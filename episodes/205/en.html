@@ -1,0 +1,223 @@
+<p>In this episode in our series on the new features in Rails 3 we&rsquo;re going to look at how it makes use of unobtrusive JavaScript. Unobtrusive JavaScript is a technique for separating the behaviour of a web application from its content in a similar way that CSS allows us to separate presentation from content. Before we start using unobtrusive JavaScript in Rails we&rsquo;ll show you an example in a simple HTML document.</p>
+
+<p>The screenshot below shows a webpage that has a link on it. When the link is clicked a JavaScript alert is shown that says &ldquo;Hello world!&rdquo;.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/343/original/E205I01.png" width="639" height="337" alt="The alert shown by the inline JavaScript."/>
+</div>
+
+<p>The HTML for the page looks like this:</p>
+<pre class="ruby">
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+  &lt;head&gt;
+    &lt;title&gt;UJS Example&lt;/title&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;h1&gt;&lt;a href=&quot;#&quot; onclick=&quot;alert(&#x27;Hello world!&#x27;); return false;&quot;&gt;Click Here&lt;/a&gt;&lt;/h1&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+</pre>
+
+<p>In the page we have a link with an onclick attribute that contains some JavaScript code. As the script is contained inline within the HTML it is not unobtrusive and this is a bad thing because we&rsquo;re mixing content and behaviour. Back in the 1990s web pages were often designed using the &lt;font&gt; element to set the typeface, size and colour of text as we didn&rsquo;t have CSS. This meant that if we wanted to change the size of all of the paragraph text across a site we&rsquo;d have to make potentially hundreds of changes. When browsers began to support CSS we could move this styling information out into stylesheets and therefore make the look of a site much easier to maintain.</p>
+
+<p>The same applies with JavaScript. Putting small pieces of JavaScript in the attributes of the HTML elements on a page mixes concerns and makes websites difficult to update. Moving JavaScript out into separate files reduces duplication, makes refactoring possible and makes it much easier to write and debug complex web applications.</p>
+
+<p>How do we make the JavaScript in our simple example unobtrusive? The main step is to move the JavaScript in the onclick attribute into a separate file and to use a JavaScript framework, in this case jQuery, to wire up the scripts to events on elements. We&rsquo;ll show you the modified page and then explain the changes we&rsquo;ve made.</p>
+
+<pre class="ruby">
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+  &lt;head&gt;
+    &lt;title&gt;UJS Example&lt;/title&gt;
+    &lt;script src=&quot;http://ajax.googleapis.com/ajax/libs/jquery/1.4.2/jquery.min.js&quot; type=&quot;text/javascript&quot; charset=&quot;UTF-8&quot;&gt;&lt;/script&gt;
+    &lt;script type=&quot;text/javascript&quot;charset=&quot;UTF-8&quot;&gt;
+      $(function () {
+        $(&#x27;#alert&#x27;).click(function () {
+          alert(&#x27;Hello, world!&#x27;);
+          return false;
+        })
+      });
+    &lt;/script&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;h1&gt;&lt;a href=&quot;#&quot; id=&quot;alert&quot;&gt;Click Here&lt;/a&gt;&lt;/h1&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+</pre>
+
+<p>The first thing to note is that despite what we said earlier we&rsquo;ve not moved the JavaScript out into a separate file, but this is only to make it more easy to show the changes.</p> 
+
+<p>In the link element in the body we&rsquo;ve removed the <code>onclick</code> attribute and replaced it with an <code>id</code> so that we can target the link from the jQuery code. Then, in the head section we&rsquo;ve added a reference to the jQuery library and, below that, the script that should be in the external file. The script starts by calling jQuery&rsquo;s <code>$</code> function with a function as an argument. The function in the argument will be called when the page&rsquo;s DOM loads and the code in it contains one line of jQuery code that finds the link by its id and attaches a function to its click event. That function contains the alert and then returns false so that the link isn&rsquo;t followed.</p>
+
+<p>If we reload the page now it will behave exactly as it did before with the alert being shown when the link is clicked.</p> 
+
+<p>It might seem that we&rsquo;ve had to do a lot of work here for not much effect but the simple example we&rsquo;ve used doesn&rsquo;t really show the advantage of unobtrusive JavaScript as we&rsquo;ve taken one line of inline JavaScript and turned it into six. This example isn&rsquo;t meant to prove the advantage of unobtrusive JavaScript but just to show how it&rsquo;s done and how to compare it. The benefits of unobtrusive JavaScript won&rsquo;t really appear until our web application has a lot more JavaScript in it as then the advantages of having all of the scripts in a separate file and being able to remove duplication begin to show themselves.</p>
+
+<p>One problem with this approach is that the JavaScript is usually located in a static JavaScript file. How do we insert dynamic server-side content into the JavaScript now that we can&rsquo;t do it inline?</p> 
+
+<p>In HTML 5 we can use custom data attributes to store data related to an element on a page.  These are the same as any other attributes but the name must begin with <code>data-</code>. To store the message that is shown when the link is clicked in a data attribute we can rewrite the link thus:</p>
+
+<pre class="ruby">
+&lt;a href=&quot;#&quot; id=&quot;alert&quot; data-message=&quot;Hello from UJS&quot;&gt;Click Here&lt;/a&gt;
+</pre>
+<p>In the JavaScript we can then alter the alert to show the text from our new attribute:</p>
+<pre class="javascript">
+$(function () {
+  $(&#x27;#alert&#x27;).click(function () {
+    alert(this.getAttribute(&#x27;data-message&#x27;));
+    return false;
+   })
+});
+</pre>
+<p>If we reload the page now we&rsquo;ll see the message from the data attribute.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/344/original/E205I02.png" width="747" height="440" alt="The alert created by unobtrusive JavaScript."/>
+</div>
+
+<h3>How Rails 3 Uses Data Attributes</h3>
+
+<p>Rails 3 uses these custom data attributes in its approach to unobtrusive JavaScript as a way of passing data to JavaScript. We&rsquo;ll take a look now at how this applies to a Rails 3 application. Our application is a basic e-commerce app that has a list of products that can be searched against. There are also links to edit and destroy products and it&rsquo;s when we try to destroy a product that we find a problem as the link seems not to work.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/345/original/E205I03.png" width="800" height="357" alt="The product page with the non-working destroy link."/>
+</div>
+
+<p>This is a common problem with Rails 3 apps. If you&rsquo;re just setting one up or moving an application over from an earlier version of Rails then you may well find that some parts of the application that use JavaScript don&rsquo;t work.</p>
+
+<p>The code in the view that generates the &ldquo;Destroy&rdquo; link is a standard link_to method with a :confirm option to display a JavaScript <code>confirm</code> alert and a <code>:method</code> option that is set to <code>:delete</code> so that the request is submitted as a DELETE request rather than as a GET.</p>
+
+<p class="codeFilePath">/app/views/products/show.html.erb</p>
+<pre class="ruby">
+&lt;%= link_to &quot;Destroy&quot;, @product, :confirm =&gt; &quot;Are you sure?&quot;, :method =&gt; :delete %&gt;
+</pre>
+<p>What&rsquo;s interesting here is the HTML source that this code generates:</p>
+<pre class="ruby">
+&lt;a href=&quot;/products/8&quot; data-confirm=&quot;Are you sure?&quot; data-method=&quot;delete&quot; rel=&quot;nofollow&quot;&gt;Destroy&lt;/a&gt;
+</pre>
+
+<p>In Rails 2 using <code>link_to</code> to create a destroy link generates a lot of inline JavaScript to create the <code>confirm</code> dialogue box and a form that would simulate a DELETE or PUT request. By comparison the Rails 3 code is much neater and makes use of the HTML 5 data attributes we showed earlier, creating one called <code>data-confirm</code> that holds the confirmation message and another called data-method that holds the method.</p>
+
+<p>The reason that the link isn&rsquo;t working is that we don&rsquo;t have the relevant JavaScript files referenced in the head section of the page so the link will behave as a standard link and perform a GET request as there&rsquo;s nothing telling it to do otherwise.</p>
+
+<p>To fix this we&rsquo;ll need to add the following two lines in the head section of our application&rsquo;s layout file:</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= javascript_include_tag :defaults %&gt;
+&lt;%= csrf_meta_tag %&gt;
+</pre>
+
+<p>The first line above should be familiar. It includes the standard JavaScript files for a Rails application. The second line creates two meta tags that hold the authenticity token that is necessary to make DELETE requests. If we reload the page and look at the source we&rsquo;ll see the HTML that these two lines have generated.</p>
+
+<pre class="ruby">
+&lt;script src=&quot;/javascripts/prototype.js?1268677667&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;/javascripts/effects.js?1268677667&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;/javascripts/dragdrop.js?1268677667&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;/javascripts/controls.js?1268677667&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;/javascripts/rails.js?1268677667&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;/javascripts/application.js?1268677667&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+&lt;meta name=&quot;csrf-param&quot; content=&quot;authenticity_token&quot;/&gt;
+&lt;meta name=&quot;csrf-token&quot; content=&quot;9ImdFvbeW7ih9oKqBDQ3O889q/hJ1q5uajpT4DFDAoA=&quot;/&gt;
+</pre>
+
+<p>In the page now we have all of the JavaScript files our application needs and two meta tags that are necessary for preventing cross-site request forgeries. These ensure that the PUT and DELETE requests come from the correct user and not from another site or hacker.</p> 
+
+<p>With these two items in place our delete link will now work as we expect it to.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/346/original/E205I04.png" width="802" height="360" alt="The destroy link now works."/>
+</div>
+
+<h3>Adding AJAX to The Search Form</h3>
+
+<p>Next we&rsquo;ll modify the search form on the index page so that it makes use of AJAX when it&rsquo;s submitted rather than making a GET request.  The code for the <code>index</code> view that contains the form is shown below:</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;Products&quot; %&gt;
+
+&lt;% form_tag products_path, :method =&gt; :get do %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag &quot;Search&quot;, :name =&gt; nil %&gt;
+  &lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;div id=&quot;products&quot;&gt;
+  &lt;%= render @products %&gt;
+&lt;/div&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;New Product&quot;, new_product_path %&gt;&lt;/p&gt;
+</pre>
+<p>The form that is used here for searching uses the technique that was used in <a href="http://railscasts.com/episodes/37-simple-search-form">episode 37</a>. In earlier versions of Rails to get the form working via AJAX we would have replaced the <code>form_tag</code> with <code>form_remote_tag</code>. This method generates a lot of inline JavaScript, however, which is exactly what we&rsquo;re trying to avoid.</p>
+
+<p>A lot of the remote helper methods are no longer available in Rails 3. To get them back we could install the <a href="http://github.com/rails/prototype_legacy_helper">Prototype Legacy Helper</a> plugin instead we&rsquo;re going to use the new Rails 3 approach.</p>
+
+<p>To do this instead of using <code>form_remote_tag</code> we stick with <code>form_tag</code>, but add a new parameter called <code>:remote</code>.</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">
+&lt;% form_tag products_path, :method =&gt; :get, :remote =&gt; true do %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag &quot;Search&quot;, :name =&gt; nil %&gt;
+  &lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p>This <code>:remote</code> parameter can also be used with other helper methods such as <code>link_to</code>, <code>button_to</code> and <code>form_for</code>. If we reload the page and look at the source we can see how the new form code works.</p>
+<pre class="ruby">
+&lt;form action=&quot;/products&quot; data-remote=&quot;true&quot; method=&quot;get&quot;&gt;  &lt;p&gt;
+    &lt;input id=&quot;search&quot; name=&quot;search&quot; type=&quot;text&quot; /&gt;
+    &lt;input type=&quot;submit&quot; value=&quot;Search&quot; /&gt;
+  &lt;/p&gt;
+&lt;/form&gt;
+</pre>
+<p>The form element is the same as it was before the remote parameter was added but has a new <code>data-remote</code> attribute. There&rsquo;s no inline JavaScript, the new attribute is enough to tell the JavaScript in <code>rails.js</code> that the form should be submitted via AJAX.</p>
+
+<p>Next we need to write code to handle the response from the AJAX call. The list of products is contained in a <code>div</code> with an <code>id</code> of products so we can update the contents of this <code>div</code> to display the relevant products. The form is submitted to the <code>ProductController</code>&rsquo;s <code>index</code> action and all we need to do is add a new view template to handle JavaScript requests called <code>index.js.erb</code>.</p>
+
+<p>We can write any JavaScript we like in this template file and it will be execute when it is returned to the browser. The code in the new template will update the contents of the products div with the list of products.</p>
+
+<p class="codeFilePath">/app/views/products/index.js.erb</p>
+<pre class="javascript">
+$(&quot;products&quot;).update(&quot;&lt;%= escape_javascript(render(@products))%&gt;&quot;);
+</pre>
+<p>When we reload the page and submit the form the search will be made with an AJAX call and we can see this as the page&rsquo;s URL doesn&rsquo;t change when the search is made.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/347/original/E205I05.png" width="801" height="409" alt="The search form working with AJAX."/>
+</div>
+
+<p>So in Rails 3, AJAX is easy to do unobtrusively by using the :remote parameter and executing the JavaScript that is returned from the server.</p>
+
+<h3>Swapping Frameworks</h3>
+
+<p>We&rsquo;ll wrap up this episode by showing you how to swap the JavaScript framework that our application uses. Our application currently uses Prototype which comes as part of the default with Rails, but what if we want to use jQuery instead?</p>
+
+<p>First we&rsquo;ll need to replace this line in our application layout.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= javascript_include_tag :defaults %&gt;
+</pre>
+<p>with this:</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= javascript_include_tag &quot;http://ajax.googleapis.com/ajax/libs/jquery/1.4.2/jquery.min.js&quot;, &quot;jquery.rails.js&quot; %&gt;
+</pre>
+<p>The first file in the list is the latest version of jQuery from Google. This isn&rsquo;t enough by itself though as we need a jQuery equivalent of the <code>rails.js</code> file we&rsquo;ve been using before for handling the unobtrusive JavaScript that&rsquo;s specific to Rails. We can find the official version of that on the <a href="http://github.com/rails/jquery-ujs">jquery-ujs project on Github</a>. This project contains a <code>rails.js</code> file that we can download and use in our projects. We&rsquo;ve downloaded it to our application&rsquo;s <code>/public/javascripts</code> directory and renamed it as <code>jquery.rails.js</code> and this file will handle all of the unobtrusive JavaScript that Rails uses.</p>
+
+<p>Now we have to alter any JavaScript we&rsquo;ve written in our application that makes use of Prototype to use jQuery-compatible code instead. We&rsquo;ll need to make two small changes to the code in <code>index.js.erb</code> that we created earlier, using <code>#products</code> instead of <code>products</code> as the selector for the products div and replacing Prototype&rsquo;s <code>update</code> method with jQuery&rsquo;s equivalent <code>html</code>.</p>
+
+<p class="codeFilePath">/app/views/products/index.js.erb</p>
+<pre class="javascript">
+$(&quot;#products&quot;).html(&quot;&lt;%= escape_javascript(render(@products))%&gt;&quot;);
+</pre>
+<p>Our application will now work exactly as it did before but with jQuery under the hood rather than Prototype.</p>
+
+<h3>Degrading Gracefully</h3>
+
+<p>If a user views our application using a browser that doesn&rsquo;t have JavaScript enabled the form will degrade gracefully and make a normal GET request when it is submitted. Destroying products will not work, however. This is a common problems caused by the fact that HTML links can only make GET requests, so Rails uses some JavaScript to simulate a DELETE. One solution is to replace the link with a button by using <code>button_to</code> but that can look ugly so we want to stick with a link. A preferable technique is the one shown in <a href="http://railscasts.com/episodes/77-destroy-without-javascript">episode 77</a> that will show a separate confirmation page before deleting an item when an application is used in a browser that has JavaScript disabled.</p>

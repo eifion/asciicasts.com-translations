@@ -1,0 +1,277 @@
+<p>In this episode we&rsquo;re going to use Paperclip and a jQuery plugin called Jcrop to crop images on a web page. Say we have a Rails application, for example a forum, that allows users to register with a username and an avatar graphic to represent themselves.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/204/original/E182I01.png" width="800" height="389" alt="The new user page."/>
+</div>
+
+<p>The image that a user chooses to upload could be of any size, so our application will resize and crop it down to 100 pixels square.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/205/original/E182I02.png" width="803" height="427" alt="The users page showing the cropped avatar." />
+</div>
+
+<p>The application uses <a href="http://github.com/thoughtbot/paperclip">Paperclip</a> to automatically crop and resize the image, but we&rsquo;d like the user to have some control over how the cropping is done. We can make use of some JavaScript to do just that and we&rsquo;ll show you how to do it in this episode.</p>
+
+<p>If you&rsquo;re unfamiliar with Paperclip it was covered back in episode 134 and it&rsquo;s worth <a href="http://railscasts.com/episodes/134-paperclip">watching</a> or <a href="http://asciicasts.com/episodes/134-paperclip">reading</a> that episode first to get an understanding of how to use it to add attachment fields to your models as this episode will build on that one.</p>
+
+<p>There are a number of JavaScript image cropping libraries available; we&rsquo;re going to use a library called <a href="http://deepliquid.com/content/Jcrop.html">Jcrop</a>, which is a jQuery plugin. If you&rsquo;re using Prototype and Scriptaculous instead of jQuery the <a href="http://www.defusion.org.uk/code/javascript-image-cropper-ui-using-prototype-scriptaculous/">JavaScript Image Cropper UI library</a> provides similar functionality.</p>
+
+<h3>Creating a Cropping Page</h3>
+
+<p>In our application we have a User model that&rsquo;s set up to use Paperclip.</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  has_attached_file :avatar, :styles  =&gt; { :small =&gt; &quot;100x100#&quot; }
+end
+</pre>
+<p>The <code>avatar</code> attribute has a style that will crop the image to 100x100. We want to create another, larger version of the image that we can show to the user and from which they can crop their avatar. We could show the original uploaded image but that could be of any size or aspect ratio and might mess up the layout of our application. It&rsquo;s better to add another style that provides an image of a known size to the user and which they can use for cropping.</p>
+<pre class="ruby">
+has_attached_file :avatar, :styles  =&gt; { :small =&gt; &quot;100x100#&quot;, :large =&gt; &quot;500x500&gt;&quot; }
+</pre>
+<p>The new large style will resize the image to fit within 500x500 pixels, but as we&rsquo;ve used &ldquo;<code>&gt;</code>&rdquo; rather than &ldquo;<code>#</code>&rdquo; after the size, Paperclip will maintain the aspect ratio so that the image isn&rsquo;t cropped.</p>
+
+<p>Our aim is to modify our application so that when a user registers and uploads an image or modifies their avatar they&rsquo;re redirected to a page on which they can crop the image they&rsquo;ve just uploaded. To do this we&rsquo;ll need to modify the <code>create</code> and <code>update</code> actions in our <code>UsersController</code> and create a new action (and associated view) called <code>crop</code>.</p>
+
+<p>We&rsquo;ll modify the <code>create</code> action first. If no avatar is supplied the application will redirect as it did before, but if an image was uploaded then the new <code>crop</code> action will be rendered.</p>
+<pre class="ruby">
+def create
+  @user = User.new(params[:user])
+  if @user.save
+    flash[:notice] = &quot;Successfully created user.&quot;
+    if params[:user][:avatar].blank?
+      redirect_to @user
+    else
+      render :action =&gt; &#x27;crop&#x27;
+    end
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end
+</pre>
+<p>Likewise, when a user is updated we want to show the <code>crop</code> view if a new image has been uploaded.</p>
+<pre class="ruby">
+def update
+  @user = User.find(params[:id])
+  if @user.update_attributes(params[:user])
+    flash[:notice] = &quot;Successfully updated user.&quot;
+    if params[:user][:avatar].blank?
+      redirect_to @user
+    else
+      render :action =&gt; &#x27;crop&#x27;
+    end
+  else
+    render :action =&gt; &#x27;edit&#x27;
+  end
+end
+</pre>
+
+<p>We&rsquo;ll create the new view file at <code>/app/views/users/crop.html.erb</code>. This file will need to contain references to the CSS and JavaScript files that Jcrop uses as well as a reference to the jQuery library. In our application&rsquo;s layout file we have a <code>yield</code> section in the head that will allow us to insert content into the <code>&lt;head&gt;</code> section of the page from our view file. We already have a reference to the jQuery library so we don&rsquo;t need to worry about that.</p>
+<pre class="ruby">
+&lt;head&gt;
+  &lt;title&gt;&lt;%= h(yield(:title) || &quot;Untitled&quot;) %&gt;&lt;/title&gt;
+  &lt;%= stylesheet_link_tag &#x27;application&#x27; %&gt;
+  &lt;%= javascript_include_tag &#x27;jquery.1.3.2.min&#x27; %&gt;
+  &lt;%= yield(:head) %&gt;
+&lt;/head&gt;
+</pre>
+<p>We&rsquo;ll give our new page a title, then create a <code>content_for</code> block to hold the code that will go into the head section in our template. This will consist of a link to Jcrop&rsquo;s stylesheet and JavaScript, which we&rsquo;ve downloaded and copied into the appropriate folders in our application, and some inline JavaScript which will cause any element with an <code>id</code> of <code>cropbox</code> to have the Jcrop functionality applied to it.</p>
+
+<p>Finally we render the image itself in the body of the page, giving it an <code>id</code> of <code>cropbox</code> so that the jQuery code we wrote is applied to it.</p>
+<pre class="ruby">
+&lt;% title &quot;Crop Avatar&quot; %&gt;
+&lt;% content_for (:head) do %&gt;
+&lt;%= stylesheet_link_tag &quot;jquery.Jcrop&quot; %&gt;
+&lt;%= javascript_include_tag &quot;jquery.Jcrop.min&quot; %&gt;
+&lt;script type=&quot;text/javascript&quot;&gt;
+  $(function() {
+    $(&#x27;#cropbox&#x27;).Jcrop();
+  });
+&lt;/script&gt;
+&lt;% end %&gt;
+
+&lt;%= image_tag @user.avatar.url(:large), :id =&gt; &quot;cropbox&quot; %&gt;
+</pre>
+<p>If we edit a user now and upload a new image file we&rsquo;ll be redirected to the new <code>crop</code> action where we&rsquo;ll see the large 500x500 version of the image with Jcrop functionality. The cursor will turn into a crosshair when it is over the image it and we can select a section by dragging over a section of the image.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/206/original/E182I03.png" width="804" height="638" alt="Selecting part of the image."/>
+</div>
+
+<p>We can now select part of the image, but there&rsquo;s no way we can crop it yet. To do that we&rsquo;ll add a form to the page that will contain fields that hold the width and height of the cropped image, along with the x and y coordinates of the top-left corner of the cropped area, along with a &ldquo;crop&rdquo; button.</p>
+
+<p>As the avatar is an attribute of the <code>User</code> model, the new form will modify a user. We&rsquo;ll need to create four new attributes in the model to hold the coordinates of the cropped area.</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  has_attached_file :avatar, :styles  =&gt; { :small =&gt; &quot;100x100#&quot;, :large =&gt; &quot;500x500&gt;&quot; }
+  attr_accessor :crop_x, :crop_y, :crop_w, :crop_h
+end
+</pre>
+
+<p>Now that we&rsquo;ve added the new attributes we can create the form. We&rsquo;d normally use hidden fields to store the cropped area&rsquo;s coordinates, but while we&rsquo;re developing our page we&rsquo;ll use text fields so that we can see the values that are being stored. The code for the form belongs immediately below the image in the <code>crop</code> view.</p>
+<pre class="ruby">
+&lt;% form_for @user do |form| %&gt;
+  &lt;% for attribute in [:crop_x, :crop_y, :crop_w, :crop_h] %&gt;
+    &lt;%= form.text_field attribute, :id =&gt; attribute %&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;&lt;%= form.submit &quot;Crop&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p>We&rsquo;ve given each text field in the form an <code>id</code> so that we can update the fields&rsquo; values from JavaScript. To update the fields when the cropped area changes we&rsquo;ll have to add some options to the call to Jcrop.</p>
+<pre class="ruby">
+$(function() {
+  $(&#x27;#cropbox&#x27;).Jcrop({
+    onChange: update_crop,
+    onSelect: update_crop,
+    setSelect: [0, 0, 500, 500],
+    aspectRatio: 1
+  });
+});
+</pre>
+<p>Jcrop has two main event handlers, <code>onChange</code> and <code>onSelect</code>, that fire when the selection changes or moves. We&rsquo;ll specify a callback function that will fire when either of these events occurs. We&rsquo;ve also defined two other options: <code>setSelect</code> which defines the initial cropping rectangle and <code>aspectRatio</code> which defines the ratio of the width to the height of the cropping rectangle, which we&rsquo;ve set to 1, so that only a square area can be selected.</p>
+
+<p>We&rsquo;ll also need to write the <code>update_crop</code> callback function. This is passed a <code>coordinates</code> object from which we can extract the <code>x</code>, <code>y</code>, <code>width</code> and <code>height</code> values and pass them to the appropriate form fields. This function goes immediately below the one above.</p>
+<pre class="javascript">
+function update_crop(coords) {
+  $(&#x27;#crop_x&#x27;).val(coords.x);
+  $(&#x27;#crop_y&#x27;).val(coords.h);
+  $(&#x27;#crop_w&#x27;).val(coords.w);
+  $(&#x27;#crop_h&#x27;).val(coords.h);  
+}
+</pre>
+<p>If we reload the page now we&rsquo;ll see the form fields with values that represent the current cropping area. As we move and resize the cropping areas the values in the textboxes will change.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/207/original/E182I04.png" width="800" height="730" alt="The coordinates of the cropped image are now shown in the text fields."/>
+</div>
+
+<p>When we click the &ldquo;crop&rdquo; button the <code>User</code> model is updated. We need to tell Paperclip to reprocess the attached file if we&rsquo;re cropping it. We can do this by using an <code>after_update</code> filter that will reprocess the image if it has just been cropped.</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  has_attached_file :avatar, :styles  =&gt; { :small =&gt; &quot;100x100#&quot;, :large =&gt; &quot;500x500&gt;&quot; }
+  attr_accessor :crop_x, :crop_y, :crop_w, :crop_h
+  after_update :reprocess_avatar, :if =&gt; :cropping?
+
+  def cropping?
+    !crop_x.blank? &amp;&amp; !crop_y.blank? &amp;&amp; !crop_w.blank? &amp;&amp; !crop_h.blank?
+  end
+
+  private
+  def reprocess_avatar
+    avatar.reprocess!
+  end
+end
+</pre>
+<p>The <code>after_update</code> filter will be called if the four cropping values have been passed from the form. If they have then Paperclip&rsquo;s <code>reprocess!</code> method will be called.</p>
+
+<p>We still need to tell Paperclip how to reprocess the image, using the coordinates passed from the form. To do that we&rsquo;ll have to write a new custom processor for Paperclip, but before we do we&rsquo;ll specify the processor in the <code>User</code> model.</p>
+<pre class="ruby">
+has_attached_file :avatar, :styles  =&gt; { :small =&gt; &quot;100x100#&quot;, :large =&gt; &quot;500x500&gt;&quot; }, :processors =&gt; [:cropper]
+</pre>
+<p>It&rsquo;s customary to place any custom processors in a <code>paperclip_processors</code> directory under the <code>/lib</code> directory. We&rsquo;ll create that directory and in it a new file called <code>cropper.rb</code>, which will contain this code:</p>
+<pre class="ruby">
+module Paperclip
+  class Cropper &lt; Thumbnail
+    def transformation_command
+      if crop_command
+        crop_command + super.sub(/ -crop \S+/, &#x27;&#x27;)
+      else
+        super
+      end
+    end
+
+    def crop_command
+      target = @attachment.instance
+      if target.cropping?
+        &quot; -crop #{target.crop_w}x#{target.crop_h}+#{target.crop_x}+#{target.crop_y}&quot;
+      end
+    end
+  end
+end
+</pre>
+<p>A custom Paperclip processor has to go inside the <code>Paperclip</code> module. Our processor inherits from the <code>Thumbnail</code> processor which is Paperclip&rsquo;s default. <code>Thumbnail</code> has a <code>transformation_command</code> method which we&rsquo;re overriding because we want to add our own command options. In our <code>transformation_command</code> method we check for any existing cropping command using a regular expression and replace it with our own, based on the attributes in the <code>User</code> model.</p>
+
+<h3>Selecting The Correct Part of The Image</h3>
+
+<p>Now that we&rsquo;ve written our processor we can try to crop our image and see if it&rsquo;s working as expected. We&rsquo;ll select the car from the image we&rsquo;ve uploaded and click &lsquo;crop&rsquo;.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/208/original/E182I05.png" width="800" height="726" alt="Selecting part of the image for cropping."/>
+</div>
+
+<p>The result almost works. Our image is cropped, but not in the right place.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/209/original/E182I06.png" width="800" height="438" alt="The wrong copped area is selected."/>
+</div>
+
+<p>This hasn&rsquo;t worked because the image the user sees is the <code>large</code> style, which has already been resized and the cropping coordinates are based on this resized image. The image that Paperclip crops is the original uploaded image so we need to compensate between the two different image sizes so that the image is cropped correctly.</p>
+
+<p>We can get the size of the original image by making use of Paperclip&rsquo;s <code>Geometry.from_file</code> method. In our <code>User</code> model we&rsquo;ll write a new method that will get the image&rsquo;s dimensions and cache them in an instance variable.</p> 
+<pre class="ruby">
+def avatar_geometry(style = :original)
+  @geometry ||= {}
+  @geometry[style] ||= Paperclip::Geometry.from_file(avatar.path(style))
+end
+</pre>
+<p>In the <code>crop</code> view we can then modify the JavaScript that sets the form values when the crop selection changes so that it takes into account the size of the original image. We do this by calculating the ratio of the original image&rsquo;s width to the width of the image that is being cropped and then multiplying all of the values by that ratio.</p>
+<pre class="javascript">
+function update_crop(coords) {
+  var ratio = &lt;%= @user.avatar_geometry(:original).width %&gt; / &lt;%= @user.avatar_geometry(:large).width %&gt;; 
+  $(&#x27;#crop_x&#x27;).val(Math.floor(coords.x * ratio));
+  $(&#x27;#crop_y&#x27;).val(Math.floor(coords.y * ratio));
+  $(&#x27;#crop_w&#x27;).val(Math.floor(coords.w * ratio));
+  $(&#x27;#crop_h&#x27;).val(Math.floor(coords.h * ratio));  
+}
+</pre>
+<p>If we select the front of the car now and crop it, the correct area of the image is cropped.</p>
+
+<div class="imageWraper">
+  <img src="/system/photos/210/original/E182I07.png" width="800" height="429" alt="The correct area is now selected."/>
+</div>
+
+<h3>Adding  a Preview Image</h3>
+
+<p>The last thing we&rsquo;ll do in this episode is add a preview image to the cropping page so that a user can see exactly what their avatar will look like before they click the crop button.</p>
+
+<p>Back in the <code>crop</code> view we&rsquo;ll add a preview section between the large image and the form. This will show the large image but in a div which is restricted to 100x100 pixels and which hides any overflow. Now is also a good time to replace the text fields that show the coordinates with hidden fields.</p>
+<pre class="ruby">
+&lt;%= image_tag @user.avatar.url(:large), :id =&gt; &quot;cropbox&quot; %&gt;
+
+&lt;h4&gt;Preview&lt;/h4&gt;
+&lt;div style=&quot;width: 100px; height: 100px; overflow: hidden;&quot;&gt;
+  &lt;%= image_tag @user.avatar.url(:large), :id =&gt; &quot;preview&quot; %&gt;
+&lt;/div&gt;
+
+&lt;% form_for @user do |form| %&gt;
+  &lt;% for attribute in [:crop_x, :crop_y, :crop_w, :crop_h] %&gt;
+    &lt;%= form.hidden_field attribute, :id =&gt; attribute %&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;&lt;%= form.submit &quot;Crop&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p>We&rsquo;ve given the preview image an <code>id</code> of <code>preview</code> so that we can reference it from the JavaScript. We&rsquo;ll modify our callback function so that it updates the preview image whenever the cropping area changes.</p>
+<pre class="javascript">
+function update_crop(coords) {
+  var rx = 100/coords.w;
+  var ry = 100/coords.h;
+  $(&#x27;#preview&#x27;).css({
+    width: Math.round(rx * &lt;%= @user.avatar_geometry(:large).width %&gt;) + &#x27;px&#x27;,
+    height: Math.round(ry * &lt;%= @user.avatar_geometry(:large).height %&gt;) + &#x27;px&#x27;,
+    marginLeft: &#x27;-&#x27; + Math.round(rx * coords.x) + &#x27;px&#x27;,
+    marginTop: &#x27;-&#x27; + Math.round(ry * coords.y) + &#x27;px&#x27;
+  });
+
+  var ratio = &lt;%= @user.avatar_geometry(:original).width %&gt; / &lt;%= @user.avatar_geometry(:large).width %&gt;; 
+  $(&#x27;#crop_x&#x27;).val(Math.floor(coords.x * ratio));
+  $(&#x27;#crop_y&#x27;).val(Math.floor(coords.y * ratio));
+  $(&#x27;#crop_w&#x27;).val(Math.floor(coords.w * ratio));
+  $(&#x27;#crop_h&#x27;).val(Math.floor(coords.h * ratio));  
+}
+</pre>
+<p>The preview image will now be updated as soon as the cropping area changes which means that as the cropping square is dragged around or resized the user will see a live update of what their avatar will look like.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/211/original/E182I08.png" width="815" height="807" alt="The cropped area now shows as a live preview."/>
+</div>
+
+<p>That&rsquo;s it for this episode. If you want to take these ideas a little further it&rsquo;s worth taking a look a jschwindt&rsquo;s <a href="http://github.com/jschwindt/rjcrop">rjcrop</a> project on Github which is an example Rails application that does something similar to what we&rsquo;ve shown here.</p>

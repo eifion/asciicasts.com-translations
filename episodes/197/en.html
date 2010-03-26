@@ -1,0 +1,233 @@
+<p>In the previous episode we showed you how to create a form that could handle multiple nested models. In the application we&rsquo;ve created for this we have a <code>Survey</code> model each <code>Survey</code> having many <code>Questions</code> and each <code>Question</code> many <code>Answers</code>.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/300/original/E197I01.png" width="816" height="490" alt="The edit page for a survey."/>
+</div>
+
+<p>In the <code>Survey</code> and <code>Question</code> models we&rsquo;ve used <code>accepts_nested_attributes_for</code> to allow us to create, edit and destroy nested records through a single model.</p>
+
+<p>As our application currently stands if we want to remove a question or an answer we have to use a checkbox. Also we have no way of adding new questions or answers through the form. In this episode we&rsquo;ll fix these problems by using JavaScript to alter the form so that we can use links to create and destroy models dynamically.</p>
+
+<p>The JavaScript we&rsquo;ll write involves some DOM manipulation so we&rsquo;ll use the <a href="http://www.prototypejs.org">Prototype library</a> to make this easier. To add the Prototype code to our application we&rsquo;ll add the following line to the &lt;head&gt; section of our application&rsquo;s layout file.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= javascript_include_tag :defaults, :cache =&gt; true %&gt;
+</pre>
+<p>If you prefer using jQuery then you can do so and we&rsquo;ll show the equivalent jQuery code at the end of the episode.</p> 
+
+<h3>Adding Links to Remove Answers</h3>
+
+<p>We&rsquo;ll tackle the easiest part first: replacing the checkboxes we use to remove questions and answers with links. Let&rsquo;s look at the answers first.</p>
+
+<p>The code that renders each answer is held in a partial called <code>answer_fields</code> and looks like this:</p>
+
+<p class="codeFilePath">/app/views/surveys/_answer_fields.html.erb</p>
+<pre class="ruby">
+&lt;p&gt;
+  &lt;%= f.label :content, &quot;Answer&quot; %&gt;
+  &lt;%= f.text_field :content %&gt;
+  &lt;%= f.check_box :_destroy %&gt;
+  &lt;%= f.label :_destroy, &quot;Remove&quot; %&gt;
+&lt;/p&gt;
+</pre>
+<p>In the code above is the <code>_destroy</code> checkbox that we check when we want an answer to be destroyed. We&rsquo;re going to replace it with a hidden field whose value will be set when the &ldquo;remove&rdquo; link is clicked. This way we can still mark an answer for deletion.</p>
+
+<p>We&rsquo;ll replace the label in the code above with a link and make use of Rails&rsquo; <code>link_to_function</code> to create a link that fires a JavaScript function when clicked. With the hidden field and the link the partial code will now look like this:</p>
+
+<p class="codeFilePath">/app/views/surveys/_answer_fields.html.erb</p>
+<pre class="ruby">
+&lt;p class=&quot;fields&quot;&gt;
+  &lt;%= f.label :content, &quot;Answer&quot; %&gt;
+  &lt;%= f.text_field :content %&gt;
+  &lt;%= f.hidden_field :_destroy %&gt;
+  &lt;%= link_to_function &quot;remove&quot;, &quot;remove_fields(this)&quot; %&gt;
+&lt;/p&gt;
+</pre>
+<p>When the &ldquo;remove&rdquo; link next to an answer is clicked it will fire a JavaScript function called <code>remove_fields</code>, passing in the link as an argument so that we can use it as a reference element to find the other elements related to the answer. There&rsquo;s no direct way get at all those fields so we&rsquo;ve added a class name to the enclosing paragraph element so that we can find them more easily.</p>
+
+<p>Next we&rsquo;ll need to write that <code>remove_fields</code> function. We&rsquo;ll do this in the <code>application.js</code> file as this is one of the files that is automatically included on our pages because we&rsquo;ve included the JavaScript <code>:defaults</code>.</p> 
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">
+function remove_fields(link) {
+	$(link).previous(&quot;input[type=hidden]&quot;).value = &quot;1&quot;;
+	$(link).up(&quot;.fields&quot;).hide();
+}
+</pre>
+
+<p>This function performs two actions. First it uses Prototype&rsquo;s <a href="http://api.prototypejs.org/dom/element.html#previous-class_method"><code>previous</code></a> function to find the first previous hidden field relative to the link that called the function which is the _destroy field and sets its value to <code>1</code> so that the answer will be marked as deleted. It then uses <a href="http://api.prototypejs.org/dom/element.html#up-class_method"><code>up</code></a> to work its way up the DOM tree from the link until it finds an element with a class of <code>fields</code>, which is the class name we gave to the paragraph element that wraps the answers fields, and hides it so that the answer is hidden.</p>
+
+<p>If we reload the survey page now we&rsquo;ll see a link against each answer.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/301/original/E197I02.png" width="816" height="471" alt="The &ldquo;remove&rdquo; checkboxes have now been replaced by links"/>
+</div>
+
+<p>If we click some of the links the value of the <code>_destroy</code> hidden field will be set to <code>1</code> for those answers so that they are marked to be deleted and the their form fields are  hidden.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/302/original/E197I03.png" width="816" height="471" alt="The answers are hidden when we click the &ldquo;remove&rdquo; link."/>
+</div>
+
+<p>Note though that we&rsquo;re not using AJAX to post back updated form values when the link is clicked so that although we&rsquo;re hiding the removed answers immediately the database won&rsquo;t be updated until we submit the form. When we do submit the form the answers will be removed and we&rsquo;ll see so on the survey&rsquo;s <code>show</code> page.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/303/original/E197I04.png" width="816" height="471" alt="The answers have now been removed."/>
+</div>
+
+<h3>Removing Questions</h3>
+
+<p>Now that we can remove answers through links we&rsquo;ll move on to the questions. The way to remove a question is basically the same as the way we remove an answer and so we can reuse some of the code we wrote earlier.</p>
+
+<p>As we did with the answers we&rsquo;re going to replace a checkbox and a label with a hidden field and a link so we&rsquo;ll take that part of the code from the <code>answer_fields</code> partial and put it in a new helper method called <code>link_to_remove_fields</code>, passing in the text we want to appear in the link and the form variable <code>f</code>.</p>
+
+<p class="codeFilePath">/app/views/surveys/_answer_fields.html.erb</p>
+<pre class="ruby">
+&lt;p class=&quot;fields&quot;&gt;
+  &lt;%= f.label :content, &quot;Answer&quot; %&gt;
+  &lt;%= f.text_field :content %&gt;
+  &lt;%= link_to_remove_fields &quot;remove&quot;, f %&gt;
+&lt;/p&gt;
+</pre>
+<p>We&rsquo;ll now write that method in the <code>application_helper</code> file.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+# Methods added to this helper will be available to all templates in the application.
+module ApplicationHelper
+  def link_to_remove_fields(name, f)
+    f.hidden_field(:_destroy) + link_to_function(name, &quot;remove_fields(this)&quot;)
+  end
+end
+</pre>
+<p>The methods that create form fields return strings, so we can concatenate the HTML generated by <code>f.hidden_field</code> and <code>link_to_function</code> methods and return them to the partial.</p>
+
+<p>We can use our new method in the <code>question_fields</code> partial too.</p>
+
+<p class="codeFilePath">/app/views/surveys/_question_fields.html.erb</p>
+<pre class="ruby">
+&lt;div class=&quot;fields&quot;&gt;
+  &lt;p&gt;
+    &lt;%= f.label :content, &quot;Question&quot; %&gt;
+    &lt;%= link_to_remove_fields &quot;remove&quot;, f%&gt;&lt;br /&gt;
+    &lt;%= f.text_area :content, :rows =&gt; 3 %&gt;&lt;br /&gt;
+  &lt;/p&gt;
+  &lt;% f.fields_for :answers do |builder| %&gt;
+    &lt;%= render &#x27;answer_fields&#x27;, :f =&gt; builder %&gt;
+  &lt;% end %&gt;
+&lt;/div&gt;
+</pre>
+<p>As our JavaScript <code>remove_fields</code> function looks for an element with a class of <code>fields</code> when hiding a question or answer we&rsquo;ve wrapped the whole partial in a <code>div</code> element with that class name so that when the &ldquo;remove&rdquo; link for a question is clicked the question will be hidden along with its answers.</p>
+
+<p>If we look at the <code>edit</code> page for a survey now and click the a question&rsquo;s &ldquo;remove&rdquo; link the question will be removed along with its answers and when we submit the form the question and its answers will be removed from the survey.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/304/original/E197I05.png" width="815" height="423" alt="The question has been removed along with its answers."/>
+</div>
+
+<h3>Adding Questions and Answers</h3>
+
+<p>Now for the difficult part: adding new questions and answers. We want links on the form that will create new form fields dynamically when they are clicked. What makes this difficult is that the JavaScript will need to have access to a blank set of fields so that it can create a new question or answer when a link is clicked.</p>
+
+<p>To do this we&rsquo;ll write a new method in the application helper called <code>link_to_add_fields</code>.
+We&rsquo;ll be able to use this method whenever we need to show a link to add the fields for a new question or answer on the form. The code for the method will look like this:</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+def link_to_add_fields(name, f, association)
+  new_object = f.object.class.reflect_on_association(association).klass.new
+  fields = f.fields_for(association, new_object, :child_index =&gt; &quot;new_#{association}&quot;) do |builder|
+    render(association.to_s.singularize + &quot;_fields&quot;, :f =&gt; builder)
+  end
+  link_to_function(name, h(&quot;add_fields(this, \&quot;#{association}\&quot;, \&quot;#{escape_javascript(fields)}\&quot;)&quot;))
+end
+</pre>
+<p>The method takes three arguments: <code>name</code>, which will be the link&rsquo;s text; <code>f</code>, the form builder object and <code>association</code>, which in this case will be either &ldquo;questions&rdquo; or &ldquo;answers&rdquo;.</p>
+
+<p>The first line of the method creates a new instance of that new association class, i.e. a new <code>Question</code> or <code>Answer</code>. This means that we have a template object that we can use to create the new form fields.</p>
+
+<p>The second part of the code builds a string of the form fields for that object so that we can insert them into the javascript function that will add them to the form when a link is clicked. It does this by calling the appropriate partial code, passing in the form builder. The only really new thing here is the <code>:child_index</code> we set. We do this so that we have something to refer to for creating the fields for the new question or answer. In the JavaScript we&rsquo;ll replace the name of this with a unique value which will be based on the current time. That way, every time we create a new question or answer it will have a unique index so that it can be identified when we submit the form.</p>
+
+<p>Finally we use the <code>link_to_function</code> method again, passing in the name of the link and a call to a JavaScript function called <code>add_fields</code> to which we pass the link, the name of the association and a string containing the escaped form fields.</p>
+
+<p>Now we can go back to the JavaScript and write the <code>add_fields</code> function.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">
+function add_fields(link, association, content) {
+  var new_id = new Date().getTime();
+  var regexp = new RegExp(&quot;new_&quot; + association, &quot;g&quot;);
+  $(link).up().insert({
+	before: content.replace(regexp, new_id)
+  });
+}
+</pre>
+<p>This function takes the three arguments we mentioned earlier: the link that was clicked, the name of the association and a string containing the HTML for the form fields. The first thing this function does is create a new id for the form elements. If we create multiple new questions or answers we don&rsquo;t want them to have the same index value as they will be considered the same model when they&rsquo;re inserted. We use the current time to make the id unique and then use a regular expression to replace the &ldquo;new_question&rdquo; or &ldquo;new_answer&rdquo; string in the form fields with that new unique id. That done we insert the string of form fields into the appropriate place in the DOM.</p>
+
+<p>That&rsquo;s the difficult part over. All we need to do now is add the links themselves. In the <code>question_fields</code> partial we&rsquo;ll add a link to add a new answer using <code>link_to_add_fields</code>, passing in :answers as the name of the association as a question has many answers.</p>
+
+<p class="codeFilePath">/app/views/surveys/_question_fields.html.erb</p>
+<pre class="ruby">
+&lt;div class=&quot;fields&quot;&gt;
+  &lt;p&gt;
+    &lt;%= f.label :content, &quot;Question&quot; %&gt;
+    &lt;%= link_to_remove_fields &quot;remove&quot;, f %&gt;&lt;br /&gt;
+    &lt;%= f.text_area :content, :rows =&gt; 3 %&gt;&lt;br /&gt;
+  &lt;/p&gt;
+  &lt;% f.fields_for :answers do |builder| %&gt;
+    &lt;%= render &#x27;answer_fields&#x27;, :f =&gt; builder %&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;&lt;%= link_to_add_fields &quot;Add Answer&quot;, f, :answers %&gt;&lt;/p&gt;
+&lt;/div&gt;
+</pre>
+<p>We can then to do a similar thing in the survey form to add an &ldquo;Add Question&rdquo; link.</p>
+
+<p class="codeFilePath">/app/views/surveys/_form.html.erb</p>
+<pre class="ruby">
+&lt;% form_for @survey do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;% f.fields_for :questions do |builder| %&gt;
+    &lt;%= render &#x27;question_fields&#x27;, :f =&gt; builder %&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;&lt;%= link_to_add_fields &quot;Add Question&quot;, f, :questions %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p>If we reload the survey page now we&rsquo;ll see the links for adding a new question or answer and when we click one of them a new field will appear on the form.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/305/original/E197I06.png" width="800" height="546" alt="A new blank field appears when we click the &ldquo;Add Answer&rdquo; link."/>
+</div>
+<p class="title">A new, blank answer field appears on the form when we click the &ldquo;Add Answer&rdquo; link.</p>
+
+<p>If we fill in the new answer field above with &ldquo;jQuery&rdquo; and submit the form then the new answer will be added.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/306/original/E197I07.png" width="801" height="375" alt="The new question has now been added"/>
+</div>
+
+<p>So, we&rsquo;ve reached our goal and now have a form on which we can dynamically add or remove fields and have the database updated appropriately when the form is submitted.</p>
+
+<h3>Alternate jQuery Code</h3>
+
+<p>The JavaScript code we&rsquo;ve used in this episode works with the Prototype library. If you prefer using jQuery, the code should look like this:</p>
+<pre class="javascript">
+function remove_fields(link) {
+	$(link).prev(&quot;input[type=hidden]&quot;).val(&quot;1&quot;);
+	$(link).closest(&quot;.fields&quot;).hide();
+}
+
+function add_fields(link, association, content) {
+	var new_id = new Date().getTime();
+	var regexp = new RegExp(&quot;new_&quot; + association, &quot;g&quot;);
+	$(link).parent().before(content.replace(regexp, new_id));
+}
+</pre>
+<p>This code is very similar to the Prototype code we&rsquo;ve been writing.</p>
+
+<p>Some of you reading this might be a little upset that the JavaScript we&rsquo;ve use isn&rsquo;t unobtrusive. While an unobtrusive solution is always preferable there isn&rsquo;t really one for our problem that was simple enough to present in this episode.  Ryan Bates is working on a plugin called <a href="http://github.com/ryanb/nested_form">nested_form</a> that will make use of jQuery to handle nested forms in an unobtrusive way. This plugin is still in early development so if you think you&rsquo;ll need something like this keep checking there to see how it is coming along.</p>

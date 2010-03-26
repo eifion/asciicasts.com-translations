@@ -1,0 +1,117 @@
+<p>From <a href="http://railscasts.com/episodes/127-rake-in-background">episode 127</a>, a short series of episodes showed how to run tasks in a background process. That series missed one of the best ways to do this: the <a href="http://github.com/tobi/delayed_job/tree/master">delayed_job plugin</a> by tobi.  The plugin was extracted from <a href="http://www.shopify.com">Shopify</a> and is a robust, stable solution for running background tasks in Rails applications. It&rsquo;s used by sites as popular as Github, so scales well too.</p>
+
+<p>To demonstrate it we&rsquo;ll use the example of a mailing application that allows you to create emails sent out to a large list of recipients. Clicking the &ldquo;deliver&rdquo; link for a mailing will deliver the emails, but will do it in the current request which takes a while to run and ties up a Rails process while it does so. Our mailing code takes about ten seconds to deliver a mailing which is too long for a user to have to wait for a response to clicking a link.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/148/original/E171I01.png" width="814" height="365" alt="The index page of our mailings application."/>
+</div>
+
+<p>Long-running tasks like this are always best moved into a background process so we&rsquo;ll use delayed_job to do just that for our delivery task.</p>
+
+<h3>Using The Right Fork And Getting Set Up</h3>
+
+<p>The official release of delayed_job can be found on <a href="http://github.com/tobi/delayed_job/tree/master">tobi&rsquo;s Github pages</a>, but there are a number of forks and we&rsquo;re going to use one supplied by <a href="http://github.com/collectiveidea/delayed_job/tree/master">collectiveidea</a>. This fork is a little more feature complete and up to date and also provides a generator script for creating the database table that delayed_job needs.</p> 
+
+<p>We&rsquo;ll begin by installing the plugin in our application with the following command.</p>
+<pre class="terminal">
+script/plugin install git://github.com/collectiveidea/delayed_job.git
+</pre>
+<p>And, once it&rsquo;s installed, run the generator script to create the migration. (Remember that only the collectiveidea fork provides this.)</p>
+<pre class="terminal">
+script/generate delayed_job
+  create  script/delayed_job
+  exists  db/migrate
+  create  db/migrate/20090720195941_create_delayed_jobs.rb
+</pre>  
+<p>Followed by</p>
+<pre class="terminal">
+rake db:migrate
+</pre>
+<p>to generate the new delayed_jobs database table. </p>
+<p>Next we&rsquo;ll start up the jobs process. There are a couple of ways to do this. If we were putting the app into production we would use the <code>delayed_job</code> script that was created when we ran the generator above.  This daemonizes the job process and allows multiple background processes to be spawned. As we&rsquo;re in development we&rsquo;ll use the provided rake task instead.</p>
+<pre class="terminal">
+rake jobs:work
+</pre>
+<p>This will run until we stop it with CTRL+C, which makes it ideal for using while in development mode.</p>
+
+<h3>Using delayed_job To Handle Our Mailings</h3>
+
+<p>Now that we&rsquo;ve got delayed_job up and running we can modify our app to move the code that delivers the emails into a background task. The code that kicks off the delivery is the <code>deliver</code> method in the <code>MailingsController</code>.</p>
+<pre class="ruby">
+def deliver
+  mailing = Mailing.find(params[:id])
+  mailing.deliver
+  flash[:notice] = &quot;Mailing delivered&quot;
+  redirect_to mailings_url
+end
+</pre>
+<p>In the controller&rsquo;s <code>deliver</code> method we find the mailing we want to send then call <code>deliver</code> on it and it&rsquo;s the <code>Mailing</code>&rsquo;s <code>deliver</code> method that takes time to run and which should be moved to the background. To do this we&rsquo;ll try  the <code>send_later</code> method. This method can be called on any model and takes as an argument a symbol representing the method we want to call.</p>
+<pre class="ruby">
+mailing.send_later(:deliver)
+</pre>
+<p>If there are arguments that we want to pass we can add them to <code>send_later</code>&rsquo;s argument list. This works like Ruby&rsquo;s <code>send</code> method, but <code>send_later</code> will move the task into the queue for processing in the background. We&rsquo;ll update our controller&rsquo;s <code>deliver</code> method to use <code>send_later</code> and see how it works. Note that we&rsquo;ve also updated the flash notice to show a more appropriate message.</p>
+<pre class="ruby">
+def deliver
+  mailing = Mailing.find(params[:id])
+  mailing.send_later(:deliver)
+  flash[:notice] = &quot;Mailing is being delivered.&quot;
+  redirect_to mailings_url
+end
+</pre>
+<p>Now, when we click on the &ldquo;deliver&rdquo; link for the second mailing in the list we see a response almost immediately.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/149/original/E171I02.png" width="808" height="405" alt="The deliver link now returns a response straightaway."/>
+</div>
+
+<p>And when we refresh the page a few seconds later it now tells us that our second mailing has been delivered.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/150/original/E171I03.png" width="808" height="405" alt="The second mailing is shown as delivered."/>
+</div>
+
+<p>If we look at the terminal window we have the <code>rake jobs:work</code> task running in we&rsquo;ll see when the job has been processed and if it was successful.</p>
+<pre class="terminal">
+1 jobs processed at 0.0993 j/s, 0 failed ...
+</pre>
+<h3>Creating a Custom Class</h3>
+
+<p>The <code>send_later</code> method makes it easy to call a method to run in the background, but what if we want to do more than just call a single method? We can instead create a class for the background code. To demonstrate this we&rsquo;ll create a class called <code>MailingJob</code> that will live in a file called <code>mailing_job.rb</code> in our application&rsquo;s <code>/lib</code> folder. Here is the code for that class.</p>
+<pre class="ruby">
+class MailingJob &lt; Struct.new(:mailing_id)
+  def perform
+    mailing = Mailing.find(mailing_id)
+    mailing.deliver
+  end
+end
+</pre>
+<p>One thing to note about this class is that it must have a method called <code>perform</code> which takes no arguments. This makes things a little difficult for us as we need to pass in the <code>mailing_id</code> for the mailing that we want to deliver. We could add an instance variable called <code>@mailing_id</code> to the class along with an <code>initialize</code> method that takes the <code>mailing_id</code> as a parameter, but the convention when using delayed_job is to have our class inherit from a struct. Having a struct as our class&rsquo;s superclass allows to to define the attributes we want the class to have, in our case a <code>mailing_id</code>. The <code>mailing_id</code> will now be the first parameter when we initialize a <code>MailingJob</code>. This nicely sets us up with a <code>mailing_id</code> variable in the class without having to create an instance variable or an initialize method.</p>
+
+<p>Now that we&rsquo;ve created our class we can use it on our <code>MailingsController</code>.</p>
+<pre class="ruby">
+def deliver
+  Delayed::Job.enqueue(MailingJob.new(params[:id]))
+  flash[:notice] = &quot;Mailing is being delivered.&quot;
+  redirect_to mailings_url
+end
+</pre>
+<p>The first line in the method does all of the work, creating an instance of our <code>MailingJob</code> class with the correct <code>id</code> for the mailing we want to send and then passing that instance to <code>Delayed::Job.enqueue</code> where it will be queued for processing.</p> 
+
+<p>Using a custom class also allows us to take advantage of some of delayed_job&rsquo;s features by passing additional parameters to the <code>Delayed::Job.enqueue</code> method. The first additional parameter we can pass is a priority. This parameter has a default value of zero, so if we pass a higher value, say, three, then that job will be processed before those jobs with the default value.</p>
+<pre class="ruby">
+Delayed::Job.enqueue(MailingJob.new(params[:id]), 3)
+</pre>
+<p>Likewise, passing a priority of less than zero will mean that the job won&rsquo;t be processed until those with a higher priority have been processed.</p>
+<pre class="ruby">
+Delayed::Job.enqueue(MailingJob.new(params[:id]), -3)
+</pre>
+<p>The second parameter than can be passed is a time at which the job should start.</p>
+<pre class="ruby">
+Delayed::Job.enqueue(MailingJob.new(params[:id]), 3, 3.days.from_now)
+</pre>
+<p>The job above now won&rsquo;t be considered to be in the queue for three days after it was added.</p> 
+
+<h3>Automatic Retry</h3>
+<p>One final feature of delayed_job worth mentioning is the automatic retry on failure. If a method throws an exception it will be caught and the method rerun later. The method will be retried up to 25 times at increasingly longer intervals until it passes. Care needs to be taken with this especially if, as were are here, you&rsquo;re sending out mailings. If the mailing fails halfway through we&rsquo;d need to make sure that when it started again it doesn&rsquo;t start again from the beginning of the list.</p>
+
+<p>That&rsquo;s it for our coverage of delayed_job. As we&rsquo;ve seen it&rsquo;s a fairly full-featured plugin and one of the best ways to create background tasks in Rails applications. One final tip: it&rsquo;s worth looking in the <code>recipes</code> folder of the plugin where you&rsquo;ll find Capistrano recipies for managing delayed_job when you deploy your application.</p>

@@ -1,0 +1,64 @@
+<p>Almost all Rails applications display a list of models and while we usually just display them in a certain order, it can be useful sometimes to group them too. Below is an application that displays a list of tasks, each of which has a due date. We want to display the tasks grouped by the month of their due date, rather than just in a list. To do this we&rsquo;re going to use a method called <code>group_by</code>.</p>
+
+<img src="/system/photos/41/original/E029I01.png" width="779" height="369" alt="Our tasks as a list."/>
+<p class="title">Our tasks as one long list.</p>
+<p>To show how the <code>group_by</code> method works we&rsquo;ll demonstrate it in Rails&rsquo; console.</p>
+<pre class="terminal">
+&gt;&gt; a = (1..20).to_a
+=&gt; [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+&gt;&gt; a.group_by { |num| num/5 }
+=&gt; {0=&gt;[1, 2, 3, 4], 1=&gt;[5, 6, 7, 8, 9], 2=&gt;[10, 11, 12, 13, 14], 3=&gt;[15, 16, 17, 18, 19], 4=&gt;[20]}
+&gt;&gt;
+</pre>
+<p class="title">Grouping an array with <code>group_by</code>.</p>
+<p>In the code above we generate a range from 1 to 20 then convert it into an array. We then run <code>group_by</code> on the array. <code>group_by</code> takes a block as an argument and returns a hash. Our block will return the number passed to it divided by 5.</p>
+<p>Each key in the returned hash will be a value that was returned by the block, and each value in the hash will be an array of the values passed to the block that returned that result. So, for example. the values 1,2,3 and 4 will all return 0 when divided by 5 (as we&rsquo;re dividing integers) so end up as values of the key <code>0</code>. Likewise, 20 is the only number in our array to divide into 5 four times so becomes a value of the key <code>4</code>.</p>
+
+<h3>A Brief Aside</h3>
+<p>The Railscast this episode is based on was written back in the Rails 1.x days. Since then the way <code>group_by</code> works has gone through a couple of changes. In Rails 2.0 - 2.2 it will return a nested array, so for the example above we&rsquo;ll see the following output.</p>
+<pre class="ruby">=&gt; [[0, [1, 2, 3, 4]], [1, [5, 6, 7, 8, 9]], [2, [10, 11, 12, 13, 14]], [3, [15, 16, 17, 18, 19]], [4, [20]]]</pre>
+<p>The latest release at the time of writing is the first release candidate of Rails 2.3. This returns an <code>OrderedHash</code> object.</p>
+
+<h3>Back To The Tasks</h3>
+<p>Returning to our project, we&rsquo;ll now use <code>group_by</code> to group our tasks by month. We&rsquo;ll do this by editing our <code>TaskController</code>.</p>
+<pre class="ruby">
+class TasksController &lt; ApplicationController
+  def index
+    @tasks = Task.all
+    @task_months = @tasks.group_by { |t| t.due_at.beginning_of_month }
+  end
+end
+</pre>
+<p>We&rsquo;re passing each task in turn to the <code>group_by</code> block and returning a date that is the first day of the month for that task&rsquo;s due date. That way we&rsquo;ll generate a hash whose keys are a date representing the first day of a month, and whose values are an array of all the tasks whose due date falls within that month.</p>
+
+<h3>Updating The View</h3>
+<pre class="ruby">
+&lt;% @tasks.each do |task| %&gt;
+&lt;p&gt;&lt;b&gt;&lt;%= task.name %&gt;&lt;/b&gt; due on &lt;%= task.to_date.to_s(:long) %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p>The original view code loops through each task and displays it. We&rsquo;ll change it so that it loops through each key /in our hash of grouped tasks and then through each task in that key&rsquo;s values. The new view code looks like this.</p>
+<pre class="ruby">
+&lt;% @task_months.each do |month, tasks| %&gt;
+&lt;h2&gt;&lt;%= month.strftime(&quot;%B %Y&quot;) %&gt;&lt;/h2&gt;
+  &lt;% tasks.each do |task| %&gt;
+    &lt;p&gt;&lt;b&gt;&lt;%= task.name %&gt;&lt;/b&gt; due at &lt;%= task.due_at.to_date.to_s(:long) %&gt;&lt;/p&gt;
+  &lt;% end %&gt;
+&lt;% end %&gt;
+</pre>
+<p class="title">The updated view code.</p>
+<p>The code now iterates over the keys in the hash (each of which is a date representing the first day of a month) and prints the month and year of that date using <code>strftime</code>. It then loops through each of that month&rsquo;s tasks and prints its details. In the browser we can see that the tasks are now grouped by month.</p>
+
+<img src="/system/photos/42/original/E029I02.png" width="776" height="481" alt="The tasks are now grouped, but the months are in the wrong order."/>
+<p class="title">All the right tasks, not necessarily in the right order.</p>
+<p>There is still one problem remaining, however. The hash doesn&rsquo;t order its keys in the way we want, which means that in the example below there is a task for January after all of February&rsquo;s tasks. We need to order the keys in the hash so that they are iterated over in the correct order. The solution to this is to sort the keys, then iterate over them, getting the tasks for that key.</p>
+<pre class="ruby">
+&lt;% @task_months.keys.sort.each do |month| %&gt;
+&lt;h2&gt;&lt;%= month.strftime(&quot;%B %Y&quot;) %&gt;&lt;/h2&gt;
+  &lt;% for task in @task_months[month] %&gt;
+    &lt;p&gt;&lt;b&gt;&lt;%= task.name %&gt;&lt;/b&gt; due at &lt;%= task.due_at.to_date.to_s(:long) %&gt;&lt;/p&gt;
+  &lt;% end %&gt;
+&lt;% end %&gt;
+</pre>
+<p class="title">Now our tasks are displayed in the correct order.</p>
+<p>It&rsquo;s worth noting that <code>group_by</code> could be used to group our tasks by any of their properties. For example if we wanted to group them by the first letter of their name we could just as easily do so. This makes <code>group_by</code> a powerful way of grouping lists of items.</p>

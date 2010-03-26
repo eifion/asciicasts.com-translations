@@ -1,0 +1,245 @@
+<p>En el <a href="http://es.asciicasts.com/episodes/196-formularios-de-modelos-anidados-1">episodio anterior</a> aprendimos a crear un formulario que pudiese gestionar m&uacute;ltiples modelos anidados.  En la aplicaci&oacute;n que creamos tenemos un mode <code>Survey</code>, que a su vez tiene muchas <code>Questions</code>, cada una de las cuales tiene muchas <code>Answers</code>.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/300/original/E197I01.png" alt="La p&aacute;gina de edici&oacute;n de una encuesta." height="490" width="816" />
+</div>
+
+<p>En los modelos <code>Survey</code> y <code>Question</code> hemos utilizado <code>accepts_nested_attributes_for</code> para poder crear, editar y destruir los registros anidados a trav&eacute;s de un &uacute;nico modelo.</p>
+
+<p>Tal y como est&aacute; ahora nuestra aplicaci&oacute;n si queremos eliminar una pregunta o una respuesta tenemos que usar una caja de selecci&oacute;n, y tampoco tenemos forma de a&ntilde;adir nuevas preguntas o respuestas a trav&eacute;s del formulario. En este episodio corregiremos estos problemas utilizando JavaScript para modificar el formulario  de forma que podamos usar enlaces para crear y destruir estos modelos din&aacute;micamente.</p>
+
+<p>El JavaScript que vamos a escribir implica que tendremos que manipular el DOM por lo que para hacerlo m&aacute;s f&aacute;cil utilizaremos la <a href="http://www.prototypejs.org/">librer&iacute;a Prototypp</a>.  Para incluir el c&oacute;digo de Prototype a nuestra aplicaci&oacute;n a&ntilde;adiremos la siguiente l&iacute;nea a la secci&oacute;n &lt;head&gt; del fichero de layout de nuestra aplicaci&oacute;n.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= javascript_include_tag :defaults, :cache =&gt; true %&gt;
+</pre>
+
+<p>(Los que prefieran usar jQuery encontrar&aacute;n el c&oacute;digo equivalente al final del episodio.)</p>
+
+<h3>A&ntilde;adiendo enlaces para quitar respuestas</h3>
+
+
+<p>Vamos a acometer primero la parte sencilla: cambiar las cajas de selecci&oacute;n por enlaces para quitar preguntas y respuestas.  Veamos primero las respuestas.  El c&oacute;digo que muestra cada respuesta se encuentra en un parcial llamado <code>answer_fields</code> y tiene el siguiente aspecto:</p>
+
+<p class="codeFilePath">/app/views/surveys/_answer_fields.html.erb</p>
+<pre class="ruby">
+&lt;p&gt;
+  &lt;%= f.label :content, &quot;Answer&quot; %&gt;
+  &lt;%= f.text_field :content %&gt;
+  &lt;%= f.check_box :_destroy %&gt;
+  &lt;%= f.label :_destroy, &quot;Remove&quot; %&gt;
+&lt;/p&gt;
+</pre>
+
+<p>La caja de selecci&oacute;n <code>_destroy</code> es la que marcamos cuando queremos destruir una respuesta.  Vamos a poner en su lugar un campo oculto cuyo valor estableceremos cuando se haga clic en el enlace de borrado.  De esta manera podremos saber qu&eacute; respuestas se han marcado para borrar.</p>
+
+<p>Cambiaremos la etiqueta del c&oacute;digo anterior por un enlace y usaremos el <em>helper</em> <code>link_to_function</code> de Rails para crear un enlace que al hacer clic sobre &eacute;l invoque una funci&oacute;n JavaScript.  Con el campo oculto y el enlace el c&oacute;digo del parcial queda as&iacute;:</p>
+
+
+<p class="codeFilePath">/app/views/surveys/_answer_fields.html.erb</p>
+<pre class="ruby">
+&lt;p class=&quot;fields&quot;&gt;
+  &lt;%= f.label :content, &quot;Answer&quot; %&gt;
+  &lt;%= f.text_field :content %&gt;
+  &lt;%= f.hidden_field :_destroy %&gt;
+  &lt;%= link_to_function &quot;remove&quot;, &quot;remove_fields(this)&quot; %&gt;
+&lt;/p&gt;
+</pre>
+
+<p>Al hacer clic sobre el enlace &ldquo;remove&rdquo; que ahora aparece al lado de cada respuesta se lanzar&aacute; una funci&oacute;n llamada  <code>remove_fields</code> que recibe dicha respuesta como argumento para que poder utilizarla como referencia para encontrar los otros elementos relacionados con la respuesta.  No hay una forma directa de acceder a dichos campos, as&iacute; que hemos a&ntilde;adido una clase al elemento p&aacute;rrafo que los incluye para poder encontrarlos m&aacute;s f&aacute;cilmente.</p>
+
+<p>A continuaci&oacute;n tenemos que escribir la funci&oacute;n <code>remove_fields</code>. Lo haremos en el fichero  <code>application.js</code> dado que es uno de los ficheros que se incluye autom&aacute;ticamente en nuestras p&aacute;ginas al haber incluido los ficheros de javascript por defecto (<code>:defaults</code>).</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">
+function remove_fields(link) {
+	$(link).previous(&quot;input[type=hidden]&quot;).value = &quot;1&quot;;
+	$(link).up(&quot;.fields&quot;).hide();
+}
+</pre>
+
+<p>Esta funci&oacute;n hace dos cosas.  En primer lugar utiliza la funci&oacute;n <a 
+href="http://api.prototypejs.org/dom/element.html#previous-class_method"><code>previous</code></a> de Prototype para encontrar el campo oculto anterior relativo al enlace que llam&oacute; a la funci&oacute;n, que es el campo _destroy y le pone su valor a <code>1</code> de forma que dicha respuesta quedar&aacute; marcada para ser borrada.  Despu&eacute;s utiliza el m&eacute;todo  <a href="http://api.prototypejs.org/dom/element.html#up-class_method"><code>up</code></a> para escalar el &aacute;rbol DOM hasta que encuentra un elemento con la clase <code>fields</code> (que es el nombre de la clase que le dimos al elemento p&aacute;rrafo que contiene los campos de las respuestas) y lo oculta de forma que la respuesta deje de verse.</p>
+
+<p>Si recargamos la p&aacute;gina de la encuesta, ahora veremos un enlace junto a cada respuesta.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/301/original/E197I02.png" alt="Las cajas de selecci&oacute;n se han convertido en enlaces" height="471" width="816" />
+</div>
+
+<p>Si hacemos clic en algunos de los enlaces de las respuestas se pondr&aacute; a 1  el valor del campo oculto <code>_destroy</code> para dichas respuestas y se ocultan los campos del formulario.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/302/original/E197I03.png" alt="Las respuestas se ocultan cuando hacemos clic en en enlace" height="471" width="816" />
+</div>
+
+<p>N&oacute;tese, sin embargo, que no estamos utilizando AJAX para actualizar los valores del formulario cuando se hace clic en el enlace de forma que, aunque estemos ocultando las respuestas al momento, la base de datos no ser&aacute; actualizada hasta que enviemos el formulario, s&oacute;lo entonces se eliminar&aacute;n y lo veremos en la p&aacute;gina <code>show</code> de la encuesta.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/303/original/E197I04.png" alt="The answers have now been removed." height="471" width="816" />
+</div>
+
+<h3>Borrado de las preguntas</h3>
+
+<p>Ahora que somos capaces de eliminar respuestas usando enlaces pasaremos a las preguntas.  La forma de borrarlas es b&aacute;sicamente la misma, as&iacute; que podremos reutilizar parte del c&oacute;digo que escribimos anteriormente.</p>
+
+<p>Tal y como hicimos con las respuestas vamos a cambiar las etiquetas y cajas de selecci&oacute;n por un campo oculto y un enlace, por lo que quitaremos esa parte del parcial <code>answer_fields</code> y la colocaremos en un nuevo m&eacute;todo <em>helper</em> llamado <code>link_to_remove_fields</code>, pasando el texto que queremos que aparezca en el enlace, y la variable del formulario <code>f</code>.</p>
+
+<p class="codeFilePath">/app/views/surveys/_answer_fields.html.erb</p>
+<pre class="ruby">
+&lt;p class=&quot;fields&quot;&gt;
+  &lt;%= f.label :content, &quot;Answer&quot; %&gt;
+  &lt;%= f.text_field :content %&gt;
+  &lt;%= link_to_remove_fields &quot;remove&quot;, f %&gt;
+&lt;/p&gt;
+</pre>
+
+<p>Escribiremos el m&eacute;todo en el archivo <code>application_helper</code>:</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre style="display: none;" class="ruby">
+# Methods added to this helper will be available to all templates in the application.
+module ApplicationHelper
+  def link_to_remove_fields(name, f)
+    f.hidden_field(:_destroy) + link_to_function(name, &quot;remove_fields(this)&quot;)
+  end
+end
+</pre>
+
+<p>Los m&eacute;todos que crean campos de formulario devuelven cadenas para que se pueda concatenar el HTML generado por <code>f.hidden_field</code> y <code>link_to_function</code> y devolv&eacute;rselo al parcial.</p>
+
+<p>Ya podemos usar nuestro nuevo m&eacute;todo en el parcial <code>question_fields</code>.</p>
+
+<p class="codeFilePath">/app/views/surveys/_question_fields.html.erb</p>
+<pre style="display: none;" class="ruby">
+&lt;div class=&quot;fields&quot;&gt;
+  &lt;p&gt;
+    &lt;%= f.label :content, &quot;Question&quot; %&gt;
+    &lt;%= link_to_remove_fields &quot;remove&quot;, f%&gt;&lt;br /&gt;
+    &lt;%= f.text_area :content, :rows =&gt; 3 %&gt;&lt;br /&gt;
+  &lt;/p&gt;
+  &lt;% f.fields_for :answers do |builder| %&gt;
+    &lt;%= render &#x27;answer_fields&#x27;, :f =&gt; builder %&gt;
+  &lt;% end %&gt;
+&lt;/div&gt;
+</pre>
+
+<p>Dado que la funci&oacute;n <code>remove_fields</code> busca un elemento que tenga la clase <code>fields</code> para ocultar una pregunta o respuesta hemos envuelto todo el parcial en un elemento <code>div</code> con ese nombre de clase para que cuando se haga clic en el enlace &ldquo;remove&rdquo; de una pregunta se oculten dicha pregunta y todas sus respuestas.</p>
+
+<p>Si miramos la p&aacute;gina de edicion de una encuesta y hacemos clic en el enlace de borrado la pregunta ser&aacute; borrada as&iacute; como sus respuestas, y cuando enviemos el formulario tanto la pregunta como las respuestas ser&aacute;n efectivamente borradas de la encuesta.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/304/original/E197I05.png" alt="La pregunta y sus respuestas han sido borradas." height="423"  width="815" />
+</div>
+
+<h3>Para a&ntilde;adir preguntas y respuestas</h3>
+
+<p>Ahora viene la parte m&aacute;s dif&iacute;cil: a&ntilde;adir nuevas preguntas y respuestas. Queremos tener enlaces en el formulario que creen din&aacute;micamente nuevos campos de formulario cuando se haga clic en ellos.  Lo que hace que esto sea dif&iacute;cil es que el JavaScript tendr&aacute; que acceder a un grupo de campos vac&iacute;os para poder crear una nueva pregunta o respuesta como respuesta a un clic.</p>
+
+<p>Para esto tendremos que escribir un nuevo m&eacute;todo llamado <code>link_to_add_fields</code> en <code>application_helper.rb</code>. Podremos utilizar este m&eacute;todo cada vez que queramos mostrar un enlace para a&ntilde;dir los campos de una nueva pregunta o respuesta en el formulario.  El c&oacute;digo del m&eacute;todo tendr&aacute; el siguiente aspecto:</p>
+
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+def link_to_add_fields(name, f, association)
+  new_object = f.object.class.reflect_on_association(association).klass.new
+  fields = f.fields_for(association, new_object, :child_index =&gt; &quot;new_#{association}&quot;) do |builder|
+    render(association.to_s.singularize + &quot;_fields&quot;, :f =&gt; builder)
+  end
+  link_to_function(name, h(&quot;add_fields(this, \&quot;#{association}\&quot;, \&quot;#{escape_javascript(fields)}\&quot;)&quot;))
+end
+</pre>
+
+<p>Este m&eacute;todo recibe tres argumentos: <code>name</code>, que ser&aacute; el texto del enlace; <code>f</code>, el constructor de formulario y <code>association</code>, que en nuestro caso ser&aacute; o bien &ldquo;questions&rdquo; o  &ldquo;answers&rdquo;.</p>
+
+<p>La primera l&iacute;nea del m&eacute;todo crea una nueva instancia de esa nueva clase de asociaci&oacute;n, es decir, una nueva  <code>Question</code> o <code>Answer</code>. Esto quiere decir que tendremos un objeto plantilla que podemos usar para crear los campos del formulario.</p>
+
+<p>La segunda parte del c&oacute;digo construye una cadena de los campos del formulario de ese objeto para poder insertarlos en la funci&oacute;n JavaScript que los a&ntilde;ade al formulario cuando se hace clic en dicho enlace.  Esto lo hace llamando al parcial apropiado pasando el constructor de formulario (<code>f</code>). Lo &uacute;nico nuevo aqu&iacute; es el valor <code>:child_index</code>. Lo empleamos para poder tener algo a lo que hacer referencia para crear los campos para la nueva pregunta o respuesta.  En el c&oacute;digo JavaScript reemplazaremos el nombre de this con un valor &uacute;nico que estar&aacute; basado en la hora actual. De esta manera cada vez que creemos una nueva pregunta o respuesta tendr&aacute; un &iacute;ndice &uacute;nico que la identifique cuando se env&iacute;e el formulario.</p>
+
+<p>Por &uacute;ltimo utilizamos el m&eacute;todo <code>link_to_function</code> de nuevo pasando el nombre del enlace y una llamada a una funci&oacute;n JavaScript llamada <code>add_fields</code> a la que le pasaremos el enlace, el nombre de la asociaci&oacute;n y una cadena que contiene los campos de formulario <em>escapados</em>.</p>
+
+<p>Ahora podemos volver al c&oacute;digo JavaScript y escribir la funci&oacute;n <code>add_fields</code>.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">
+function add_fields(link, association, content) {
+  var new_id = new Date().getTime();
+  var regexp = new RegExp(&quot;new_&quot; + association, &quot;g&quot;);
+  $(link).up().insert({
+	before: content.replace(regexp, new_id)
+  });
+}
+</pre>
+
+<p>Esta funci&oacute;n recibe los tres argumentos que mencion&aacute;bamos anteriormente: el enlace que ha sido pulsado, el nombre de la asociaci&oacute;n y una cadena que contiene el HTML de los campos del formulario.  Lo primero que hace esta funci&oacute;n es crear un nuevo identificador para los campos del formulario. Si creamos varia preguntas nuevas no queremos que tengan todas el mismo campo de &iacute;ndice porque entonces ser&iacute;an consideradas como pertenecientes al mismo modelo al enviar el formulario.  Utilizaremos la hora actual para que este identificador sea &uacute;nico y despu&eacute;s reemplazaremos la cadena <code>new_question</code> o <code>new_answer</code> por ese identifciador utilizando una expresi&oacute;n regular.  Una vez hecho esto insertamos la cadena de campos en su lugar correspondiente en el DOM.</p>
+
+<p>Ya ha pasado lo m&aacute;s dif&iacute;cil.  Ahora todo lo que nos queda por hacer es a&ntilde;adir los enlaces propiamente dichos.  En el parcial <code>question_fields</code> a&ntilde;adiremos un enlace para a&ntilde;adir una nueva respuesta utilizando  <code>link_to_add_fields</code>, pas&aacute;ndole <code>:answers</code> como el nombre de la asociaci&oacute;n dado que una pregunta tiene muchas respuestas.</p>
+
+<p class="codeFilePath">/app/views/surveys/_question_fields.html.erb</p>
+<pre class="ruby">&lt;div class=&quot;fields&quot;&gt;
+  &lt;p&gt;
+    &lt;%= f.label :content, &quot;Question&quot; %&gt;
+    &lt;%= link_to_remove_fields &quot;remove&quot;, f %&gt;&lt;br /&gt;
+    &lt;%= f.text_area :content, :rows =&gt; 3 %&gt;&lt;br /&gt;
+  &lt;/p&gt;
+  &lt;% f.fields_for :answers do |builder| %&gt;
+    &lt;%= render &#x27;answer_fields&#x27;, :f =&gt; builder %&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;&lt;%= link_to_add_fields &quot;Add Answer&quot;, f, :answers %&gt;&lt;/p&gt;
+&lt;/div&gt;
+</pre>
+
+<p>Podemos hacer algo parecido en el formulario de encuesta para a&ntilde;adir un enlace para a&ntilde;adir preguntas.</p>
+
+<p class="codeFilePath">/app/views/surveys/_form.html.erb</p>
+<pre class="ruby">&lt;% form_for @survey do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;% f.fields_for :questions do |builder| %&gt;
+    &lt;%= render &#x27;question_fields&#x27;, :f =&gt; builder %&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;&lt;%= link_to_add_fields &quot;Add Question&quot;, f, :questions %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Si recargamos la p&aacute;gina de encuestas ahora veremos los enlaces para a&ntilde;adir una nueva pregunta o respuesta y si hacemos clic en uno de ellos aparecer&aacute; un nuevo campo en el formulario.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/305/original/E197I06.png" alt="Aparece un nuevo campo vac&iacute;o cuando se hace clic en el enlace &ldquo;Add Answer&rdquo;." height="546" width="800" />
+</div>
+
+<p class="title">Cuando hacemos clic en el enlace &ldquo;Add Answer&rdquo; aparece un nuevo campo vac&iacute;o para la respuesta.</p>
+
+<p>Si rellenamos el nuevo campo de respuesta con &ldquo;jQuery&rdquo; y enviamos el formulario se a&ntilde;adir&aacute; la nueva respuesta.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/306/original/E197I07.png" alt="Se ha a&ntilde;adido la nueva pregunta" height="375" width="801" />
+</div>
+
+<p>Hemos alcanzado nuestro objetivo y ya tenemos un formulario en el que podemos a&ntilde;adir o eliminar campos din&aacute;micamente, y que actualizar&aacute; adecuadamente la base de datos cuando se env&iacute;e.</p>
+
+<h3>C&oacute;digo alternativo para jQuery</h3>
+
+<p>El JavaScript que hemos utilizado en este episodio funciona con la librer&iacute;a Prototype.  Si preferimos utilizar jQuery, el c&oacute;digo ser&iacute;a el siguiente:</p>
+
+<pre class="javascript">function remove_fields(link) {
+	$(link).prev(&quot;input[type=hidden]&quot;).val(&quot;1&quot;);
+	$(link).closest(&quot;.fields&quot;).hide();
+}
+
+function add_fields(link, association, content) {
+	var new_id = new Date().getTime();
+	var regexp = new RegExp(&quot;new_&quot; + association, &quot;g&quot;);
+	$(link).parent().before(content.replace(regexp, new_id));
+}
+</pre>
+
+<p>Este c&oacute;digo es muy parecido al que hemos escrito para Prototype.</p>
+
+<p>Algunos lectores no estar&aacute;n satisfechos porque el JavaScript que hemos utilizado no es &quot;no intrusivo&quot;.  Aunque siempre es preferible adoptar una soluci&oacute;n no intrusiva, para este problema en concreto no hab&iacute;a una que fuese lo suficientemente sencilla como para presentarla en este episodio.   Ryan Bates est&aacute; trabajando en un plugin llamado <a href="http://github.com/ryanb/nested_form">nested_form</a> que utiliza jQuery para controlar estos formularios no anidados de forma no intrusiva. A&uacute;n est&aacute; en desarrollo, as&iacute; que si piensan que necesitan algo como esto, lo mejor es pasarse por all&iacute; para ver c&oacute;mo est&aacute; de avanzado.</p>

@@ -1,0 +1,96 @@
+<p>RJS makes writing AJAX-enabled Rails applications easy, but bugs still happen. In this episode we&rsquo;re going to show how to debug both server-side and client-side errors. The application we wrote in <a href="/episodes/43-ajax-with-rjs">the last episode</a> let customers add reviews of products via a form that used AJAX, but it&rsquo;s not working now. When we click the button to try to add a review, nothing happens. This means that there is an error somewhere in the lifetime of the AJAX call, either the request is not being sent correctly or an error on the server is causing the response to be invalid or missing. Bugs like this can be difficult to track down as the browser doesn&rsquo;t show an error message so there&rsquo;s no obvious place to start looking for the line of code that needs fixing.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/65/original/E044I01.png" width="808" height="657" alt="The review isn&rsquo;t added when we click the button."/>
+  <p class="title">Our broken product page.</p>
+</div>
+
+<h3>Tracing The Call</h3>
+<p>The first step towards debugging our problem is to look at the source code for the page. We&rsquo;ll look in the <code>&lt;head&gt;</code> section to make sure that the required JavaScript files have been referenced.</p>
+<pre class="terminal">
+&lt;head&gt;
+  &lt;meta http-equiv=&quot;Content-Type&quot; content=&quot;text/html; charset=utf-8&quot;/&gt;
+  &lt;link href=&quot;/stylesheets/ep44.css?1237493400&quot; media=&quot;screen&quot; rel=&quot;stylesheet&quot; type=&quot;text/css&quot; /&gt;
+  &lt;script src=&quot;/javascripts/prototype.js?1237114650&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+  &lt;script src=&quot;/javascripts/effects.js?1237114650&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+  &lt;script src=&quot;/javascripts/dragdrop.js?1237114650&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+  &lt;script src=&quot;/javascripts/controls.js?1237114650&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+  &lt;script src=&quot;/javascripts/application.js?1237114650&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+  &lt;title&gt;Episode 44: Debugging RJS&lt;/title&gt;
+&lt;/head&gt;
+</pre>
+<p class="title">The JavaScript files referenced in the &lt;head&gt; section of our page.</p>
+
+<p>The Prototype and script.aculo.us libraries are correctly referenced in our page. Next we&rsquo;ll look at the opening form tag to make sure that the AJAX request that is made when the form is submitted is correct.</p>
+<pre class="terminal">
+&lt;form action=&quot;/products/1/reviews&quot; class=&quot;new_review&quot; id=&quot;new_review&quot; method=&quot;post&quot; 
+onsubmit=&quot;new Ajax.Request(&#x27;/products/1/reviews&#x27;, {asynchronous:true, evalScripts:true, parameters:Form.serialize(this)}); return false;&quot;&gt;
+</pre>
+<p>What we want to check for here is that the AJAX request is made and that the URL it calls is correct. Our code looks right; the JavaScript in the onsubmit attribute creates a new Ajax.Request and the URL is the correct one to create a new review.</p> 
+
+<p>Given that the code on the page looks correct, the next place to check is on the server. The development log will be able to tell us if the AJAX call has been made. We&rsquo;ll run <code>tail</code> on the log and try submitting another request.</p>
+<pre class="terminal">
+Processing ReviewsController#create (for 127.0.0.1 at 2009-03-19 21:17:50) [POST]
+  Parameters: {&quot;commit&quot;=&gt;&quot;Add comment&quot;, &quot;review&quot;=&gt;{&quot;name&quot;=&gt;&quot;Bob&quot;, &quot;content&quot;=&gt;&quot;Wow!&quot;}, &quot;product_id&quot;=&gt;&quot;1&quot;, &quot;authenticity_token&quot;=&gt;&quot;4cncFdRcYuinYVNWj3uGZTPuvx4VXM7gBCRCMOLt4fw=&quot;, &quot;_&quot;=&gt;&quot;&quot;}
+  Review Create (0.4ms)   INSERT INTO &quot;reviews&quot; (&quot;name&quot;, &quot;updated_at&quot;, &quot;product_id&quot;, &quot;content&quot;, &quot;created_at&quot;) VALUES(&#x27;Bob&#x27;, &#x27;2009-03-19 21:17:50&#x27;, 1, &#x27;Wow!&#x27;, &#x27;2009-03-19 21:17:50&#x27;)
+Rendering reviews/create
+Rendered reviews/_review (1.3ms)
+  Product Load (0.3ms)   SELECT * FROM &quot;products&quot; WHERE (&quot;products&quot;.&quot;id&quot; = 1) 
+  SQL (0.2ms)   SELECT count(*) AS count_all FROM &quot;reviews&quot; WHERE (&quot;reviews&quot;.product_id = 1) 
+
+
+ActionView::TemplateError (undefined method `pluralized&#x27; for #&lt;ActionView::Base:0x221b66c&gt;) on line #2 of app/views/reviews/create.rjs:
+1: page.insert_html :bottom, :reviews, :partial =&gt; &#x27;review&#x27;, :object =&gt; @review
+2: page.replace_html :reviews_count, pluralized(@review.product.reviews.size, &#x27;Review&#x27;)
+3: page[:new_review].reset
+4: page.replace_html :notice, flash[:notice]
+5: flash.discard
+</pre>
+<p class="title">The RJS error in the development log.</p>
+<p>When we click the button an error message appears in the development log. The correct action (<code>ReviewsController#create</code>) is called and the review is inserted into the reviews table in the database. Then the RJS file is called and it&rsquo;s here where the error occurs. The log shows that a call to an undefined method, <code>pluralized</code>, is made in our RJS file.</p>
+
+<p>If we look in our RJS file we&rsquo;ll find the line of code that causes the error. The method should be called  pluralize rather than pluralized. We&rsquo;ll change it and see if it fixes the error.</p>
+<pre class="ruby">
+page.replace_html :reviews_count, pluralize(@review.product.reviews.size, &#x27;Review&#x27;)
+</pre>
+<p></p>
+<div class="imageWrapper">
+  <img src="/system/photos/66/original/E044I02.png" width="824" height="492" alt="The review is now added correctly."/>
+  <p class="title">The review is now added.</p>
+</div>
+<p>Our change has fixed the error and now our form is submitted correctly. Just to make sure we&rsquo;ll take another look at the end of the development log and we should see that there are no errors and that the request has completed successfully.</p>
+<pre class="terminal">
+Processing ReviewsController#create (for 127.0.0.1 at 2009-03-19 22:06:40) [POST]
+  Parameters: {&quot;commit&quot;=&gt;&quot;Add comment&quot;, &quot;review&quot;=&gt;{&quot;name&quot;=&gt;&quot;Fry&quot;, &quot;content&quot;=&gt;&quot;This is great!&quot;}, &quot;product_id&quot;=&gt;&quot;1&quot;, &quot;authenticity_token&quot;=&gt;&quot;4cncFdRcYuinYVNWj3uGZTPuvx4VXM7gBCRCMOLt4fw=&quot;, &quot;_&quot;=&gt;&quot;&quot;}
+  Review Create (0.4ms)   INSERT INTO &quot;reviews&quot; (&quot;name&quot;, &quot;updated_at&quot;, &quot;product_id&quot;, &quot;content&quot;, &quot;created_at&quot;) VALUES(&#x27;Fry&#x27;, &#x27;2009-03-19 22:06:40&#x27;, 1, &#x27;This is great!&#x27;, &#x27;2009-03-19 22:06:40&#x27;)
+Rendering reviews/create
+Rendered reviews/_review (0.1ms)
+  Product Load (0.3ms)   SELECT * FROM &quot;products&quot; WHERE (&quot;products&quot;.&quot;id&quot; = 1) 
+  SQL (0.2ms)   SELECT count(*) AS count_all FROM &quot;reviews&quot; WHERE (&quot;reviews&quot;.product_id = 1) 
+Completed in 22ms (View: 10, DB: 1) | 200 OK [http://localhost/products/1/reviews]
+</pre>
+<p>This was a fairly straightforward bug to find and fix, but it has demonstrated how to step through the stages of an AJAX call and locate an error.</p>
+
+<h3>Client-side Errors</h3>
+<p>Sometimes an AJAX request is broken but the log file shows that the code has executed correctly on the server. In these cases we need a good JavaScript debugger, and a really good one is Firebug which works with Firefox. <a href="http://www.getfirebug.com/">Firebug</a> can be installed from the Firebug website in the same way as any other Firefox extension. Once installed it can be used to debug HTML, CSS and JavaScript, including AJAX requests.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/67/original/E044I03.png" width="825" height="580" alt="Firebug is disabled by default."/>
+  <p class="title">Firebug is disabled by default.</p>
+</div>
+
+<p>Firebug is activated by clicking the bug icon in the status bar. By default it will be disabled for the current server. To enable it we&rsquo;ll check the three checkboxes and then the &ldquo;Apply&rdquo; button. Once enabled we&rsquo;ll add another review to our page and see what appears in the Firebox console.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/68/original/E044I04.png" width="759" height="131" alt="The AJAX request's parameters listed in Firebug." />
+</div>
+<p>The console shows us that our AJAX request was made and returned 200, so was successful. If it had failed we&rsquo;d generally see the top line in red and a 500 status. Below that are three tabs that show was was sent in the headers, in the body of the request and what came back in the response. In the tab above we can see the contents of the form fields that were sent.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/69/original/E044I05.png" width="741" height="212" alt="The AJAX response in Firebug." />
+</div>
+<p>In the &lsquo;Response&rsquo; tab is the JavaScript that our RJS file generated. Our Ajax call will evaulate this script when it&rsquo;s returned from the server and it&rsquo;s this that causes the page to be updated and the form to be reset. Being able to see the JavaScript that&rsquo;s going to be run is incredibly useful as we&rsquo;ll be able to debug it much more easily than we could back in the bad old days of debugging by <code>alert</code> statements.</p>
+<p>That said, alert messages do still have their uses. If an error is thrown by the JavaScript that is returned from the server, it&rsquo;ll be caught by the <code>try</code> / <code>catch</code> block in the code and an <code>alert</code> message shown. We&rsquo;ll show this by deliberately causing an error by changing the line 
+of RJS that resets the form so that it has the wrong <code>id</code>.</p>
+<p>Adding a review now throws up the following two alerts, the first showing the error and the second the code that caused it.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/70/original/E044I06.png" width="797" height="387" alt="The error messages shown when the form can&rsquo;t be found."/>
+</div>
+<p>Thankfully the error message clearly explains that the error occurred as a result of failing to find an element on the page with an <code>id</code> of <code>new_reviewXXX</code>, so we&rsquo;ve got a good starting point to try and track the error down.</p>
+<p>Hopefully, we&rsquo;ve covered enough in this episode to give you a good idea as to where to start tracking down bugs in your RJS code. With a combination of the development log for checking server-side code and Firebug for checking client-side code you&rsquo;ll have enough information to quickly fix any bugs that arise.</p>

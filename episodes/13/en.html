@@ -1,0 +1,76 @@
+<p>In this episode we&rsquo;ll show you why it&rsquo;s a bad idea to store a model in the session.</p>
+<pre class="ruby">
+class UserController &lt; ApplicationController
+  def prepare
+    session[:user] = User.find(:first)
+    redirect_to :action =&gt; :'show'
+  end
+
+  def show
+    @user = session[:user]
+  end
+
+  def update
+    @user = session[:user]
+    @user.name = 'Foo'
+    redirect_to :action =&gt; 'show'
+  end  
+end
+</pre>
+<p class="title">Controller with actions that store a model in the session.</p>
+<p>In the code above we have a controller with three actions. The first action, <code>prepare</code>, finds the first <code>User</code>, stores it in the session, then redirects to the <code>show</code> action. The <code>show</code> action gets the current user from the session and outputs some debug information about that user.</p>
+<pre class="ruby">
+&lt;%= debug(@user) %&gt;
+&lt;%= link_to 'update', :action =&gt; 'update' %&gt;
+</pre>
+<p class="title">The <code>show</code> view code.</p>
+<p>The <code>show</code> view has a link to the <code>update</code> action. The <code>update</code> action gets the current user from the session again, changes one of its properties then redirects back to <code>show</code>. The change made in update should be temporary as it&rsquo;s not written back to the database. Finally, <code>update</code> redirects back to <code>show</code> so that we can see the properties of the user again.</p>
+<img src="/system/photos/9/original/E013I01.png" alt="" width="800" height="570"/>
+<p>We first go to <code>/user/prepare</code> which puts the first user into the session and redirects to <code>show</code>. In <code>show</code> we can see that the name is correct. We then click &lsquo;Update&rsquo;, the name property for the user is changed and we&rsquo;re redirected to <code>show</code> again. The name is now &lsquo;Foo&rsquo;, which is different from the name for that user in the database. Because we&rsquo;ve stored the user in the session, any changes made to it are persisted across requests so every time we get the user back from the session we&rsquo;re seeing the modified <code>User</code> rather than the one stored in the database. This can lead to some tricky bugs.</p>
+<pre class="terminal">
+NooNoo:ep13 eifion$ script/console
+Loading development environment (Rails 2.2.2)
+&gt;&gt; User.first.name
+=&gt; "Eifion" 
+&gt;&gt;   
+</pre>
+<p class="title">The <code>User</code> in the database still has the name &lsquo;Eifion&rsquo;.</p>
+
+<h3>Problems With Validations</h3>
+<p>Our <code>User</code> model has a validation that checks that the name exists (with <code>validates_presence_of</code>). We&rsquo;ll update the <code>update</code> action to set the name to an empty string, check that the user is valid and see what happens.</p>
+<pre class="ruby">
+def update
+  @user = session[:user]
+  @user.name = ''
+  @user.valid?
+  redirect_to :action =&gt; 'show'
+end    
+</pre>
+<p class="title">The updated <code>update</code> action.</p>
+<img src="/system/photos/10/original/E013I02.png" alt="" width="800" height="500"/>
+<p>Now we&rsquo;ve set the name to be an empty string, but there are still errors. Once we&rsquo;ve redirected to another page the errors shouldn&rsquo;t be persisted but, because we&rsquo;re storing the model in the session, they are, even after redirecting. This could cause confusion to a user who might see validation errors on a page and find them still there when they return to the page later.</p>
+
+<h3>The Correct Way To Do It</h3>
+<p>Now we&rsquo;ll do it correctly. Instead of storing the <code>User</code> model in the session, we&rsquo;ll store the user&rsquo;s <code>id</code>. The updated controller code will look like this:</p>
+<pre class="ruby">
+class UserController &lt; ApplicationController
+  def prepare
+    session[:user_id] = User.find(:first).id
+    redirect_to :action =&gt; :'show'
+  end
+
+  def show
+    @user = User.find(session[:user_id])
+  end
+
+  def update
+    @user = User.find(session[:user_id])
+    @user.name = 'Foo'
+    redirect_to :action =&gt; 'show'
+  end  
+end
+</pre>
+<p class="title">Controller with actions that store an <code>id</code> in the session.</p>
+<p>Now, only the <code>id</code> is stored in the session and the user is fetched from the database for each request. This time the change made to the user&rsquo;s <code>name</code> is not persisted and remains the same across requests.</p>
+<img src="/system/photos/11/original/E013I03.png" alt="" width="800" height="400" />
+<p>Hopefully this episode has shown the dangers of storing models and other complex objects in Rails&rsquo; session. The session object should only be used to store simple objects such as array, strings and integers.</p>

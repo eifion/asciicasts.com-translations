@@ -1,0 +1,211 @@
+<p>In any Rails application that displays a list of items it&rsquo;s great to be able to paginate the list so that you can display a number of items at a time. There are a couple of gems you can use for pagination; a good one is the <a href="http://github.com/mislav/will_paginate/tree/master">will_paginate</a> gem, which we&rsquo;ve used in the application below.</p>
+
+<p>Below is the index page from the application, which shows a paginated list of products. Clicking one of the links at the top of each page reloads the page and shows a different part of the list. The current page of products we&rsquo;re viewing is shown in the query string part of the URL.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/158/original/E174I01.png" width="823" height="420" alt="Our products list page."/>
+</div>
+
+<p>The pagination uses standard HTML links, but instead we&rsquo;d like the links to trigger an AJAX request when they&rsquo;re clicked so that we can update only the part of the page that changes.</p>
+
+<h3>Pagination</h3>
+
+<p>The will_paginate gem can be <a href="http://github.com/mislav/will_paginate/tree/master">installed from Github</a> and installed in our application by adding</p>
+<pre class="ruby">
+config.gem &#x27;mislav-will_paginate&#x27;, :lib =&gt; &#x27;will_paginate&#x27;, :source =&gt; &#x27;http://gems.github.com&#x27;
+</pre>
+<p>to <code>/config/environment.rb</code>. We make use of it in our products controller&rsquo;s <code>index</code> action where we use <code>paginate</code> instead of <code>find</code> to get our list of products.</p>
+<pre class="ruby">
+class ProductsController &lt; ApplicationController
+  def index
+    @products = Product.paginate(:all, :order =&gt; &quot;name ASC&quot;, :per_page =&gt; 10, :page =&gt; params[:page])
+  end
+end
+</pre>
+<p>The two parameters worth noting in the paginate method are <code>:per_page</code>, which determines how many items will be retrieved at one time and <code>:page</code> which determines the offset. We&rsquo;re retrieving 10 items per page and getting the page number from the query string parameters.</p>
+
+<p>Finally, in the index view we&rsquo;re using <code>will_paginate</code> to display the paging links. This will give us &ldquo;previous&rdquo; and &ldquo;next&rdquo; links along with shortcut links to each page.</p>
+<pre class="ruby">
+&lt;%= will_paginate @products %&gt;
+</pre>
+
+<h3>Adding The AJAX Functionality</h3>
+
+<p>To make the paging work with AJAX we need to modify the pagination links so that they make an AJAX request when clicked instead of linking to another page. We could achieve this by delving into the will_paginate code and modifying it, but this would be a lot of work and result in an obtrusive solution that would modify the HTML that generates the links. A better solution is to leave the HTML as it is and to add some <a href="http://en.wikipedia.org/wiki/Unobtrusive_JavaScript">unobtrusive JavaScript</a> that adds the AJAX functionality to the links. This way the page will still work for users who have JavaScript turned off.</p>
+
+<p>We&rsquo;re going to use the <a href="http://jquery.com/">jQuery</a> library to make implementing the AJAX functionality easier. To do this we&rsquo;ll need to download jQuery and put it in our application&rsquo;s <code>/public/javascripts</code> directory as <code>jquery.js</code>. We can then reference it by adding this line in the <code>&lt;head&gt;</code> section of our application&rsquo;s layout file.</p>
+<pre class="ruby">
+&lt;%= javascript_link_tag &#x27;jquery&#x27; %&gt;
+</pre>
+<p>If you prefer you could use prototype instead of jQuery, but the code we&rsquo;ll be writing to enable the AJAX links would need to be changed to work under prototype.</p>
+
+<p>We&rsquo;ll add the JavaScript for the pagination into a new JavaScript file called <code>pagination.js</code> that will live in the same directory as our other JavaScript files. The first thing we&rsquo;ll want to add to the file is some <code>onclick</code> events for the pagination links on the page. However, we don&rsquo;t want to add the events until the page&rsquo;s Document Object Model has loaded. We can the browser execute a function when the DOM has loaded by calling the <code>$</code> function, passing it the function as an argument. To test that our code is set up correctly we&rsquo;ll start by showing an <code>alert</code> when the DOM loads.</p>
+<pre class="javascript">
+$(function (){
+	alert(&#x27;DOM has loaded.&#x27;);
+});
+</pre>
+<p>Before the code will work we&rsquo;ll have to include our new JavaScript file on the products page. As we&rsquo;ve used Ryan Bates&rsquo; nifty layout generator in our application we can use the javascript helper method it provides. In the index view file we can add the following line.</p>
+<pre class="ruby">
+&lt;% javascript &#x27;pagination&#x27; %&gt;
+</pre>
+<p>Now, when we reload the page the pagination JavaScript is loaded and we see the <code>alert</code> when the page loads.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/159/original/E174I02.png" width="825" height="421" alt="The alert that shows when the page's DOM loads."/>
+</div>
+
+<p>Now that we know that the JavaScript is being called correctly we can start to modify it to make our pagination links use AJAX. If we look at the source code of the page we can see that the pagination links are all contained within a <code>div</code> with a class of <code>pagination</code>. We can use this to create a jQuery selector that matches all of the links.</p>
+<pre class="terminal">
+&lt;div class=&quot;pagination&quot;&gt;
+  &lt;a href=&quot;/products?page=1&quot; class=&quot;prev_page&quot; rel=&quot;prev start&quot;&gt;&amp;laquo; Previous&lt;/a&gt; 
+  &lt;a href=&quot;/products?page=1&quot; rel=&quot;prev start&quot;&gt;1&lt;/a&gt; 
+  &lt;span class=&quot;current&quot;&gt;2&lt;/span&gt; 
+  &lt;a href=&quot;/products?page=3&quot; rel=&quot;next&quot;&gt;3&lt;/a&gt; 
+  &lt;!-- Other links omitted --&gt;
+  &lt;a href=&quot;/products?page=3&quot; class=&quot;next_page&quot; rel=&quot;next&quot;&gt;Next &amp;raquo;&lt;/a&gt;
+&lt;/div&gt;
+</pre>
+<p>Once we&rsquo;ve matched the links we can use the <code>click</code> function to modify their behaviour. We&rsquo;ll modify our pagination code so that it looks like this.</p>
+<pre class="javascript">
+$(function () {
+	$(&#x27;.pagination a&#x27;).click(function () {
+		$.get(this.href, null, null, &#x27;script&#x27;);
+		return false;
+	});
+});
+</pre>
+<p>We still have our <code>$</code> function that fires when the page&rsquo;s DOM loads, but now instead of just showing an <code>alert</code> it does a little more. First it calls the <code>$</code> function with a string argument to match all of the anchor elements in the pagination <code>div</code>. The matching elements then have their <code>click</code> event modified so that an AJAX request is made when they are clicked.</p> 
+
+<p>The AJAX request is a GET request so we can use jQuery&rsquo;s <code>$.get</code> method. This method takes a number of parameters. The first is the URL that the request will be made to. We want to make our AJAX request to the same URL that the anchor links to so we can use <code>this.href</code> to pass the value of its <code>href</code> attribute.</p>
+
+<p>The second parameter is for any data we want to pass. We are passing the page number but this is in the URL&rsquo;s query string so we can use <code>null</code> here. Likewise the third parameter is for a callback function but as we don&rsquo;t need one we can pass <code>null</code> again.</p>
+
+<p>The last parameter is important. It tells jQuery how to treat the response from our AJAX request. As we&rsquo;ll be sending back JavaScript that we want the browser to execute we&rsquo;ll pass <code>&lsquo;script&rsquo;</code> for this value.</p>
+
+<p>Finally our function will <code>return false;</code> so that the link&rsquo;s default behaviour isn&rsquo;t triggered as this would cause the page to reload making our AJAX request pointless.</p>
+
+<h3>Modifying The Controller</h3>
+
+<p>When an AJAX request is triggered by clicking one of the pagination links it will call the same action that would have been called had we not added the JavaScript: the ProductController&rsquo;s <code>index</code> action.</p>
+<pre class="ruby">
+def index
+  @products = Product.paginate(:all, :order =&gt; &quot;name ASC&quot;, :per_page =&gt; 10, :page =&gt; params[:page])
+end
+</pre>
+<p>This action will work equally well for an AJAX request, but the associated view file returns HTML. We&rsquo;ll need to create a additional view that will return the list of products as JavaScript. To do this we&rsquo;ll create a file called <code>index.js.erb</code> in the <code>/app/views/products</code> directory. This new view can contain any JavaScript that we want the browser to execute in response to a paging link being clicked.</p> 
+
+<p>To test that our AJAX code works we&rsquo;ll start by adding a simple <code>alert</code> to the view.</p>
+<pre class="javascript">
+alert(&quot;This is an AJAX request.&quot;);
+</pre>
+<p>If we reload the page again and click one of the pagination links we&rsquo;ll see the alert.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/160/original/E174I03.png" width="830" height="413" alt="The alert that shows as the response to the AJAX request."/>
+</div>
+
+<p>The browser is now executing the JavaScript that the <code>index</code> action returned when the AJAX request was made.</p>
+
+<p>Obviously we want to do more than just show an <code>alert</code> when a link is clicked. Instead we want to replace the part of the page that shows the links and the list of products. To do this we&rsquo;ll have to extract the links and the list into a partial.</p>
+
+<p>The index view&rsquo;s code looks like this:</p>
+<pre class="ruby">
+&lt;% title &quot;Products&quot; %&gt;
+&lt;% javascript &#x27;pagination&#x27; %&gt;
+&lt;%= will_paginate @products %&gt;
+&lt;% @products.each do |product| %&gt;
+  &lt;div class=&quot;product&quot;&gt;
+    &lt;h3&gt;
+      &lt;%= link_to product.name, product %&gt;
+      &lt;%= number_to_currency(product.price, :unit =&gt; &quot;&amp;pound;&quot;) %&gt;
+    &lt;/h3&gt;
+    &lt;div class=&quot;actions&quot;&gt;
+      &lt;%= link_to &quot;Edit&quot;, edit_product_path(product) %&gt; |
+      &lt;%= link_to &quot;Destroy&quot;, product, :confirm =&gt; &quot;Are you sure?&quot;, :method =&gt; :delete %&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+&lt;% end %&gt;
+&lt;%= will_paginate @products %&gt;
+&lt;p&gt;&lt;%= link_to &quot;New Product&quot;, new_product_path %&gt;&lt;/p&gt;
+</pre>
+<p>The part of the view we want to extract is the part between (and including) the two <code>will_paginate</code> lines.  We&rsquo;ll put this code into a partial file called <code>_product.html.erb</code>, then reference the partial from the index.</p>
+<pre class="ruby">
+&lt;% title &quot;Products&quot; %&gt;
+&lt;% javascript &#x27;pagination&#x27; %&gt;
+&lt;div id=&quot;products&quot;&gt;
+  &lt;%= render &#x27;products&#x27; %&gt;
+&lt;/div&gt;
+&lt;p&gt;&lt;%= link_to &quot;New Product&quot;, new_product_path %&gt;&lt;/p&gt;
+</pre>
+<p>One other change we&rsquo;ll make is to wrap the partial in a <code>div</code> so that we have a wrapper element around the content that we can reference from JavaScript. This means that we know exactly which part of the page we&rsquo;ll replace. Note that since Rails 2.3 we can render a partial by just passing its name as a string to <code>render</code>.</p>
+
+<p>We can now move back to our <code>index.js.erb</code> file and replace the <code>alert</code> with the code that will update the contents of the <code>div</code> with the <code>id</code> of products with the contents of the partial. All it takes is one line of jQuery code.</p>
+<pre class="javascript">
+$(&quot;#products&quot;).html(&quot;&lt;%= escape_javascript(render(&quot;products&quot;)) %&gt;&quot;);
+</pre>
+<p>The code above gets the HTML from the products partial, uses <code>escape_javascript</code> to make it safe for putting into a JavaScript string, then replaces the contents of the products <code>div</code> with the partial&rsquo;s output.</p>
+
+<p>When we refresh the page now and click the &ldquo;Next&rdquo; link the page updates and shows the next page of products without the page&rsquo;s URL changing, but if we click the link again then the page reloads fully and the URL changes. Each subsequent click will then alternate between the AJAX update working and the page fully reloading.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/161/original/E174I04.png" width="828" height="411" alt="The browser fully reloads the page the second time we click one of the links."/>
+</div>
+
+<p>Why is this happening? Well, our pagination JavaScript wires up click events to the pagination links when the page&rsquo;s DOM loads. When the links and content are replaced by the response from the AJAX request the event-wiring is lost, so the links behave like traditional links again. The next link we click reloads the whole page and so the links have their click events wired up again, only for the events to be disconnected again when another link is clicked and another AJAX update takes place.</p>
+
+<p>Thankfully, jQuery makes it easy to fix this problem. Instead of using <code>click</code> to attach the click events to the links we can make use of the <code>live</code> function. This function takes an extra parameter, which is the name of the event you want to wire up, but is otherwise the same.</p>
+<pre class="javascript">
+$(function () {
+	$(&#x27;.pagination a&#x27;).live(&quot;click&quot;, function () {
+		$.get(this.href, null, null, &#x27;script&#x27;);
+		return false;
+	});
+});
+</pre>
+<p>Using <code>live(&ldquo;click&rdquo;, function () { ... }</code> instead of <code>click()</code> will mean that jQuery will use event delegation to ensure that any new matching elements will also respond to the event. If we refresh the page now and click the links the reloading on each alternate click will be gone and the page will always update the list via AJAX.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/162/original/E174I05.png" width="823" height="424" alt="The links now work all the time and the URL remains the same."/>
+</div>
+
+<h3>Adding a Loading Notification</h3>
+
+<p>We&rsquo;ll finish off this episode by adding a notice that gives the user an indication that the page is loading when they click one of the links. While we&rsquo;re running the application on our local machine it responds almost immediately, but this may not be the case when it goes live so we&rsquo;ll need to provide feedback to the user.</p>
+
+<p>To simulate the delay locally we can add a two-second <code>sleep</code> to the <code>index</code> action.</p>
+<pre class="ruby">
+def index
+  sleep 2
+  @products = Product.paginate(:all, :order =&gt; &quot;name ASC&quot;, :per_page =&gt; 10, :page =&gt; params[:page])
+end
+</pre>
+<p>If we click on one of the pagination links now there&rsquo;ll be a short pause while the page updates, but no indication given that the next set of results is being fetched.</p>
+
+<p>We can add the notification in our pagination JavaScript. There are a number of ways we could do this; one popular way to indicate that something is going on is to have a small spinner graphic that is hidden by default and shown when necessary. To keep things simple we&rsquo;ll replace the contents of our pagination div with a message when one of the links is clicked.</p>
+<pre class="javascript">
+$(function () {
+  $(&#x27;.pagination a&#x27;).live(&quot;click&quot;, function () {
+    $(&#x27;.pagination&#x27;).html(&#x27;Page is loading...&#x27;);
+    $.get(this.href, null, null, &#x27;script&#x27;);
+    return false;
+  });
+});
+</pre>
+<p>Now, when we click a link the pagination links will be replaced by the &ldquo;Page is loading...&rdquo; message until the results come back.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/163/original/E174I06.png" width="823" height="424" alt="A loading message is now shown while the next results are fetched."/>
+</div>
+
+<h3>A Final Note</h3>
+
+<p>If you&rsquo;re using an earlier version of jQuery you might need to add another line of JavaScript to make the AJAX requests are handled properly on the server. Without it the requests might trigger the HTML view rather the JavaScript one. If this is the case the code you&rsquo;ll need to add is:</p>
+<pre class="javascript">
+jQuery.ajaxSetUp({
+	&#x27;beforeSend&#x27;: function (xhr) {xhr.setRequestHeader(&#x27;Accept&#x27;, &#x27;text/javascript&#x27;)}
+});
+</pre>
+<p>That&rsquo;s it for this episode. Hopefully it will have given you a good overview of handling page requests with jQuery, not just for pagination but for any kind of AJAX functionality you might want to add to your site.</p>
+
+<p>In the next episode we&rsquo;ll be expanding on this topic. Currently if we reload the page the list of products won&rsquo;t hold its position but return to the first page of results. Also there is currently no way of bookmarking a page or using the browser&rsquo;s back button to visit previous pages. The next episode will cover all of these topics and improve the usability of our application.</p>

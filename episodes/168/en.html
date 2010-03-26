@@ -1,0 +1,147 @@
+<p>Below is the home page of a Rails blogging application. We&rsquo;d like to make the site a little more useful by integrating information from another site into it. To do this we&rsquo;ll add a list of links on the page that link to another Rails-related site, say a list of the most recent ASCIIcasts.</p> 
+<div class="imageWrapper">
+  <img src="/system/photos/135/original/E168I01.png" width="823" height="468" alt="The home page of our blogging application" />
+</div>
+
+<p>If we visit asciicasts.com we&rsquo;ll see a list of the most recent episodes on the homepage, but how should we get this data on to our site? We could use screen-scraping: grabbing the HTML from the page and parsing it to get the data we want which works, but has disadvantages. For example, if the site owner changes the structure of the page then our parsing code could well stop being able to extract the right data from it.</p>
+
+<p>A much better way, where it&rsquo;s available, is to use an RSS feed. The ASCIIcasts site has an RSS feed containing a list of the episodes so instead of scraping the site, we can just pull the data we need from the feed.</p>
+
+<h3>Feedzirra</h3>
+
+<p>There are a number of ways of parsing an RSS feed in Ruby, but one of the best is a gem called <a href="http://github.com/pauldix/feedzirra/tree/master">Feedzirra</a>. The main advantage of Feedzirra is its speed; it parses feeds very quickly, but it is also useful as it can parse many different types of feed.</p>
+
+<p>To install Feedzirra we first need to make sure that <code>http://gems.github.com</code> is in our list of gem sources. If not we&rsquo;ll need to add it.</p>
+<pre class="terminal">
+gem sources -a http://gems.github.com
+</pre>
+<p>Now we can install the gem:</p>
+<pre class="terminal">
+sudo gem install pauldix-feedzirra
+</pre>
+<p>Several dependencies will be installed alongside the gem. Once everything&rsquo;s installed we&rsquo;ll need to add a reference to the gem in our application&rsquo;s <code>/config/environment.rb</code> file.</p>
+<pre class="ruby">
+config.gem &quot;pauldix-feedzirra&quot;, :lib =&gt; &quot;feedzirra&quot;, :source =&gt; &quot;http://gems.github.com&quot;
+</pre>
+<p>That&rsquo;s it. We&rsquo;re ready to start parsing RSS feeds in our application.</p>
+
+<h3>Getting The Feed</h3>
+
+<p>We&rsquo;re going to show the feed on the home page of our site, but we don&rsquo;t want to have to get the feed every time a user visits that page as getting the feed and parsing it are expensive operations and take time to run. It would be better to cache the feed locally. There are a various ways we could cache the feed&rsquo;s data; we&rsquo;re going to store it in the database and create a new model to represent an entry in the feed. We&rsquo;ll call this model <code>feed_entry</code>. The model will have four attributes to store the entry&rsquo;s data: <code>name</code>, to store the headline, <code>summary</code> to store the content, <code>url</code> to store the entry&rsquo;s link, <code>published_at</code> for the time the entry was created and <code>guid</code> to store the entry&rsquo;s unique identifier so that we can check for duplicates.</p>
+
+<p>We&rsquo;ll generate our model with</p>
+<pre class="terminal">
+script/generate model feed_entry name:string summary:text url:string published_at:datetime guid:string
+</pre>
+<p>Then migrate the database to generate the table.</p>
+<pre class="terminal">
+rake db:migrate
+</pre>
+<p>The logic for parsing the feed and updating the entries will be added to the <code>FeedEntry</code> class. To start off we&rsquo;ll need a method that parses the feed and adds any new entries to the database. For this we&rsquo;ll write a class method called <code>update_from_feed</code>.</p>
+<pre class="ruby">
+def self.update_from_feed(feed_url)
+  feed = Feedzirra::Feed.fetch_and_parse(feed_url)
+  feed.entries.each do |entry|
+    unless exists? :guid =&gt; entry.id
+      create!(
+        :name         =&gt; entry.title,
+        :summary      =&gt; entry.summary,
+        :url          =&gt; entry.url,
+        :published_at =&gt; entry.published,
+        :guid         =&gt; entry.id
+      )
+    end
+  end
+end
+</pre>
+<p>The method takes one parameter: a URL for the feed which will be parsed by Feedzirra. It will fetch the feed and parse it, then it will then loop through each entry and add it to the database unless it&rsquo;s already there. The method uses ActiveRecord&rsquo;s <code>exists?</code> method to search for an entry by its guid to see if the entry is already in the database.</p>
+
+<p>We can now go into the console and try out our new method to get the entries from the ASCIIcasts feed into our database.</p>
+<pre class="terminal">
+&gt;&gt; FeedEntry.update_from_feed(&quot;http://asciicasts.com/episodes.xml&quot;)
+</pre>
+<p>There will be a delay of a few seconds while the feed is fetched and parsed and then you should see a long array of FeedZilla objects returned. Once it&rsquo;s finished we should have our entries in the database.</p>
+<pre class="terminal">
+&gt;&gt; FeedEntry.count
+=&gt; 61
+</pre>
+<p>If we were to run the command again it would only add any new entries that had been created since the last time we ran it. To keep the feed up to date we could set up a cron job to fetch the feed at a regular interval. If we were to do this we could use the Whenever gem that was covered in <a href="http://asciicasts.com/episodes/164-cron-in-ruby">episode 164</a>.</p>
+
+<p>Now that we have our feed entries in the database we&rsquo;ll modify our view code to show the most recent entries. At the top of the articles index view we&rsquo;ll add the following code to render the ten most recent entries.</p>
+<pre class="ruby">
+&lt;div id=&quot;recent_episodes&quot;&gt;
+  &lt;h3&gt;Recent ASCIIcasts Episodes&lt;/h3&gt;
+  &lt;ul&gt;
+  &lt;% for entry in FeedEntry.all(:limit =&gt; 10, :order =&gt; &quot;published_at desc&quot;) %&gt;
+    &lt;li&gt;&lt;%= link_to h(entry.name), entry.url %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+  &lt;/ul&gt;
+&lt;/div&gt;
+</pre>
+<p>With a little CSS we can style the div and make the list appear on the right-hand side of the articles page.</p>
+<pre class="terminal">
+#recent_episodes { float: right; border: solid 1px #666; margin: 8px 0 16px 16px; padding: 4px; background-color: #DDD; }
+#recent_episodes h3 { margin: 0; font-size: 1em; }
+#recent_episodes ul { list-style: none; margin-left: 8px; padding-left: 0; }
+#recent_episodes a { font-size: 0.9em; }
+</pre>
+<p>Our page now has a panel on it showing the most recent episodes.</p>
+
+<div class="imageWrapper">
+  <img src="system/photos/136/original/E168I02.png" width="824" height="473" alt="The home page now shows the data from the feed." />
+</div>
+
+<h3>More Frequent Updates</h3>
+
+<p>The code we&rsquo;ve written works well when we don&rsquo;t need to check for updates to the feed very often, but if we had to check every ten minutes or so then this isn&rsquo;t the most efficient way to do it. We have to get the full feed every time and most of the time the data in it won&rsquo;t have changed from the last time, so we&rsquo;re wasting time and bandwidth by always pulling the whole feed back.</p>
+
+<p>Thankfully Feedzirra provides a way of getting updates for a feed. If you look at the example code for <a href="http://gist.github.com/57285">Feedzirra</a> you can see that there is a method that will get only the entries for the feed that have been updated since the feed was last retrieved.</p>
+<pre class="ruby">
+# updating a single feed
+updated_feed = Feedzirra::Feed.update(feed)
+</pre>
+<p>The update method uses <a href="http://en.wikipedia.org/wiki/HTTP_ETag">ETags</a> to determine if the feed has updated since it was last changed and will only download and reparse it if it has. To get the new entries there&rsquo;s a <code>new_entries</code> method that will return a collection of the new entries.</p>
+
+<p>I was unable to get this working while writing the test application, but I&rsquo;ll show you the code that should work and enable you to get frequent updates from a feed. What we&rsquo;re going to do is add another method to our <code>FeedEntry</code> class to go with the <code>update_from_feed</code> method we created earlier. This method will repeatedly poll the feed and add any updated entries to the database.</p>
+
+<p>Our new method will use the code that add the entries to the database so we&rsquo;ll start by extracting this code out into a method.</p>
+<pre class="ruby">
+class FeedEntry &lt; ActiveRecord::Base
+  def self.update_from_feed(feed_url)
+    feed = Feedzirra::Feed.fetch_and_parse(feed_url)
+    add_entries(feed.entries)
+  end
+
+  private
+  def self.add_entries(entries)
+    entries.each do |entry|
+      unless exists? :guid =&gt; entry.id
+        create!(
+          :name         =&gt; entry.title,
+          :summary      =&gt; entry.summary,
+          :url          =&gt; entry.url,
+          :published_at =&gt; entry.published,
+          :guid         =&gt; entry.id
+        )
+      end
+    end
+  end
+end
+</pre>
+<p>Now we can write our new method, which we&rsquo;ll call <code>update_from_feed_continuously</code>.</p>
+<pre class="ruby">
+def self.update_from_feed_continuously(feed_url, delay_interval = 15.minutes)
+  feed = Feedzirra::Feed.fetch_and_parse(feed_url)
+  add_entries(feed.entries)
+  loop do
+    sleep delay_interval.to_i
+    feed = Feedzirra::Feed.update(feed)
+    add_entries(feed.new_entries) if feed.updated?
+  end 
+end
+</pre>
+<p>This method is similar to the <code>update_from_feed</code> method but it takes an additional parameter that specifies how often the feed should be polled. It starts by getting the full feed and adding the entries then enters an endless loop that sleeps for the specified period before checking to see if the feed has been updated and, if so,  adding any new entries to the database.</p>
+
+<p>So we now have two methods for getting entries from an RSS feed; one that is suitable for a cron job and another that can use a daemonized process and is more suitable for when a feed needs to be checked for updates frequently.</p> 
+
+<p>It should be noted that a loop is not the best way to do a daemonized process. For a better approach look at <a href="http://railscasts.com/episodes/129-custom-daemon">Episode 129</a> which shows how to use the daemons gem to create a background process.</p>

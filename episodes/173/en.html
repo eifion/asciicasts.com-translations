@@ -1,0 +1,266 @@
+<p>In episode 168 [<a href="http://asciicasts.com/episodes/168-feed-parsing">read</a>, <a href="http://railscasts.com/episodes/168-feed-parsing">watch</a>] we used <a href="http://github.com/pauldix/feedzirra/tree/master">Feedzirra</a> to parse and extract RSS feeds. Sometimes, though, the data we want isn&rsquo;t available via RSS or an API and we have to take the option of last resort: screen scraping. Screen scraping involves downloading a web page&rsquo;s HTML and parsing it for data and we&rsquo;ll show you how to do that in this episode.</p>
+
+<h3>Price Matching</h3>
+<p>To demonstrate screenscraping we&rsquo;ll work with a simple shop application. The page below shows a list of products, but none of them have a price. To fix this we&rsquo;ll fetch the price from another website using screen scraping.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/154/original/E173I01.png" width="808" height="359" alt="The application we&rsquo;ll used our scraped data on."/>
+</div>
+<p>The site we&rsquo;ll be taking the other prices from is <a href="http://www.walmart.com/">Walmart&rsquo;s</a>. We&rsquo;ll search for each product using the search field on the home page then return the price for the first item on the results page.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/155/original/E173I02.png" width="808" height="474" alt="The page we&rsquo;ll scrape the data from."/>
+</div>
+<p>A quick disclaimer before we continue. Before you dash off and start scraping data from websites willy-nilly you must check that you&rsquo;re allowed to use the sites in this way. The terms of use may mean that you can&rsquo;t scrape data; for example <a href="http://www.imdb.com/">IMDB</a> explicitly forbids the scraping of information from its site. If you&rsquo;re using screen scraping in a production application it is vital to ensure that you&rsquo;re on safe legal ground.</p>
+
+<h3>ScrAPI</h3>
+
+<p>There are a variety of Ruby libraries available for screen scraping. Two of the most popular are <a href="http://scubyt.org">scRUBYt</a> and <a href="http://blog.labnotes.org/2006/07/11/scraping-with-style-scrapi-toolkit-for-ruby/">scrAPI</a>. One of the main differences between them is that scRUBYt uses XPath for matching while scrAPI uses CSS selectors. I&rsquo;m more comfortable with CSS selectors so for this episode we&rsquo;ll use scrAPI.</p>
+
+<p>ScrAPI is available as a gem and is installed in the usual way.</p>
+<pre class="terminal">
+sudo gem install scrapi
+</pre>
+<p>ScrAPI relies on the <a href="http://rubyforge.org/projects/tidy/">tidy gem</a> so will install that too if you don&rsquo;t already have it on your machine. Once it&rsquo;s installed we&rsquo;ll need to add a reference to it in our application&rsquo;s <code>/config/environment.rb</code> file.</p>
+<pre class="terminal">
+config.gem &quot;scrapi&quot;
+</pre>
+
+<h3>Extracting The Data</h3>
+<p>Now that our application&rsquo;s set up we can start trying to scrape the data we need. Before we try getting a price from the results page we&rsquo;ll start with something a little simpler: extracting the page&rsquo;s title.</p>
+
+<p>When trying something new it&rsquo;s often best to start outside a Rails application so that we can quickly experiment and see the results of the code we write. In a new Ruby file we&rsquo;ll try to scrape the title from the search results page from the Walmart site above. The code to scrape the title looks like this.</p>
+<pre class="ruby">
+require &#x27;rubygems&#x27;
+require &#x27;scrapi&#x27;
+
+scraper = Scraper.define do
+  process &quot;title&quot;, :page_name =&gt; :text
+  result :page_name
+end
+
+uri = URI.parse(&quot;http://www.walmart.com/search/search-ng.do?search_constraint=0&amp;ic=48_0&amp;search_query=LOST+third+season&amp;Find.x=17&amp;Find.y=1&amp;Find=Find&quot;)
+puts scraper.scrape(uri)
+</pre>
+<p>At the top of the file are the two <code>require</code> statements to load the scrAPI gem. We then define a <code>Scraper</code> and assign it to a variable. We do this by calling <code>Scraper.define</code> and passing it a block. There are a number of methods that we can call in the block; one of the ones that we&rsquo;ll use often is <code>process</code>.</p> 
+
+<p>In the process method we define the content that we&rsquo;ll scrape from the site. The first argument is the CSS selector that matches the content we want, in our case the <code>title</code> element. We want to assign the result to a variable, we do that by passing a hash as a second argument. The hash&rsquo;s key is the name of the variable and the value is the part of the matched element we&rsquo;re interested in which for us is its text.</p> 
+
+<p>The other method we use in the scraper&rsquo;s block is <code>result</code> and this is where we define what&rsquo;s returned. In the code above we&rsquo;re just returning the value of <code>page_name</code>.</p> 
+
+<p>Now that the scraper is defined we can do the actual scraping. We define the URI we want to parse with <code>URI.parse</code>, passing it the search results page we used earlier, then call <code>scraper.scrape</code>, passing it that URI. Finally in our test code we print out the results of the scrape.</p>
+
+<p>If we run the code above we should see the contents of the title from the page printed out.</p>
+<pre class="terminal">
+$ ruby scrapitest.rb 
+Search results for LOST third season - Walmart
+</pre>
+<p>And there it is. Now that we know that scraping works we can try to get the price for the first product on the search results page.</p> 
+
+<p>The difficult part of this is getting the right CSS selector to match the element on the page that contains the price. We could try to work it out by looking at the source for the page and determining the elements and classes that would define a selector to match the price element but if we have Firefox then we can make use of an extension called Firequark. <a href="http://www.quarkruby.com/2007/9/5/firequark-quick-html-screen-scraping">Firequark</a> is an extension to <a href="http://getfirebug.com">Firebug</a>, one of the most popular web development extensions for Firefox. If you have Firebug installed then Firequark will overwrite it so bear that in mind before installing it.</p>
+
+<p>Once it&rsquo;s installed then we can use it to get our CSS selector. If we right-click on the item&rsquo;s price in Firefox and select &ldquo;Inspect Element&rdquo; from the pop-up menu then Firebug will open and show the source around that element. We can then right-click on that element and we&rsquo;ll see the extra menu options that Firequark creates. The two we&rsquo;re interested in are &ldquo;Copy CSS Selector&rdquo; and &ldquo;Copy U CSS Selector&rdquo;. These differ in that the second one will create a selector that matches only the element we&rsquo;ve selected while the first will return a selector that matches a number of elements.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/156/original/E173I03.png" width="848" height="739" alt="Using Firequark to get the CSS selector."/>
+</div>
+
+<p>For our price element the CSS selector is</p>
+<pre class="terminal">
+div.firstRow div.priceAvail&gt;div&gt;div.PriceCompare&gt;div.BodyS
+</pre>
+<p>We can paste this into the small Ruby program we wrote earlier, replacing the &ldquo;title&rdquo; selector in the scraper&rsquo;s <code>process</code> method. We&rsquo;ll also change the name of the variable that&rsquo;s returned from <code>:page_name</code> to <code>:price</code>.</p>
+<pre class="ruby">
+require &#x27;rubygems&#x27;
+require &#x27;scrapi&#x27;
+
+scraper = Scraper.define do
+  process &quot;div.firstRow div.priceAvail&gt;div&gt;div.PriceCompare&gt;div.BodyS&quot;, :price =&gt; :text
+  result :price
+end
+
+url = URI.parse(&quot;http://www.walmart.com/search/search-ng.do?search_constraint=0&amp;ic=48_0&amp;search_query=LOST+third+season&amp;Find.x=17&amp;Find.y=1&amp;Find=Find&quot;)
+puts scraper.scrape(url)
+</pre>
+<p>When we run our program now we&rsquo;ll see the item&rsquo;s price.</p>
+<pre class="terminal">
+$ ruby scrapitest.rb 
+Our Price: $31.32
+</pre>
+<p>We still need to extract the price itself from the string but we have the information we want.</p>
+
+<h3>Incorporating Scraping Into Our Application</h3>
+<p>Now that we&rsquo;ve successfully scraped a price from the site we can move back to our application and add this functionality in. We&rsquo;ll do this by writing a class method in our <code>Product</code> model class to fetch the prices for any products without a price.</p>
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+  
+  def self.fetch_prices
+    scraper = Scraper.define do
+      process &quot;div.firstRow div.priceAvail&gt;div&gt;div.PriceCompare&gt;div.BodyS&quot;, :price =&gt; :text
+      result :price
+    end
+    
+    find_all_by_price(nil).each do |product|
+      url = URI.parse(&quot;http://www.walmart.com/search/search-ng.do?search_constraint=0&amp;ic=48_0&amp;search_query=&quot; + CGI.escape(product.title) + &quot;&amp;Find.x=17&amp;Find.y=1&amp;Find=Find&quot;)
+      product.update_attribute :price, scraper.scrape(url)[/[.0-9]+/]
+    end
+  end
+
+end
+</pre>
+<p>Our new <code>fetch_prices</code> method is made up mostly of the code we created in our test program. In the first part of the method we create the scraper that fetches the price from the page. Then we find all of the products that have no price and loop through them. For each product we create a URI to the search page that includes the product&rsquo;s title, escaped with <code>CGI.escape</code>. With the result we get back from the scraper we then use a regular expression, <code>/[.0-9]+/</code> , to get the numeric part from the text that is returned (which is in the form &ldquo;Our Price: $99.99&rdquo;). Once we&rsquo;ve got the value we can update the product&rsquo;s price.</p>
+
+<p>We can test this now by running <code>Product.fetch_prices</code> in Rails&rsquo; console. (If this app was going into product we might want to turn this into a rake task.)</p>
+<pre class="terminal">
+&gt;&gt; Product.fetch_prices
+=&gt; [#&lt;Product id: 1, title: &quot;LOST Third Season&quot;, price: 31.32, created_at: &quot;2009-08-03 18:10:12&quot;, updated_at: &quot;2009-08-05 20:46:31&quot;, category_id: nil&gt;, 
+#&lt;Product id: 2, title: &quot;Star Wars Episode IV: A New Hope&quot;, price: 13.86, created_at: &quot;2009-08-03 18:11:31&quot;, updated_at: &quot;2009-08-05 20:46:32&quot;, category_id: nil&gt;, 
+#&lt;Product id: 3, title: &quot;Webster College Dictionary&quot;, price: 17.21, created_at: &quot;2009-08-03 18:11:47&quot;, updated_at: &quot;2009-08-05 20:46:34&quot;, category_id: nil&gt;]
+</pre>
+<p>There&rsquo;s a slight pause as each price is fetched, then we can see all of our products each with its price as scraped from Walmart&rsquo;s site. If we go back to our product page and reload it we&rsquo;ll see the products listed along with their prices.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/157/original/E173I04.png" width="809" height="362" alt="Our items now have a price."/>
+</div>
+
+<h3>Further Adventures With ScrAPI.</h3>
+
+<p>We&rsquo;ll finish off this episode by showing some of the other things that scrAPI can do. So far we&rsquo;ve only fetched the content of a single element on a page but it&rsquo;s just as easy to fetch multiple elements. Back in our test program we&rsquo;ll add another call to the process method to get the item&rsquo;s title.</p>
+<pre class="ruby">
+require &#x27;rubygems&#x27;
+require &#x27;scrapi&#x27;
+
+scraper = Scraper.define do
+  process &quot;div.firstRow a.prodLink&quot;, :title =&gt; :text
+  process &quot;div.firstRow div.priceAvail&gt;div&gt;div.PriceCompare&gt;div.BodyS&quot;, :price =&gt; :text
+  result :price, :title
+end
+
+url = URI.parse(&quot;http://www.walmart.com/search/search-ng.do?search_constraint=0&amp;ic=48_0&amp;search_query=LOST+third+season&amp;Find.x=17&amp;Find.y=1&amp;Find=Find&quot;)
+puts scraper.scrape(url)
+</pre>
+<p>Now, as well as getting the price for the first item in the search results we&rsquo;re fetching the title too. The CSS selector for this is just <code>div.firstRow a.title
+</code>. When we run this program now we get a slightly different result. Instead of a string being returned we get a struct.</p>
+<pre class="terminal">
+$ ruby scrapitest.rb 
+#&lt;struct #&lt;Class:0x11fbc14&gt; price=&quot;Our Price: $31.32&quot;, title=nil&gt;
+</pre>
+<p>We can get at the attributes of this struct by changing the last part of our program so that we assign the result of the scrape to a variable then print out the properties from that.</p>
+<pre class="ruby">
+product =  scraper.scrape(url)
+puts product.title
+puts product.price
+</pre>
+<p>We&rsquo;ll now see the title and price output.</p>
+<pre class="terminal">
+$ ruby scrapitest.rb 
+Lost: The Complete Third Season - The Unexplored Edition
+Our Price: $31.32
+</pre>
+
+<h3>Returning Multiple Results</h3>
+<p>The page we&rsquo;re scraping data from has multiple results on it, but we&rsquo;re currently only getting the details for the first result. We can instead get the price and title for every result on the page. To do this we need to find a CSS selector generic enough to match each item. We can use Firequark again to get this. If we right-click on one of the results and select &ldquo;Inspect Element&rdquo; we can then right-click on the element in Firebug&rsquo;s source view and select &ldquo;Copy CSS Selector&rdquo; from the Firequark menu.</p>
+
+<p>When we select this option we&rsquo;ll be asked for the number of elements we need to match. As there are seven results on the page we&rsquo;ll enter 7 and click &ldquo;OK&rdquo;. The matching CSS selector will be copied to the clipboard. For our items it&rsquo;s simply</p>
+<pre class="terminal">
+div.prodInfo
+</pre>
+<p>This selector will match all of the items on the page, but how do we use it with scrAPI to return a list of items? The answer is to use nested scrapers.</p>
+<pre class="ruby">
+scraper = Scraper.define do
+  array :items
+  process &quot;div.item&quot;, :items =&gt; Scraper.define {
+    process &quot;a.prodLink&quot;, :title =&gt; :text
+    process &quot;div.priceAvail&gt;div&gt;div.PriceCompare&gt;div.BodyS&quot;, :price =&gt; :text
+    result :price, :title
+  }
+  result :items
+end
+</pre>
+<p>In our outer scraper we first call the <code>array</code> method, passing it the name of a variable.  This means that the scraper knows it will be returning an array of values. We then call <code>process</code>, but because we want to return multiple values from each item we define a second scraper. The second scraper has two <code>process</code> methods which are similar to the ones we used earlier to fetch the price and title for the first item, but with <code>div.firstRow</code> removed from the selectors as we don&rsquo;t need to match the first item any more because we&rsquo;re already within an item in the outer selector.</p>
+
+<p>Now our scraper will return an array of products. We can loop through the array and print out the title and price of each item.</p>
+<pre class="ruby">
+url = URI.parse(&quot;http://www.walmart.com/search/search-ng.do?search_constraint=0&amp;ic=48_0&amp;search_query=LOST+third+season&amp;Find.x=17&amp;Find.y=1&amp;Find=Find&quot;)
+scraper.scrape(url).each do |product|
+  puts product.title
+  puts product.price
+  puts
+end
+</pre>
+<p>When we run our program now we&rsquo;ll see the list of results.</p>
+<pre class="terminal">
+$ ruby scrapitest.rb 
+Lost: The Complete Third Season - The Unexplored Edition
+Our Price: $31.32
+
+Lost: The Complete Third Season - The Unexplored Experience (Spanish)
+Our Price: $50.32
+
+Lost World: Season 3, The (Full Frame)
+Our Price: $20.86
+
+Lost In Space: Season 3, Vol. 2
+Our Price: $18.32
+
+Lost In Space: Season 3, Vol. 1 (Full Frame, Widescreen)
+Our Price: $18.32
+
+Lost: Season Three Score (2CD)
+Our Price: $15.88
+
+Land Of The Lost: The Complete Third Season
+Our Price: $26.86
+</pre>
+
+<h3>Getting Other Attributes</h3>
+
+<p>So far we&rsquo;ve only got the text from the elements we&rsquo;ve matched from our scraper, but what if we want to get an attibute, say the href of a link? In our scraper we match the anchor tag of an item as its text contains the item&rsquo;s title. We can retrieve the link to the item&rsquo;s page too adding another item to the hash of values we pass to <code>process</code>.</p>
+<pre class="ruby">
+process &quot;a.prodLink&quot;, :title =&gt; :text, :link =&gt; &quot;@href&quot;
+</pre>
+<p>To get the value of the href attribute we pass the name of the attribute with an <code>@</code> in front of it. This will assign the value of the href attribute to the <code>:link</code> variable. To return the value from the scraper we just add the variable&rsquo;s name to the <code>result</code> method.</p>
+<pre class="ruby">
+result :price, :title, :link
+</pre>
+<p>We can then print out the link along with the title and price.</p>
+<pre class="ruby">
+url = URI.parse(&quot;http://www.walmart.com/search/search-ng.do?search_constraint=0&amp;ic=48_0&amp;search_query=LOST+third+season&amp;Find.x=17&amp;Find.y=1&amp;Find=Find&quot;)
+scraper.scrape(url).each do |product|
+  puts product.title
+  puts product.price
+  puts product.link
+  puts
+end
+</pre>
+<p>Running our program one last time will show the links for each item.</p>
+<pre class="terminal">
+$ ruby scrapitest.rb 
+Lost: The Complete Third Season - The Unexplored Edition
+Our Price: $31.32
+/catalog/product.do?product_id=5978156
+
+Lost: The Complete Third Season - The Unexplored Experience (Spanish)
+Our Price: $50.32
+/catalog/product.do?product_id=6537182
+
+Lost World: Season 3, The (Full Frame)
+Our Price: $20.86
+/catalog/product.do?product_id=10750968
+
+Lost In Space: Season 3, Vol. 2
+Our Price: $18.32
+/catalog/product.do?product_id=3873349
+
+Lost In Space: Season 3, Vol. 1 (Full Frame, Widescreen)
+Our Price: $18.32
+/catalog/product.do?product_id=3551329
+
+Lost: Season Three Score (2CD)
+Our Price: $15.88
+/catalog/product.do?product_id=9875636
+
+Land Of The Lost: The Complete Third Season
+Our Price: $26.86
+/catalog/product.do?product_id=3899305
+</pre>
+<p>ScrAPI is fairly flexible when it comes to scraping data from webpages. It should be possible to scrape the data you want from any page, although if we were using this technique in a production application we&rsquo;d want to implement some error handling. For example a search may return no results, or the price for certain items may appear in an element with a different class name.</p>

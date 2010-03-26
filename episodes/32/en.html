@@ -1,0 +1,75 @@
+<div class="imageWrapper">
+  <img src="/system/photos/50/original/E032I01.png?1235812733" width="815" height="369" alt="The tasks index page."/>
+</div>
+<p>Above is an application that displays a list of tasks. Clicking on the edit link for a task takes us to the edit page for that task. The edit page uses the <a href="http://api.rubyonrails.org/classes/ActionView/Helpers/DateHelper.html#M001668"><code>datetime_select</code></a> helper method to render the tasks as a list of drop down lists.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/51/original/E032I02.png?1235812787" width="815" height="369" alt="The edit page for a task."/>
+</div>
+
+<p>Changing five drop downs isn&rsquo;t the simplest way to update the due date. It would be easier for the users if they could enter the date and time in a single text field. Our application could then parse what they entered and store it back in the database.</p>
+
+<p>Replacing the drop-downs with a text field will mean that we have a field on the form that doesn&rsquo;t directly map on to a field in the database. We&rsquo;ll have to create a virtual attribute in the <code>Task</code> model to handle the new field. Before we do that we&rsquo;ll update the view code and replace our drop-downs with a text field called <code>due_at_string</code>.</p>
+<pre class="ruby">
+&lt;h1&gt;Edit Task&lt;/h1&gt;
+&lt;% form_for @task do |form| %&gt;
+&lt;ol class=&quot;formList&quot;&gt;
+  &lt;li&gt;
+    &lt;%= form.label :name, &quot;Name&quot; %&gt;
+    &lt;%= form.text_field :name %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.label :due_at_string, &quot;Due at&quot; %&gt;
+    &lt;%= form.text_field :due_at_string %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= submit_tag &quot;Edit task&quot; %&gt;
+  &lt;/li&gt;
+&lt;/ol&gt;
+&lt;% end %&gt;
+</pre>
+<p class="title">The edit view code with our new text field in it.</p>
+<p>Now that we&rsquo;ve updated the form we&rsquo;ll have to create getter and setter methods for the virtual attribute in the model.  Virtual attributes were covered back in <a href="/episodes/16-virtual-attributes">episode 16</a>; have a look there if you need some more information about them.</p>
+<pre class="ruby">
+class Task &lt; ActiveRecord::Base
+  belongs_to :project
+  validates_presence_of :name
+
+  def due_at_string
+    due_at.to_s(:db)
+  end
+
+  def due_at_string=(due_at_str)
+    self.due_at = Time.parse(due_at_str)
+  end
+end
+</pre>
+<p>The getter method gets the task&rsquo;s <code>due_at</code> date from the database and returns a string representation of it. The setter method could be a little tricky as it will have to take whatever input the user provides and convert it into a date and time. Thankfully, the Time object provides a <a href="http://www.ruby-doc.org/core/classes/Time.html#"><code>parse</code> method</a> that will try to convert the value entered into a valid date.</p>
+
+<p>If we reload our page now we&rsquo;ll see that the drop-downs have been replaced with a textbox showing the due at date for our task. The <code>Time.parse</code> method is fairly clever at parsing the text we pass it, so we can enter, say, <code>March 1st at 8:00PM</code> and it will be able to convert it.</p>
+
+<p>Sometimes though, we need more flexibility than <code>Time.parse</code> can provide. The <a href="http://chronic.rubyforge.org/">Chronic gem</a>, which can be installed with <code>sudo gem install chronic</code> is useful if we need to be able to accept more types of date and time. To use it we just add <code>require &#x27;chronic&#x27;</code> to the top of the <code>Task</code> class and replace <code>Time.parse</code> in our setter method with <code>Chronic.parse</code> so that it looks like this.</p>
+<pre class="ruby">
+  def due_at_string=(due_at_str)
+    self.due_at = Chronic.parse(due_at_str)
+  end
+</pre>
+<p>One of the advantages of Chronic is that it can handle relative dates, so we can pass &quot;tomorrow&quot;, &quot;Monday&quot; or even &quot;next Tuesday at 8pm&quot; and it will parse them correctly.</p>
+
+<h3>Handling Exceptions</h3>
+<p>Chronic will return <code>nil</code> if we pass it a string that it cannot parse, which we can check for, but <code>Time.parse</code> will raise an <code>ArgumentError</code> exception. Obviously we&rsquo;ll need to handle this so we&rsquo;ll add a <code>rescue</code> block to the setter method. We&rsquo;ll add an instance variable to the class that will be set to <code>true</code> if the date entered causes an exception to be raised and then add a <code>validate</code> method to the class that will add an error to the task&rsquo;s errors if the time passed could not be parsed.</p>
+<pre class="ruby">
+def due_at_string=(due_at_str)
+  self.due_at = Time.parse(due_at_str)
+rescue ArgumentError
+  @due_at_invalid = true
+end
+
+def validate
+  errors.add(:due_at, &quot;is invalid&quot;) if @due_at_invalid
+end
+</pre>  
+<p>If we try to pass an invalid date now, the error will be caught and added to the model&rsquo;s list of errors. It&rsquo;s worth noting that <code>Time.parse</code> will replace missing or completely invalid parts of the string passed with the equivalent part from <code>Time.now</code>, so if we pass a completely invalid value like <code>&quot;Hello, world!&quot;</code> the due date will be set to the current time. An exception will only be raised if an invalid date such as <code>&quot;32-12-2009&quot;</code> is passed.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/52/original/E032I03.png?1235812834" width="808" height="484" alt="The edit page will now show an error if an invalid date is passed."/>
+</div>
+<p>We now have a much better way of inputting dates and times into Rails applications. Whether we choose to use the Chronic gem or the built-in time parsing methods we can handle a wide range of date formats from user input.</p>

@@ -1,0 +1,294 @@
+<p>This episode continues the recent series on testing and in it we&rsquo;ll be showing you how to create custom matchers and macros in RSpec. <a href="http://rspec.rubyforge.org/rspec/1.1.11/classes/Spec/Matchers.html">Matchers</a> and macros can be used to refactor your specs and we&rsquo;ll be using them to clean up some existing specs for an application.</p>
+
+<h3>Custom Matchers</h3>
+<p>To demonstrate custom matchers we will modify the second of the two specs below.</p>
+<pre class="ruby">
+require File.dirname(__FILE__) + &#x27;/../spec_helper&#x27;
+ 
+describe ArticlesController do
+  it &quot;should not set position when not saved to database&quot; do
+    article = Article.new(:name =&gt; &quot;Foo&quot;)
+    article.position.should be_nil
+  end
+  
+  it &quot;should increment article position when creating next article&quot; do
+    article1 = Article.create!(:name =&gt; &quot;Foo&quot;)
+    article2 = Article.create!(:name =&gt; &quot;Bar&quot;)
+    article2.position.should == article1.position + 1
+  end
+end
+</pre>
+<p>In RSpec a matcher is anything that appears to the right of the words <code>should</code> or <code>should_not</code>. The first spec above has the matcher <code>be_nil</code> while the second one uses <code>==</code>. Matchers are equivalent to the assertions used by <code>Test::Unit</code> in that they compare an expected value with an actual one.</p>
+
+<h3>Creating Our First Custom Matcher</h3>
+
+<p>In the second spec above we create two articles and check that the <code>position</code> of the second is one greater than that of the first. Instead of using <code>== article1.position + 1</code> we&rsquo;re going to create a custom matcher called <code>be_one_more_than</code> and use that to check the second article&rsquo;s position against the first. We&rsquo;ll start by using the new matcher, then define it.</p>
+<pre class="ruby">
+it &quot;should increment article position when creating next article&quot; do
+  article1 = Article.create!(:name =&gt; &quot;Foo&quot;)
+  article2 = Article.create!(:name =&gt; &quot;Bar&quot;)
+  article2.position.should be_one_more_than(article1.position)
+end
+</pre>
+<p class="caption">Using our custom matcher.</p>
+<p>There are two ways that we can define a custom matcher. The first is to write a <a href="http://apidock.com/rspec/Spec/Matchers/simple_matcher">simple matcher</a>, where we just define a method; the second is to create a new class to describe the matching behaviour.</p>
+
+<h3>Writing a Simple Matcher</h3>
+<p>We&rsquo;ll write <code>be_one_more_than</code> as a simple matcher method. Any method defined in a <code>describe</code> block is available to all of the specs in that block so we can create the method there.</p>
+<pre class="ruby">
+describe ArticlesController do
+  def be_one_more_than(number)
+    simple_matcher(&quot;one more than #{number}&quot;) { |actual| actual == number + 1 }
+  end
+  # (specs here)
+end
+</pre>
+<p>RSpec provides a <code>simple_matcher</code> method to enable us to write our own simple matchers. The method takes two arguments. The first is a description which will be shown if match fails; the second is a block which takes the actual value we&rsquo;re testing (the value before the word <code>should</code>) and returns a boolean value depending on whether the comparison defined in the block passes. The block for our method returns <code>true</code> if the actual value is one more than the expected value.</p>
+
+<p>If we rerun our specs they still pass, so our matcher is working.</p>
+<pre class="terminal">
+$ rake spec
+(in /Users/eifion/rails/apps_for_asciicasts/ep157)
+<span class="passed">...........</span>
+
+Finished in 0.578004 seconds
+
+<span class="passed">11 examples, 0 failures</span>
+</pre>
+
+<h3>Making The Matcher Available To All Specs</h3>
+<p>While the simple matcher works, but it is only available to the specs in one file. If we want to create custom matchers that work in any of our specs we can do so by defining them in a module and making that module available to RSpec.</p>
+
+<p>To do this we&rsquo;ll create a file in our application&rsquo;s <code>spec</code> directory and called <code>custom_matchers.rb</code>. In that file we&rsquo;ll create a module and move our <code>be_one_more_than</code> method into it.</p>
+<pre class="ruby">
+module CustomMatcher
+  def be_one_more_than(number)
+    simple_matcher(&quot;one more than #{number}&quot;) { |actual| actual == number + 1 }
+  end
+end
+</pre>
+<p>Next we have to modify the <code>spec_helper.rb</code> file in the <code>spec</code> directory so that RSpec knows about our new module. To do this we have to add a new <code>require</code> statement so that our <code>custom_modifiers</code> file is referenced, and then configure RSpec to include our new module.</p>
+<pre class="ruby">
+# This file is copied to ~/spec when you run &#x27;ruby script/generate rspec&#x27;
+# from the project root directory.
+ENV[&quot;RAILS_ENV&quot;] ||= &#x27;test&#x27;
+require File.dirname(__FILE__) + &quot;/../config/environment&quot; unless defined?(RAILS_ROOT)
+require &#x27;spec/autorun&#x27;
+require &#x27;spec/rails&#x27;
+require File.dirname(__FILE__) + &quot;/custom_matchers&quot;
+
+Spec::Runner.configure do |config|
+  config.use_transactional_fixtures = true
+  config.use_instantiated_fixtures  = false
+  config.fixture_path = RAILS_ROOT + &#x27;/spec/fixtures/&#x27;
+  
+  config.mock_with :mocha
+  config.include(CustomMatcher)
+end
+</pre>
+<p>All of the methods in the <code>CustomMatcher</code> module will now be available to all spec descriptions, so we can remove the <code>be_one_more_than</code> method from the article_spec file.</p>
+
+<p>Our custom matcher should work with both <code>should</code> and <code>should_not</code>. To test it we&rsquo;ll change the spec we used earlier to use <code>should_not</code> to check that the custom matcher works and to see what error message is shown when the match fails.</p>
+<pre class="ruby">
+article2.position.should_not be_one_more_than(article1.position)
+</pre>
+<p>Now we&rsquo;ll run the specs again&hellip;</p>
+<pre class="terminal">
+$ rake spec
+(in /Users/eifion/rails/apps_for_asciicasts/ep157)
+<span class="passed">..........</span><span class="failed">F</span>
+
+1)
+<span class="failed">&#x27;ArticlesController should increment article position when creating next article&#x27; FAILED
+expected not to get &quot;one more than 1&quot;, but got 2</span>
+./spec/models/article_spec.rb:12:
+
+Finished in 0.442849 seconds
+
+<span class="failed">11 examples, 1 failure</span>
+</pre>
+<p>&hellip;and, as expected, we get one failure as we&rsquo;ve reversed the criteria of one of the specs.</p>
+
+<h3>Creating a Matcher Class</h3>
+<p>The error message that the failing spec displays makes sense if you read it carefully enough, but it&rsquo;s a little cryptic. While it&rsquo;s possible to create different messages for simple matchers, it&rsquo;s a little complicated to implement, so instead we&rsquo;ll turn our simple matcher into a full RSpec matcher class.</p>
+
+<p>A matcher is an object that responds to the methods <code>matches?</code> and <code>failure_message_for_should</code>. It can also use the optional methods <code>does_not_match?</code>, <code>failure_message_for_should_not</code> and <code>description</code>. We&rsquo;ll create a class in our <code>CustomMatchers</code> module to replace the simple matcher we created earlier. (By the way, if you&rsquo;re using TextMate and have the <a href="http://github.com/dchelimsky/rspec-tmbundle/tree/master">RSpec bundle</a> installed you can type <code>matc</code> and TAB and an example class will be generated for you.)</p>
+
+<p>Our matcher class will look like this:</p>
+<pre class="ruby">
+module CustomMatcher
+  class OneMoreThan
+    def initialize(expected)
+      @expected = expected
+    end
+
+    def matches?(actual)
+      @actual = actual
+      @actual == @expected + 1
+    end
+
+    def failure_message_for_should
+      &quot;expected #{@actual.inspect} to be one more than #{@expected.inspect}&quot;
+    end
+
+    def failure_message_for_should_not
+      &quot;expected #{@actual.inspect} not to be one more than #{@expected.inspect}&quot;
+    end
+  end
+
+  def be_one_more_than(expected)
+    OneMoreThan.new(expected)
+  end
+end
+</pre>
+<p>The module still has the <code>be_one_more_than</code> method that we used in our simple matcher, but now instead of returning a <code>simple_matcher</code> it returns an instance of our new <code>OneMoreThan</code> class. The expected value is passed to the class&rsquo;s constructor where it is stored as an instance variable. The actual work is done in the <code>matches?</code> method which is the method that RSpec calls when the spec is run. This method can be defined in two ways: we can either have a <code>should</code> expectation in the method (in our case this would be <code>@actual.should == @expected + 1</code>), or we can return a boolean value as we&rsquo;ve chosen to do. The other two methods allow us to define failure messages for failing <code>should</code> and <code>should_not</code> specs.</p>
+
+<p>Our new class should behave in the same way as our simple matcher did, and the one spec we modified to deliberately fail should still fail but will now show the failure message we defined in the class.</p>
+<pre class="terminal">
+$ rake spec
+(in /Users/eifion/rails/apps_for_asciicasts/ep157)
+<span class="passed">..........</span><span class="failed">F</span>
+
+1)
+<span class="failed">&#x27;ArticlesController should increment article position when creating next article&#x27; FAILED
+expected 2 not to be one more than 1</span>
+./spec/models/article_spec.rb:12:
+</pre>
+<p>Our spec fails as expected and we&rsquo;re now seeing the failure message we defined in the class&rsquo;s <code>failure_message_for_should_not</code> method.</p>
+
+<h3>Macros</h3>
+
+<p>As well as matchers we can write RSpec macros to tidy up spec code. The specs for the <code>ArticlesController</code> cover the standard RESTful actions that the controller implements. Two of the specs describe actions that everyone can see: viewing a list of articles and seeing individual articles. The rest of the specs describe actions that are only available to admins (the actions that involve creating, editing and deleting articles). The whole file is a little long to display here, but you can see it on <a href="http://github.com/ryanb/railscasts-episodes/tree/master/episode-157/">Ryan Bates&rsquo; Github pages</a> under <code>/spec/controllers</code>. We&rsquo;ll use macros to refactor some of this code.</p>
+
+<p>The first part of the specs that we&rsquo;re going to change is the code that creates a user before every admin spec is run.</p>
+<pre class="ruby">
+describe &quot;as admin&quot; do
+  before(:each) do
+   user = User.new(:username =&gt; &quot;Admin&quot;, :email =&gt; &quot;admin@example.com&quot;, :password =&gt; &quot;secret&quot;)
+   user.admin = true
+   user.save!
+   session[:user_id] = user.id
+  end
+  # (rest of specs)
+end
+</pre>
+<p>This code is used in several places which creates repetition in our specs. We could, instead, write a method called <code>login_as_admin</code> that creates a user and logs them and DRY up our spec code.</p>
+
+<p>The method could go in the <code>describe</code> block, but then it would only be available to the specs for the <code>ArticleController</code>. To make it available to all of the controller specs we&rsquo;ll create a new module and put the method there.</p>
+
+<p>The new module will be created in a file called <code>controller_macros.rb</code> in the specs directory. We&rsquo;ll call the module <code>ControllerMacros</code> and put the <code>login_as_admin</code> method there.</p>
+<pre class="ruby">
+module ControllerMacros
+  def login_as_admin
+    user = User.new(:username =&gt; &quot;Admin&quot;, :email =&gt; &quot;admin@example.com&quot;, :password =&gt; &quot;secret&quot;)
+    user.admin = true
+    user.save!
+    session[:user_id] = user.id
+  end
+end
+</pre>
+<p>(What we&rsquo;ve done here isn&rsquo;t exactly a macro, but it has a similar effect and allows us to tidy up our spec code.)</p>
+
+<p>To make the module accessible from our specs we need to modify the <code>spec_helper.rb</code> file again. Immediately below where we added the <code>require</code> line to add the custom matcher we&rsquo;ll add a similar line to add the controller macros file.</p>
+<pre class="ruby">
+require File.dirname(__FILE__) + &quot;/controller_macros&quot;
+</pre>
+<p>Likewise below where we included the <code>CustomMatcher</code> module we&rsquo;ll include our <code>ControllerMacros</code> module.</p>
+<pre class="ruby">
+config.include(ControllerMacros, :type =&gt; :controller)
+</pre>
+<p>The controller macros only need to be available to the controller specs, so we&rsquo;ve added a <code>type</code> argument to restrict the specs that the module will be included in. With the module now available to all of the controller specs we can now use the <code>login_as_admin</code> method we created in any controller spec where we need to log in a user.</p>
+<pre class="ruby">
+describe &quot;as admin&quot; do
+  before(:each) do
+	login_as_admin
+  end
+  # (rest of specs)
+end
+</pre>
+
+<h3>Another Problem</h3>
+<p>Our controller spec is now a little cleaner, but there&rsquo;s another problem with it in that it&rsquo;s missing a number of specs. In our application anyone should be able to view the <code>index</code> and <code>show</code> actions, but only logged-in users should see the actions that modify the articles. We have specs to test <code>index</code> and <code>show</code> as a guest and specs to test that a logged-in user can see the other actions. What&rsquo;s missing are specs to test that guests cannot see the actions that require a login.</p>
+<pre class="ruby">
+ describe &quot;as guest&quot; do
+    it &quot;index action should render index template&quot; do
+      get :index
+      response.should render_template(:index)
+    end
+    
+    it &quot;show action should render show template&quot; do
+      get :show, :id =&gt; Article.first
+      response.should render_template(:show)
+    end
+end
+</pre>
+<p class="title">The guest specs don&rsquo;t check that the admin pages are hidden.</p>
+<p>These specs are important because without them there is no way of testing that the articles cannot be modified by anyone.</p>
+
+<p>Our <code>ArticlesController</code> has a before filter in it that restricts access to some of the methods,</p>
+<pre class="ruby">
+before_filter :admin_required, :except =&gt; [:index, :show]
+</pre>
+<p>but if we were to comment this filter out, all of our specs would still pass. The <code>ArticlesController</code> spec needs a new set of specs adding that check that only logged-in users can create and edit articles. Five new specs need to be added to the <code>describe</code> block above, one each for <code>new</code>, <code>create</code>, <code>edit</code>, <code>update</code> and <code>destroy</code>. Here is the one for <code>new</code>:</p>
+<pre class="ruby">
+it &quot;new action should require admin&quot; do
+  get :new
+  response.should redirect_to(login_url)
+  flash[:error].should == &quot;Unauthorized Access&quot;
+end
+</pre>
+<p>The other four will all follow the same format, with only the string that describes the spec and the line that makes the request changing between each spec, so writing the specs will create a lot of repeated code. Instead of having to do that we could create a macro that would allow us to test the actions from a single method call.</p>
+<pre class="ruby">
+it_should_require_admin_for_actions :new, :create, :edit, :update, :destroy
+</pre>
+
+<h3>Creating The Macro</h3>
+<p>To create the macro we need to create a class method in the <code>describe</code> block.</p>
+<pre class="ruby">
+def self.it_should_require_admin_for_actions(*actions)
+  actions.each do |action|
+    it &quot;#{action} action should require admin&quot; do
+      get action, :id =&gt; 1
+      response.should redirect_to(login_url)
+      flash[:error].should == &quot;Unauthorized Access&quot;
+    end
+  end
+end
+</pre>
+<p>The method loops through the actions we pass to it, and runs each one through an <code>it</code> block. The block then makes a GET request to that action, passing an <code>id</code> in case the action requires one, and checks that the response redirects to the login page and that the flash is showing the correct message.</p>
+
+<p>This method will be useful in all of our controller specs so the next thing to do is to move it into our <code>ControllerMacros</code> module. Because of the way Ruby works, we can&rsquo;t just move the method into the module as it won&rsquo;t be included in the describe block that way. We&rsquo;ll have to do a little more work to get the method working.</p>
+
+<p>When a module is included in a class the module&rsquo;s instance methods become available to instances of that class. The class methods, however, do not. To make them available we can make use of <code>included</code>. A module&rsquo;s <code>included</code> method is called when the module is included into a class and it takes the class as an argument. We can use the <code>included</code> method, therefore, to extend the class with our module&rsquo;s class methods.</p>
+
+<p>First we&rsquo;ll put the class method into a submodule that we&rsquo;ll call <code>ClassMethods</code>. Then, in the <code>included</code> method we&rsquo;ll extend the spec class with the class methods that are defined there (just the one for now). Now we&rsquo;ll be able to use that method in any of our controller specs. Note that we&rsquo;ve removed the <code>self</code> from before <code>it_should_require_admin_for_actions</code> as including it this way will automatically make it a class method.</p>
+<pre class="ruby">
+module ControllerMacros
+
+  def self.included(base)
+    base.extend(ClassMethods)
+  end
+
+  module ClassMethods
+    def it_should_require_admin_for_actions(*actions)
+      actions.each do |action|
+        it &quot;#{action} action should require admin&quot; do
+          get action, :id =&gt; 1
+          response.should redirect_to(login_url)
+          flash[:error].should == &quot;Unauthorized Access&quot;
+        end
+      end
+    end
+  end
+  
+  def login_as_admin
+    user = User.new(:username =&gt; &quot;Admin&quot;, :email =&gt; &quot;admin@example.com&quot;, :password =&gt; &quot;secret&quot;)
+    user.admin = true
+    user.save!
+    session[:user_id] = user.id
+  end
+end
+</pre>
+<p>We&rsquo;ve used some advanced Ruby ideas in the module above. For the purposes of this example all you need to know is that the methods defined in the <code>ClassMethods</code> submodule are available in the describe blocks in the specs, while the methods outside the submodule are available in it blocks or before blocks.</p>
+
+<p>By moving code into the  module above we&rsquo;ve managed to reduce a lot of the duplication in our specs. It&rsquo;s worth remembering, however, that some duplication is desirable in specs. The specs are there to define your application&rsquo;s behaviour and should do so clearly, even at the risk of duplication. You don&rsquo;t want to hide your application&rsquo;s behaviour behind the scenes.</p>

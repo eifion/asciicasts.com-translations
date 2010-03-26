@@ -1,0 +1,53 @@
+<p>This is the first in a series of six episodes about handling credit card transactions and purchases in a Rails application. We&rsquo;ll be concentrating mainly on PayPal, especially in the early episodes, as it provides a simple way of adding payments to your site. The application we&rsquo;ll be working with is a basic e-commerce site that shows a list of products that you can add to a cart.</p>
+<img src="/system/photos/30/original/E141I01.png" width="808" height="386" alt="The cart page on our site."/>
+<p class="title">The cart page on our site.</p>
+<h3>Setting Up a Test PayPal Account</h3>
+<p>The &rsquo;checkout&rsquo; link on our site currently does nothing. What we want it do is have it send the contents of the cart to PayPal and have PayPal handle the credit card processing for us.Firstly we&rsquo;re going to have to set up a test account on <a href="https://developer.paypal.com">PayPal&rsquo;s developer site</a>. This will allow us to test our site without having to worry about any real money or credit card payments taking place.</p> 
+<p>
+<p>We didn&rsquo;t have a PayPal sandbox account, but signing up for one is a straightforward process. Once signed up and logged in the first thing we want to do it create a seller account. There is a link from the home page titled &ldquo;Create a preconfigured buyer or seller account&rdquo; and clicking it takes us to the page where we can create our seller.</p>
+
+<img src="/system/photos/31/original/E141I02.png" width="893" height="493" alt="Setting up a seller account."/>
+<p class="title">Setting up our seller account.</p>
+
+<p>Once we&rsquo;ve created our seller we&rsquo;ll make a note of the password supplied as we&rsquo;ll need it to log in later. With it we can enter the enter the sandbox test site and log in as our seller. Once logged in we want to click on the &ldquo;Merchant Services&rsquo; tab, but it&rsquo;s here where things can get a little confusing. PayPal offers a variety of services and it can be difficult to know which one to choose. As ours is a simple site we&rsquo;re going to use the Website Payments Standard option.</p> 
+
+<p>There are several ways to use Website Payments Standard; the one we&rsquo;ll use is called &ldquo;Custom Integration&rdquo;. On the Website Payments Standard page there is a link for creating a Custom Integration. Once there click the &quot;developer page&quot; link and on the page you&rsquo;re redirected to there should be a link called &quot;Standard Variable Reference&quot;. The page that this link points to shows a <a href="https://cms.paypal.com/us/cgi-bin/?cmd=_render-content&amp;content_ID=developer/e_howto_html_Appx_websitestandard_htmlvariables">list of all of the variables</a> that can be passed to PayPal when they process an order from our site. We&rsquo;ll want to pay particular attention to the table headed &quot;Variables for Individual Items in Third Party Shopping Carts&quot; as this shows us the variables we&rsquo;ll need to process orders from our cart, which is considered a third part cart by PayPal.</p>
+
+<h3>Adding PayPal To Our Site</h3>
+<p>To make our cart work with PayPal we&rsquo;ll have to alter the &ldquo;checkout&rdquo; link on the cart page so that it goes to PayPal and passes all of the necessary variables in the query string. The logical place to create this link is in the cart model as that&rsquo;s where the data about the order is stored so we&rsquo;ll change the link to look like this.</p>
+<pre class="ruby">
+&lt;%= link_to &quot;Checkout&quot;, @cart.paypal_url(products_url) %&gt;
+</pre>
+<p>When our customer has finished paying for their order on PayPal they&rsquo;ll be redirected back to our site. We&rsquo;re passing the products index page url as an argument to the cart&rsquo;s <code>paypal_url</code> method so the customer will be redirected back to there after they have paid.</p>
+<p>The method in the Cart model to generate the URL for PayPal is quite long, but not too complicated.</p>
+<pre class="ruby">
+def paypal_url(return_url)
+    values = {
+      :business =&gt; &rsquo;seller_1234111143_biz@asciicasts.com&rsquo;,
+      :cmd =&gt; &rsquo;_cart&rsquo;,
+      :upload =&gt; 1,
+      :return =&gt; return_url,
+      :invoice =&gt; id
+    }
+    
+    line_items.each_with_index do |item, index|
+      values.merge!({
+        &quot;amount_#{index + 1}&quot; =&gt; item.unit_price,
+        &quot;item_name_#{index + 1}&quot; =&gt; item.product.name,
+        &quot;item_number_#{index + 1}&quot; =&gt; item.product.identifier,
+        &quot;quantity_#{index + 1}&quot; =&gt; item.quantity
+      })
+    end
+    &quot;https://www.sandbox.paypal.com/cgi-bin/webscr?&quot; + values.map { |k,v| &quot;#{k}=#{v}&quot;  }.join(&quot;&amp;&quot;)
+  end
+</pre>
+<p class="title"> The method that generates the URL for PayPal.</p>
+<p>In the first part of the <code>paypal_url</code> method we create a hash of the values that tell PayPal who we are, what command to execute and what URL to return to when the customer has made their payment. In the second part we loop through each line item and create a number of variables that give the information about each item. Finally we turn the hash into a querystring and append it to the URL of the page on PayPal&rsquo;s sandbox that will process our order. These URLs can become fairy long quite easily so we could consider using a form that stores all of the values in hidden fields and a button to POST the values instead.</p>
+
+<p>To test this functionality we&rsquo;ll first need to create another test PayPal account for our buyer. We do this in the same way we created our seller account above. Make sure you click &ldquo;show advanced options&rdquo; so that you can give your imaginary customer some money to spend.</p>
+
+<p>Back in our application we&rsquo;ll buy a couple of items and then click the &ldquo;checkout&rdquo; link. If all is well we&rsquo;ll be redirected to the PayPal site where we can log in as our imaginary customer.</p>
+
+<img src="/system/photos/32/original/E141I03.png" width="810" height="623" alt="Paying for our items on the PayPal site."/>
+
+<p>After we&rsquo;ve paid we&rsquo;re redirected to a summary page with a link on it back to our site. When we click that we&rsquo;re taken back to our product page. If we add another item to our cart now we&rsquo;ll see that the cart still contains the items that have just been bought. We need a way for PayPal to tell us that the order has been successful so that we can clear the cart. That in itself is quite a large topic and there&rsquo;ll be more about it in the next episode.</p>

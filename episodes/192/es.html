@@ -1,0 +1,287 @@
+<p>Hace algunos episodios estudi&aacute;bamos <a href="http://asciicasts.com/episodes/188-declarative-authorization">Declarative Authorization</a> que si bien es un excelente plugin de Rails puede ser un poco pesado para sitios web m&aacute;s simples. Despu&eacute;s de escribir el <a href="http://railscasts.com/episodes/188-declarative-authorization">Railscast sobre Declarative Authorization</a> Ryan Bates busc&oacute; una soluci&oacute;n alternativa y, como no encontr&oacute; ninguna, decidi&oacute; implementar la suya propia, <a href="http://github.com/ryanb/cancan">CanCan</a>, tratando de mantenerlo todo lo m&aacute;s sencillo posible. Ech&eacute;mosle un vistazo.</p>
+
+<p>En este episodio trabajaremos con la misma aplicaci&oacute;n sencilla de blog que utilizamos en el episodio sobre Declarative Authorization. Esta aplicaci&oacute;n tiene un cierto n&uacute;mero de art&iacute;culos, cada uno de los cuales pertenece a un usuario y que puede tener muchos comentarios asociados.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/264/original/E192I01.png" alt="La página de un artículo en nuestra aplicaci&oacute;n" width="815" height="606"/>
+</div>
+
+<p>Obs&eacute;rvese en la captura anterior que a pesar de que no hay una sesi&oacute;n iniciada los enlaces de edici&oacute;n y borrado de art&iacute;culos est&aacute;n visibles. Queremos restringir, mediante la autorizaci&oacute;n, el acceso a lo que cada usuario puede hacer. Ya tenemos autenticaci&oacute;n en nuestra aplicaci&oacute;n de forma que los usuarios pueden darse de alta e iniciar sesi&oacute;n, para lo que hemos usado Authlogic aunque en realidad cualquier soluci&oacute;n de autenticaci&oacute;n nos servir&iacute;a.</p>
+
+<p>En la p&aacute;gina de registro tenemos un n&uacute;mero de <em>checkboxes</em> que permiten a un usuario escoger los roles a los que quiere pertenecer. Un administrador podr&aacute; hacer cualquier cosa; un moderador podr&aacute; editar los comentarios de cualquiera y un autor puede crear art&iacute;culos y modificar los que haya escrito. Los usuarios que no pertenezcan a ning&uacute;n rol pueden crear comentarios y cambiarlos.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/265/original/E192I02.png" alt="La p&aacute;gina de registro con los checkboxes de roles." width="800" height="510"/>
+</div>
+
+<h3>Instalaci&oacute;n de CanCan</h3>
+
+<p>CanCan es una gema. Para a&ntilde;adirlo a nuestra aplicaci&oacute;n tenemos que a&ntilde;adir la siguiente l&iacute;nea en el bloque <code>Rails::Initializer.run</code> de nuestro archivo <code>/config/environment.rb</code>.</p>
+<pre class="ruby">config.gem &quot;cancan&quot;</pre>
+<p>Nos podemos asegurar de que la gema est&aacute; instalada ejecutando</p>
+<pre class="terminal">
+sudo rake gems:install
+</pre>
+<p>Si ya tenemos instalada una versi&oacute;n antigua de CanCan tendremos que actualizarnos a la &uacute;ltima porque hay algunas funcionalidades que s&oacute;lo est&aacute;n presentes a partir de la versi&oacute;n 1.0.0.</p>
+
+<h3>Uso de CanCan</h3>
+
+<p>Para utilizar CanCan tenemos que crear una nueva clase llamada <code>Ability</code>, que pondremos en nuestro directorio <code>/app/models</code>. Esta clase tiene que incluir el m&oacute;dulo <code>CanCan::Ability</code> y definir tambi&eacute;n un m&eacute;todo <code>initialize</code> que recibe un objeto de usuario como par&aacute;metro. Ser&aacute; en este m&eacute;todo donde definiremos las capacidades de cada usuario.</p>
+
+<pre class="ruby">
+class Ability
+include CanCan::Ability
+
+  def initialize(user)
+  end
+end 
+</pre>
+<p>Las capacidades de cada usuario se definen con el m&eacute;todo <code>can</code>, el coraz&oacute;n de CanCan. Este m&eacute;todo recibe dos par&aacute;metros, primero la acci&oacute;n que queremos realizar y segundo la clase de modelo sobre la que se aplica esta acci&oacute;n. Alternativamente podemos pasar <code>:all</code> para aplicar una acci&oacute;n a cualquier modelo. Si queremos que todos los usuarios puedan leer todos los modelos podemos hacerlo de esta manera:</p>
+<pre class="ruby">
+  class Ability
+  include CanCan::Ability
+
+  def initialize(user)
+    can :read, :all
+  end
+end 
+</pre>
+<p>Tal y como est&aacute; nuestra autorizaci&oacute;n nadie puede editar o borrar art&iacute;culos o comentarios, pero hay enlaces a las acciones <code>edit</code> y <code>destroy</code> en la p&aacute;gina de cada art&iacute;culo. En la vista para la acci&oacute;n <code>show</code> del art&iacute;uculo podemos usar <code>can?</code> (n&oacute;tese el signo de interrogaci&oacute;n) para determinar si el usuario actual est&aacute; autorizado para realizar la acci&oacute;n a la que lleva cada enlace. Mientras que el m&eacute;todo <code>can</code> define las capacidades, <code>can?</code> es un m&eacute;todo booleano que determina si el usuario actual posee las capacidades. Al igual que <code>can</code>, <code>can?</code> recibe dos par&aacute;metros, una acci&oacute;n y un modelo, en este caso un <code>Article</code>. Utilizaremos <code>can?</code> en la vista <code>show</code> de forma que los enlaces de edici&oacute;n y borrado est&eacute;n ocultos a no ser que el usuario actual tenga la capacidad apropiada. Para hacerlo, envolveremos los enlaces con sentencias <code>if</code> de forma que s&oacute;lo se muestren cuando el usuario actual puede llevar a cabo la acci&oacute;n correspondiente sobre el art&iacute;culo.</p>
+<pre class="ruby">
+  &lt;p&gt;
+     &lt;% if can? :update, @article %&gt;
+       &lt;%= link_to &quot;Edit&quot;, edit_article_path(@article) %&gt; |
+     &lt;% end %&gt;
+     &lt;% if can? :destroy, @article %&gt;
+       &lt;%= link_to &quot;Destroy&quot;, @article, :method =&gt; :delete, :confirm =&gt; &quot;Are you sure?&quot; %&gt; |
+     &lt;% end %&gt;
+     &lt;%= link_to &quot;Back to Articles&quot;, articles_path %&gt;
+   &lt;/p&gt;
+</pre>
+
+<p>M&aacute;s abajo en la misma vista haremos un cambio similar en cada enlace de comentario.</p>
+<pre class="ruby">
+  &lt;p&gt;
+     &lt;% if can? :update, comment %&gt;
+       &lt;%= link_to &quot;Edit&quot;, edit_comment_path(comment) %&gt; |
+     &lt;% end %&gt;
+     &lt;% if can? :destroy, comment %&gt;
+       &lt;%= link_to &quot;Destroy&quot;, comment, :method =&gt; :delete, :confirm =&gt; &quot;Are you sure?&quot; %&gt;
+     &lt;% end %&gt;
+   &lt;/p&gt;   
+</pre>
+<p>Con esto ya podemos cargar la p&aacute;gina de un art&iacute;culo y veremos que los enlaces para editar o borrar art&iacute;culos y comentarios han desaparecido dado que no hay usuarios con la capacidad de editarlos.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/266/original/E192I03.png" alt="Ya no se ven los enlaces." width="815" height="416"/>
+</div>
+
+<h3>C&oacute;mo proteger los Controladores</h3>
+
+<p>Las acciones siguen estando disponibles a pesar de que hayamos ocultado los enlaces para editar art&iacute;culos y comentarios, por lo que si visitamos directamente la acci&oacute;n <code>edit</code> de un art&iacute;culo seguimos pudiendo cambiarlo. As&iacute; que adem&aacute;s de hacer cambios en las vistas tendremos que modificar nuestros controladores para que los usuarios s&oacute;lo pueden ejecutar las acciones para las que tienen autorizaci&oacute;n. Hay dos formas de hacerlo en CanCan. La primera funciona a nivel de acci&oacute;n y veremos un ejemplo con la acci&oacute;n <code>edit</code> de <code>ArticleController</code>.</p>
+<pre class="ruby">
+  def edit
+     @article = Article.find(params[:id])
+     unauthorized! if cannot? :edit, @article
+   end   
+</pre>
+<p>Para evitar que se ejecute la acci&oacute;n invocamos a <code>unathorized!</code>, que alzar&aacute; una excepci&oacute;n. Por supuesto s&oacute;lo querremos que esto ocurra cuando el usuario no est&eacute; autorizado y para verificar dicha autorizaci&oacute;n podemos utilizar el m&eacute;todo <code>can?</code> igual que hicimos en la vista o, como en este caso, <code>cannot?</code>.</p>
+<p>Si tratamos de acceder a la acci&oacute;n <code>edit</code> directamente ahora recibiremos un error que nos impedir&aacute; hacerlo.</p>
+<div class="imageWrapper">
+      <img src="/system/photos/267/original/E192I04.png" alt="Se producir&aacute; una excepci&oacute;n si se intenta acceder a una acci&oacute;n no autorizada." width="815" height="416"/>
+</div>
+<p>Podr&iacute;amos repetir todo esto en cada acci&oacute;n de nuestros controladores, pero hay una forma m&aacute;s f&aacute;cil de hacerlo porque estamos usando la convenci&oacute;n REST. Al principio del controlador pordemos llamar a <code>load_and_authorize_resource</code> que cargar&aacute; y autorizar&aacute; al recurso apropiado en un filtro. Dado que este m&eacute;todo carga el recurso bas&aacute;ndose en la acci&oacute;n podemos eliminar las l&iacute;neas de c&oacute;digo que hay en cada acci&oacute;n para poner dicho recurso en una variable de instancia (en este caso era <code>@article</code>) haciendo que el c&oacute;digo de <code>ArticlesController</code> tenga este aspecto:</p>
+<pre class="ruby">  
+ class ArticlesController &lt; ApplicationController
+     load_and_authorize_resource
+
+     def index
+       @articles = Article.all
+     end
+
+     def show
+       @comment = Comment.new(:article =&gt; @article)
+     end
+
+     def new
+     end
+
+     def create
+       @article.user = current_user
+       if @article.save
+         flash[:notice] = &quot;Successfully created article.&quot;
+         redirect_to @article
+       else
+         render :action =&gt; &#x27;new&#x27;
+       end
+     end
+
+     def edit
+     end
+
+     def update
+       if @article.update_attributes(params[:article])
+         flash[:notice] = &quot;Successfully updated article.&quot;
+         redirect_to @article
+       else
+         render :action =&gt; &#x27;edit&#x27;
+       end
+     end
+
+     def destroy
+       @article.destroy
+       flash[:notice] = &quot;Successfully destroyed article.&quot;
+       redirect_to articles_url
+     end
+   end
+</pre>
+<p>Con esto los usuarios no podr&aacute;n crear, editar o borrar ning&uacute;n art&iacute;culo.</p>
+<p>Queremos hacer un cambio parecido en <code>CommentsController</code> para restringir el acceso a sus acciones, y una vez m&aacute;s utilizaremos <code>load_and_authorize_resources</code> para cargar el recurso <code>Comment</code> y comprobar su autorizaci&oacute;n. Si <code>Comment</code> fuese en nuestras rutas un recurso anidado de <code>Article</code> podr&iacute;amos utilizar <code>:nested</code> en <code>load_and_authorize_resources</code> para cargar los comentarios a trav&eacute;s del recurso <code>Article</code>.</p>
+<pre class="ruby">  
+     load_and_authorize_resource :nested =&gt; :article
+</pre>
+<p>En nuestro caso no tendremos que hacerlo porque no estamos anidando los recursos.</p>
+<h3>A&ntilde;adiendo Capacidades</h3>
+<p>Ahora que nuestra aplicaci&oacute;n es segura podemos empezar a definir las capacidades que tendr&aacute; cada rol. Esto se hace en la clase <code>Ability</code> que a&ntilde;adimos anteriormente, defini&eacute;ndolas en el m&eacute;todo <code>initialize</code> para que sean reflejadas en el resto de la aplicaci&oacute;n.</p>
+    <pre class="ruby">
+  class Ability
+     include CanCan::Ability
+
+     def initialize(user)
+       can :read, :all
+     end
+   end
+</pre>
+<p><code>initialize</code> recibe el usuario actual, de forma que podamos modificar las capacidades dependiendo de qu&eacute; usuario est&aacute; activo. Vamos a empezar con los usuarios que tienen el rol de administrador que son los que podr&aacute;n hacer cualquier cosa. Este usuario puede ser un objeto de cualquier tipo lo que significa que la autenticaci&oacute;n est&aacute; completamente desacoplada de la autorizaci&oacute;n. Por ejemplo, lo que define a un usuario como administrador depende por completo del sistema de autenticaci&oacute;n. Podr&iacute;amos tener un campo booleano llamado <code>admin?</code> en nuestro modelo <code>User</code>.</p>
+<p>En nuestra aplicaci&oacute;n un usuario puede tener varios roles y tenemos un m&eacute;todo <code>role?</code> que nos dice si un usuario pertenece a un rol. Utilizaremos este m&eacute;todo para establecer las capacidades.</p>
+<pre class="ruby">
+  class Ability
+     include CanCan::Ability
+
+     def initialize(user)
+       if user.role? :admin
+         can :manage, :all
+       else
+         can :read, :all
+       end
+     end
+   end   
+</pre>
+<p>Nuestro c&oacute;digo ahora comprueba si el usuario actual es administrador y si lo es le permite administrar todos los modelos. Si se pasa <code>:manage</code> como acci&oacute;n quiere decir que se pueden efectuar todas las acciones sobre un modelo.</p>
+<p>A&uacute;n tenemos que definir el m&eacute;todo <code>role?</code> en el modelo <code>User</code>. Hemos establecido los roels de la misma manera que hicimos en el Episodio 189 [<a href="http://railscasts.com/episodes/189-embedded-association">ver</a>, <a href="http://asciicasts.com/episodes/189-embedded-association">leer</a>] pero no importa c&oacute;mo definamos nuestros roles siempre que podamos determinar a qu&eacute; rol pertenece un usuario.</p>
+<pre class="ruby">
+  class User &lt; ActiveRecord::Base
+     acts_as_authentic
+     has_many :articles
+     has_many :comments
+
+     named_scope :with_role, lambda { |role| {:conditions =&gt; &quot;roles_mask &amp; #{2**ROLES.index(role.to_s)} &gt; 0 &quot;} }
+
+     ROLES = %w[admin moderator author editor]
+
+     def roles=(roles)
+       self.roles_mask = (roles &amp; ROLES).map { |r| 2**ROLES.index(r) }.sum
+     end
+
+     def roles
+       ROLES.reject { |r| ((roles_mask || 0) &amp; 2**ROLES.index(r)).zero? }
+     end
+
+     def role?
+       roles.include? role.to_s
+     end
+
+   end   
+</pre>
+<p>El m&eacute;todo <code>role?</code> que hemos a&ntilde;adido comprueba que los roles del usuario incluyan el rol pasado</p>
+<p>Volvamos a la clase <code>Ability</code>, donde a&uacute;n nos queda por hacer un cambio m&aacute;s. En <code>initialize</code> comprobamos si el usuario pertenece al rol pero los usuarios invitados (que a&uacute;n no se han registrado) <code>user</code> ser&aacute; <code>nil</code>. Podr&iacute;amos comprobar la presencia de <code>nil</code> antes de chequear los roles del usuario pero en lugar de esto crearemos un usuario invitado si el usuario pasado es nulo. De esta forma podremos invocar a m&eacute;todos como <code>role?</code> para usuarios que a&uacute;n no se hayan dado de alta.</p>
+<pre class="ruby">
+  class Ability
+     include CanCan::Ability
+
+     def initialize(user)
+       user ||= User.new # Guest user
+       if user.role? :admin
+         can :manage, :all
+       else
+         can :read, :all
+       end
+     end
+   end 
+</pre>
+<p>Si volvemos otra vez a la aplicaci&oacute;n a&uacute;n seguiremos sin poder editar o destruir comentarios pero si iniciamos sesi&oacute;n como un usuario que tenga el rol de administraci&oacute;n, se mostrar&aacute;n los enlaces.</p>
+<div class="imageWrapper">
+      <img src="/system/photos/268/original/E192I05.png" alt="Los administradores vuelven a ver los enlaces." width="816" height="458"/>
+</div>
+<p>Como ya tenemos funcionando la autorizaci&oacute;n para administradores ahora tendremos que establecer las capacidades para el resto de roles. Empezaremos con los usuarios invitados, que no tienen roles asignados. Estos usuarios deber&iacute;an poder crear comentarios y actualizar los comentarios que hayan escrito. Para hacer esto tendremos que modificar la clase <code>Ability</code> de esta manera:</p>
+<pre class="ruby">
+  class Ability
+     include CanCan::Ability
+
+     def initialize(user)
+       user ||= User.new
+
+       if user.role? :admin
+         can :manage, :all
+       else
+         can :read, :all
+         can :create, Comment
+         can :update, Comment do |comment|
+           comment.try(:user) == user
+         end
+       end
+     end
+   end  
+</pre>
+<p>El c&oacute;digo para permitir que los usuarios invitados creen comentarios es muy sencillo, pero el c&oacute;digo de actualizaci&oacute;n es un poco m&aacute;s complicado porque los usuarios deber&iacute;an s&oacute;lo poder actualizar los comentarios que hayan escrito. Para hacerlo le pasaremos a <code>can</code> un bloque que a su vez pasar&aacute; la instancia del modelo que estamos comprobando. Este bloque deber&iacute;a devolver <code>true</code> o <code>false</code> dependiendo de si la acci&oacute;n debe permitirse o no, por tanto es aqu&iacute; donde comprobaremos si el usuario del comentario es el usuario actual. Es posible que el comentario sea nulo, as&iacute; que utilizaremos el m&eacute;todo <code>try</code> de Rails para leer el atributo <code>user</code> de forma que se devuelva <code>nil</code> en lugar de elevar una excepci&oacute;n.</p>
+<p>Si iniciamos una sesi&oacute;n como un usuario que no tiene roles, veremos que podemos a&ntilde;adir comentario y actualizarlo, pero no en los comentarios de los dem&aacute;s.</p>
+<div class="imageWrapper">
+      <img src="/system/photos/269/original/E192I06.png" alt="Los usuarios invitados s&oacute;lo pueden editar sus propios comentarios." width="815" height="543"/>
+</div>
+<p>A continuaci&oacute;n modificaremos el c&oacute;digo para a&ntilde;adir las capacidades de los moderadores, que deber&iacute;an poder modificar cualquier comentarios. Actualizaremos la capacidad de actualizaci&oacute;n de comentarios para permitirlo.</p>
+<pre class="ruby">
+  can :update, Comment do |comment|
+     comment.try(:user) == user || user.role?(:moderator)
+   end   
+</pre>
+<p>A&uacute;n nos queda un rol m&aacute;s por cubrir, <code>:author</code>. Los autores deber&iacute;an pdoer crear art&iacute;culos y modificar cualquier art&iacute;culo que hayan escrito. Tan s&oacute;lo tenemos que a&ntilde;adir el siguiente c&oacute;digo en la clase <code>Ability</code>:</p>
+<pre class="ruby">
+  class Ability
+     include CanCan::Ability
+
+     def initialize(user)
+       user ||= User.new
+
+       if user.role? :admin
+         can :manage, :all
+       else
+         can :read, :all
+         can :create, Comment
+         can :update, Comment do |comment|
+           comment.try(:user) == user || user.role?(:moderator)
+         end
+         if user.role?(:author)
+           can :create, Article
+           can :update, Article do |article|
+             article.try(:user) == user
+           end
+         end
+       end
+     end
+   end   
+</pre>
+<p>Tal y como hicimos con los usuarios invitados y los comentarios, en la capacidad de actualizaci&oacute;n de art&iacute;culo le pasamos el art&iacute;culo actual a un bloque y comprobamos que el autor del art&iacute;culo sea el usuario actual.</p>
+<p>Ya tenemos definidas todas las capacidades para todos los roles de usuario. Lo mejor de CanCan es que nos permite definir todas las capacidades en una ubicaci&oacute;n &uacute;nica, y el resto de la aplicaci&oacute;n reflejar&aacute; estos cambios.</p>
+<h3>Para embellecer la p&aacute;gina de error</h3>
+<p>Cuando un usuario invoca una acci&oacute;n para la que no tiene acceso ver&aacute; un p&aacute;gina de error bastante fea mostrando una excepci&oacute;n <code>AccessDenied</code>. Podemos cambiarlo para que se vea una p&aacute;gina de error con un aspecto mejor:</p>
+<p>Rails proporciona un m&eacute;todo llamado <code>rescue_from</code> que podemos poner en nuestro <code>ApplicationController</code>, que recibe una excepci&oacute;n y un bloqueo o m&eacute;todo. Nosotros le pasaremos un bloque dentro del cual haremos que la aplicaci&oacute;n muestre un mensaje flash y redirija a la p&aacute;gina de inicio.</p>
+<pre class="ruby">
+  rescue_from CanCan::AccessDenied do |exception|
+     flash[:error] = &quot;Access denied!&quot;
+     redirect_to root_url
+   end   
+</pre>
+<p>Si un usuario sin roles intenta editar un art&iacute;culo tecleando directamente la URL ser&aacute; redirigido a la p&aacute;gina de inicio con un mensaje dici&eacute;ndole que no puede hacerlo.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/270/original/E192I07.png" alt="Se muestra un mensaje flash si se intenta acceder una acci&oacute;n no permitida." width="818" height="359"/>
+</div>
+<p>Eso es todo por este episodio. Para m&aacute;s detalles o para informar de un problema, visiten la <a href="http://github.com/ryanb/cancan">p&aacute;gina de GitHub</a> que ha creado Ryan para el proyecto.</p>

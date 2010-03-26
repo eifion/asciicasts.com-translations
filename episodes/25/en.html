@@ -1,0 +1,48 @@
+<p><q style="font-style: italic; font-family: Georgia, serif; font-size: 1.1em;">Did you really name your son Robert&#x27;); DROP TABLE Students; -- ?</q> - <a href="http://xkcd.com/327/">XKCD No. 327</a></p>
+
+<p>For the next few episodes we&rsquo;ll talk about security and protecting your site from hackers. One of the first rules of security is to never trust input from users. In Rails this means taking care of the items in the params hash. The user can control both the keys and the values in the params hash, so all input must be considered suspicious. The same applies to the cookies hash; the user can completely control what is in it. On the other hand the session hash is only set on the server, so can be trusted.</p>
+
+<p>One of the most common security issues is known as SQL injection. This happens when user input is placed directly into a SQL query. If a user knows that their input is being directly inserted into a query they can deliberately write input that can retrieve data that they should not see or even alter or destroy data in the database.  We&rsquo;ll explain how this works and how to protect against it with a simple example.</p>
+
+<h3>Task Search</h3>
+
+<p>Below we have a simple search form on a page that performs a SQL LIKE search to find tasks with a name that matches the input supplied in the form.</p?>
+
+<img src="/system/photos/24/original/E025I01.png" width="812" height="477"/>
+
+<p>The problem is that the input supplied by the user is directly passed to the database query in our controller.</p>
+<pre class="ruby">
+class TasksController &lt; ApplicationController
+ def index
+  @tasks = Task.find(:all,:conditions=&gt;&quot;name LIKE &rsquo;%#{params[:query]}%&rsquo;&quot;)
+ end
+end
+</pre>
+<p class="title">The TasksController showing the potentially unsafe SQL query.</p>
+
+<p>The value in the <code>:conditions</code> key in the <code>find</code> hash is passed straight to a SQL query. The problem with this is that if the user passes a parameter that contains a single quote character the rest of the statement is considered to be SQL. So, if we enter a search term containing a single quote, e.g. Task 1&rsquo;TEST, the input after the quote will be executed as SQL and Rails will throw an error.</p> 
+<pre class="terminal">
+Processing TasksController#index (for 127.0.0.1 at 2009-02-01 21:29:26) [GET]
+  Parameters: {&quot;query&quot;=&gt;&quot;Task 1&rsquo;TEST&quot;}
+  Task Load (0.0ms)   SQLite3::SQLException: near &quot;TEST&quot;: syntax error: SELECT * FROM &quot;tasks&quot; WHERE (name like &rsquo;%Task 1&rsquo;TEST%&rsquo;) 
+
+ActiveRecord::StatementInvalid (SQLite3::SQLException: near &quot;TEST&quot;: syntax error: SELECT * FROM &quot;tasks&quot; WHERE (name like &rsquo;%Task 1&rsquo;TEST%&rsquo;) ):
+</pre>
+<p class="title">Invalid SQL is generated if the user input contains a single quote.</p>
+<p>In the SQL command above we have our search term, Task 1&rsquo;TEST; and we can see that the quote in the search term completes the SQL statement. The remaining part, TEST%&rsquo;), is invalid SQL which is why an error is thrown. This is dangerous as it means that any SQL could be executed against the database. How do we stop this?</p>
+<p>The answer is to escape the quotes. Rails provides an easy way to do this. We can pass an array of conditions, the first element of which is our search term with the value replaced by a question mark. Each question mark in the first element will be replaced by the value in each subsequent element, but escaped so that it is safe.  If we had, say, three parameters we&rsquo;d have three question marks and our array would have to contain four elements.</p>
+<pre class="ruby">
+  @tasks = Task.find(:all, &crarr;
+  :conditions=&gt; [ &quot;name LIKE ?&quot;, &quot;%#{params[:query]}%&quot; ]
+</pre>
+<p class="title">A safer way to pass a search term that contains user input.</p>
+<p>Now that we&rsquo;ve updated our query, if we search again for a term with a single quote in it Rails escapes the quote safely. To make sure that our LIKE search is maintained the percent signs need to be placed around the  query in the second element of the array. Placing them around the question mark will not work.</p>
+<pre class="terminal">
+The SQL in our log file now looks like this.
+Processing TasksController#index (for 127.0.0.1 at 2009-02-01 21:59:31) [GET]
+  Parameters: {&quot;query&quot;=&gt;&quot;Task 1&rsquo;TEST&quot;}
+  Task Load (0.5ms)   SELECT * FROM &quot;tasks&quot; WHERE (name like &rsquo;%Task 1&rsquo;&rsquo;TEST%&rsquo;)
+</pre>  
+<p class="title">The search term is now safely escaped.</p>
+<p>We can see now that the quote is escaped. Note that as we&rsquo;re using Sqlite the quote is escaped by using two single quotes. Other databases may use a backslash before the quote.</p>
+<p>In Rails you only need to worry about escaping input in find methods if you&rsquo;re using the :conditions parameter. If you&rsquo;re using the dynamic find_by methods as discussed back in <a href="/episodes/2-dynamic-find-by-methods">episode 2</a> then Rails will automatically escape any input which will ensure that you&rsquo;re safe from SQL injection.</p>

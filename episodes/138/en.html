@@ -1,0 +1,130 @@
+<p>Internationalization (i18n) was one of the new features introduced in Rails 2.2, and in this episode we&rsquo;ll show you how to use it by making the page below able to display itself in more than one language.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/79/original/E138I01.png" width="810" height="412" alt="The home page for the site we&rsquo;re going to internationalize."/>
+</div>
+<p>When a user signs up to use our site we&rsquo;re going to give them the option of choosing the language they want the site to use. For this e-commerce site we&rsquo;re going to give them the choice between English and Wookieespeak.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/80/original/E138I02.png" width="809" height="512" alt="The user can choose their preferred language when they sign up."/>
+</div>
+<p>We&rsquo;re using the <a href="http://github.com/technoweenie/restful-authentication/tree/master">Restful Authentication plugin</a> to manage our users and the form above is the one that the plugin generates. We&rsquo;ve added a new field to the <code>User</code> model called <code>language</code> and added a dropdown field to the form that allows the user to set their preferred language. The value of each option is a two-letter language code that for the purposes of this example we&rsquo;ve just hard-coded into the view.</p>
+<pre class="ruby">
+&lt;li&gt;
+ &lt;%= form.label :language, &quot;Language&quot; %&gt;
+ &lt;%= form.select :language, [[&#x27;English&#x27;, &#x27;en&#x27;], [&#x27;Wookieespeak&#x27;, &#x27;wk&#x27;]] %&gt;
+&lt;/li&gt;
+</pre>
+<h3>Creating Locales</h3>
+<p>Applications created with Rails 2.2 or later will have a directory called <code>locales</code> under the <code>config</code> directory and its here that the files for each language the application is going to support go. Each language&rsquo;s texts are stored in a YAML file and there will be an English file called <code>en.yml</code> created as an example.</p>
+
+<p>To internationalize our page we&rsquo;ll first need to copy each piece of text that we want to translate from the products page into the <code>en.yml</code> file.</p>
+<pre class="ruby">
+en:
+  welcome:
+    title: &quot;Welcome&quot;
+    paragraph: &quot;Thank you for visiting our store. Please browse through the products below and buy some stuff. You&#x27;ll love the unique quality and workmanship put into these items.&quot;
+  products:
+      title: &quot;Products&quot;
+      released: &quot;Released&quot;
+</pre>
+<p>Note that the YAML keys can be nested so we&rsquo;ve split the texts up in to two sections, <code>welcome</code> and <code>products</code>. With the English texts in place the next thing to do is to create a Wookieespeak file to hold the translations. These go in a file called <code>wk.yml</code> in the same directory.</p>
+<pre class="ruby">
+ wk:
+  welcome:
+    title: &quot;Wyah&quot;
+    paragraph: &quot;Wyaaaaaa. Ruh ruh. Huwaa muaa mumwa. Wyogg, ur oh. Wua ga ma uma ahuma ooma. Ruh gwyaaaag. Youw.&quot;
+  products:
+    title: &quot;Mauhwaa&quot;
+    released: &quot;Ruhhha&quot;
+</pre>  
+<p>Apologies if the translation isn&rsquo;t quite correct, but I don&rsquo;t speak Wookiee.</p>
+
+<h3>Adding The Placeholders</h3>
+<p>Now that we have the YAML files for each language we can replace the hard-coded text in the page with placeholders that point to the translations. Rails provides a method called <code>t</code> which takes the translation&rsquo;s identifier as an argument. Once we&rsquo;ve replaced the texts our index page now looks like this:</p>
+<pre class="ruby">
+&lt;% title t(&#x27;welcome.title&#x27;) %&gt;
+&lt;p&gt;&lt;%= t &#x27;welcome.paragraph&#x27; %&gt;&lt;/p&gt;
+&lt;h2&gt;&lt;%= t &#x27;products.title&#x27; %&gt;&lt;/h2&gt;
+&lt;% @products.each do |product| %&gt;
+  &lt;h3&gt;
+    &lt;%= link_to h(product.name), product %&gt;
+    &lt;%= number_to_currency product.price, :unit =&gt; &quot;&amp;pound;&quot; %&gt;
+  &lt;/h3&gt;
+  &lt;div class=&quot;date_released&quot;&gt;
+    &lt;em&gt;&lt;%= t &#x27;products.released&#x27; %&gt;: &lt;%= product.release_date.strftime(&quot;%d/%m/%Y&quot;) %&gt;&lt;/em&gt;
+  &lt;/div&gt;
+&lt;% end %&gt;
+</pre>
+<p>If we reload our page now it will look exactly the same, but instead of the static text we had before we&rsquo;re seeing the English versions of our localized texts.</p>
+
+<h3>Changing The Language</h3>
+<p>Now that we have two languages we&rsquo;ll need to provide a way to switch between them. We can do this using a before filter in the application&rsquo;s controller that calls a method to set the language.</p>
+<pre class="ruby">
+class ApplicationController &lt; ActionController::Base
+  helper :all
+  protect_from_forgery 
+
+  before_filter :set_user_language
+
+  private
+  def set_user_language
+    I18n.locale = &#x27;wk&#x27;
+  end
+end
+</pre>
+<p>To test the Wookiee translations we&rsquo;ll hard-code the value of the locale to the code we used for Wookieespeak and reload the page.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/81/original/E138I03.png" width="808" height="375" alt="The translations aren&rsquo;t shown as they&rsquo;re not yet loaded."/>
+</div>
+<p>The page changes, but we&rsquo;re not seeing the translations. The reason for that is that the localised texts are loaded when the application starts up. We&rsquo;ll need to restart the server to see the Wookiespeak text.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/82/original/E138I04.png?" width="808" height="380" alt="The Wookiee translations are now shown."/>
+</div>
+
+<h3>Setting The Language From The User&rsquo;s Preferences</h3>
+<p>Our translations now work but the language used is hard-coded in the application controller. We need to use the language preference set by the user so that they can see the site in their preferred language. As we&rsquo;re using Restful Authentication we can use <code>current_user</code> to retrieve the logged in user and then get their language. We can modify the <code>set_user_language</code> method in the application controller to set the current locale from  the user&rsquo;s language if there is a logged-in user.</p>
+<pre class="ruby">
+def set_user_language
+    I18n.locale = current_user.language if logged_in?
+end
+</pre>
+<p>If we look at the page while not logged in then the user interface will show the default language, English, but if we log in as a user whose preferred language is Wookiee then we&rsquo;ll see the translations.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/83/original/E138I05.png" width="810" height="423" alt="The user&rsquo;s preferred language is now shown."/>
+</div>
+<h3>Two Final Steps</h3>
+<p>Although most of the text is translated, there are still a couple of problems with the page: the flash text that shows at the top of the page isn&rsquo;t localized and the prices have lost their currency symbol.</p>
+<p>We can fix the problem with the flash message by adding new texts to our two language files. We&rsquo;ll add this key to the <code>en.yml</code> file.</p>
+<pre class="ruby">
+flash:
+  login: &quot;Logged in successfully.&quot;
+</pre>  
+<p>and this one to wk.yml.</p>
+<pre class="ruby">
+flash:
+  login: &quot;Wohooohaa&quot;
+</pre>
+<p>Then in the sessions controller file we&rsquo;ll need to update the code that sets the flash message. In the <code>create</code> method we&rsquo;ll change the line the line the sets the flash to:</p>
+<pre class="ruby">
+flash[:notice] = t(&quot;flash.login&quot;)
+</pre>
+<p>Note that we have access to the <code>t</code> method in the controller as we had in the view. If we need to translate something outside a controller or view then <code>t</code> is just a shortcut for <code>I18n.translate</code> so that can be used elsewhere.</p>
+
+<p>We can restore the missing currency symbols by using one of the reserved keys that the language YAML files use. There are a number of keys for defining things like dates, times and number formatting. At the top of the English language file is a link to a <a href="http://github.com/svenfuchs/rails-i18n/tree/master/rails%2Flocale">Github repository</a> that has a large number of example files for many different languages. We&rsquo;ll make up some symbols and formats for the Wookiee culture and add them to the file.</p>
+<pre class="ruby">
+number:
+  format:
+    precision: 3
+    separator: &#x27;|&#x27;
+    delimiter: &#x27;-&#x27;
+
+  currency:
+    format:
+      unit: &#x27;&omega;&#x27;
+      precision: 2
+      format: &#x27;%n%u&#x27;
+</pre>
+<p>When we refresh the page now we&rsquo;ll see the number formats and currencies in Wookiee. If this was a proper online shop we&rsquo;d need to handle the differing coversion rates between currencies, but for our demonstation the different currency symbol and price formatting will do.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/84/original/E138I06.png" width="810" height="423" alt="Everything on the page is now translated as we want it."/>
+</div>
+<p>This episode has only covered the basics of internationalization in Rails. There are a number of other parts of the site that could be localized, for example the date formats and the error messages that are displayed by the validations. Checkout the <a href="http://guides.rubyonrails.org/i18n.html">documentation</a> for more details.</p>

@@ -1,0 +1,132 @@
+<p>In the last episode we added AJAX functionality to a paginated list of products. Instead of acting as normal HTML links, the paginated links had click events added to them via unobtrusive JavaScript so that when clicked they made an AJAX request that updated the main content of the page with a new page of products.</p> 
+<div class="imageWrapper">
+  <img src="/system/photos/164/original/E175I01.png" width="823" height="429" alt="Our products page."/>
+</div>
+
+<h3>Problems With AJAX</h3>
+
+<p>Because we&rsquo;re using AJAX to update the page the URL doesn&rsquo;t change when a new page of products is loaded. This means that if we reload the page, or bookmark it and return to it later, the first page of products will be shown no matter what page of products we were on. Another consequence of using AJAX is that changing the page of links we&rsquo;re viewing doesn&rsquo;t add the previous page to the browser&rsquo;s history, so we can&rsquo;t use the back and forward buttons to move through the pages we&rsquo;ve just viewed.</p>
+
+<p>So there are disadvantages to our AJAX approach; how can we work around them? That&rsquo;s what we&rsquo;ll show you in this episode. Be warned that this episode will be more about JavaScript than Ruby on Rails as the issues we&rsquo;ll be dealing with are on the client-side.</p>
+
+<p>There are a number of JavaScript libraries we could use to solve this problem. One of the oldest is <a href="http://code.google.com/p/reallysimplehistory/">reallysimplehistory</a>, available on Google code. There is also Yahoo&rsquo;s <a href="http://developer.yahoo.com/yui/history/">Browser History Manager</a>. Yahoo have a number of JavaScript libraries available so it&rsquo;s worth a look. Another option is Asual&rsquo;s <a href="http://www.asual.com/swfaddress/">SWFAddress</a>, which works with Flash as well as JavaScript.</p>
+
+<p>All of the libraries mentioned above work with plain JavaScript, but as we&rsquo;re using jQuery in our application it would be better if we could find one designed to work with that. Asual, mentioned above, have released a plugin called <a href="http://www.asual.com/jquery/address/">jQuery Address</a> that would work, but instead we&rsquo;re going to use a different one called <a href="http://benalman.com/projects/jquery-url-utils-plugin/">jQuery URL Utils plugin</a>. This plugin has a lot of functionality despite its small size (less than 4KB minified) and comes with good documentation.</p>  
+ 
+<p>To use the plugin we&rsquo;ll need to download it and add it to our application&rsquo;s <code>/public/javascripts</code> directory as <code>jquery.ba-url.js</code>. Next we&rsquo;ll include it on our products index page. It needs to be referenced before our <code>pagination.js</code> file so we&rsquo;ll have to modify the line that includes the JavaScript to add the file before the <code>pagination</code> one.</p>
+<pre class="javascript">
+&lt;% javascript &#x27;jquery.ba-url&#x27;, &#x27;pagination&#x27; %&gt;
+</pre>
+
+<h3>An Improvement to Our Pagination Code</h3>
+
+<p>Before we start modifying our code to use the plugin we&rsquo;ll take a brief look at the pagination code we wrote in the last episode.</p>
+<pre class="javascript">
+$(function () {
+  $(&#x27;.pagination a&#x27;).live(&quot;click&quot;, function () {
+    $(&#x27;.pagination&#x27;).html(&#x27;Page is loading...&#x27;);
+    $.get(this.href, null, null, &#x27;script&#x27;);
+    return false;
+  });
+});
+</pre>
+<p>We can make a small improvement to this code. Instead of using <code>$.get</code> to make the AJAX request we can instead use <code>$.getScript</code>, passing it the URL we want to call.</p>
+<pre class="javascript">
+$.getScript(this.href);
+</pre>
+<p>The <code>$.getScript</code> function makes a GET request to the URL passed as a parameter and executes any JavaScript that is returned, which is the same as <code>$.get</code> does, but with a neater syntax.</p>
+
+<h3>Giving Each Page a Unique URL</h3>
+
+<p>We can now return to our application and start implementing new features. What we want to do is update the URL through JavaScript each time one of the pagination links is clicked. This way each page of products will have a unique URL so that it can be bookmarked. We&rsquo;ll do this by adding an anchor to the URL that uniquely identifies the current page of products we&rsquo;re on. For example, for page 2 when the application is running locally the URL will be:</p>
+<pre class="terminal">
+http://localhost:3000/#page=2
+</pre>
+<p>We can set the URL by making use of the plugin we downloaded earlier. It provides a <code>$.setFragment</code> method that updates the anchor part of the current URL. We can use it in our pagination code like this:</p>
+<pre class="javascript">
+$(function () {
+  $(&#x27;.pagination a&#x27;).live(&quot;click&quot;, function () {
+    $.setFragment({ page: $.queryString(this.href).page });
+    $(&#x27;.pagination&#x27;).html(&#x27;Page is loading...&#x27;);
+    $.getScript(this.href);
+    return false;
+  });
+});
+</pre>
+<p>It works like this: if we pass <code>$.setFragment</code> a literal JavaScript object it will turn it into a querystring-like set of keys and values. We want an anchor of the form <code>page=x</code>, so we can pass an object with <code>page</code> as a key, but how do we get the page number? Well, the page number is in the querystring of the pagination link&rsquo;s URL, which we&rsquo;re passing in our AJAX call. We can get this value out by using the <code>$.queryString</code> function, which turns the keys and values in the querystring into a JavaScript object, and getting the value of the <code>page</code> property.</p>
+
+<p>With our pagination code updated we can try it out. If we load up our products page and click &ldquo;next&rdquo; the AJAX request is made and the URL changes. Note that the browser&rsquo;s back button is now enabled too, which means that the previous page has been added to the browser&rsquo;s history.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/165/original/E175I02.png" width="823" height="403" alt="The current page is now show in the URL&rsquo;s anchor."/>
+</div>
+
+<h3>Fixing The Back Button</h3>
+
+<p>We&rsquo;re not there yet. Although the back and forward buttons now work, the page&rsquo;s contents don&rsquo;t change when we use them. Also, if we bookmark the page and come back to it, or just reload it then the first page of products will be displayed no matter what the page value in the URL&rsquo;s anchor.</p>
+
+<p>We&rsquo;ll sort out the back and forward buttons first. To get them working we need to listen for an event that&rsquo;s fired when the anchor part of the URL changes. This is something that is supported by the plugin we&rsquo;re using. To enable it we need to add a line of JavaScript to our pagination code.</p>
+<pre class="javascript">
+$.fragmentChange(true);
+</pre>
+<p>We can now listen for that event. To do so we call the <code>$(document).bind</code> function, passing the name of the event we want to listen out for. If we also pass the name of the section of the anchor we&rsquo;re interested in, the event will only fire when that section changes. We also need to pass bind a function, and this will be executed when the event fires. For now we&rsquo;ll just show an <code>alert</code> so that we can test that everything works.</p>
+<pre class="javascript">
+$(document).bind(&quot;fragmentChange.page&quot;, function () {
+  alert(&#x27;fragment changed!&#x27;);
+});
+</pre>
+<p>If we reload the page now then click one of the links we&rsquo;ll see the alert, as the anchor part of the URL has changed. The alert will also be shown when we click either the back or forward buttons.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/166/original/E175I03.png" width="825" height="405" alt="The fragmentChange event is fired when the back button is clicked."/>
+</div>
+
+<p>Given that the <code>fragmentChange</code> event is trapped each time we click one of the links, we can now move our AJAX request into the function that&rsquo;s called when the event fires. That way the AJAX request will also be made whenever the back button is clicked. This does give us a slight problem, however. This is the line of code we&rsquo;re moving.</p>
+<pre class="javascript">
+$.getScript(this.href);
+</pre>
+<p>In the line above this refers to the clicked pagination link which we no longer have access to, so we&rsquo;ll have to get the page number another way. The code that runs when the link&rsquo;s clicked is still updating the URL&rsquo;s anchor, though, so we can retrieve the page number from that.</p>
+<pre class="javascript">
+$.getScript(
+  $.queryString(
+    document.location.href, { &#x27;page&#x27;:$.fragment().page }
+  )
+);
+</pre>
+<p>The code we use to do this is a little complicated, so we&rsquo;ve split it up across a few lines to make it clearer. To build the correct URL we use the <code>$.queryString</code> function passing it <code>document.location.href</code> to get the main part of the page&rsquo;s URL and an JavaScript object with a <code>page</code> property to build the querystring. To get the correct page number we call <code>$.fragment().page</code> to get it from the anchor part of the URL. Once we&rsquo;ve built the correct URL up we can pass it to <code>$.getScript</code> to make our AJAX call.</p>
+
+<p>When we reload the page now and start clicking through the links the back button becomes available as before, but now when we click the back button the correct page of products is shown as the <code>fragmentChange</code> event is fired and an AJAX call made to update the products list.</p>
+
+<h3>Bookmarking and Reloading</h3>
+
+<p>We&rsquo;re almost there now, but there&rsquo;s still one part of the page that&rsquo;s not working as it should. If we visit a specific page of products then click reload we&rsquo;re shown the first page of products again. The same happens if we bookmark a specific page and go back to it later.</p>
+
+<p>The way to fix this problem is to trigger the <code>fragmentChange</code> event when the page loads, if there&rsquo;s an anchor in the page&rsquo;s URL. To do that we just need to add a few more lines of JavaScript to our pagination code.</p>
+<pre class="javascript">
+if ($.fragment().page) {
+  $(document).trigger(&quot;fragmentChange.page&quot;);
+}
+</pre>
+<p>This code checks for an anchor in the URL when the page loads and if it finds one triggers the <code>fragmentChange</code> event so that the correct page of products is loaded.</p> 
+
+<p>Our final pagination JavaScript looks like this:</p>
+<pre class="javascript">
+$(function () {
+	$(&#x27;.pagination a&#x27;).live(&quot;click&quot;, function () {
+		$.setFragment({ page: $.queryString(this.href).page });
+		$(&#x27;.pagination&#x27;).html(&#x27;Page is loading...&#x27;);
+		return false;
+	});
+	
+	$.fragmentChange(true);
+	$(document).bind(&quot;fragmentChange.page&quot;, function () {
+		$.getScript($.queryString(document.location.href, { &#x27;page&#x27;: $.fragment().page }));
+	});
+	
+	if ($.fragment().page) {
+		$(document).trigger(&quot;fragmentChange.page&quot;);
+	}
+});
+</pre>
+<p>We now have a product list that we can page though via AJAX, but which still works with the browsers&rsquo; forward and back buttons and which allows specific pages to be bookmarked.</p>
+
+<p>While we&rsquo;ve used jQuery to develop the paging in our application there are still many Prototype users out there. If you&rsquo;re using Prototype the <a href="http://prototypextensions.com/history#main=quickstart">Prototypextensions</a> library offers similar AJAX history functionality.</p>

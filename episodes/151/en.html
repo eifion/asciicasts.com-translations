@@ -1,0 +1,175 @@
+<p>One of the major changes to Rails 2.3 is that it is now uses <a href="http://rack.rubyforge.org">Rack</a>. Rack is a beautiful thing, it provides a standardised interface for a web server to interact with a web application. This might seem a fairly simple thing, but it gives us a lot of power. One of the things it enables is Rack Middleware which is a filter that can be used to intercept a request and alter the response as a request is made to an application.</p>
+<p>The previous episode demonstrated Rails Metal, which is similar to Middleware in that it uses the Rack interface to handle a request. The main difference is that Metal acts as the endpoint for a request and returns a response, whereas Middleware acts like a filter and can pass the request on to an application, then filter the response that is returned.</p>
+<p>To demonstrate Rack Middleware we&rsquo;re going to use the simple e-commerce application seen in previous episodes. We&rsquo;d like to know how long each request takes to process so we&rsquo;re going to use Middleware to inject an HTML comment into each page that contains the processing time. This is probably not something you&rsquo;re going to want to do in a production Rails application, but it will provide a good demonstration on how Middleware can intercept a request and response and change an application&rsquo;s behaviour.</p>
+<div class="imageWrapper">
+  <img src="E151I01.png" width="824" height="456" alt="Our e-commerce app."/>
+</div>
+
+<h3>Creating The Middleware</h3>
+<p>A Middleware filter is just a Ruby class. We&rsquo;ll create a class under the <code>lib</code> folder of our Rails application in a file called <code>response_timer.rb</code>. The code for the class is shown below.</p>
+<pre class="ruby">
+class ResponseTimer
+  def initialize(app)
+    @app = app
+  end
+  
+  def call(env)
+    [200, {&quot;Content-Type&quot; =&gt; &quot;text/html&quot;}, &quot;Hello, World!&quot;]
+  end
+end
+</pre>
+<p class="title">Our first Middleware class.</p>
+<p>There are a couple of things of note in the class above:</p>
+<ul style="list-style: disc inside;">
+  <li>All Middleware classes have an <code>initialize</code> method that takes an application as an argument. In that method we&rsquo;ve created an instance variable called <code>@app</code> so that we can reference the application in other methods. In this case <code>@app</code> will be a reference to our Rails application.</li>
+  <li><code>ResponseTimer</code> is a Rack application in itself, although we&rsquo;ll be making it act like a filter for our Rails app. All Rack applications have a <code>call</code> method that takes an environment hash variable as an argument and returns an array containing an HTTP status, a hash of headers and a response object. For now our <code>call</code> method is just going to return a simple &ldquo;Hello, World!&rdquo; response to make sure that everything is working as we&rsquo;d expect it to.</li>
+</ul>
+<p>There&rsquo;s one more change we&rsquo;ll need to make before our Middleware will be called. In the Rails application&rsquo;s <code>environment.rb</code> file we have to add a line in the <code>Rails::Initializer.run</code> block so that the app knows to treat our new class as Middleware.</p>
+<pre class="ruby">
+Rails::Initializer.run do |config|
+  config.middleware.use &quot;ResponseTimer&quot;
+end
+</pre>
+<p>We&rsquo;ll have to pass the name of the class as a string rather than as a constant because the class will not be loaded when the application is initialised. Passing the name as a string ensures that the class is loaded when the Middleware is set up.</p>
+<p>To test that our new class is being picked up as a Middleware class we can call <code>rake middleware</code>. The class should be listed in the output.</p>
+<pre class="terminal">
+eifion$ rake middleware
+(in /Users/eifion/rails/apps_for_asciicasts/ep151)
+use Rack::Lock
+use ActionController::Failsafe
+use ActionController::Reloader
+use ActionController::Session::CookieStore, #&lt;Proc:0x01b90eb4@(eval):8&gt;
+use ActionController::RewindableInput
+use ActionController::ParamsParser
+use Rack::MethodOverride
+use Rack::Head
+use ResponseTimer
+use ActiveRecord::ConnectionAdapters::ConnectionManagement
+use ActiveRecord::QueryCache
+run ActionController::Dispatcher.new
+</pre>
+<p>All of the Middleware our application is using is listed above, including our <code>ResponseTimer</code> class.</p> 
+
+<h3>Testing The Middleware</h3>
+<p>Now that our Middleware class is in place we can test it. Every time we make a change to the class we&rsquo;ll have to restart the server.  Once we&rsquo;ve done that and we go back to our products page we&rsquo;ll see the output from our Middleware class instead of the page we saw before.</p>
+<div class="imageWrapper">
+  <img src="E151I02.png" width="816" height="256" alt="The response from our Middleware class"/>
+  <p class="title">The response from our Middleware class.</p>
+</div>
+<p>It isn&rsquo;t just the products controller that is intercepted by the Middleware. We can call any action in any controller and we&rsquo;d see the same output, even if we call an action that doesn&rsquo;t exist. This happens because our Middleware isn&rsquo;t acting as Middleware right now; it is catching every request and returning the same response so our Rails application isn&rsquo;t even seeing the requests. We want to filter the responses from our Rails applications rather than just display &ldquo;Hello, World!&rdquo; so we&rsquo;ll now modify our Middleware class to do that.</p>
+<pre class="ruby">
+class ResponseTimer
+  def initialize(app)
+    @app = app
+  end
+  
+  def call(env)
+    status, headers, response = @app.call(env)
+    [status, headers, &quot;&lt;!-- Response Time: ... --&gt;\n&quot; + response.body]
+  end
+end
+</pre>
+<p>Instead of just returning a static response, we want to return a modified version of the response from our Rails application. As our Rails app is a Rack application and we have a reference to it in the <code>@app</code> instance variable we can call <code>call</code> on it, passing through the environment variables, and modify the response. Like any other Rack application there will be an array returned containing the status, the headers and a response object. The response will be an <a href="http://api.rubyonrails.org/classes/ActionController/Response.html"><code>ActionController::Response</code></a> object, rather than a string, so we&rsquo;ll have to call its <code>body</code> method to get the response as a string. We&rsquo;ll add an HTML comment to the beginning of the body before returning it.</p>
+
+<p>When we look at our products page again (after restarting the server) we&rsquo;ll see the comment at the top of the page&rsquo;s source code. Our original aim was to have the time the response took in the comment. We&rsquo;ll modify the <code>call</code> method now to do that.</p>
+<pre class="ruby">
+def call(env)
+  start = Time.now
+  status, headers, response = @app.call(env)
+  stop = Time.now
+  [status, headers, &quot;&lt;!-- Response Time: #{stop - start} --&gt;\n&quot; + response.body]
+  end
+</pre>  
+<p>After restarting the server again, we&rsquo;ll now see the response time in the comment.</p>
+<pre class="terminal">
+&lt;!-- Response Time: 0.021467 --&gt;
+&lt;!DOCTYPE html PUBLIC &quot;-//W3C//DTD XHTML 1.0 Strict//EN&quot;
+	&quot;http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd&quot;&gt;
+</pre>
+<h3>Filtering The Content Type</h3>
+<p>One problem with our Middleware class is that it assumes that every response is an HTML document, which is not always the case. To make sure that we only add our timer comment to the appropriate documents we can check the Content-Type header.</p>
+<pre class="ruby">
+def call(env)
+    start = Time.now
+    status, headers, response = @app.call(env)
+    stop = Time.now
+    if headers[&quot;Content-Type&quot;].include? &quot;text/html&quot;
+      [status, headers, &quot;&lt;!-- Response Time: #{stop - start} --&gt;\n&quot; + response.body]
+    else
+      [status, headers, response]
+    end
+  end
+end
+</pre>
+<p>The <code>call</code> method will now pass the response straight through for any content type other than <code>text/html</code>.</p>
+
+<h3>Configuring Middleware</h3>
+<p>If we want to pass parameters to our Middleware we can. Say we want to customise the message that we return in our HTML comment. We can do this by passing additional parameters to the Middleware class when it is created.</p>
+<pre class="ruby">
+class ResponseTimer
+  def initialize(app, message = &quot;Response Time&quot;)
+    @app = app
+    @message = message
+  end
+  
+  def call(env)
+    start = Time.now
+    status, headers, response = @app.call(env)
+    stop = Time.now
+    if headers[&quot;Content-Type&quot;].include? &quot;text/html&quot;
+      [status, headers, &quot;&lt;!-- #{@message}: #{stop - start} --&gt;\n&quot; + response.body]
+    else
+      [status, headers, response]
+    end
+  end
+end
+</pre>
+<p>In our <code>initialize</code> method we&rsquo;ve added another argument called <code>message</code>, with a default value. Its value is stored in an instance variable called <code>@message</code>. In the <code>call</code> method we put the message into the HTML comment.</p>
+<p>To set the message we have to alter the line of code in <code>environment.rb</code> where we defined our new Middleware class. We just pass the message as a second argument.</p>
+<pre class="ruby">
+Rails::Initializer.run do |config|
+  config.middleware.use &quot;ResponseTimer&quot;, &quot;Load Time&quot;
+end
+</pre>
+<p>After another restart and refresh the comment at the top of our page will now be updated to show our new message.</p>
+<pre class="terminal">&lt;!-- Load Time: 0.179821 --&gt;</pre>
+
+<h3>Improving The Middleware</h3>
+<p>What we&rsquo;ve done so far works perfectly well, but it&rsquo;s not using Middleware in the best way. We&rsquo;re using <code>response.body</code> which is a method specific to Rails applications and which assumes that the response object is an <code>ActionController</code> response. When working with Rack Middleware we shouldn&rsquo;t assume that we&rsquo;re dealing any specific framework or application.</p>
+<p>A way to make our Middleware class work with any Rack application would be to use <code>response.each</code> which takes a block and to add our content within the block. This approach can become messy fairly easily, though so we&rsquo;re going to restructure our Middleware class. We&rsquo;ll show the code first and then explain it.</p>
+<pre class="ruby">
+class ResponseTimer
+  def initialize(app, message = &quot;Response Time&quot;)
+    @app = app
+    @message = message
+  end
+  
+  def call(env)
+    @start = Time.now
+    @status, @headers, @response = @app.call(env)
+    @stop = Time.now
+    [@status, @headers, self]
+  end
+  
+  def each(&amp;block)
+    block.call(&quot;&lt;!-- #{@message}: #{@stop - @start} --&gt;\n&quot;) if @headers[&quot;Content-Type&quot;].include? &quot;text/html&quot;
+    @response.each(&amp;block)
+  end
+end
+</pre>
+<p>The first thing to note is that in the <code>call</code> method we&rsquo;re returning <code>self</code> in the array that we pass back to the Rack application instead of the response. The only method that Rack requires a response object to support is <code>each</code>. This makes our <code>ResponseTimer</code> class a type of response. We&rsquo;re also making <code>start</code>, <code>stop</code>, <code>status</code>, <code>headers</code> and <code>response</code> instance variables so that we can access them in the each method.</p>
+<p>Each iteration through the <code>each</code> method&rsquo;s block will return some content that will be returned to the user. The first iteration will return our timer comment if the content type is <code>text/html</code> and all other iterations will be passed back to the response object.</p>
+
+<p>With one last restart and refresh we&rsquo;ll check the source of our application and see if the timer comment still works.</p>
+<pre class="terminal">
+&lt;!-- Load Time: 0.023725 --&gt;
+&lt;!DOCTYPE html PUBLIC &quot;-//W3C//DTD XHTML 1.0 Strict//EN&quot;
+	&quot;http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd&quot;&gt;
+
+&lt;html xmlns=&quot;http://www.w3.org/1999/xhtml&quot; xml:lang=&quot;en&quot; lang=&quot;en&quot;&gt;
+&lt;head&gt;
+</pre>
+<p>It does! Now that we&rsquo;ve rewritten our Middleware it can be used with any type of application that supports Rack.</p>
+
+<h3>Other Uses For Middleware</h3>
+<p>Our example, while it demonstrates how to use Middleware, isn&rsquo;t the most useful application of it. There are though, unlimited uses for Middleware. For more example Middleware applications, take a look at the <a href="http://github.com/rack/rack-contrib/tree/master">rack-contrib</a> project on GitHub. There are many Middleware applications there that you can use in your own projects or browse through to see how to make your own Middleware apps.</p>

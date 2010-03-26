@@ -1,0 +1,294 @@
+<p>One of the most popular plugins for Rails applications is <a href="http://github.com/technoweenie/restful-authentication/tree/master">Restful Authentication</a> which was covered back in <a href="http://railscasts.com/episodes/67-restful-authentication">episode 67</a>. Restful Authentication is a generator script that creates a lot of code that will handle the authentication in your Rails app. It works well as a quick solution to creating authentication for your application, but more flexible and extendable alternatives now exist.</p>
+
+<p>One such alternative is <a href="http://github.com/binarylogic/authlogic/tree/master">Authlogic</a>. It uses a different approach from Restful Authentication in that it doesn&rsquo;t generate controllers or views but just deals with the code to handle the authentication for your users. Because of that it can take a bit longer to get your application running under Authlogic, as you have to write more code yourself, but you gain flexibility and more control over how the authentication is presented to the user.</p>
+
+<h3>Adding Authlogic To An Application</h3>
+<div class="imageWrapper">
+  <img src="/system/photos/86/original/E160I01.png" width="823" height="287" alt="The application we&rsquo;re going to add authentication to." />
+</div>
+
+<p>Above is a page from the application we&rsquo;re going to add authentication to. In the top right corner of the page we want to add a link that shows &ldquo;Register&rdquo; and &ldquo;Log in&rdquo; links if there&rsquo;s no currently logged-in user and &ldquo;Edit Profile&rdquo; and &ldquo;Log out&rdquo; links if there is.</p>
+
+<h3>Installing Authlogic</h3>
+
+<p>Authlogic can be installed either as a plugin or a gem; we&rsquo;re going to install the gem. To add it to our application we just need to add the line below to <code>/config/environment.rb</code>.</p>
+<pre class="ruby">
+config.gem &quot;authlogic&quot;
+</pre>
+<p>Then we&rsquo;ll run rake to make sure that the gem is installed.</p>
+<pre class="terminal">
+sudo rake gems:install
+</pre>
+
+<h3>Creating The Model And Controller</h3>
+
+<p>With Authlogic installed the next thing to do is to create a model and controller to handle our users. First we&rsquo;ll generate our <code>User</code> model.</p>
+<pre class="terminal">
+script/generate model user
+</pre>
+<p>Next we&rsquo;ll edit the generated migration file to configure our model&rsquo;s properties. Authlogic works by looking for columns with a given name in the database. Our migration file will look like this:</p>
+<pre class="ruby">
+class CreateUsers &lt; ActiveRecord::Migration
+  def self.up
+    create_table :users do |t|
+      t.string :username
+      t.string :email
+      t.string :crypted_password
+      t.string :password_salt
+      t.string :persistence_token
+      t.timestamps
+    end
+  end
+
+  def self.down
+    drop_table :users
+  end
+end
+</pre>
+<p>Authlogic recognises the fields called <code>email</code>, <code>crypted_password</code>, <code>password_salt</code> and <code>persistence_token</code> and knows how to deal with them. You can find more details on the columns that Authlogic recognises on the Github page for the <a href="http://github.com/binarylogic/authlogic_example/tree/master">Authlogic example app</a>.</p>
+
+<p>Finally we&rsquo;ll run <code>rake</code> to create the table in the database.</p>
+<pre class="terminal">
+rake db:migrate
+</pre>
+<p>The <code>User</code> model we generated is just a standard model class. To add Authlogic to the class we just add the line <code>acts_as_authentic</code>.</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  acts_as_authentic
+end
+</pre>
+<p>You can pass a block to <code>acts_as_authentic</code> to specify configuration options, but the defaults are sensible so we won&rsquo;t need to do that here.</p>
+<p>Before we go any further we&rsquo;ll also create our users controller. This will need to have <code>new</code> and <code>edit</code> views so we&rsquo;ll get the generator to create those.</p>
+<pre class="terminal">
+script/generate controller users new edit
+</pre>
+<p>We&rsquo;ll be using the controller as a restful resource so we&rsquo;ll also need to make a small addition to the routes file (<code>/config/routes.rb</code>).</p>
+<pre class="ruby">
+map.resources :users
+</pre>
+<p>We can leave the controller as it is for now. We&rsquo;ll come back and fill the controller methods and views shortly.</p>
+
+<h3>Adding The Links</h3>
+
+<p>Now that our model and controller are set up we&rsquo;ll move on to creating the links that enable a user to sign up, log in or out, or change their profile. To start off we&rsquo;ll create the &ldquo;Register&rdquo; link, which we&rsquo;ll put in a <code>div</code> in our application&rsquo;s layout file (<code>/app/views/layouts/application.html.erb</code>).</p>
+<pre class="ruby">
+&lt;div id=&quot;user_nav&quot;&gt;
+  &lt;%= link_to &quot;Register&quot;, new_user_path %&gt;
+&lt;/div&gt;
+</pre>
+<p>We want the link to appear on the right-hand side of the page and in a slightly smaller size so we&rsquo;ll use CSS to float it by modifying our stylesheet.</p>
+<pre class="terminal">
+div#user_nav { float: right; font-size: 0.9em; }
+</pre>
+<p>And we now have our registration link on every page of our application.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/87/original/E160I02.png" width="823" height="287" alt="The page now has a register link." />
+</div>
+
+<p>The &ldquo;Register&rdquo; link links to <code>/users/new</code>, so our next task is to write the code that creates a new user. We already have the controller and view files and the code we&rsquo;ll need to put in them is fairly straightforward.</p>
+<pre class="ruby">
+def new
+    @user = User.new
+end
+
+def create
+  @user = User.new(params[:user])
+  if @user.save
+    flash[:notice] = &quot;Registration successful.&quot;
+    redirect_to root_url
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end
+</pre>
+<p>The controller code is standard RESTful code. The <code>new</code> action creates an empty user object while the <code>create</code> action creates a new user from the supplied parameters and saves it to the database if it is valid, or shows the new form again if it is not.</p>
+
+<p>The registration form will be used when registering or editing a user&rsquo;s profile so it will be best put in a partial file. Again, there&rsquo;s nothing complicated.</p>
+<pre class="ruby">
+&lt;% title (&quot;New User&quot;) %&gt;
+&lt;%= render @user %&gt;
+</pre>
+<p class="title">The view code for <code>new.html.erb</code>.</p>
+<pre class="ruby">
+&lt;% form_for @user do |form| %&gt;
+&lt;%= form.error_messages %&gt;
+&lt;ol class=&quot;formList&quot;&gt;
+  &lt;li&gt;
+    &lt;%= form.label :username, &quot;Username&quot; %&gt;
+    &lt;%= form.text_field :username %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.label :email, &quot;Email&quot; %&gt;
+    &lt;%= form.text_field :email %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.label :password, &quot;Password&quot; %&gt;
+    &lt;%= form.password_field :password %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.label :password_confirmation, &quot;Password confirmation&quot; %&gt;
+    &lt;%= form.password_field :password_confirmation %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.submit &quot;Submit&quot; %&gt;
+  &lt;/li&gt;
+&lt;/ol&gt;
+&lt;% end %&gt;
+</pre>
+<p class="title">The code for <code>_user.html.erb</code>.</p>
+<p>Now we can click on the &ldquo;Register&rdquo; link now see our registration form. If we try to register without filling any of the fields in we&rsquo;ll see that Authlogic automatically provides validations for the <code>User</code> model.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/88/original/E160I03.png" width="808" height="592" alt="The user model is automatically validated when a user tries to register." />
+</div> 
+<p>If we fill the form in correctly then we&rsquo;ll be redirected to the home page and told that our registration has been successful.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/89/original/E160I04.png" width="823" height="267" alt="Our user is now successfully registered." />
+</div>
+
+<h3>Logging In</h3>
+<p>Along with the &ldquo;Register&rdquo; link we want a &ldquo;Log in&rdquo; one so that a registered user can log in. To do this in Authlogic we need to create another model called <code>UserSession</code> that represents the user&rsquo;s current session. This means that to log a user in we just create a new <code>UserSession</code> record. Authlogic provides a generator script to generate this model.</p>
+<pre class="terminal">
+$ script/generate session user_session
+    exists  app/models/
+    create  app/models/user_session.rb
+</pre>
+<p>The generator is simple and only creates the new <code>UserSession</code> model. If we look at that model we&rsquo;ll see that it&rsquo;s just an empty class that inherits from <code>Authlogic::Session::Base</code>, but that&rsquo;s enough for it to handle all of the session logic for us.</p>
+<pre class="ruby">
+class UserSession &lt; Authlogic::Session::Base
+end
+</pre>
+<p>As the generator script doesn&rsquo;t create any controllers or views we still need to create a login form. We can do this in a RESTful manner by creating a <code>UserSessions</code> controller and giving it <code>new</code>, <code>create</code> and <code>destroy</code> actions to create and destroy sessions. Only the <code>new</code> action will have an associated view, so that&rsquo;s the only action we&rsquo;ll ask the generator to create.</p>
+<pre class="terminal">
+script/generate controller UserSessions new
+</pre>
+<p>The three methods we need in the controller are, again, much as you&rsquo;d see for any other controller. For new, we just create a <code>new</code> instance of <code>UserSession</code>.</p>
+<pre class="ruby">
+def new
+  @user_session = UserSession.new
+end
+</pre>
+<p>For <code>create</code> we create a <code>UserSession</code> based on the passed parameters. If the user is valid then the <code>UserSession</code> object will be valid and can be saved.</p>
+<pre class="ruby">
+def create
+  @user_session = UserSession.new(params[:user_session])
+  if @user_session.save
+    flash[:notice] = &quot;Successfully logged in.&quot;
+    redirect_to root_url
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end
+</pre>
+<p>Lastly, for destroy we just destroy the current <code>UserSession</code>. Note that we don&rsquo;t need to find the session by an <code>id</code> as we&rsquo;re just destroying the current one for that user.</p>
+<pre class="ruby">
+def destroy
+  @user_session = UserSession.find
+  @user_session.destroy
+  flash[:notice] = &quot;Successfully logged out.&quot;
+  redirect_to root_url
+end
+</pre>
+<p>In the <code>new</code> view we&rsquo;ll need a form so that a user can log themselves in.</p>
+<pre class="ruby">
+&lt;% title &quot;Log in&quot; %&gt;
+
+&lt;% form_for @user_session do |form| %&gt;
+&lt;%= form.error_messages %&gt;
+&lt;ol class=&quot;formList&quot;&gt;
+  &lt;li&gt;
+    &lt;%= form.label :username, &quot;Username&quot; %&gt;
+    &lt;%= form.text_field :username %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.label :password, &quot;Password&quot; %&gt;
+    &lt;%= form.password_field :password %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.submit &quot;Submit&quot; %&gt;
+  &lt;/li&gt;
+&lt;/ol&gt;
+&lt;% end %&gt;
+</pre>
+<p>Again we&rsquo;ll need to modify our routes file so that it treats the controller as  a resource, and we&rsquo;ll also add a couple of named routes to provide neat <code>login</code> and <code>logout</code> URLs.</p>
+<pre class="ruby">
+map.login &#x27;login&#x27;, :controller =&gt; &#x27;user_sessions&#x27;, :action =&gt; &#x27;new&#x27;
+map.logout &#x27;logout&#x27;, :controller =&gt; &#x27;user_sessions&#x27;, :action =&gt; &#x27;destroy&#x27;
+map.resources :user_sessions
+</pre>
+<p>We can now go back to our application&rsquo;s layout file and add the link for logging in.</p>
+<pre class="ruby">
+&lt;div id=&quot;user_nav&quot;&gt;
+  &lt;%= link_to &quot;Register&quot;, new_user_path %&gt;
+  &lt;%= link_to &quot;Log in&quot;, login_path %&gt;
+&lt;/div&gt;
+</pre>
+<p>Now we can log in to the application. If we provide an invalid username or password then the <code>UserSession</code> model is considered invalid and we&rsquo;re shown an error message.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/90/original/E160I05.png" width="808" height="412" alt="An error message is shown if the credentials supplied are incorrect." />
+</div>
+<p>Otherwise we&rsquo;re logged in and redirected back to the home page.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/91/original/E160I06.png" width="827" height="256" alt="The flash message is shown when we successfully log in." />
+</div>
+
+<h3>Logging Out</h3>
+
+<p>The code for logging in and out still isn&rsquo;t complete. After we&rsquo;ve logged in we still see the &ldquo;Register&rdquo; and &ldquo;Log in&rdquo; links where we should now see &ldquo;Edit Profile&rdquo; and &ldquo;Log out&rdquo;. To change the links we&rsquo;ll need to modify our layout file again.</p>
+<pre class="ruby">
+&lt;div id=&quot;user_nav&quot;&gt;
+  &lt;% if current_user %&gt;
+    &lt;%= link_to &quot;Edit profile&quot;, edit_user_path(:current) %&gt;
+    &lt;%= link_to &quot;Logout&quot;, logout_path %&gt;
+  &lt;% else %&gt;
+    &lt;%= link_to &quot;Register&quot;, new_user_path %&gt;
+    &lt;%= link_to &quot;Log in&quot;, login_path %&gt;
+  &lt;% end %&gt;
+&lt;/div&gt;
+</pre>
+<p>There&rsquo;s no need to pass a user id to the <code>edit</code> action as we&rsquo;re always going to be editing the current user so we can just pass <code>:current</code>. The <code>current_user</code> method we&rsquo;ve used in the <code>if</code> statement doesn&rsquo;t as yet exist, so we&rsquo;ll need to write it. We&rsquo;ll want it to be available to all of the controllers so it will go in <code>application_controller.rb</code>.</p>
+<pre class="ruby">
+helper_method :current_user
+
+private
+def current_user_session
+  return @current_user_session if defined?(@current_user_session)
+  @current_user_session = UserSession.find
+end
+
+def current_user
+  @current_user = current_user_session &amp;&amp; current_user_session.record
+end
+</pre>
+<p>We&rsquo;ve added two methods to the application controller. The first, <code>current_user_session</code>,  gets the current user&rsquo;s session, and the second, <code>current_user</code>, will return the <code>User</code> model for the currently logged-in user. We&rsquo;ll make <code>current_user</code> a helper method so that it can be used in our views and our layout file.</p>
+
+<p>Now when we log in we&rsquo;ll see the correct links.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/92/original/E160I07.png" width="827" height="256" alt="Our user is now successfully registered." />
+</div>
+<p>As we&rsquo;ve defined the route and written the controller action to log a user out the &ldquo;Log out&rdquo; link will work, but we need to modify the <code>UsersController</code> to enable the profile to be edited.</p>
+<pre class="ruby">
+def edit
+  @user = current_user
+end
+
+def update
+  @user = current_user
+  if @user.update_attributes(params[:user])
+    flash[:notice] = &quot;Successfully updated profile.&quot;
+    redirect_to root_url
+  else
+    render :action =&gt; &#x27;edit&#x27;
+  end
+end
+</pre>
+<p>The <code>edit</code> and <code>update</code> methods vary slightly from normal in that instead of getting a model by its <code>id</code> they just get the current user, using the <code>current_user</code> method we wrote in the application controller.</p>
+
+<p>Finally we just need to put the user form into the edit view (<code>/app/views/users/edit.html.erb</code>).</p>
+<pre class="ruby">
+&lt;% title (&quot;Edit User&quot;) %&gt;
+&lt;%= render @user %&gt;
+</pre>
+<p>We can now edit our profile when we&rsquo;re logged in which means that we&rsquo;ve implemented all of the functionality we wanted in our site. Users can now register, log in, edit their profiles and log out again.</p>
+
+<h3>Further Reading</h3>
+<p>There&rsquo;s much more functionality available in Authlogic than we&rsquo;ve shown in this episode. For more information  check out the <a href="http://github.com/binarylogic/authlogic/tree/master">Github page for Authlogic</a> and the <a href="http://github.com/binarylogic/authlogic_example/tree/master">page for the example application</a>. For a reference there&rsquo;s the <a href="http://authlogic.rubyforge.org">RDoc documentation</a> too.</p>

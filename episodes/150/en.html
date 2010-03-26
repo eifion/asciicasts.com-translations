@@ -1,0 +1,114 @@
+<p>One of the new features in Rails 2.3 is Rails Metal. It provides a way to bypass Rails&rsquo; routing and request process and go straight from the server to the request&rsquo;s logic. This can help the performance of your Rails app if you&rsquo;re trying to make a certain action run as fast as possible.</p>
+<p>Below is an application that monitors the processes on a server through a web interface. The list is updated via an AJAX call every few seconds. The update is a fairly simple request that is called often, so it&rsquo;s a good candidate for optimising with Metal.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/56/original/E150I01.png?1236415699" width="824" height="361" alt="The list of processes on our server."/>
+</div>
+<p class="title">The application shows the processes on our server.</p>
+<p>The view code for the page above is straightforward. It uses <code>periodically_call_remote</code> to make a GET request to the processes controller&rsquo;s list action and updates the contents of the pre element every three seconds.</p>
+<pre class="ruby">
+&lt;h1&gt;Processes List&lt;/h1&gt;
+&lt;pre id=&quot;processes&quot;&gt;Gathering processes...&lt;/pre&gt;
+&lt;%= periodically_call_remote :url =&gt; &quot;/processes/list&quot;, :update =&gt; &quot;processes&quot;, :frequency =&gt; 3, :method =&gt; :get %&gt;
+</pre>
+<p class="title">The view code for the index action.</p>
+
+<p>The <code>list</code> action in the controller is also simple. It calls the<a href="http://www.opengroup.org/onlinepubs/009695399/utilities/ps.html"> <code>ps</code> command</a> with a number of parameters and returns its output.</p>
+<pre class="ruby">
+class ProcessesController &lt; ApplicationController
+  def index
+  end
+
+  def list
+    render :text =&gt; `ps -axcr -o &quot;pid, pcpu, pmem, time, comm&quot;`
+  end
+end
+</pre>
+<p class="title">The list action calls ps to get a list of running processes.</p>
+
+<h3>Generating Metal</h3>
+<p>To optimise our action we&rsquo;ll first need to make sure we&rsquo;re running Rails 2.3 which, at the time of writing, is still at the release candidate stage. Once we&rsquo;ve done that we can generate our Metal script.</p>
+<pre class="terminal">
+script/generate metal processes_list
+    create  app/metal
+    create  app/metal/processes_list.rb
+</pre>
+<p>The script will generate a <code>metal</code> directory under <code>/app</code> and create a ruby file with the name of our metal script. The file looks like this.</p>
+<pre class="ruby">
+# Allow the metal piece to run in isolation
+require(File.dirname(__FILE__) + &quot;/../../config/environment&quot;) unless defined?(Rails)
+
+class ProcessesList
+  def self.call(env)
+    if env[&quot;PATH_INFO&quot;] =~ /^\/processes_list/
+      [200, {&quot;Content-Type&quot; =&gt; &quot;text/html&quot;}, [&quot;Hello, World!&quot;]]
+    else
+      [404, {&quot;Content-Type&quot; =&gt; &quot;text/html&quot;}, [&quot;Not Found&quot;]]
+    end
+  end
+end
+</pre>
+<p>The first line of the Metal script loads the Rails environment unless it has already been loaded while the rest of it is a class. If you&rsquo;ve dealt with rack application before then this class should look familiar. As with rack, there&rsquo;s a method called <code>call</code> that takes a hash of environment variables. The <code>call</code> method returns an array, which contains three elements representing three parts of the response. The first is the HTTP status number; the second is a hash of headers and the third is the response&rsquo;s body.</p>
+<p>Our Metal class is basically a rack application of its own and so it will bypass routing and request process that normal requests to a Rails action go through. The request won&rsquo;t be logged in Rails&rsquo; log file; even that is bypassed.</p>
+<p>Our <code>ProcessesList</code> class first uses a regular expression to check that the path begins with process_list. If it does then it will return &ldquo;Hello, World!&rdquo;; otherwise it will return a 404 error. If the 404 error is returned it will be detected by Rails, which then takes over the processing of the request.</p>
+<p>We&rsquo;ll now take a look at our Metal action to see if it&rsquo;s working, but before we do we&rsquo;ll have to restart the server. Even in development mode changes to a Metal script aren&rsquo;t picked up so we&rsquo;ll need to restart every time we make a change. Once the server has restarted we can go to <code>http://localhost:3000/processes_list</code> and we&rsquo;ll see the &ldquo;Hello, World!&rdquo; body content that was in our Metal script returned.</p>
+<p>Our processes list action is at <code>/processes/list</code>. If we were to change the line in our Metal script that looks for a matching URL so that it looked to match <code>/processes/list</code> (rather than <code>/processes_list</code>) then the Metal script would pick up the request before Rails had a chance to process it and we&rsquo;d see &ldquo;Hello, World!&rdquo; returned. For now we&rsquo;ll keep it at <code>/processes_list</code> so that we can compare the speed of each later.</p>
+<p>To compare Metal with a normal Rails request we&rsquo;ll have to have each method do the same thing so we&rsquo;re going to replace the &ldquo;Hello, World!&rdquo; text with the same call to <code>ps</code> that the list action makes.</p>
+<pre class="ruby">
+class ProcessesList
+  def self.call(env)
+    if env[&quot;PATH_INFO&quot;] =~ /^\/processes_list/
+      [200, {&quot;Content-Type&quot; =&gt; &quot;text/html&quot;}, [`ps -axcr -o &quot;pid, pcpu, pmem, time, comm&quot;`]]
+    else
+      [404, {&quot;Content-Type&quot; =&gt; &quot;text/html&quot;}, [&quot;Not Found&quot;]]
+    end
+  end
+end
+</pre>
+<p class="title">Our Metal script now returns the same list of processes as the list action.</p>
+<p>Next we&rsquo;ll update the index view so that <code>periodically_call_remote</code> calls the URL for our Metal script.</p>
+<pre class="ruby">
+&lt;h1&gt;Processes List&lt;/h1&gt;
+&lt;pre id=&quot;processes&quot;&gt;Gathering processes...&lt;/pre&gt;
+&lt;%= periodically_call_remote :url =&gt; &quot;/processes_list&quot;, :update =&gt; &quot;processes&quot;, :frequency =&gt; 3, :method =&gt; :get %&gt;
+</pre>
+<p>If we look at our process index page again we&rsquo;ll see the same output we saw earlier. The only difference is that the AJAX request is being made to our Metal script, rather than through the <code>processes</code> controller.</p>
+<p>If we look at the development log, we can see that while a call is being made to the <code>index</code> action, there is no record of the calls to <code>list</code>. This is because the Metal script handles the request before Rails has a chance to log it. Metal requests happen outside of Rails&rsquo; logging process so they won&rsquo;t appear in the log file.</p>
+
+<h3>Benchmarking</h3>
+<p>To see if using Metal has sped our request up we&rsquo;ll run some benchmarks to compare each request. We&rsquo;ll need to use the production environment to run our benchmarks so we&rsquo;ll stop the server and restart it in production mode.</p>
+<pre class="terminal">script/server -e production -d</pre>
+<p>We&rsquo;ll do our benchmarking with the <a href=" http://httpd.apache.org/docs/2.0/programs/ab.html"><code>ab</code> command</a>.  We&rsquo;ll call the Rails request first, then the Metal one and compare the results.</p>
+
+<table id="railsvmetal">
+  <thead>
+    <tr>
+      <th>Rails Request</th>
+      <th>Metal Request</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>
+        <pre>
+ab -n 100 http://127.0.0.1:3000/processes/list          
+Requests per second:    20.03 [#/sec] (mean)
+Time per request:       49.924 [ms] (mean)
+Time per request:       49.924 [ms] 
+(mean, across all concurrent requests)
+        </pre>
+      </td>
+      <td>
+        <pre>
+ab -n 100 http://127.0.0.1:3000/processes_list 
+Requests per second:    36.94 [#/sec] (mean)
+Time per request:       27.073 [ms] (mean)
+Time per request:       27.073 [ms] 
+(mean, across all concurrent requests)         
+        </pre>
+      </td>
+    </tr>
+  </tbody>
+</table>
+<p class="title">Comparing the Two Requests</p>
+<p>The <code>ab</code> command returns a lot of information, but the parts we&rsquo;re interested in are shown above. We can see that we&rsquo;re getting almost twice as many requests per second from the Metal request as from the Rails one. Of course the figures will vary depending on the machine you&rsquo;re running the benchmark on and on the complexity of the request you&rsquo;re making.</p>
+<p>Despite this speed increase we don&rsquo;t really want to be using Metal to replace every action in our Rails applications. It is best used for requests that are called frequently, or ones that have been optimised as much as possible but which still need an extra speed boost. If you&rsquo;re not sure if you need to be using Metal for a certain request it&rsquo;s best to try using a traditional Rails action and optimising that first.</p>

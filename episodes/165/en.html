@@ -1,0 +1,238 @@
+<p><a href="http://railscasts.com/episodes/52-update-through-checkboxes">Episode 52</a> demonstrated how to edit multiple records simultaneously. The example application allowed you to mark several tasks as complete and each checked <code>Task</code> would be updated so that it was complete.</p>
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/114/original/E165I01.png" width="808" height="371" alt="The application built in episode 52."/>
+</div>
+<p>In this episode we&rsquo;ll expand on the same idea, but instead of just being able to update a single attribute we&rsquo;ll give the user the option of updating multiple attributes on a number of records.</p>
+
+<h3>The Store Application</h3>
+
+<p>The application we&rsquo;ll be using is shown below. Currently if we want to update, say, the category for the last two products we&rsquo;d have to edit each product individually. While this is fine for a small number of products it would soon become fairly tedious if we had to do it for dozens or hundreds. We&rsquo;ll modify our application so that we can update a number of attributes on some of the products at the same time.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/115/original/E165I02.png" width="808" height="466" alt="The index page on the store application."/>
+</div>
+
+
+<h3>Modifying The Index View</h3>
+
+<p>We&rsquo;ll start by adding a checkbox next to each product so that we can easily select the products we want to update. To do this we&rsquo;ll first have to wrap the table that renders the products in a form tag. We don&rsquo;t yet have an action that can handle editing multiple products so we&rsquo;ll leave that blank for now and come back to it later to fill in the appropriate path.</p>
+<pre class="ruby">&lt;% form_tag ... do %&gt;</pre>
+<p>We haven&rsquo;t specified a method for the form so it will use POST by default. As the form will take us to a page that shows a list of the selected products we could use GET, but as there will be multiple product ids passed, GET won&rsquo;t really work.</p>
+
+<p>On each row of the table we&rsquo;ll need to add a checkbox that has a value that is the <code>id</code> of the product (and an empty <code>&lt;th&gt;</code> in the table&rsquo;s head so that the headings still line up correctly).</p>
+<pre class="ruby">
+&lt;td&gt;&lt;%= check_box_tag &quot;product_ids[]&quot;, product.id %&gt;&lt;/td&gt;
+</pre>
+<p>Note the empty square brackets at the end of the name of the <code>check_box_tag</code>. Doing this will mean that all of the values passed will be gathered into an array.</p>
+
+<p>Finally we&rsquo;ll need to add a submit button below the table.</p>
+<pre class="ruby">
+&lt;%= submit_tag &quot;Edit Checked&quot; %&gt;
+</pre>
+<p>Our products index view file will now look like this:</p>
+<pre class="ruby">
+&lt;h1&gt;Products&lt;/h1&gt;
+
+&lt;% form_tag ... do %&gt;
+&lt;table&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th&gt;Name&lt;/th&gt;
+      &lt;th&gt;Category&lt;/th&gt;
+      &lt;th&gt;Price&lt;/th&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody&gt;
+    &lt;% for product in @products %&gt;
+    &lt;tr&gt;
+      &lt;td&gt;&lt;%= check_box_tag &quot;product_ids[]&quot;, product.id %&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;%= product.name %&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;%= product.category.name %&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;%= number_to_currency product.price, :unit =&gt; &quot;&amp;pound;&quot; %&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;%= link_to &quot;Edit&quot;, edit_product_path(product) %&gt;&lt;/td&gt;
+      &lt;td&gt;&lt;%= link_to &quot;Destroy&quot;, product_path(product), :confirm =&gt; &quot;Are you sure?&quot;, :method =&gt; :delete %&gt;&lt;/td&gt;
+    &lt;/tr&gt;
+    &lt;% end %&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;
+&lt;%= submit_tag &quot;Edit Checked&quot; %&gt;
+&lt;% end %&gt;
+&lt;%= link_to &quot;New Product&quot;, new_product_path %&gt;
+</pre>
+<h3>Modifying The Products Controller</h3>
+
+<p>Our products controller has the usual RESTful actions in it. We&rsquo;ll have to add two more to allow the editing and updating of multiple records.</p> 
+<pre class="ruby">
+def edit_multiple
+    
+end
+  
+def update_multiple
+   
+end
+</pre>
+
+<p>These two actions will behave like the standard <code>edit</code> and <code>update</code> actions but will handle multiple records. The <code>edit_multiple</code> action will need a view and we&rsquo;ll write that shortly.</p> 
+
+<p>In our application <code>Products</code> is a RESTful resource so the two new actions won&rsquo;t be accessible without making a change to our routes file. As we&rsquo;re adding methods that will work on a collection of products we&rsquo;ll use the <code>:collection</code> option to add our two new actions.</p>
+<pre class="ruby">
+  map.resources :products, :collection =&gt; { :edit_multiple =&gt; :post, :update_multiple =&gt; :put }
+</pre>  
+<p>The <code>:collection</code> option takes a hash of values. Each key is the name of an action and each value is the method that that action should use. As mentioned earlier we&rsquo;re using POST for the <code>edit_multiple</code> action, even though ideally we should use GET.</p> 
+
+<p>Now that we have our actions defined we can go back to the <code>form_tag</code> on the index page and add the correct path.</p>
+<pre class="ruby">
+&lt;% form_tag edit_multiple_products_path do %&gt;
+</pre>
+<p>Now, if we refresh the index page we&rsquo;ll see the checkboxes for each product and the button that will take us to the edit multiple page.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/116/original/E165I03.png" width="808" height="524" alt="The index page with checkboxes for each product."/>
+</div>
+
+<h3>The New Form</h3>
+
+<p>If we check some of the checkboxes and then click the &ldquo;Edit Checked&rdquo; button we&rsquo;ll see a missing template error. This is because we&rsquo;ve not yet created the view code, so our next job will be to write this. The code will go in <code>/app/views/products/edit_multiple.html.erb</code>. But before we do that let&rsquo;s take a quick look at the section of the development log that was generated when we clicked the button.</p>
+<pre class="terminal">
+Processing ProductsController#edit_multiple (for 127.0.0.1 at 2009-06-06 19:24:37) [POST]
+  Parameters: {&quot;product_ids&quot;=&gt;[&quot;3&quot;, &quot;4&quot;, &quot;5&quot;], &quot;commit&quot;=&gt;&quot;Edit Checked&quot;, &quot;authenticity_token&quot;=&gt;&quot;s5z3KEJpBM7zC2JooC/relZ2oZtVpfxL/IMklpcBuYU=&quot;}
+</pre>  
+<p>In the parameters section we can see the array of product ids that represent the products in the list that we selected. In the controller we&rsquo;ll use this parameter to get the products we chose from the list.</p>
+<pre class="ruby">
+  def edit_multiple
+    @products = Product.find(params[:product_ids])
+  end
+</pre>  
+<p>Now to the form view. In our application we already have a form in a partial that allows us to create and edit products, so it might seem that we could just use the form again, but there are some parts of it that need to be changed to make it work with multiple records so we&rsquo;ll create a new form.</p>
+
+<p>At the top of this form we&rsquo;ll put the opening <code>form_tag</code>. As the form isn&rsquo;t going to be editing a particular product we&rsquo;ll use a symbol rather than a variable that references a product. We&rsquo;ll also need to specify a <code>:url</code> so that the form knows where to send its data and a <code>:method</code> so that PUT rather than POST is used.</p>
+<pre class="ruby">
+&lt;% form_for :product, :url =&gt; update_multiple_products_path, :html =&gt; { :method =&gt; :put } do |form| %&gt;
+</pre>
+<p>In the form we&rsquo;ll need to pass through the <code>id</code>s of the products that were passed to it,or they will be lost when the form is submitted and we won&rsquo;t know which products to update. We can pass the <code>id</code>s as a series of hidden fields and, as we&rsquo;re doing that, also show a list of the products that are being updated to the user.</p>
+<pre class="ruby">
+&lt;ul&gt;
+  &lt;% for product in @products %&gt;
+  &lt;li&gt;
+    &lt;%= h product.name %&gt;
+    &lt;%= hidden_field_tag &quot;product_ids[]&quot;, product.id%&gt;
+  &lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;
+</pre>
+<p>Next we&rsquo;ll add the form elements for the attributes that a <code>Product</code> has. There will be elements for the name, the category, the price, and for whether the product has been discontinued. When we submit this form we only want to update the fields that have had a value set against them, so for the fields that have a fixed number of options we&rsquo;ll need to add a blank option so that the users can choose not update that field.</p>
+<pre class="ruby">
+&lt;ol class=&quot;formList&quot;&gt;
+  &lt;li&gt;
+    &lt;%= form.label :category_id %&gt; 
+    &lt;%= form.collection_select :category_id, Category.all, :id, :name, :include_blank =&gt; true %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.label :name %&gt;
+    &lt;%= form.text_field :name %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.label :price %&gt;
+    &lt;%= form.text_field :price %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.label :discontinued %&gt;
+    &lt;%= form.select :discontinued, [[&quot;Yes&quot;, true], [&quot;No&quot;, false]], :include_blank =&gt; true %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.submit &quot;Submit&quot; %&gt;
+  &lt;/li&gt;
+&lt;/ol&gt;
+</pre>
+<p>Finally, we&rsquo;ll just need to close the <code>form_for</code> block and our form is done.</p>
+<pre class="ruby">
+&lt;% end %&gt;
+</pre>
+<p>Now, if we refresh the page we&rsquo;ll see the list of products we&rsquo;ve selected and the form that will let us update those products. Note that both of the drop-downs have blank options so that we don&rsquo;t have to update their values.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/117/original/E165I04.png" width="810" height="524" alt="The edit_multiple form."/>
+</div>
+
+<h3>Writing The Update Action</h3>
+
+<p>We&rsquo;re almost there now, but we still have to write the code for the <code>update_model</code> action so that the products we select have their attributes updated when the form above is submitted.</p>
+<pre class="ruby">
+def update_multiple
+  @products = Product.find(params[:product_ids])
+  @products.each do |product|
+    product.update_attributes!(params[:product].reject { |k,v| v.blank? })
+  end
+  flash[:notice] = &quot;Updated products!&quot;
+  redirect_to products_path
+end
+</pre>
+<p>The <code>update_multiple</code> action starts by getting the array of product <code>id</code>s that we passed through from the other form as a list of hidden fields. We then loop through each product and update its attributes. As we only want to update the attributes that aren&rsquo;t empty we use <code>reject</code> to loop through each parameter and remove the ones that have a blank value from the parameter array. Note that we&rsquo;re using <code>update_attributes!</code> with a bang (!) as we don&rsquo;t have any validations on our model. If this was a production application we&rsquo;d have validations but that&rsquo;s beyond the scope of this episode. Using <code>update_attributes!</code> this way will mean that an exception is thrown if something is invalid. Once all of the products have been updated we set a flash message and return back to the products listing page.</p>
+
+<p>Let&rsquo;s see if it works. We have two products, Video Game Console and Video Game Disc, listed under Toys &amp; Games which we want to list in Electronics instead. If we pick them from the list and click &lsquo;Submit&rsquo; we&rsquo;ll see them listed on the edit multiple page.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/118/original/E165I05.png" width="808" height="505" alt="The products we&rsquo;ve selected listed on the edit_multiple form."/>
+</div>
+
+<p>If we select &ldquo;Electronics&rdquo; from the category drop-down and click &ldquo;Submit&rdquo; we&rsquo;ll be taken back to the listings page with the products shown in their new category.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/119/original/E165I06.png" width="808" height="545" alt="The products have now been selected."/>
+</div>
+
+<p>As you can see, the two products have been moved into the Electronics category, but none of their other attributes have been changed.</p>
+
+<h3>A Step Further</h3>
+
+<p>What we&rsquo;ve done so far is a pretty useful way of updating a number of models at once, but to finish off this episode we&rsquo;re going to take it a step further and allow relative changes to be made to the prices of our products so that we could, for example, have a 20%-off sale on all of our furniture.</p>
+
+<p>We can currently select multiple products, but if we change the price field on the form all of the selected products will end up at the same price. If we were to make use of virtual attributes it would be fairly straightforward to allow relative price changes. If you&rsquo;re not familiar with virtual attributes they were covered back in episode 16 so you can <a href="http://railscasts.com/episodes/16-virtual-attributes">watch</a> or <a href="http://asciicasts.com/episodes/16-virtual-attributes">read</a> more about them there.</p>
+
+<p>We&rsquo;re going to create a virtual attribute called <code>price_modification</code> in the <code>Product</code> model. We&rsquo;ll start by modifying the <code>edit_multiple</code> form so that it updates our new attribute rather than modifying the <code>price</code> field directly.</p>
+<pre class="ruby">
+&lt;li&gt;
+  &lt;%= form.label :price_modification %&gt;
+  &lt;%= form.text_field :price_modification %&gt;
+&lt;/li&gt;
+</pre>
+<p>Now we need to define getter and setter methods for our new attribute inside the <code>Product</code> model.</p>
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+  
+  def price_modification
+    price
+  end
+  
+  def price_modification=(new_price)
+    if new_price.ends_with? &quot;%&quot;
+      self.price += (price * (new_price.to_f / 100)).round(2)
+    else
+      self.price = new_price
+    end
+  end
+end
+</pre>
+<p>The getter is straightforward: we just want to return the price, but the setter method is a little more complicated. If the value entered ends with a percentage sign we&rsquo;re going to convert that value to a number (<code>new_price.to_f</code>), divide it by one hundred and then multiply the original price by that amount to get the difference. We&rsquo;ll then add that difference to the original price. If a negative amount is entered then the price will be discounted. Finally we&rsquo;ll <code>round</code> the new value to two decimal places using an extension to round that ActiveSupport supplies.</p>
+
+<p>So, let&rsquo;s start our furniture sale. We&rsquo;ll select our two furniture products and edit them.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/120/original/E165I07.png" width="805" height="56" alt="The products we&rsquo;re going to update the price of."/>
+</div>
+
+<p>Then in the form we&rsquo;ll enter &ldquo;-20%&rdquo; in the price field.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/121/original/E165I08.png" width="812" height="505" alt="Altering the price of multiple products."/>
+</div>
+
+<p>When we submit the form and return to the list, the prices for those items are now shown 20% lower.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/122/original/E165I09.png" width="812" height="532" alt="Both prices have now been changed."/>
+</div>
+
+<p>The techniques shown in the episode have a lot of uses and can be applied in a number of scenarios. With experimentation you should be able to find a lot of ways in which being able to make relative changes to attributes in your records is useful in your Rails applications.</p>

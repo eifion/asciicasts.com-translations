@@ -1,0 +1,131 @@
+<p>Rails 2.3 is now very near to release, so in this episode we&rsquo;re going to show some more of its new features. In the last four episodes we&rsquo;ve already covered some of the big new features in Rails 2.3; this one will wrap up this short series with an summary of some of the smaller new additions.</p>
+
+<h3>Find in Batches</h3>
+
+<p>The first thing we&rsquo;re going to demonstrate is <code>find_in_batches</code>. Dealing with large numbers of ActiveRecord objects can place a large burden of your server&rsquo;s memory; <code>find_in_batches</code> will, as its name suggests, return the objects in batches reducing the amount of memory used. By default, <code>find_in_batches</code> works with batches of 1,000 records, but we&rsquo;re going to demonstrate it on a smaller scale. For each command in <code>script/console</code> that we run we&rsquo;ll show the SQL that Rails generates below.</p>
+
+<p>We have a <code>Product</code> model that has 25 items in it. If we get the items in batches of ten then four calls are made to the database.</p>
+<pre class="terminal">
+&gt;&gt; Product.find_in_batches(:batch_size =&gt; 10)  do |batch|
+?&gt;   puts &quot;Products in batch: #{batch.size}&quot;
+&gt;&gt; end
+Products in batch: 10
+Products in batch: 10
+Products in batch: 5
+</pre>
+<pre class="terminal">
+  Product Load (1.1ms)   SELECT * FROM &quot;products&quot; WHERE (products.id &gt;= 0) ORDER BY products.id ASC LIMIT 10
+  Product Load (1.0ms)   SELECT * FROM &quot;products&quot; WHERE (products.id &gt; 10) ORDER BY products.id ASC LIMIT 10
+  Product Load (0.6ms)   SELECT * FROM &quot;products&quot; WHERE (products.id &gt; 20) ORDER BY products.id ASC LIMIT 10
+  Product Load (0.1ms)   SELECT * FROM &quot;products&quot; WHERE (products.id &gt; 25) ORDER BY products.id ASC LIMIT 10
+</pre>
+<p>Only the records needed for each batch are fetched from the database which places less of a demand on the server&rsquo;s memory.</p> 
+<p>There is a similar method called <code>each</code> which can also be used to iterate over a large collection of items. It differs from <code>find_in_batches</code> in that the object in the block is a single item rather than a batch.</p>
+<pre class="terminal">
+&gt;&gt; Product.each(:batch_size =&gt; 10) do |product|
+?&gt;   puts product.name
+&gt;&gt; end
+Book
+Cactus
+Camera
+Car
+Chair
+(and 20 other items)
+</pre>
+<p>The same four database calls are made as before.</p>
+<pre class="terminal">
+  Product Load (1.2ms)   SELECT * FROM &quot;products&quot; WHERE (products.id &gt;= 0) ORDER BY products.id ASC LIMIT 10
+  Product Load (1.0ms)   SELECT * FROM &quot;products&quot; WHERE (products.id &gt; 10) ORDER BY products.id ASC LIMIT 10
+  Product Load (0.6ms)   SELECT * FROM &quot;products&quot; WHERE (products.id &gt; 20) ORDER BY products.id ASC LIMIT 10
+  Product Load (0.1ms)   SELECT * FROM &quot;products&quot; WHERE (products.id &gt; 25) ORDER BY products.id ASC LIMIT 10
+</pre>  
+<p>Although we&rsquo;ve used find_in_batches for retrieving a small number of items it is designed to work with large amounts of data and is meant to be used when you&rsquo;re dealing with thousands of records at a time.</p>
+
+<h3>scoped_by_x</h3>
+<p>The next few feature is related to named scopes. Named scopes are a great addition to Rails, but sometimes it can be a pain to have to generate a named scope for each column in a model. Rails 2.3 provides a <code>scoped_by_</code> method which acts in a similar way to <code>find_by_</code> in that it takes a column name. For example, to create a scope that returns the products that cost &pound;4.99 we can use</p>
+<pre class="terminal">
+&gt;&gt; p = Product.scoped_by_price(4.99).first
+=&gt; #&lt;Product id: 1, category_id: 1, name: &quot;Book&quot;, price: #&lt;BigDecimal:2097bb0,&#x27;0.499E1&#x27;,8(8)&gt;, description: &quot;Paperback book&quot;, created_at: &quot;2009-03-13 20:47:15&quot;, updated_at: &quot;2009-03-13 22:12:48&quot;&gt;
+</pre>
+<pre class="terminal">
+  Product Load (0.4ms)   SELECT * FROM &quot;products&quot; WHERE (&quot;products&quot;.&quot;price&quot; = 4.99) LIMIT 1
+</pre>
+<p>Note that the database query isn&rsquo;t performed when the <code>scoped_by_</code> method is called, but when the method after (in this case <code>first</code>) is.</p>
+
+<p>Scopes can be chained together, so if we want to find the first product in category 1 with a price of &pound;4.99 we can run the following code.</p>
+<pre class="terminal">
+&gt;&gt; p = Product.scoped_by_price(4.99).scoped_by_category_id(1).first
+=&gt; #&lt;Product id: 1, category_id: 1, name: &quot;Book&quot;, price: #&lt;BigDecimal:2086478,&#x27;0.499E1&#x27;,8(8)&gt;, description: &quot;Paperback book&quot;, created_at: &quot;2009-03-13 20:47:15&quot;, updated_at: &quot;2009-03-13 22:12:48&quot;&gt;
+</pre>
+<pre class="terminal">
+    Product Load (0.8ms)   SELECT * FROM &quot;products&quot; WHERE ((&quot;products&quot;.&quot;category_id&quot; = 1 AND &quot;products&quot;.&quot;price&quot; = 4.99)) ORDER BY price ASC LIMIT 1
+</pre>
+
+<h3>Default Scope</h3>
+<p>The next new addition is <code>default_scope</code>. It provides a way to define default find conditions or ordering for a model. While it wouldn&rsquo;t be a particularly useful thing to do, we could define a default scope for our <code>Product</code> model that only returns products that cost &pound;4.99.</p>
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+
+  default_scope :conditions =&gt; [&quot;price = ?&quot;, 4.99]
+end
+</pre>
+<p>If we try to get all of our products now, only the ones costing &pound;4.99 will be returned.</p>
+<pre class="terminal">
+&gt;&gt; Product.count
+=&gt; 9
+</pre>
+<pre class="terminal">
+ SQL (0.3ms)   SELECT count(*) AS count_all FROM &quot;products&quot; WHERE (price = 4.99)
+</pre> 
+<p>This isn&rsquo;t the best use for <code>default_scope</code> as we don&rsquo;t always want to just find products costing &pound;4.99. If our <code>Product</code> model had a <code>deleted_at</code> column we could define a default scope to return only the items that had not been marked as deleted. That way we can safely &lsquo;delete&rsquo; a product by just setting the <code>deleted_at</code> column to the current time.</p>
+
+<p>Instead of defining default conditions a more useful option for <code>default_scope</code> is to provide a default order. If we always want our products to come back in order of price we can set the default scope to do that.</p>
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+
+  default_scope :order =&gt; [&quot;price ASC&quot;]
+end
+</pre>
+<p>There may be a slight loss of performance for requests when the order isn&rsquo;t important, but if we want a model to be returned in a certain order most of the time this is still a good use for <code>default_scope</code>.</p>
+
+<h3>Try</h3>
+<p>A <code>try</code> method is added to all Ruby objects in Rails 2.3. As its name indicates it allows you to try calling a method on an object, even though that object may be <code>nil</code>.</p>
+<p>We have a product that costs &pound;4.99 in our products table so we can retrieve its name. If we try to get the name of a product with a price of &pound;4.95 when none of our products are priced at &pound;4.95 an error will be thrown as we&rsquo;re trying to call <code>name</code> on <code>nil</code>.</p>
+<pre class="terminal">
+&gt;&gt; Product.find_by_price(4.99).name
+=&gt; &quot;Book&quot;
+&gt;&gt; Product.find_by_price(4.95).name
+NoMethodError: You have a nil object when you didn&#x27;t expect it!
+The error occurred while evaluating nil.name
+	from (irb):2
+&gt;&gt;
+</pre> 
+<p>The <code>try</code> method will try to call a method on an object but return <code>nil</code> if that object doesn&rsquo;t respond to that method. It takes a symbol as an argument.</p>
+<pre class="terminal">
+&gt;&gt; Product.find_by_price(4.99).try(:name)
+=&gt; &quot;Book&quot;
+&gt;&gt; Product.find_by_price(4.95).try(:name)
+=&gt; nil
+&gt;&gt; 
+</pre>
+
+<h3>Render</h3>
+<p>There have been some great improvements made to the <code>render</code> method in Rails 2.3 which can be used to make view code more concise. On our products&rsquo; index page we&rsquo;re rendering a list of products in a partial. In older versions of Rails we&rsquo;d have to use this code.</p>
+<pre class="ruby">&lt;%= render :partial =&gt; &#x27;product&#x27;, :collection =&gt; @products %&gt;</pre>
+<p>Later versions of Rails automatically assumed the name of the partial from the collection  allowing us to shorten the code.</p>
+<pre class="ruby">&lt;%= render :partial =&gt; @products %&gt;</pre>
+<p>In Rails 2.3 we can just pass the list of products and Rails will know that we want to render a partial for each one.</p>
+<pre class="ruby">&lt;%= render @products %&gt;</pre>
+<p>Similarly, to render a single model, rather than a collection, we can just pass that object, allowing us to replace</p>
+<pre class="ruby">&lt;%= render :partial =&gt; &lsquo;product&rsquo;, :object =&gt; @product %&gt;</pre>
+<p>with</p>
+<pre class="ruby">&lt;%= render @product %&gt;</pre>
+<p>Similar improvements have been made in the controller code too. If we want to render an action, for example rendering <code>new</code> after an invalid attempt to create a new model, we currently use</p>
+<pre class="ruby">render :action =&gt;  &#x27;new&#x27;</pre>
+<p>In Rails 2.3 we can just pass the name of the action as a string.</p>
+<pre class="ruby">render &#x27;new&#x27;</pre>
+<p>If we want to render a template for a different controller we can pass both names separated by a slash.</p>
+<pre class="ruby">render &#x27;products/edit&#x27;</pre>
+<p>There are many more new features in Rails 2.3 than have been covered in this series. Take a look at the <a href="http://guides.rubyonrails.org/2_3_release_notes.html">Rails 2.3 Release Notes</a> for a comprehensive overview of what&rsquo;s new in 2.3.</p>

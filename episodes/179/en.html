@@ -1,0 +1,157 @@
+<p>Rails has recently been updated to version 2.3.4. This release focuses mainly on security and bug fixes but there are a couple of interesting new features too. One of these new features allows you to seed your applications database with the data it needs to get your application up and running.</p>
+
+<p>When you create a Rails application under Rails 2.3.4 a file called <code>seeds.rb</code> is created in the <code>db</code> directory. This is now the conventional place to define any initial data that your application needs. This data can then be created by running a new rake task: <code>rake db:seed</code>.</p>
+
+<p>To give a quick demonstration of this we&rsquo;ll add a <code>puts</code> statement to the seed file:</p>
+<pre class="terminal">
+puts &quot;Seed data goes here.&quot;
+</pre>
+<p>Then run the rake task, where we&rsquo;ll see the output.</p>
+<pre class="terminal">
+% rake db:seed
+(in /Users/eifion/rails/apps_for_asciicasts/ep179/seeder)
+Seed data goes here.
+</pre>
+<p>At first sight this might seem to be a simple new feature, and so it is. What makes it worthy of note though is that it means that there is now a conventional place to put seed data in applications.</p> 
+
+<h3>Creating Seed Data</h3>
+
+<p>Let&rsquo;s say that we&rsquo;re writing an application where users have to choose which operating system they&rsquo;re running when they register. To enable this we&rsquo;ll create a model called <code>OperatingSystem</code> that has a <code>name</code> column. We&rsquo;ll generate the model in the usual way.</p>
+<pre class="terminal">
+script/generate model operating_system name:string
+</pre>
+<p>The list of operating systems isn&rsquo;t something that will be created by the users so we&rsquo;ll need to define some initial data. But where should we do this? One place where Rails developers sometimes add seed data is within the migration files, like this:</p>
+<pre class="ruby">
+class CreateOperatingSystems &lt; ActiveRecord::Migration
+  def self.up
+    create_table :operating_systems do |t|
+      t.string :name
+
+      t.timestamps
+    end
+
+    # Create the seed data
+    [&quot;Linux&quot;, &quot;Mac OS X&quot;, &quot;Windows&quot;].each do |os|
+      OperatingSystem.find_or_create_by_name os
+    end
+  end
+
+  def self.down
+    drop_table :operating_systems
+  end
+end
+</pre>
+<p>This works, but it isn&rsquo;t really the best way to do this. Migrations are best left to the job they&rsquo;re designed for: creating the structure of your database. Creating seed data in them can also lead to your seed data being scattered across several migration files.</p>
+
+<p>Now from Rails 2.3.4 we have a central place where we can create the seed data so we can move the seed data code from the migration file into the seeds.rb file.</p>
+<pre class="ruby">
+[&quot;Linux&quot;, &quot;Mac OS X&quot;, &quot;Windows&quot;].each do |os|
+  OperatingSystem.find_or_create_by_name os
+end
+</pre>
+<p>Note that we&rsquo;re using <code>find_or_create_by_name</code> so that the models are only created if they don&rsquo;t already exist, meaning that the seed data file can be run more than once and won&rsquo;t repeatedly create the same operating systems.</p>
+
+<p>Another example of the sort of data you might want to seed an application with is a list of countries for an address form. To do this we&rsquo;ll generate another model for a country that has a name and a code.</p>
+<pre class="terminal">
+script/generate model country name:string code:string
+</pre>
+<p>Entering all of the country data would be fairly tedious, even if we only have to do it once. Fortunately <a href="http://openconcept.ca/sites/openconcept.ca/files/country_code_drupal_0.txt">at this URL</a> is a text file containing a list of country codes an names separated by a vertical bar.</p>
+<pre>
+AF|Afghanistan
+AL|Albania
+DZ|Algeria
+AS|American Samoa
+AD|Andorra
+&hellip;
+</pre>
+<p>We can use the data in this file to populate our Country model.</p>
+<pre class="ruby">
+Country.delete_all
+open(&quot;http://openconcept.ca/sites/openconcept.ca/files/country_code_drupal_0.txt&quot;) do |countries|
+  countries.read.each_line do |country|
+    code, name = country.chomp.split(&quot;|&quot;)
+    Country.create!(:name =&gt; name, :code =&gt; code)
+  end
+end
+</pre>
+<p>This time we&rsquo;re populating the data in a slightly different way. First we delete any existing countries, then open the text file and loop through each line in it, creating a country from the code and name. This provides a quick and simple way to populate the country models. The code above uses <a href="http://www.ruby-doc.org/stdlib/libdoc/open-uri/rdoc/">OpenURI</a> to get the file so for it to work we&rsquo;ll need to require it at the top of the file for it to work.</p>
+
+<pre class="ruby">
+require &#x27;open-uri&#x27;
+</pre>
+<p>Now that we&rsquo;ve written our seed script we can run it to see if it works. Before we do we&rsquo;ll need to run our migration file to create the two models.</p>
+<pre class="terminal">
+rake db:migrate
+</pre>
+<p>Then we can run our seed task.</p>
+<pre class="terminal">
+rake db:seed
+</pre>
+<p>This will take a couple of seconds to run and when it finishes our database will be populated. We can check this by running <code>script/console</code>.</p>
+
+<p>Our operating systems are there:</p>
+<pre class="terminal">
+&gt;&gt; OperatingSystem.all
++----+----------+-------------------------+-------------------------+
+| id | name     | created_at              | updated_at              |
++----+----------+-------------------------+-------------------------+
+| 1  | Linux    | 2009-09-14 20:55:20 UTC | 2009-09-14 20:55:20 UTC |
+| 2  | Mac OS X | 2009-09-14 20:55:20 UTC | 2009-09-14 20:55:20 UTC |
+| 3  | Windows  | 2009-09-14 20:55:20 UTC | 2009-09-14 20:55:20 UTC |
++----+----------+-------------------------+-------------------------+
+3 rows in set
+</pre>
+<p>And so are the countries.</p>
+<pre class="terminal">
+&gt;&gt; Country.all
+
++-----+---------------------+------+---------------------+---------------------+
+| id  | name                | code | created_at          | updated_at          |
++-----+---------------------+------+---------------------+---------------------+
+| 1   | Afghanistan         | AF   | 2009-09-14 21:03... | 2009-09-14 21:03... |
+| 2   | Albania             | AL   | 2009-09-14 21:03... | 2009-09-14 21:03... |
+| 3   | Algeria             | DZ   | 2009-09-14 21:03... | 2009-09-14 21:03... |
+| 4   | American Samoa      | AS   | 2009-09-14 21:03... | 2009-09-14 21:03... |
+| 5   | Andorra             | AD   | 2009-09-14 21:03... | 2009-09-14 21:03... |
+</pre>
+
+<h3>Fixtures</h3>
+
+<p>We&rsquo;ll finish this episode with a final tip. If your application already has fixtures which contain the data you want to use as seed data, you can use this as the basis for your seed data.</p> 
+
+<p>Say we have the following seed data in our <code>/test/fixtures/operating_systems.yml</code> file.</p> 
+<pre class="ruby">
+# Read about fixtures at http://ar.rubyonrails.org/classes/Fixtures.html
+
+windows:
+ name: Windows
+
+mac:
+ name: Mac OS X
+
+linux:
+ name: Linux
+</pre>
+<p>We can import it by replacing the code that generates the operating systems in <code>seeds.rb</code> with this.</p>
+<pre class="ruby">
+require &#x27;active_record/fixtures&#x27;
+
+Fixtures.create_fixtures(&quot;#{Rails.root}/test/fixtures&quot;, &quot;operating_systems&quot;)
+</pre>
+<p>If we re-run our seed task the operating system models will be recreated.</p>
+<pre class="terminal">
+&gt;&gt; OperatingSystem.all
++------------+----------+-------------------------+-------------------------+
+| id         | name     | created_at              | updated_at              |
++------------+----------+-------------------------+-------------------------+
+| 303122256  | Linux    | 2009-09-14 21:28:31 UTC | 2009-09-14 21:28:31 UTC |
+| 387181413  | Mac OS X | 2009-09-14 21:28:31 UTC | 2009-09-14 21:28:31 UTC |
+| 1676117404 | Windows  | 2009-09-14 21:28:31 UTC | 2009-09-14 21:28:31 UTC |
++------------+----------+-------------------------+-------------------------+
+3 rows in set
+</pre>
+<p>There is one noticeable difference when getting the data from the fixture file: the <code>id</code>s are rather wonky. This is because of the way that fixtures generate ids when they are not explicitly specified in the fixture file.</p>
+
+<p>There is some controversy among developers about what exactly constitutes seed data. For some it&rsquo;s the minimum amount of data that is required to get an application functioning, while others like to add user records and other user-generated content. If you want to keep the data that is absolutely necessary to get an application set up separate from any other data it might need you can use a rake task. <a href="http://railscasts.com/episodes/126-populating-a-database">Episode 126</a> used this approach to populate a database with a large amount of test data. If you&rsquo;re trying to test the performance of your application when it has a lot of data, or simulate what it will look like when it has a large amount of data this is an excellent approach.</p>
+
+<p>While we&rsquo;re on the topic of seed data it&rsquo;s worth looking at the <a href="http://github.com/mbleigh/seed-fu">seed-fu library</a> which is another way of generating seed data. If you&rsquo;re not using the latest version of Rails then this provides a useful alternative way of generating seed data. Alternatively the <a href="http://github.com/sevenwire/bootstrapper/">BootStrapper</a> library is also well worth investigating.</p>

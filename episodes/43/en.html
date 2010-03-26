@@ -1,0 +1,81 @@
+<p>In this episode we&rsquo;re going to use RJS to add some AJAX functionality to a site. Using RJS is the easiest way of adding AJAX to a Rails site, especially if you need to update multiple elements on a page.</p>
+<p>On our site&rsquo;s products page, users can add reviews for a product via a form. When the form is submitted it posts back to the server via an HTTP POST request and the page is reloaded.</p>
+<div class="imageWrapper">
+  <img src="E043I01.png" width="823" height="744" alt="Our product page showing the reviews."/>
+  <p class="title">Our product page showing the reviews.</p>
+</div>
+<p>A number of elements on the page are different after the form has been submitted: the text showing the number of reviews has changed, the review has been added to the list, the form has been reset and there is a message at the top of the page thanking the user for adding their review. All of these will need to be updated by our RJS template after we AJAXify the form.</p>
+
+<h3>Modifying The View</h3>
+<p>Before we start updating the view code we first need to make sure that we&rsquo;re including prototype and the other standard JavaScript files. To do that we&rsquo;ll need to add this line in the <code>&lt;head&gt;</code> section of our layout file.</p>
+<pre class="ruby">&lt;%= javascript_include_tag :defaults %&gt;</pre>
+<p>We&rsquo;ll start by modifying the view code. The view code for the product page has a standard Rails form in it.</p>
+<pre class="ruby">
+&lt;% form_for [@product, @review] do |form| %&gt;
+&lt;ol class=&quot;formList&quot;&gt;
+  &lt;li&gt;&lt;%= form.label :name, &quot;Name:&quot; %&gt; &lt;%= form.text_field :name %&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;%= form.label :content, &quot;Review:&quot; %&gt; &lt;%= form.text_area :content, :rows =&gt; 5 %&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;%= submit_tag &quot;Add comment&quot; %&gt;&lt;/li&gt;
+&lt;/ol&gt;
+&lt;% end %&gt;
+</pre>
+<p>All we need to do to make the form post back via AJAX is to replace <code>form_for</code> in the first line with <code>form_remote_for</code>. Rails provides a number of methods that turn &lsquo;normal&rsquo;  elements into AJAX-enabled ones;  for more information there is a list avaiable on the Rails API site1.</p>
+<p>After making the change to our form and refreshing the page the opening form tag will now have an <code>onsubmit</code> attribute that will make the form be submitted asynchronously. If the site is being used by someone who doesn&rsquo;t have JavaScript enabled on their browser then the form will still work, but the page will post back in the same way it did before we added the AJAX code.</p>
+<pre class="terminal">
+&lt;form action=&quot;/products/1/reviews&quot; class=&quot;new_review&quot; id=&quot;new_review&quot; method=&quot;post&quot; 
+onsubmit=&quot;new Ajax.Request(&#x27;/products/1/reviews&#x27;, 
+{asynchronous:true, evalScripts:true, parameters:Form.serialize(this)}); 
+return false;&rdquo;&gt;
+</pre>
+
+<h3>Modifying The Controller</h3>
+<p>The review form is submitted to an action called <code>create</code> in the reviews controller. The action creates the new review, sets a flash notice and then redirects back to the product&rsquo;s page.</p>
+<pre class="ruby">
+def create
+  @review = Review.new(params[:review])
+  @review.product_id = params[:product_id]
+  @review.save
+  flash[:notice] = &quot;Thanks for your review!&quot;
+  redirect_to product_path(params[:product_id])
+end
+</pre>
+<p>Redirecting won&rsquo;t work with an AJAX request, so we&rsquo;re going to have to modify the controller to  respond differently depending on whether an HTTP request or a JavaScript request has been made. The <code>respond_to</code> method lets us do this. It takes a block in which we put the code for each different format. We&rsquo;ll replace the <code>redirect_to</code> line in the action above with this:</p>
+<pre class="ruby">
+respond_to do |format|
+  format.html { redirect_to product_path(params[:product_id]) }
+  format.js
+end
+</pre>
+<p>Now, with the code above, the redirect will still take place if we call the action via HTTP, but not if we call it via AJAX. As there&rsquo;s no code in the js block it will fall through to the RJS template.</p>
+
+<h3>Creating the RJS template</h3>
+<p>The template file goes in the <code>/app/views/reviews</code> folder and, as it&rsquo;s executed by the <code>create</code> action, is called <code>create.rjs</code>. The RJS file will generate JavaScript and return it to the client in response to the AJAX request.</p>
+<p>The first thing we need to do is to add the new review to the list. The reviews are rendered as an ordered list with an <code>id</code> of <code>reviews</code>. Each review is rendered in a partial called <code>_review.html.erb</code>. The RJS to add the new review to the bottom of the list is this.</p>
+<pre class="ruby">page.insert_html :bottom, :reviews, :partial =&gt; &#x27;review&#x27;, :object =&gt; @review</pre>
+<p>The code above uses <code>insert_html</code> to add HTML to the page. The arguments it takes are:</p>
+<ul style="list-style: inside disc;">
+  <li>Where to insert the HTML (this can be <code>:before</code>, <code>:after</code>, <code>:top</code> or <code>:bottom</code>).</li>
+  <li>The <code>id</code> of the element we want to modify (our &lsquo;reviews&rsquo; list).</li>
+  <li>The HTML to render. This can be as simple as a string, or, in our case, a partial. We pass the name of the partial and the object to pass to it. We&rsquo;re rendering a new review, so we pass the <code>review</code> partial and the new review object we created. (In Rails 2.3 this can be shortened to <code>:partial =&gt; @review</code>).</li>
+</ul>
+<p>The new review will now be added to the list when we submit the form, but the text that shows the number of reviews will not be updated. We&rsquo;ll add some more RJS code to do that. This time we&rsquo;re replacing HTML rather than inserting so we&rsquo;ll use <code>replace_html</code>.</p>
+<pre class="ruby">page.replace_html :reviews_count, pluralize(@review.product.reviews.size, &#x27;Review&#x27;)</pre>
+<p>With <code>replace_html</code> we need to pass the <code>id</code> of the element we want to update and the new content. We&rsquo;ll pass the text back using the same <code>pluralize</code> method we use in the view code. As we don&rsquo;t have access to the <code>@product</code> variable we use in the view we have to get the new review&rsquo;s product and then the number of reviews it has.</p>
+<p>We&rsquo;ll also want to reset the form when a review is added. The form has an <code>id</code> of <code>new_review</code> and we can use the <code>page</code> object to pass a JavaScript method to it like this.</p>
+<pre class="ruby">page[:new_review].reset</pre>
+<p>Lastly, we need to show the flash notice. As with the element that shows the number of reviews, we can use <code>replace_html</code> to show the message.</p>
+<pre class="ruby">page.replace_html :notice, flash[:notice]</pre>
+
+<h3>One Final Problem</h3>
+<p>Our form now works as we want it to and reviews can be added without the reviews page posting back to the server and refreshing itself. There is one small problem remaining, however. If we refresh the page after we&rsquo;ve added a comment the flash message remains, although it will disappear if the page is refreshed again. This is because of the way flash works: it will hold on to the message for one request.</p>
+<p>The way to work around this is to discard the flash after it is passed to the JavaScript for rendering. We just need to add one more line to our RJS file.</p>
+<pre class="ruby">flash.discard</pre>
+<p>Now, the flash will not appear again if we refresh the page or navigate to another one.</p>
+<p>Our page now behaves exactly as it did before but without having to post back. The final RJS file looks like this.</p>
+<pre class="ruby">
+page.insert_html :bottom, :reviews, :partial =&gt; &#x27;review&#x27;, :object =&gt; @review
+page.replace_html :reviews_count, pluralize(@review.product.reviews.size, &#x27;Review&#x27;)
+page[:new_review].reset
+page.replace_html :notice, flash[:notice]
+flash.discard
+</pre>

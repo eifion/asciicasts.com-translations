@@ -1,0 +1,58 @@
+<p><q style="font-style: italic; font-family: Georgia, serif; font-size: 1.1em;">Did you really name your son Robert&#x27;); DROP TABLE Students; --?</q> - <a href="http://xkcd.com/327/">XKCD No. 327</a></p>
+
+<p>Dalam beberapa episode, kita akan membahas mengenai keamanan dan pengamanan situs anda dari serangan hacker. Salah satu aturan utama dari security adalah jangan pernah percaya pada input dari seorang user. Dalam Rails, hal ini berarti memperhatikan seluruh item dalam hash params. User dapat mengontrol baik key maupun value dari hash params, sehingga seluruh input harus diwaspadai. Hal tersebut juga berlaku untuk hash cookies, dimana user dapat mengatur apa yang ada di dalamnya. Sebaliknya, hash session adalah satu-satunya yang berada di sisi server, sehingga dapat dipercaya nilai yang ada pada hash session.</p>
+
+<p>Salah satu masalah umum security adalah SQL Injection. Hal ini terjadi ketika inputan dari user ditempatkan secara langsung dalam sebuah query SQL. Jika seorang user mengetahui bahwa inputan miliknya langsung dilakukan insert ke dalam sebuah query, secara sengaja mereka dapat menulis input yang dapat mengambil data dari database yang seharusnya tidak boleh terlihat atau bahkan mengubah atau menghapus data dalam database. Kita akan menjelaskan bagaimana hal ini bekerja dan bagaimana terlindung dari SQL Injection dengan sebuah contoh sederhana.</p>
+
+<h3>Pencarian Task</h3>
+
+<p>Di bawah ini kita memiliki sebuah form pencarian sederhana pada sebuah halaman yang melakukan pencarian dengan menggunakan SQL LIKE untuk mendapatkan task dengan nama yang cocok dengan input yang diberikan pada form.</p?>
+
+<img src="/system/photos/24/original/E025I01.png" width="812" height="477" />
+
+<p>Masalahnya adalah input yang diberikan oleh user langsung dikirimkan ke sebuah query database dalam controller kita.</p>
+
+<pre class="ruby">
+class TasksController &lt; ApplicationController
+ def index
+  @tasks = Task.find(:all,:conditions=&gt;&quot;name LIKE
+&rsquo;%#{params[:query]}%&rsquo;&quot;)
+ end
+end
+</pre>
+<p class="title">TasksController menunjukkan SQL query yang berpotensi tidak aman</p>
+
+<p>Nilai di dalam key <code>:conditions</code> dalam hash <code>find</code> yang langsung digunakan sebagai query SQL. Yang menjadi masalah dengan hal ini adalah jika user mengirimkan parameter yang mengandung sebuah petik tunggal, maka seluruh statement akan dianggap sebagai SQL. Sehingga jika kita jika sebuah istilah atau kata mengandung sebuah petik tunggal pada saat seach, misal Task 1&rsquo;TEST, inputan setelah petik tunggal akan dieksekusi sebagai SQL dan Rails akan melakukan throw error.</p> 
+
+<pre class="terminal">
+Processing TasksController#index (for 127.0.0.1 at 2009-02-01 21:29:26) [GET]
+  Parameters: {&quot;query&quot;=&gt;&quot;Task 1&rsquo;TEST&quot;}
+  Task Load (0.0ms)   SQLite3::SQLException: near &quot;TEST&quot;: syntax
+error: SELECT * FROM &quot;tasks&quot; WHERE (name like &rsquo;%Task
+1&rsquo;TEST%&rsquo;) 
+
+ActiveRecord::StatementInvalid (SQLite3::SQLException: near &quot;TEST&quot;:
+syntax error: SELECT * FROM &quot;tasks&quot; WHERE (name like &rsquo;%Task
+1&rsquo;TEST%&rsquo;) ):
+
+</pre>
+<p class="title">SQL tidak valid muncul jika inputan user mengandung petik tunggal.</p>
+<p>Dalam perintah SQL diatas yang dimiliki oleh kata dalam search, Task 1&rsquo;TEST; dan dari kata tersebut, kita dapat melihat bahwa tanda petik yang ada di dalamnya merupakan statement SQL yang lengkap. Kemudian, bagian yang terakhir setelah tanda titik koma, TEST%), merupakan SQL yang tidak valid yang akan melakukan throw error. Hal ini berbahaya karena dapat menyebabkan SQL apapun dapat dieksekusi dalam database. Bagaimana menghentikan hal ini?</p>
+<p>Jawabannya adalah melakukan escape terhadap petik tunggal. Rails memiliki cara yang mudah untuk melakukannya. Kita dapat mengirimkan sebuah array of conditions, di mana di elemen pertamanya merupakan kata yang inputkan saat search dengan value yang digantikan dengan tanda tanya (?). Setiap tanda tanya dalam elemen pertama akan digantikan oleh value dari dari elemen selanjutnya dalam keadaan telah di-escape, sehingga aman. Jika seandainya kita memiliki tiga buah parameter, maka kita menggunakan tiga buah tanda tanya dan array kita akan memiliki empat buah elemen.</p>
+<pre class="ruby">
+  @tasks = Task.find(:all, &crarr;
+  :conditions=&gt; [ &quot;name LIKE ?&quot;, &quot;%#{params[:query]}%&quot; ]
+
+</pre>
+<p class="title">Cara yang lebih aman untuk mengirimkan sebuah kata dalam search yang di-input oleh user.</p>
+<p>Sekarang query kita telah ter-update. Jika kita melakukan search ulang untuk sebuah kata atau istilah dengan petik tunggal didalamnya, Rails akan melakukan escape petik tersebut dengan aman. Untuk menyakinkan bahwa search menggunakan LIKE, tanda persen (%) perlu ditempatkan dintara query dalam elemen array yang kedua. Menempatkan tanda persen yang mengapit tanda tanya tidak akan membuat query yang menggunakan LIKE tersebut bekerja.</p>
+<pre class="terminal">
+The SQL in our log file now looks like this.
+Processing TasksController#index (for 127.0.0.1 at 2009-02-01 21:59:31) [GET]
+  Parameters: {&quot;query&quot;=&gt;&quot;Task 1&rsquo;TEST&quot;}
+  Task Load (0.5ms)   SELECT * FROM &quot;tasks&quot; WHERE (name like
+&rsquo;%Task 1&rsquo;&rsquo;TEST%&rsquo;)
+</pre>  
+<p class="title">Kata yang di-search oleh user telah di-escape dengan aman.</p>
+<p>Kita dapat melihat sekarang bahwa petik telah di-escape. Sebagai catatan, jika menggunakan Sqlite, tanda petik akan di-escape dengan menggunakan dua buah petik tunggal (&rsquo;&rsquo;). Sedangkan database lain biasanya menggunakan backslash (\) sebelum tanda petik.</p>
+<p>Dalam Rails anda mungkin hanya perlu mengkhawatirkan bagaimana melakukan escape input dalam method find jika anda menggunakan parameter :conditions. Jika anda menggunakan method dinamis find_by seperti yang dijelaskan pada <a href="/episodes/2-dynamic-find-by-methods">episode 2</a> maka Rails akan secara otomatis melakukan escape terhadap inputan apapun untuk meyakinkan bahwa anda telah aman dari SQL Injection.</p>

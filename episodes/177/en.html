@@ -1,0 +1,176 @@
+<p>In this episode we&rsquo;re building a wiki-style application. The application has a page model and below is the show action for the home page.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/175/original/E177I01.png" width="800" height="347" alt="Our wiki's home page."/>
+</div>
+
+<p>Like most wikis, anyone can edit one of the pages and change the content, but one significant feature that&rsquo;s missing from ours is the ability to go back and see previous versions of the pages. What we need is a versioning solution for our models.</p>
+
+<h3>Vestal Versions</h3>
+
+<p><a href="http://ruby5.envylabs.com/episodes/4-episode-3-august-20-2009">Episode 3 of the Ruby5 podcast</a> featured a plugin that can help with this problem. <a href="http://github.com/laserlemon/vestal_versions/tree/master">Vestal Versions</a> stores a history of the changes that are made to ActiveRecord models, which is exactly what we&rsquo;re looking for for our wiki.</p>
+
+<p>Vestal Versions is available as a gem, so to use it in our application it we just have to add</p>
+<pre class="ruby">
+config.gem &#x27;laserlemon-vestal_versions&#x27;, :lib =&gt; &#x27;vestal_versions&#x27;, :source =&gt; &#x27;http://gems.github.com&#x27;
+</pre>
+<p>into the <code>config</code> block in <code>/config/environment.rb</code> then run</p>
+<pre class="ruby">
+sudo rake gems:install
+</pre>
+<p>to make sure that the gem is installed.</p> 
+
+<p>As Vestal Versions needs to make changes to our app&rsquo;s database the next step is to run its migration generator.</p>
+<pre class="terminal">
+script/generate vestal_versions_migration
+</pre>
+<p>This generates the migration for the versions table that Vestal Versions uses so next we&rsquo;ll have to migrate the database.</p>
+<pre class="terminal">
+rake db:migrate
+</pre>
+<p>Now we can add versioning to our <code>Page</code> model. To do this all we have to do is call <code>versioned</code> from within our model.</p>
+<pre class="ruby">
+class Page &lt; ActiveRecord::Base
+  versioned
+end
+</pre>
+<p>That&rsquo;s it. Any changes made to a <code>Page</code> will now be tracked within the <code>versions</code> table.</p>
+
+<h3>Adding Versioning To Our Wiki Pages</h3>
+
+<p>The first change we&rsquo;ll make to our wiki application is to display the version number on the show action page. To do this we just need to show the page&rsquo;s <code>version</code>.</p>
+<pre class="ruby">
+&lt;% title @page.name %&gt;
+&lt;p&gt;&lt;%= simple_format wiki_link(h(@page.content))%&gt;&lt;/p&gt;
+&lt;p&gt;
+  &lt;%= link_to &quot;Edit&quot;, edit_page_path(@page) %&gt;
+  | Version &lt;%= @page.version %&gt;
+&lt;/p&gt;
+</pre>
+<p>When we reload the page, however, the version number isn&rsquo;t shown.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/176/original/E177I02.png" width="800" height="347" alt="The version number isn&rsquo;t displayed."/>
+</div>
+
+<p>This has happened because the page existed before we added Vestal Versions to the application and therefore hadn&rsquo;t had a version applied to it. We can fix this by updating the existing models which will cause Vestal Versions to apply versioning to them.</p>
+
+<p>We could do this in the console if we just want to change the development version of our app but we want to ensure that the versioning is set everywhere that this code is deployed. To make sure of this we&rsquo;ll generate a migration instead.</p>
+<pre class="terminal">
+script/generate migration version_existing_pages
+</pre>
+<p>In the migration we want to update any existing <code>Page</code> records. As our application is running on Rails 2.3.3 we can make use of the new <a href="http://asciicasts.com/episodes/172-touch-and-cache">touch</a> functionality to simply update each one.</p>
+<pre class="ruby">
+class VersionExistingPages &lt; ActiveRecord::Migration
+  def self.up
+    say_with_time &quot;Setting initial version for pages&quot; do
+      Page.find_each(&amp;:touch)
+    end
+  end
+
+  def self.down
+  end
+end
+</pre>
+<p>Calling <code>touch</code> on a page will update its timestamp and will therefore trigger the versioning. Note that we&rsquo;re using <code>say_with_time</code> to output a message from the migration to the console.</p>
+
+<p>We can now run</p>
+<pre class="terminal">
+rake db:migrate
+</pre>
+<p>again and each page will have a version applied to it.</p>
+
+<p>If we go back to our application now and reload the page we&rsquo;ll see that the version number is now displayed.</p> 
+<div class="imageWrapper">
+  <img src="/system/photos/177/original/E177I03.png" width="800" height="347" alt="The version number is now showing."/>
+</div>
+
+<p>And when we edit the page, the version number should change to 2.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/178/original/E177I04.png" width="800" height="347" alt="When we update the page the version number increases."/>
+</div>
+
+<p>It does, and we&rsquo;re now displaying version 2 of the home page.</p> 
+
+<p>As our pages are now versioned it would be good if we could add a link on the page to display the previous version next to the current version number. In our <code>show</code> view we can add the link after the code that displays the version number.</p>
+<pre class="ruby">
+  &lt;% if @page.version &gt; 1 %&gt;
+  | &lt;%= link_to &quot;Previous version&quot;, :version =&gt; @page.version-1 %&gt;
+  &lt;% end %&gt;
+</pre>
+<p>The <code>if</code> condition ensures that the link is only shown if the page has a previous version to show. As for the link itself, we want to display the same page, but with a <code>version</code> parameter in the URL that has the value of the previous version of the page. Then. in the <code>PagesController</code>&rsquo;s <code>show</code> action we can check for the version parameter and, if we find it, go to the appropriate version of that page.</p>
+<pre class="ruby">
+def show
+  @page = Page.find(params[:id])
+  @page.revert_to(params[:version].to_i) if params[:version]
+end
+</pre>
+<p>In the <code>show</code> action we use Vestal Versions&rsquo; <code>revert_to</code> method to get the correct version of the page if a <code>version</code> parameter has been passed. One thing to note is that <code>revert_to</code> expects an integer value and the parameter will be a string so we need to cast it first.</p> 
+
+<p>When we reload the page again we&rsquo;ll now see the &ldquo;Previous Version&rdquo; link.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/179/original/E177I05.png" width="800" height="347" alt="Adding a &ldquo;previous version&rdquo; link."/>
+</div>
+
+<p>And when we click it we&rsquo;ll get the first version of the page.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/180/original/E177I06.png" width="800" height="347" alt="Looking at a previous version of the page."/>
+</div>
+
+<p>When looking at an older version of a page it would be handy to have a link back to the current version. We can do that by adding this code to our view.</p>
+<pre class="ruby">
+&lt;% if params[:version] %&gt;
+  | &lt;%= link_to &quot;Latest version&quot;, :version =&gt; nil %&gt;
+&lt;% end %&gt;
+</pre>
+<p>Now, when we&rsquo;re viewing a previous version of the page (i.e. when a version parameter exists in the querystring) we&rsquo;ll be shown a link back to the current version of the page.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/181/original/E177I07.png" width="800" height="347" alt="Older versions now have a link to the current version."/>
+</div>
+
+<h3>Some Other Tricks</h3>
+
+<p>There are a number of other things that Vestal Versions can do, which we&rsquo;ll demonstrate in the console. (Note that we&rsquo;re using <a href="http://github.com/cldwalker/hirb/tree/master">hirb</a> here to prettify the output.) If we get the first page</p>
+<pre class="terminal">
+&gt;&gt; p = Page.first
++----+----------+--------------------+--------------------+--------------------+
+| id | name     | content            | created_at         | updated_at         |
++----+----------+--------------------+--------------------+--------------------+
+| 1  | HomePage | Welcome to out ... | 2009-08-31 08:4... | 2009-08-31 10:1... |
++----+----------+--------------------+--------------------+--------------------+
+1 row in set
+</pre>
+<p>we then can call a versions method on that page to get all of its versions.</p>
+<pre class="terminal">
+&gt;&gt; p.versions
++----+--------------+---------------+---------------+--------+---------------+
+| id | versioned_id | versioned_... | changes       | number | created_at    |
++----+--------------+---------------+---------------+--------+---------------+
+| 1  | 1            | Page          | nameHomePa... | 1      | 2009-08-31... |
+| 2  | 1            | Page          | updated_at... | 2      | 2009-08-31... |
++----+--------------+---------------+---------------+--------+---------------+
+2 rows in set
+</pre>
+<p><code>versions</code> is set up as an ActiveRecord association (and is itself its own model) which maps to the <code>versions</code> table we created earlier with the migration. We could, for example, use this to have a history page that showed each version of a <code>Page</code> and link to each one.</p>
+
+<p>Earlier we used <code>revert_to</code> to show an earlier version of a page, passing it the id of the version we wanted. We can pass <code>revert_to</code> different parameters, though, including a datetime value. To get the version we had half an hour ago we can pass <code>30.minutes.ago</code> and we should see the first version of the page we created.</p>
+<pre class="terminal">
+&gt;&gt; p.revert_to(60.minutes.ago)
+=&gt; 1
+&gt;&gt; p.content
+=&gt; &quot;Welcome to out humble wiki where you can learn how to PurchasePianos,
+WriteMusic and PlayPiano. If you&#x27;re just getting started, check out the
+BeginnerPiano page. Enjoy!&quot;
+</pre>
+<p>We can also pass the symbols <code>:first</code> or <code>:last</code> to get the oldest or newest versions of a model.</p>
+<pre class="terminal">
+&gt;&gt; p.revert_to(:first)
+=&gt; 1
+&gt;&gt; p.revert_to(:last)
+=&gt; 2
+</pre>
+<p>That&rsquo;s all for this episode. Hopefully we&rsquo;ve shown you that Vestal Versions is a great solution for any situation in which you need to keep a history of changes to your ActiveRecord models in your Rails applications.</p>

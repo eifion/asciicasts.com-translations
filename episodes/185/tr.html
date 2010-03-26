@@ -1,0 +1,183 @@
+    <p>&#214;nceki b&#246;l&#252;mde, &#231;ok az kodla form view&rsquo;lar&#305; olu&#351;turmak i&#231;in harika bir gem olan <a href="http://github.com/justinfrench/formtastic">Formtastic</a> gem&rsquo;ini tan&#305;tm&#305;&#351;t&#305;k. Bunu kullanarak, bir veterinerin ameliyathanesi i&#231;in hayvan kategorileri ve hayvan eklemek ve onlar&#305; d&#252;zenlemek i&#231;in formlar&#305; olan basit bir uygulama olu&#351;turmu&#351;tuk. Bu b&#246;l&#252;mde, uygulamam&#305;z&#305; ilerletmek i&#231;in Formtastic&rsquo;in daha geli&#351;mi&#351; &#246;zelliklerinden yararlanaca&#287;&#305;z.</p>
+
+  <div class="imageWrapper">
+    <img src="/system/photos/222/original/E185I01.png" alt="Bir hayvan i&#231;in d&#252;zenleme sayfas&#305;." height="477" width="800"/>
+  </div>
+
+  <p>&#214;nceki b&#246;l&#252;m&#252;n sonuna geldi&#287;imizde, hayvan olu&#351;turmak ve ayr&#305;nt&#305;lar&#305;n&#305; g&#252;ncelle&#351;tirmek i&#231;in kullanabildi&#287;imiz bir formumuz olmu&#351;tu. Bu b&#246;l&#252;mde forma yeni &#246;zellikler kazand&#305;rmak i&#231;in onu de&#287;i&#351;tirece&#287;iz.</p>
+
+  <h3>&#199;oktan &#231;o&#287;a (Many-to-Many) &#304;li&#351;kileri &#304;dare Etme</h3>
+
+  <p>Bir hayvan, veterinerin ameliyathanesine bir&#231;ok hastal&#305;kla gebilir, bu nedenle uygulamam&#305;zda yapmak istedi&#287;imiz ilk de&#287;i&#351;iklik bir <code>Problem</code> model&rsquo;i eklemek. Bu model, <code>Animal</code> model&rsquo;iyle &#231;oktan &#231;o&#287;a ili&#351;kiye sahip olacak. &#214;nceki b&#246;l&#252;mde, Formtastic&rsquo;i kategori a&#231;&#305;l&#305;r kutusunu olu&#351;turmak i&#231;in kulland&#305;&#287;&#305;m&#305;zda, onun birden &#231;o&#287;a ili&#351;kileri (one-to-many) ne kadar iyi idare etti&#287;ini g&#246;rm&#252;&#351;t&#252;k. S&#246;ylemeye gerek yok; &#231;oktan &#231;o&#287;a ili&#351;kilerle de ayn&#305; derecede iyi &#231;al&#305;&#351;abiliyor.</p>
+
+  <p>Problem scaffold&rsquo;unu olu&#351;turmakla ba&#351;layaca&#287;&#305;z. &#214;nceki b&#246;l&#252;mde oldu&#287;u gibi, scaffold&rsquo;u olu&#351;turmay&#305; basitle&#351;tirmek i&#231;in Ryan Bates&rsquo;in <a href="http://github.com/ryanb/nifty-generators">nifty olu&#351;turucular&#305;n&#305;</a> kullan&#305;yoruz.</p>
+  <pre class="terminal">
+  script/generate nifty_scaffold problem name:string
+  </pre>
+  <p>&#199;oktan &#231;o&#287;a ili&#351;ki olu&#351;turdu&#287;umuz i&#231;in, model&rsquo;leri birle&#351;tirmek i&#231;in ek bir model olu&#351;turaca&#287;&#305;z. Hem <code>Animal</code> hem de <code>Problem</code> model&rsquo;ine ba&#287;lanan <code>Symptom</code> (belirti) adl&#305; bir tane olu&#351;turaca&#287;&#305;z.</p>
+  <pre class="terminal">
+  script/generate nifty_scaffold symptom animal_id:integer problem_id:integer --skip-controller
+  </pre>
+  <p>Belirtileri do&#287;rudan web aray&#252;z&#252;nden idare etmeye gerek yok, bu y&#252;zden controller kodunu olu&#351;turmay&#305; atlamak i&#231;in burada <code>--skip-controller</code> se&#231;ene&#287;ini kullanabiliriz.</p>
+
+  <p>Bu ad&#305;m&#305; tamamlamak i&#231;in, yeni tablolar&#305; olu&#351;turmak &#252;zere veritaban&#305;m&#305;z&#305;n ge&#231;i&#351;ini yapaca&#287;&#305;z.</p>
+  <pre class="terminal">
+  rake db:migrate
+  </pre>
+  <p>Ard&#305;ndan <code>Problem</code>, <code>Symptom</code> ve <code>Animal</code> model&rsquo;lerinin aras&#305;ndaki ba&#287;lant&#305;lar&#305; kurmam&#305;z gerekecek. Bir <code>Problem</code> , bir&#231;ok <code>Symptom</code> ve <code>Animal</code>&rsquo;a sahiptir:</p>
+  <pre class="ruby">
+  class Problem &lt; ActiveRecord::Base
+    attr_accessible :name
+    has_many :symptoms
+    has_many :animals, :through =&gt; :symptoms
+  end
+  </pre>
+  <p>Bir <code>Symptom</code>, bir <code>Problem</code> ve bir <code>Animal</code>&rsquo;a aittir:</p>
+  <pre class="ruby">
+  class Symptom &lt; ActiveRecord::Base
+    attr_accessible :animal_id, :problem_id
+    belongs_to :animal
+    belongs_to :problem
+  end
+  </pre>
+  <p>Son olarak bir <code>Animal</code>, bir&#231;ok <code>Symptom</code> ve <code>Problem</code>&rsquo;e sahiptir:</p>
+  <pre class="ruby">
+  class Animal &lt; ActiveRecord::Base
+    attr_accessible :name, :category_id, :born_on, :female, :problem_ids
+    belongs_to :category
+    has_many :symptoms
+    has_many :problems, :through =&gt; :symptoms
+  end
+  </pre>
+  <p><code>Animal</code> model&rsquo;imizde yapmam&#305;z gereken ba&#351;ka bir de&#287;i&#351;iklik oldu. Hangi alanlar&#305;n toplu atama (mass assignment) ile g&#252;ncelle&#351;tirilebilece&#287;ini kontrol etmek i&#231;in <code>attr_accessible</code> &#246;zelli&#287;ini kulland&#305;&#287;&#305;m&#305;zdan, bir hayvana toplu atama ile birden &#231;ok problem atayabilmek ve b&#246;ylece kullan&#305;c&#305; aray&#252;z&#252;nden g&#252;ncelle&#351;tirme yap&#305;lmas&#305;na izin vermek i&#231;in <code>problem_ids</code> &#246;&#287;esini eri&#351;ilebilen alanlar&#305;n listesine eklememiz gerekiyor.</p>
+
+  <p>Model&rsquo;lerimizi de&#287;i&#351;tirdi&#287;imize g&#246;re, problemlerin hayvanlara atanabilmesi i&#231;in formu g&#252;ncelle&#351;tirebiliriz. Problemleri &#231;oktan se&#231;meli olarak g&#246;stermek i&#231;in yaln&#305;zca <code>&lt;%= f.input :problems %&gt;</code> b&#246;l&#252;m&#252;n&#252; hayvan formuna eklememiz gerekiyor.</p>
+  <pre class="ruby">
+  &lt;% semantic_form_for @animal do |f| %&gt;
+    &lt;% f.inputs do %&gt;
+      &lt;%= f.input :name %&gt;
+      &lt;%= f.input :born_on, :start_year =&gt; 1900 %&gt;
+      &lt;%= f.input :category, :include_blank =&gt; false %&gt;
+      &lt;%= f.input :female, :as =&gt; :radio, :label =&gt; &quot;Gender&quot;, :collection =&gt; [[&quot;Male&quot;, false], [&quot;Female&quot;, true]] %&gt;
+      &lt;%= f.input :problems %&gt;
+    &lt;% end %&gt;
+    &lt;%= f.buttons %&gt;
+  &lt;% end %&gt;
+  </pre>
+  <p>&#350;imdi sayfay&#305; yeniden y&#252;klersek, problemlerin listesini formda g&#246;rebiliriz. (Veritaban&#305;na &#246;nceden birka&#231; problem eklemi&#351;tik, bu nedenle g&#246;sterilecek bir &#351;eyler bulunuyor.) Birka&#231; problem se&#231;er ve hayvan&#305;m&#305;z&#305; kaydedersek, hayvan&#305; d&#252;zenlemeye geri geldi&#287;imizde onlar&#305;n se&#231;ili oldu&#287;unu g&#246;rece&#287;iz.</p>
+
+  <div class="imageWrapper">
+    <img src="/system/photos/223/original/E185I02.png" alt="Problemler &#231;oktan se&#231;meli olarak listeleniyor." height="588" width="800"/>
+  </div>
+
+  <p>Problemleri &#231;oktan se&#231;meli yerine bir dizi onay kutusu halinde g&#246;stermek istiyoruz. Son defas&#305;nda Formtastic&rsquo;in :as se&#231;ene&#287;ini kullanarak onay kutular&#305;n&#305; radyo d&#252;&#287;meleriyle de&#287;i&#351;tirmi&#351;tik. Listeyi onay kutular&#305; olarak g&#246;stermek i&#231;in burada ayn&#305;s&#305;n&#305; yapabiliriz.</p>
+  <pre class="ruby">
+  &lt;%= f.input :problems, :as =&gt; :check_boxes %&gt;
+  </pre>
+  <p>Sayfay&#305; bir daha yeniledi&#287;imizde problemler onay kutular&#305; halinde g&#246;sterilir ve &#231;oktan se&#231;melide &#246;nceden se&#231;ti&#287;imiz &#246;&#287;eler i&#351;aretli olarak gelir.</p>
+
+  <div class="imageWrapper">
+    <img src="/system/photos/224/original/E185I03.png" alt="Problemler artık onay kutusu listesi olarak g&#246;steriliyor." height="583" width="800"/>
+  </div>
+
+  <h3>Zorunlu Alanlarla &#199;al&#305;&#351;ma</h3>
+
+  <p>Yukar&#305;daki her alan&#305;n etiketinin yan&#305;nda, o alan&#305;n zorunlu oldu&#287;unu belirten bir y&#305;ld&#305;z i&#351;areti bulunmaktad&#305;r. Varsay&#305;lan olarak, Formtastic her alan&#305; zorunlu yapar. <code>:required</code> se&#231;ene&#287;ini kullanarak bunu tek bir alan i&#231;in ge&#231;ersiz k&#305;labiliriz.</p>
+  <pre class="ruby">
+  &lt;%= f.input :problems, :as =&gt; :check_boxes, :required =&gt; false %&gt;
+  </pre>
+  <p>Bunu her alan i&#231;in kontrol etmek zahmetli hale gelebilir; hangi alanlar&#305;n zorunlu oldu&#287;unu kontrol etmek i&#231;in model&rsquo;lerin do&#287;rulamalar&#305;n&#305; kullanabilseydik &#231;ok daha kolay olurdu. Formtastic bunu desteklemektedir, ancak bundan yararlanmak i&#231;in &#246;ncelikle <a href="http://github.com/redinger/validation_reflection">validation_reflection</a> adl&#305; bir eklentiyi y&#252;klememiz gerekir.</p>
+
+  <p>Eklentiyi uygulamam&#305;za GitHub&rsquo;dan y&#252;kleyebiliriz.</p>
+  <pre class="terminal">  script/plugin install git://github.com/redinger/validation_reflection.git
+  </pre>
+  <p>validation_reflection
+y&#252;klendikten sonra, eklentinin &#231;al&#305;&#351;t&#305;r&#305;lmas&#305; i&#231;in sunucumuzu yeniden
+ba&#351;latmam&#305;z gerekir. Daha sonra sayfay&#305; yeniden y&#252;klersek, y&#305;ld&#305;z
+i&#351;aretlerinin gitti&#287;ini g&#246;r&#252;r&#252;z. Bu, Animal model&rsquo;indeki alanlar&#305;n hi&#231;birinin do&#287;rulamas&#305;n&#305;n olmamas&#305;ndand&#305;r.</p>
+
+  <div class="imageWrapper">
+    <img src="/system/photos/225/original/E185I04.png" alt="Zorunlu alan i&#351;aretleri art&#305;k g&#246;sterilmiyor." height="583" width="800"/>
+  </div>
+
+  <p>&#350;imdi <code>name</code> ve <code>born_on</code> &#246;zelliklerine do&#287;rulama ekleyerek onlar&#305;n zorunlu olmas&#305;n&#305; sa&#287;layabiliriz&hellip;</p>
+  <pre class="ruby">
+  class Animal &lt; ActiveRecord::Base
+    attr_accessible :name, :category_id, :born_on, :female, :problem_ids
+    belongs_to :category
+    has_many :symptoms
+    has_many :problems, :through =&gt; :symptoms
+    validates_presence_of :name, :born_on
+  end
+  </pre>
+  <p>&hellip;ve formu tekrar y&#252;klersek y&#305;ld&#305;z i&#351;aretleri o alanlar&#305;n etiketlerinin yan&#305;na geri gelecektir.</p>
+
+  <div class="imageWrapper">
+    <img src="/system/photos/226/original/E185I05.png" alt="Model do&#287;rulamalar&#305; nedeniyle ilk iki alan art&#305;k zorunlu." height="582" width="800"/>
+  </div>
+
+  <h3>Formtastic Hata Mesajlar&#305;n&#305; Nas&#305;l &#304;dare Eder</h3>
+
+  <p>Formtastic, bir formun hata mesajlar&#305;n&#305; her alan&#305;n yan&#305;nda sat&#305;r aras&#305;nda g&#246;sterir. Hayvan&#305;m&#305;z&#305;n ad&#305;n&#305; silersek ve ard&#305;ndan kaydetmeye &#231;al&#305;&#351;&#305;rsak varsay&#305;lan hata iletisi g&#246;sterilir.</p>
+
+  <div class="imageWrapper">
+    <img src="/system/photos/227/original/E185I06.png" alt="Alan&#305;n alt&#305;nda yer alan varsay&#305;lan do&#287;rulama metni." height="280" width="797"/>
+  </div>
+
+  <p>Gerekirse, Formtastic&rsquo;in yap&#305;land&#305;rmas&#305;nda de&#287;i&#351;iklik yap&#305;larak bu davran&#305;&#351; de&#287;i&#351;tirilebilir.</p>
+
+  
+<p>En iyisi yap&#305;land&#305;rma ayr&#305;nt&#305;lar&#305;n&#305; <code>/config/initializers</code> dizinine koymakt&#305;r. Bu dosyaya <code>formtastic_config.rb</code> ad&#305;n&#305; verece&#287;iz.&nbsp;<a href="http://github.com/justinfrench/formtastic">Formtastic GitHub sayfas&#305;nda</a> yap&#305;land&#305;rma dosyas&#305;na yerle&#351;tirilebilecekler hakk&#305;nda ayr&#305;nt&#305;lar ve g&#246;r&#252;lebilecek bir&nbsp;<a href="http://github.com/justinfrench/formtastic/blob/master/generators/formtastic/templates/formtastic.rb">&#246;rnek dosya</a> bulunmaktad&#305;r. Orada listelenen yap&#305;land&#305;rma se&#231;eneklerinden biri, formun hatalar&#305;n&#305;n nerede g&#246;sterildi&#287;ini de&#287;i&#351;tirmek i&#231;in gereken <code>inline_errors</code> se&#231;ene&#287;idir. Hatalar&#305; gizlemek i&#231;in yap&#305;land&#305;rma dosyas&#305;nda <code>inline_errors</code> se&#231;ene&#287;ini <code>:none</code> olarak ayarlayabiliriz.</p>
+
+  <pre class="ruby">Formtastic::SemanticFormBuilder.inline_errors = :none</pre>
+  
+<p>Art&#305;k ge&#231;ersiz bir formu g&#246;ndermeye &#231;al&#305;&#351;t&#305;&#287;&#305;m&#305;zda form sayfas&#305;na
+geri g&#246;nderilece&#287;iz ama hi&#231;bir hata g&#246;sterilmeyecek. Hatalar&#305; formun
+tepesinde bir liste halinde g&#246;r&#252;nt&#252;lemek istersek, hatalar&#305; “klasik” Rails yoluyla g&#246;stermek i&#231;in  <code>error_messages</code> metodunu kullanabiliriz.</p>
+  <pre class="ruby">
+  &lt;% semantic_form_for @animal do |f| %&gt;
+    &lt;%= f.error_messages %&gt;
+    &lt;% f.inputs do %&gt;
+    &lt;!-- rest of form --&gt;
+  </pre>
+  <p>Form hatalar&#305; art&#305;k formun tepesinde g&#246;sterilecektir.</p>
+
+  <div class="imageWrapper">
+    <img src="/system/photos/228/original/E185I07.png" alt="Hatalar art&#305;k formun tepesinde g&#246;steriliyor." height="380" width="790"/>
+  </div>
+
+  <h3>&#304;pu&#231;lar&#305;</h3>
+
+  <p>G&#246;sterece&#287;imiz bir Formtastic alan se&#231;ene&#287;i daha var: <code>:hint</code> (ipucu). Ad&#305;ndan da anla&#351;&#305;laca&#287;&#305; gibi, <code>:hint</code> alan&#305;n yan&#305;nda bir ipucu g&#246;sterir. Alan&#305;n ad&#305;na bir ipucu eklemek i&#231;in yaln&#305;zca uygun bir ipucu mesaj&#305; eklememiz gerekmektedir.</p>
+
+  <pre class="ruby">&lt;%= f.input :name, :hint =&gt; &quot;Enter the owner&amp;rsquo;s name if none is provided.&quot; %&gt;</pre>
+  <p>&#350;imdi sayfay&#305; yeniden y&#252;kledi&#287;imizde ipucu mesaj&#305; form alan&#305;n&#305;n alt&#305;nda g&#246;sterilecektir.</p>
+
+  <div class="imageWrapper">
+    <img src="/system/photos/229/original/E185I08.png" alt="Alan&#305;n alt&#305;nda g&#246;sterilen ipucu." height="286" width="816"/>
+  </div>
+
+  <p>&#304;pucu mesaj&#305;n&#305;n veya formun ba&#351;ka b&#246;l&#252;mlerinin stilini de&#287;i&#351;tirmek istersek, bir &#246;nceki b&#246;l&#252;mde</p>
+  <pre class="terminal">
+  script/generate formtastic_stylesheets
+  </pre>
+  <p>komutunu &#231;al&#305;&#351;t&#305;rd&#305;&#287;&#305;m&#305;zda Formtastic&rsquo;in olu&#351;turdu&#287;u <code>formtastic_changes.css</code> dosyas&#305;n&#305; de&#287;i&#351;tirerek bunu yapabiliriz. Dosyan&#305;n i&#231;inde
+ipucu metninin stilinin nas&#305;l de&#287;i&#351;tirilece&#287;ini g&#246;steren i&#351;e yarar bir
+yorum b&#246;l&#252;m&#252; bulunmaktad&#305;r. &#304;pucu metninin 11px boyutunda ve italik
+olmas&#305;n&#305; istersek &#351;u CSS&rsquo;yi kullanarak bunu yapabiliriz:</p>
+  <pre class="terminal">
+  form.formtastic fieldset ol li p.inline-hints { 
+    font-style: italic;
+    font-size: 11px;
+  }
+  </pre>
+  <p>Formu tekrar y&#252;klersek ipucu metni de&#287;i&#351;mi&#351; olacakt&#305;r.</p>
+
+  <div class="imageWrapper">
+    <img src="/system/photos/230/original/E185I09.png" alt="&#304;pucumuzun art&#305;k stili var." height="286" width="816"/>
+  </div>
+
+  <p>Formun g&#246;r&#252;n&#252;m&#252;nde ba&#351;ka de&#287;i&#351;iklikler yapmak istersek, varsay&#305;lan stillerin nas&#305;l tan&#305;mland&#305;&#287;&#305;n&#305; g&#246;rmek i&#231;in <code>formtastic.css</code> dosyas&#305;na bakmak en iyi yoldur. Ard&#305;ndan varsay&#305;lanlar&#305; ge&#231;ersiz k&#305;lmak i&#231;in <code>formtastic_changes.css</code> dosyas&#305;nda benzer se&#231;icileri (selector) kullanabiliriz.</p>
+
+  
+<p>Bu b&#246;l&#252;ml&#252;k bu kadar. Formtastic&rsquo;i kendi uygulamalar&#305;n&#305;zda denemeniz i&#231;in sizi ikna edecek kadar bilgi verebildi&#287;imizi umuyoruz. Bu iki b&#246;l&#252;m boyunca i&#351;leyemedi&#287;imiz birka&#231; &#246;zellik bulunuyor. Formtastic belgeleri t&#252;m &#246;zellikleri kaps&#305;yor ve yerelle&#351;tirme deste&#287;i dahil olmak &#252;zere daha fazla bilgi i&#231;in bakmaya de&#287;er.</p>

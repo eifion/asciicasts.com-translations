@@ -1,0 +1,322 @@
+<p>Back in <a href="http://railscasts.com/episodes/111-advanced-search-form">episode 111</a>, we created an advanced search form. One of the key parts of the code was a number of methods that we used to build conditions dynamically by building up the SQL for the search terms. For example, to search for a product based on its keywords or price we created methods like these:</p>
+<pre class="ruby">
+# models/search.rb
+
+private
+def keyword_conditions
+  [&quot;products.name LIKE ?&quot;, &quot;%#{keywords}%&quot;] unless keywords.blank?
+end
+
+def minimum_price_conditions
+  [&quot;products.price &gt;= ?&quot;, minimum_price] unless minimum_price.blank?
+end
+
+def maximum_price_conditions
+  [&quot;products.price &lt;= ?&quot;, maximum_price] unless maximum_price.blank?
+end
+
+def category_conditions
+  [&quot;products.category_id = ?&quot;, category_id] unless category_id.blank?
+end
+
+def conditions
+  [conditions_clauses.join(&#x27; AND &#x27;), *conditions_options]
+end
+
+def conditions_clauses
+  conditions_parts.map { |condition| condition.first }
+end
+
+def conditions_options
+  conditions_parts.map { |condition| condition[1..-1] }.flatten
+end
+
+def conditions_parts
+  private_methods(false).grep(/_conditions$/).map { |m| send(m) }.compact
+end
+</pre>
+<p>This isn&rsquo;t the best way to approach this problem as it can quickly get messy and is prone to bugs. So, if concatenating strings together to build up SQL statements isn&rsquo;t the way to go, what&rsquo;s the alternative?</p>
+
+<p>One solution is to use <a href="http://github.com/binarylogic/searchlogic/tree/master">Searchlogic</a>. This works by creating a number of named scopes that can be called on any ActiveRecord model to search against that model&rsquo;s attributes. Given, say, a <code>User</code> model with a <code>username</code> attribute, Searchlogic lets us use methods such as <code>username_equals</code>, <code>username_does_not_equal</code>, <code>username_begins_with</code> and so on. (For a longer list see the documentation on <a href="http://github.com/binarylogic/searchlogic/tree/master">Searchlogic&rsquo;s Github page</a>.) Using named scopes has several advantages, not least of which is that we can chain them together to create more complex search conditions.</p>
+
+<h3>Installing</h3>
+
+<p>Searchlogic is available as a gem and is installed in the usual way. First we need to download and install the gem.</p>
+<pre class="terminal">
+sudo gem install searchlogic
+</pre>
+<p>Then, inside our application&rsquo;s <code>/config/environment.rb</code> file we can add it to the list of the app&rsquo;s gems.</p>
+<pre class="ruby">
+config.gem &quot;searchlogic&quot;
+</pre>
+
+<h3>Using Searchlogic</h3>
+
+<p>Before we add Searchlogic to our application we&rsquo;ll demonstrate how it works in the console. To make the console&rsquo;s output easier to read we&rsquo;re going to make use of another gem called <a href="http://github.com/cldwalker/hirb/tree/master">hirb</a>. Hirb provides several functions for improving the output from the Rails console, not least of which is that it displays lists of models, such as we&rsquo;d see returned from a find, as tables. Hirb can be installed with</p>
+<pre class="terminal">
+sudo gem install cldwalker-hirb --source http://gems.github.com
+</pre>
+<p>We can also make the console show the appropriate lines from the development log so that we can see which SQL statements were called against the database. To get this all working we need to run some code when <code>script/console</code> starts. First,</p>
+<pre class="ruby">
+ActiveRecord::Base.logger = Logger.new(STDOUT)
+</pre>
+<p>will enable the output logging to be shown in the console and to enable hirb we need to run these two lines:</p>
+<pre class="ruby">
+require &#x27;hirb&#x27;
+Hirb::View.enable
+</pre>
+<p>The data we&rsquo;re going to search against is a list of nine <code>Product</code> models. The products we have are these (note that we&rsquo;ve removed the default timestamp fields from the tables so that the output is narrow enough to fit).</p>
+<pre class="terminal">
+&gt;&gt; Product.all
+  Product Load (0.8ms)   SELECT * FROM &quot;products&quot; 
++----+-------------+--------------------+--------+
+| id | category_id | name               | price  |
++----+-------------+--------------------+--------+
+| 1  | 5           | Scrabble Delux     | 29.99  |
+| 2  | 2           | DVD Player         | 79.99  |
+| 3  | 1           | Red T-Shirt        | 12.49  |
+| 4  | 4           | Black Leather Sofa | 399.99 |
+| 5  | 4           | Oak Coffee Table   | 223.99 |
+| 6  | 3           | Milk (1 Gallon)    | 2.99   |
+| 7  | 3           | Oh&#x27;s Cereal        | 3.95   |
+| 8  | 2           | Video Game Console | 299.95 |
+| 9  | 2           | Video Game Disc    | 29.95  |
++----+-------------+--------------------+--------+
+</pre>
+<p>Say we want to find all of the products that have &ldquo;video&rdquo; in their name. With Searchlogic we can use <code>name_like</code>, which will generate a SQL LIKE query. If we run <code>Product.name_like &quot;video&quot;</code> we&rsquo;ll see the two products whose name contains &ldquo;video&rdquo;.</p>
+<pre class="terminal">
+&gt;&gt; Product.name_like &quot;video&quot;
+  Product Load (0.4ms)   SELECT * FROM &quot;products&quot; WHERE (products.name LIKE &#x27;%video%&#x27;) 
++----+-------------+--------------------+--------+
+| id | category_id | name               | price  |
++----+-------------+--------------------+--------+
+| 8  | 2           | Video Game Console | 299.95 |
+| 9  | 2           | Video Game Disc    | 29.95  |
++----+-------------+--------------------+--------+
+2 rows in set
+</pre>
+<p>Each named scope that Searchlogic provides has a <code>not</code> variant, so if we want to find the products whose name doesn&rsquo;t contain &ldquo;video&rdquo; we can use <code>name_not_like</code>. Running <code>Product.name_not_like &quot;video&quot;</code> will return the products that weren&rsquo;t returned before.</p>
+<pre class="terminal">
+&gt;&gt; Product.name_not_like &quot;video&quot;
+  Product Load (0.8ms)   SELECT * FROM &quot;products&quot; WHERE (products.name NOT LIKE &#x27;%video%&#x27;) 
++----+-------------+--------------------+--------+
+| id | category_id | name               | price  |
++----+-------------+--------------------+--------+
+| 1  | 5           | Scrabble Delux     | 29.99  |
+| 2  | 2           | DVD Player         | 79.99  |
+| 3  | 1           | Red T-Shirt        | 12.49  |
+| 4  | 4           | Black Leather Sofa | 399.99 |
+| 5  | 4           | Oak Coffee Table   | 223.99 |
+| 6  | 3           | Milk (1 Gallon)    | 2.99   |
+| 7  | 3           | Oh&#x27;s Cereal        | 3.95   |
++----+-------------+--------------------+--------+
+7 rows in set
+</pre>
+<p>As we mentioned before we can chain queries together. To return the products that don&rsquo;t have &ldquo;video&rdquo; in their name and cost less than &pound;5 we can run <code>Product.name_not_like(&quot;video&quot;).price_gt(5)</code>.</p>
+<pre class="terminal">
+&gt;&gt; Product.name_not_like(&quot;video&quot;).price_gt(5)
+  Product Load (0.5ms)   SELECT * FROM &quot;products&quot; WHERE ((products.price &gt; 5) AND (products.name NOT LIKE &#x27;%video%&#x27;)) 
++----+-------------+--------------------+--------+
+| id | category_id | name               | price  |
++----+-------------+--------------------+--------+
+| 1  | 5           | Scrabble Delux     | 29.99  |
+| 2  | 2           | DVD Player         | 79.99  |
+| 3  | 1           | Red T-Shirt        | 12.49  |
+| 4  | 4           | Black Leather Sofa | 399.99 |
+| 5  | 4           | Oak Coffee Table   | 223.99 |
++----+-------------+--------------------+--------+
+5 rows in set
+</pre>
+<p>We could chain another condition to the list to also restrict the items to those costing less than &pound;200 by running <code>Product.name_not_like(&quot;video&quot;).price_gt(5).price_lt(200)</code></p>
+<pre class="terminal">
+&gt;&gt; Product.name_not_like(&quot;video&quot;).price_gt(5).price_lt(200)
+  Product Load (0.4ms)   SELECT * FROM &quot;products&quot; WHERE ((products.price &lt; 200) AND ((products.price &gt; 5) AND (products.name NOT LIKE &#x27;%video%&#x27;))) 
++----+-------------+----------------+-------+
+| id | category_id | name           | price |
++----+-------------+----------------+-------+
+| 1  | 5           | Scrabble Delux | 29.99 |
+| 2  | 2           | DVD Player     | 79.99 |
+| 3  | 1           | Red T-Shirt    | 12.49 |
++----+-------------+----------------+-------+
+3 rows in set
+</pre>
+<p>If we want to search for multiple names we can use <code>name_like_any</code> and pass an number of values. To search for products whose name contains either &ldquo;sofa&rdquo; or &ldquo;table&rdquo; we can run <code>Product.name_like_any &quot;sofa&quot;, &quot;table&quot;</code> and we&rsquo;ll see the products that have either &ldquo;sofa&rdquo; or &ldquo;table&rdquo; in their names.</p>
+<pre class="terminal">
+&gt;&gt; Product.name_like_any &quot;sofa&quot;, &quot;table&quot;
+  Product Load (0.4ms)   SELECT * FROM &quot;products&quot; WHERE (products.name LIKE &#x27;%sofa%&#x27; OR products.name LIKE &#x27;%table%&#x27;) 
++----+-------------+--------------------+--------+
+| id | category_id | name               | price  |
++----+-------------+--------------------+--------+
+| 4  | 4           | Black Leather Sofa | 399.99 |
+| 5  | 4           | Oak Coffee Table   | 223.99 |
++----+-------------+--------------------+--------+
+2 rows in set
+</pre>
+<p>We can also perform searches on associated attributes. Our products have a <code>category_id</code> attribute as they <code>belong_to</code> a <code>Category</code>. Our list of categories is</p>
+<pre class="terminal">
+&gt;&gt; Category.all
+  Category Load (0.4ms)   SELECT * FROM &quot;categories&quot; 
++----+--------------+
+| id | name         |
++----+--------------+
+| 1  | Clothing     |
+| 2  | Electronics  |
+| 3  | Groceries    |
+| 4  | Furniture    |
+| 5  | Toys &amp; Games |
++----+--------------+
+5 rows in set
+</pre>
+<p>To list all of the products whose category contains &ldquo;elect&rdquo;, we can run <code>Product.category_name_like(&quot;elect&quot;)</code>.</p>
+<pre class="terminal">
+&gt;&gt; Product.category_name_like(&quot;elect&quot;)
+  Product Load (0.4ms)   SELECT &quot;products&quot;.* FROM &quot;products&quot; INNER JOIN &quot;categories&quot; ON &quot;categories&quot;.id = &quot;products&quot;.category_id WHERE (categories.name LIKE &#x27;%elect%&#x27;) 
++----+-------------+--------------------+--------+
+| id | category_id | name               | price  |
++----+-------------+--------------------+--------+
+| 2  | 2           | DVD Player         | 79.99  |
+| 8  | 2           | Video Game Console | 299.95 |
+| 9  | 2           | Video Game Disc    | 29.95  |
++----+-------------+--------------------+--------+
+3 rows in set
+</pre>
+<p>Searchlogic also gives us a method called <code>search</code> that can be called on a model. The arguments you pass to search are the same as the named scopes that are created so to find the products whose category name contains &ldquo;elect&rdquo; with a price of below 100 pounds we can use <code>Product.search(:category_name_like =&gt; &quot;elect&quot;, :price_lt =&gt; &quot;100&quot;)</code>.</p>
+<pre class="terminal">
+&gt;&gt; Product.search(:category_name_like =&gt; &quot;elect&quot;, :price_lt =&gt; &quot;100&quot;)
+=&gt; #&lt;Searchlogic::Search:0x2311e40 @klass=Product(id: integer, category_id: integer, name: string, price: float), @conditions={:category_name_like=&gt;&quot;elect&quot;, :price_lt=&gt;100.0}, @current_scope=nil&gt;
+</pre>
+<p>This time we have a <code>Search</code> object returned. To work with the object we&rsquo;ll have to assign it to a variable, which we can do with this irb trick.</p>
+<pre class="terminal">
+&gt;&gt; s = _
+</pre>
+<p>If you assign a variable to the underscore character it will be assigned the value of the object that was returned in the last command. With the search object assigned to <code>s</code> we can call the all method to return a list of the matching products.</p>
+<pre class="terminal">
+&gt;&gt; s.all
+  Product Load (0.4ms)   SELECT &quot;products&quot;.* FROM &quot;products&quot; INNER JOIN &quot;categories&quot; ON &quot;categories&quot;.id = &quot;products&quot;.category_id WHERE ((products.price &lt; 100.0) AND (categories.name LIKE &#x27;%elect%&#x27;)) 
++----+-------------+-----------------+-------+
+| id | category_id | name            | price |
++----+-------------+-----------------+-------+
+| 2  | 2           | DVD Player      | 79.99 |
+| 9  | 2           | Video Game Disc | 29.95 |
++----+-------------+-----------------+-------+
+2 rows in set
+</pre>
+<p>We can call named scopes on the search object too. So to just match the products in the search object that have a name containing &ldquo;video&rdquo; we can call <code>s.name_like(&quot;video&quot;)</code> to get another search object on which we can call <code>all</code>.</p>
+<pre class="terminal">
+&gt;&gt; s.name_like(&quot;video&quot;).all
+  Product Load (0.3ms)   SELECT &quot;products&quot;.* FROM &quot;products&quot; INNER JOIN &quot;categories&quot; ON &quot;categories&quot;.id = &quot;products&quot;.category_id WHERE ((products.price &lt; 100.0) AND ((products.name LIKE &#x27;%video%&#x27;) AND (categories.name LIKE &#x27;%elect%&#x27;))) 
++----+-------------+-----------------+-------+
+| id | category_id | name            | price |
++----+-------------+-----------------+-------+
+| 9  | 2           | Video Game Disc | 29.95 |
++----+-------------+-----------------+-------+
+1 row in set
+</pre>
+<p>If you&rsquo;ve created our own named scopes in a model you can also use them here with a search object.</p>
+<p>We can also pass in sorting options as well as conditions, by using <code>ascend_by_</code> and <code>descend_by_</code>. So, <code>Product.ascend_by_name</code> will return the products in alphabetical order.</p>
+<pre class="terminal">
+&gt;&gt; Product.ascend_by_name
++----+-------------+--------------------+--------+
+| id | category_id | name               | price  |
++----+-------------+--------------------+--------+
+| 4  | 4           | Black Leather Sofa | 399.99 |
+| 2  | 2           | DVD Player         | 79.99  |
+| 6  | 3           | Milk (1 Gallon)    | 2.99   |
+| 5  | 4           | Oak Coffee Table   | 223.99 |
+| 7  | 3           | Oh&#x27;s Cereal        | 3.95   |
+| 3  | 1           | Red T-Shirt        | 12.49  |
+| 1  | 5           | Scrabble Delux     | 29.99  |
+| 8  | 2           | Video Game Console | 299.95 |
+| 9  | 2           | Video Game Disc    | 29.95  |
++----+-------------+--------------------+--------+
+9 rows in set
+</pre>
+
+<h3>Integrating Search Into Our Application</h3>
+
+<p>That&rsquo;s enough of the console. We&rsquo;ll now integrate Searchlogic into an application. Below is a page showing the same list of products we&rsquo;ve been searching against. There&rsquo;s also a search field and button on the page, but the form isn&rsquo;t wired up yet. Entering a search term and clicking the button just reloads the page with the search term in the querystring.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/167/original/E176I01.png" width="815" height="342" alt="The search form on our products page."/>
+</div>
+<p>Getting the search working is straightforward. In the controller we&rsquo;ll split the search term into words (after converting it to a string in case it&rsquo;s <code>nil</code>) then use <code>name_like_all</code> to return the products whose name contains all of the search words. Lastly we&rsquo;ll add <code>ascend_by_name</code> to return the products in alphabetical order.</p>
+<pre class="ruby">
+def index
+  @products = Product.name_like_all(params[:search].to_s.split).ascend_by_name
+end
+</pre>
+<p>If we search for &ldquo;video console&rdquo; now we&rsquo;ll see the one product that has a name that matches both &ldquo;video&rdquo; and &ldquo;console&rdquo; returned.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/168/original/E176I02.png" width="815" height="342" alt="The basic search form now works."/>
+</div>
+
+<p>Now that we&rsquo;ve got the search working we can add some more functionality to our form, allowing searching by category and a price range.</p>
+
+<p>The search form in the index view currently looks like this:</p>
+<pre class="ruby">
+&lt;% form_tag products_path, :method =&gt; &#x27;GET&#x27; do %&gt;
+  &lt;%= text_field_tag :search, params[:search] %&gt;
+  &lt;%= submit_tag &quot;Search&quot;, :name =&gt; nil %&gt;
+&lt;% end %&gt;
+</pre>
+<p>This code is based on the simple search form from <a href="http://railscasts.com/episodes/37-simple-search-form">episode 37</a>. For our more complex search form we&rsquo;re going to use <code>form_for</code> instead of <code>form_tag</code>. We usually <code>form_for</code> for manipulating resources, but in this case we can think of a search as a resource. If we do so then we can write our form this way:</p>
+<pre class="ruby">
+&lt;% form_for @search do |f| %&gt;
+  &lt;ol class=&quot;formList&quot;&gt;
+    &lt;li&gt;
+      &lt;%= f.label :name_like, &quot;Name&quot; %&gt;
+      &lt;%= f.text_field :name_like %&gt;
+    &lt;/li&gt;
+    &lt;li&gt;
+      &lt;%= f.label :category_id_equals, &quot;Category&quot; %&gt;
+      &lt;%= f.collection_select :category_id_equals, Category.all, :id, :name, :include_blank =&gt; true %&gt;
+    &lt;/li&gt;
+    &lt;li&gt;
+      &lt;%= f.label :price_gte, &quot;Price Range&quot; %&gt;
+      &lt;%= f.text_field :price_gte, :size =&gt; 8 %&gt; - &lt;%= f.text_field :price_lte, :size =&gt; 8 %&gt;
+    &lt;/li&gt;
+    &lt;li&gt;
+      &lt;%= f.submit &quot;Search&quot; %&gt;
+    &lt;/li&gt;
+  &lt;/ol&gt;
+&lt;% end %&gt;
+</pre>
+<p>Our form is now for a <code>@search</code> instance variable which we&rsquo;ll create in the controller shortly. We&rsquo;ll give it fields called <code>name_like</code>, <code>category_id_equals</code>, <code>price_gte</code> and <code>price_lte</code>. These names should look familiar as some of the named scopes we&rsquo;ve used when searching against our product model. We&rsquo;re assigning values to them which we can then use in the controller to perform our search.</p>
+<pre class="ruby">
+def index
+  @search = Product.search(params[:search])
+  @products = @search.all
+end
+</pre>
+<p>We can use the params from our search form to pass to <code>Product.search</code> to return a search object. What we&rsquo;re doing is passing a hash of options to the search method in the same way we did earlier when we ran</p>
+<pre class="ruby">
+Product.search(:category_name_like =&gt; &quot;elect&quot;, :price_lt =&gt; &quot;100&quot;)
+</pre>
+<p>We then get our list of matching products by calling <code>@search.all</code>.</p>
+
+<p>Let&rsquo;s see if our new form works by trying a search for the products in the electronics category that are less than &pound;50.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/169/original/E176I03.png" width="800" height="435" alt="The advanced search form now works too."/>
+</div>
+
+<p>It does! We now have a form that lets us search against a number of fields.</p>
+
+<h3>Sorting in Views</h3>
+
+<p>We&rsquo;ll finish off by showing one more of Searchlogic&rsquo;s features: sorting. Searchlogic provides a helper method called order that can be added to our view and which provides links that order the search results. If we add</p>
+<pre class="ruby">
+&lt;p&gt;Sort by &lt;%= order @search, :by =&gt; :name %&gt; | &lt;%= order @search, :by =&gt; :price %&gt;&lt;/p&gt;
+</pre>
+<p>to the view we&rsquo;ll have two links on the page that will allow us to sort our search results by name or price either ascending or descending.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/170/original/E176I04.png" width="815" height="496" alt="We now have links we can sort by."/>
+</div>
+
+<p>Searchlogic provides an impressive range of features to make searching easy in your Rails applications, especially with its clever use of named scopes. Despite that there are a couple of reasons that might make using it in views only suitable for pages that are in admin sections or otherwise protected from public use. The first is aesthetic: the URLs Searchlogic generates can become quite long fairly easily, as all of the search parameters are included in the querystring. Secondly, as the parameters are passed in the querystring users aren&rsquo;t restricted to the fields in the form, but could enter any named scope which are available in your model. If you want to take this approach on your public-facing forms then filtering the params hash to ensure that only the named scopes that are on the form are being passed is necessary.</p>
+
+<h3>Performance</h3>
+
+<p>It might seem that adding a large number of named scopes to all of an application&rsquo;s models might hurt its performance, but Searchlogic makes use of <code>method_missing</code> to only create named scopes are they are called for the first time. This means that the named scopes are created as efficiently as possible. That said, if you&rsquo;ll be doing a lot of text searching in your application it might be worth looking at a full-text search engine such as <a href="http://freelancing-god.github.com/ts/en/">Thinking Sphinx</a>.</p>

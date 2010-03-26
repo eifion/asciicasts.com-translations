@@ -1,0 +1,197 @@
+<p>This episode is going to cover authorization, specifically role-based authorization. With this a user can be assigned to a role which gives them certain permissions throughout an application. Authorization is a tricky subject to cover, not least because there are <a href="http://steffenbartsch.com/blog/2008/08/rails-authorization-plugins/">so many different authorization plugins and gems available</a>. Another problem is that the best authorization solution depends on the type of application you&rsquo;re writing.</p>
+
+<p>This episode will focus on <a href="http://github.com/stffn/declarative_authorization">declarative authorization</a> which is one of the more advanced solutions. At first it might appear to be a rather complicated but with a little effort you&rsquo;ll discover that it provides a lot of powerful functionality and can handle a wide range of authorization needs.</p>
+
+<h3>Adding Authorization to Our Application</h3>
+
+<p>In this episode we&rsquo;ll be working with a blogging application. The application&rsquo;s home page shows a list of articles and each article can have a number of comments which are shown on that article&rsquo;s page.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/235/original/E188I01.png" width="824" height="523" alt="The home page of our blogging application."/>
+</div>
+
+<p>In its current state any user who visits the site can edit or delete any of the articles or comments which is obviously not what we want so we&rsquo;ll be modifying the application to give each user a different level of functionality according to their role. We already have authentication set up on our site and there are links at the top of each page to allow users to sign up or log in. For this we used Authlogic, which was covered back in episode 160 [<a href="http://railscasts.com/episodes/160-authlogic">watch</a>, <a href="http://asciicasts.com/episodes/160-authlogic">read</a>].</p> 
+
+<p>To add roles we&rsquo;re going to create a new model called <code>Role</code> which will have a string attribute called <code>name</code>. The <code>Role</code> and <code>User</code> models will be linked by a <code>has_many :through</code> relationship via a join model called <code>Assignment</code>.</p> 
+
+<p>To assign roles to a user we&rsquo;ll modify the sign-up form so that a user can choose their roles. This is done with a series of checkboxes using the technique described back in episode 17 [<a href="http://asciicasts.com/episodes/160-authlogic">watch</a>, <a href="http://asciicasts.com/episodes/17-habtm-checkboxes">read</a>]. Obviously in a real world application we wouldn&rsquo;t let users to choose their own roles but to keep this example application simple we&rsquo;re going to allow this.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/236/original/E188I02.png" width="824" height="523" alt="The signup page showing the roles checkboxes."/>
+</div>
+
+<p>Our three roles will have different permissions: members of the admin role will be allowed to create, edit and destroy anything across the application; moderators will be allowed to edit anyone&rsquo;s comments, but not articles; authors will be allowed to create articles and edit any articles that they have created and finally, users without any assigned role will be allowed to create comments and edit their own comments.</p>
+
+<h3>Getting Started With Declarative Authorization</h3>
+
+<p>Now that we know what we want to do let&rsquo;s dive in and get started. Declarative authorization is available as a gem from Gemcutter so the first step we need to take is to add a reference to it in our application&rsquo;s <code>/config/environment.rb</code> file.</p>
+<pre class="ruby">
+config.gem &quot;declarative_authorization&quot;, :source =&gt; &quot;http://gemcutter.org&quot;
+</pre>
+<p>Then, to make sure that the gem is installed we&rsquo;ll run</p>
+<pre class="terminal">
+sudo rake gems:install
+</pre>
+<p>The permissions for the roles we&rsquo;re defining for our application are going be defined in a new file called <code>authorization_rules.rb</code> in the <code>/config</code> directory. Declarative Authorization provides its own DSL for defining roles and permissions and this is how we&rsquo;ll use it to define the permissions for the admin user.</p>
+<pre class="ruby">
+authorization do
+  role :admin do
+    has_permission_on [:articles, :comments], :to =&gt; [:index, :show, :new, :create, :edit, :update, :destroy]
+  end
+end
+</pre>
+<p>The roles are defined within an <code>authorization</code> block. Each role has a name and also takes a block in which that role&rsquo;s permissions are set out. We use the <code>has_permission_on</code> method to define the permissions and this takes two parameters. The first is a list of the models that the role can access and this is followed by a <code>:to</code> parameter which has a list of the permitted actions on those models.</p>
+
+<p>We&rsquo;ll define the other roles later and test what we&rsquo;ve done so far now. Before we go any further though we&rsquo;ll need to make one other change as declarative authorization doesn&rsquo;t know how our roles are defined. We need to make a change to our <code>User</code> model, adding a <code>role_symbols</code> method that returns a list of the roles the user has as an array of symbols. If, for example, our <code>User</code> model had an <code>admin</code> attribute we could write this method this way so that the user belongs to the <code>:admin</code> role if they are an admin.</p>
+<pre class="ruby">
+def role_symbols
+  [:admin] if admin?
+end
+</pre>
+<p>Our application is different is that it has a many-to-many relationship between <code>User</code> and <code>Role</code> and a user&rsquo;s roles are defined when they sign up through the checkboxes we saw earlier. So in <code>role_symbols</code> we&rsquo;ll convert the current user&rsquo;s roles into an array of symbols which is done like this:</p>
+<pre class="ruby">
+def role_symbols
+  roles.map do |role|
+    role.name.underscore.to_sym
+  end
+end
+</pre>
+<p>Declarative authorization will now be able to map a user&rsquo;s roles to the roles we&rsquo;re defining in the <code>authorization_rules</code> file.</p>
+
+<p>There are a couple of steps we still need to take. One is to set up a <code>before_filter</code> in our <code>ApplicationController</code> to tell declarative authorization what the current user is. </p>
+<pre class="ruby">
+class ApplicationController &lt; ActionController::Base
+  helper :all
+  protect_from_forgery
+  before_filter { |c| Authorization.current_user = c.current_user }
+end
+</pre>
+<p>Finally we need to go into each of our controllers and add a <code>before_filter</code> there to restrict access. We do this by calling a method that declarative authorization provides called <code>filter_resource_access</code>. This method adds before filters to RESTful type controllers and also does one other thing: when <code>filter_resource_access</code> is called it loads the single resource model so that it can check the access on it. This means that in each of the <code>show</code>, <code>new</code>, <code>create</code>, <code>edit</code>, <code>update</code> and <code>delete</code> actions we can remove the line that loads the model. We can do this in both the <code>ArticlesController</code> and the <code>CommentsController</code> in our application. If any of your controllers don&rsquo;t follow the RESTful conventions then the documentation7 has details on how to deal with this.</p>
+
+<h3>Testing What We&rsquo;ve Done</h3>
+
+<p>It has taken quite a bit of work to get this far but we&rsquo;re finally at the stage where we can test what we&rsquo;ve done so far. If we log in as a user with an admin role we can view the articles and the links to edit or delete articles and comments are visible. So far, so good, but when we log out though we see something unexpected:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/237/original/E188I03.png" width="803" height="280" alt="The error page shown when trying to access an unauthorized action."/>
+</div>
+
+<p>This happens because the application redirects to the home page, the articles index page, when we log out and as a guest we don&rsquo;t have permission to view that action. To fix this we need to add the permissions for the guest in the <code>authorization_rules</code> file. The guest role is a special role reserved for users who are yet to sign up or log in or users who don&rsquo;t have a role assigned to them.</p>
+<pre class="ruby">
+authorization do
+  role :admin do
+    has_permission_on [:articles, :comments], :to =&gt; [:index, :show, :new, :create, :edit, :update, :destroy]
+  end
+  
+  role :guest do
+    has_permission_on :articles, :to =&gt; [:index, :show]
+    has_permission_on :comments, :to =&gt; [:new, create]
+  end
+end
+</pre>
+<p>In the guest role we give permission for guests to access the index and show actions for articles and the new and create actions for comments. With these changes in place when we reload the page we can see the list of articles again.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/238/original/E188I04.png" width="824" height="302" alt="We can now see the home page again."/>
+</div>
+
+<h3>Hiding Links to Forbidden Actions</h3>
+
+<p>Although guest users cannot edit or destroy articles and comments the links for these actions are still shown. Our next step therefore is to remove these links for those users in roles that don&rsquo;t have permission to execute the actions they link to. We&rsquo;ll have to modify the view code to do this and declarative authorization provides a useful method called <code>permitted_to?</code> to help with this.</p>
+
+<p>In the view code for the <code>ArticleController</code>&rsquo;s show action we&rsquo;ll use <code>permitted_to?</code> to hide the links to edit or delete an article unless the current user has the appropriate permissions.</p>
+<pre class="ruby">
+&lt;p&gt;
+  &lt;% if permitted_to? :edit, @article %&gt;
+    &lt;%= link_to &quot;Edit&quot;, edit_article_path(@article) %&gt; |
+  &lt;% end %&gt;
+  &lt;% if permitted_to? :destroy, @article %&gt;
+    &lt;%= link_to &quot;Destroy&quot;, @article, :method =&gt; :delete, :confirm =&gt; &quot;Are you sure?&quot; %&gt; |
+  &lt;% end %&gt;
+  &lt;%= link_to &quot;Back to Articles&quot;, articles_path %&gt;
+&lt;/p&gt;
+</pre>
+<p>The <code>permitted_to?</code> method takes two parameters: the name of an action and a model.  Further down in the same file we&rsquo;ll make a similar modification so that the links are hidden unless the current user can edit or delete a comment.</p>
+<pre class="ruby">
+&lt;p&gt;
+  &lt;% if permitted_to? :edit, comment %&gt;
+    &lt;%= link_to &quot;Edit&quot;, edit_comment_path(comment) %&gt; |
+  &lt;% end %&gt;
+  &lt;% if permitted_to? :destroy, comment %&gt;
+    &lt;%= link_to &quot;Destroy&quot;, comment, :method =&gt; :delete, :confirm =&gt; &quot;Are you sure?&quot; %&gt;
+  &lt;% end %&gt;
+&lt;/p&gt;
+</pre>
+<p>We also need to make a similar change in the index view to hide the new article link.</p>
+<pre class="ruby">
+&lt;% if permitted_to? :create, Article.new %&gt;
+  &lt;p&gt;&lt;%= link_to &quot;New Article&quot;, new_article_path %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p>Note that as we don&rsquo;t have an instance of an article in the index action we&rsquo;ve used <code>Article.new</code> instead.</p>
+
+<p>When we reload the page now the edit and destroy links will be hidden unless the current user has the appropriate permissions.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/239/original/E188I05.png" width="823" height="431" alt="The edit and destroy links are now hidden."/>
+</div>
+
+<h3>Adding More Roles and Rules</h3>
+
+<p>Now that everything is set up all we need to do to alter access to the different parts of the site is to make changes to the <code>authorization_rules</code> file. The DSL that&rsquo;s provided allows us to set some fairly advanced rules. For example if we want to allow logged-in users who have no roles assigned to them to be able to edit their own comments we can add the following rule to the <code>:guest</code> role.</p>
+<pre class="ruby">
+role :guest do
+  has_permission_on :articles, :to =&gt; [:index, :show]
+  has_permission_on :comments, :to =&gt; [:new, :create]
+  has_permission_on :comments, :to =&gt; [:edit, :update] do
+    if_attribute :user =&gt; is { user }
+  end
+end
+</pre>
+<p>Declarative authorization provides an <code>if_attribute</code> method which can be used to add conditions to a permission. In the new rule above permission is only granted if the <code>:user</code> attribute, that is the user the comment belongs to, is the currently logged in user.</p>
+
+<p>If we now log in as a user with no roles and add a comment to an article we&rsquo;ll see that we have an &ldquo;edit&rdquo; link for that comment but not the comments made by anyone else.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/240/original/E188I06.png" width="823" height="552" alt="The guest user can now edit the comments they have made."/>
+</div>
+
+<p>All we&rsquo;ve had to do to enable this is make one change to the <code>authorization_rules</code> file which shows how easy it is to set up rules like this.</p>
+
+<h3>Adding Permissions For Other Roles</h3>
+
+<p>We have set up three roles in our application but so far we have only defined permissions for one of them (as well as the guest role). We&rsquo;ll add permissions for those roles now.</p>
+<pre class="ruby">
+role :moderator do
+  includes :guest
+  has_permission_on :comments, :to =&gt; [:edit,:update]
+end
+  
+role :author do
+  includes :guest
+  has_permission_on :articles, :to =&gt; [:new, :create]
+  has_permission_on :articles, :to =&gt; [:edit, :update] do
+    if_attribute :user =&gt; is { user }
+  end
+end
+</pre>
+<p>Notice that we&rsquo;ve used an <code>includes</code> method here to give one role the permissions of another. Any user in the moderator role can do anything a guest can do and also edit and update anyone&rsquo;s comments. Similarly authors can do all that a guest can do but can also create articles and update any articles that they have written.</p>
+
+<h3>A Better Error Message</h3>
+
+<p>To finish this episode we&rsquo;ll make one last change to our application. If someone viewing our site tries to visit an action they don&rsquo;t have access to they&rsquo;ll see a basic error page with a message saying that they aren&rsquo;t allowed to do that.</p>
+
+<p>We can improve this by modifying our <code>ApplicationController</code>. If we add a method called <code>permission_denied</code> it will be executed when an attempt to call an unauthorized action is made. So instead of showing a bare error we&rsquo;ll have our application redirect to the home page and show an flash message.</p>
+<pre class="ruby">
+def permission_denied
+  flash[:error] = &quot;Sorry, you not allowed to access that page.&quot;
+  redirect_to root_url
+end
+</pre>
+<p>Now when we try to access an action we&rsquo;re not allowed to we&rsquo;ll be redirected to the home page and shown a better error.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/241/original/E188I07.png" width="823" height="296" alt="We now see a custom error when trying to access an unauthorized action."/>
+</div>
+
+<p>That&rsquo;s it for this episode. Declarative authorization provides a neat, powerful solution for authorization in Rails applications and we&rsquo;ve only really scratched the surface of what it can do. The <a href="http://github.com/stffn/declarative_authorization">documentation pages</a> provide much more details and are well worth reading if you want to delve a little deeper.</p>

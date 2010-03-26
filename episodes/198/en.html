@@ -1,0 +1,310 @@
+<p>In episode 165 [<a href="http://railscasts.com/episodes/165-edit-multiple">watch</a>, <a href="http://asciicasts.com/episodes/165-edit-multiple">read</a>], we created an application that could edit multiple records simultaneously. Each record on the index page had a checkbox against it so that we could choose which items we wanted to edit and then update the fields for those items.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/307/original/E198I01.png" width="812" height="362" alt="The products list from our previous application."/>
+</div>
+
+<p>If we select the three products above then click &ldquo;edit checked&rdquo; we can then update the category, name or price for those products, for example putting them all into the &ldquo;groceries&rdquo; category.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/308/original/E198I02.png" width="814" height="522" alt="Updating the category for a number of products."/>
+</div>
+
+<p>The obvious restriction is that any changes we make are applied to all of the checked products, so in this episode we&rsquo;ll write a similar application that will show a separate set of fields for each checked product so that we can update multiple products on a single form, each with their own set of values.</p> 
+
+<h3>Adding The Checkboxes</h3>
+
+<div class="imageWrapper">
+  <img src="/system/photos/309/original/E198I03.png" width="809" height="319" alt="The scaffold-generated table for products."/>
+</div>
+
+<p>We&rsquo;ll start with a basic scaffolding for listing products. The scaffolding code gives us the ability to edit products individually, but of course that&rsquo;s not what we want to do. As we did last time we&rsquo;re going to add a checkbox against each item so that we can choose the items we want to edit. The first change we&rsquo;re going to make therefore will be to the products <code>index</code> view.</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">
+&lt;h1&gt;Products&lt;/h1&gt;
+&lt;% form_tag edit_individual_products_path do %&gt;
+  &lt;table&gt;
+    &lt;thead&gt;
+      &lt;tr&gt;
+        &lt;th&gt;&lt;/th&gt;
+        &lt;th&gt;&amp;nbsp;&lt;/th&gt;
+        &lt;th&gt;Name&lt;/th&gt;
+        &lt;th&gt;Category&lt;/th&gt;
+        &lt;th&gt;Price&lt;/th&gt;
+      &lt;/tr&gt;
+    &lt;/thead&gt;
+    &lt;tbody&gt;
+      &lt;% for product in @products %&gt;
+      &lt;tr&gt;
+        &lt;td&gt;&lt;%= check_box_tag &quot;product_ids[]&quot;, product.id %&gt;&lt;/td&gt;
+        &lt;td&gt;&lt;%= product.name %&gt;&lt;/td&gt;
+        &lt;td&gt;&lt;%= product.category.name %&gt;&lt;/td&gt;
+        &lt;td&gt;&lt;%= number_to_currency product.price, :unit =&gt; &quot;&amp;pound;&quot; %&gt;&lt;/td&gt;
+        &lt;td&gt;&lt;%= link_to &quot;Edit&quot;, edit_product_path(product) %&gt;&lt;/td&gt;
+        &lt;td&gt;&lt;%= link_to &quot;Destroy&quot;, product_path(product), :confirm =&gt; &quot;Are you sure?&quot;, :method =&gt; :delete %&gt;&lt;/td&gt;
+      &lt;/tr&gt;
+      &lt;% end %&gt;
+    &lt;/tbody&gt;
+  &lt;/table&gt;
+  &lt;p&gt;&lt;%= submit_tag &quot;Edit Checked&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+&lt;p&gt;&lt;%= link_to &quot;New Product&quot;, new_product_path %&gt;&lt;/p&gt;
+</pre>
+<p>To add the checkboxes we have made a number of changes to the scaffolded code. Firstly we&rsquo;ve wrapped the table in a form using <code>form_tag</code>.</p> 
+<pre class="ruby">
+&lt;% form_tag edit_individual_products_path do %&gt;
+  &lt;!-- table --&gt;
+&lt;% end %&gt;
+</pre>
+<p>The form will be submitted to a new action in the products controller called <code>edit_individual</code> that we&rsquo;ll write shortly. In the table itself we&rsquo;ll add a new <code>th</code> element in the header then, in the table&rsquo;s body, a new cell to hold the checkbox, which we&rsquo;ll declare with</p>
+<pre class="ruby">
+&lt;%= check_box_tag &quot;product_ids[]&quot;, product.id %&gt;
+</pre>
+<p>The name we pass to <code>check_box_tag</code> is <code>product_ids[]</code>, the empty square brackets mean that we can pass multiple product <code>id</code>s as an array for all of the checked boxes. We also pass the product&rsquo;s <code>id</code> as a value for each checkbox.</p>
+
+<p>Finally we add a submit tag so that we can submit the form.</p>
+<pre class="ruby">
+&lt;%= submit_tag &quot;Edit Checked&quot; %&gt;
+</pre>
+<p>The form submits to new action called <code>edit_individual</code> so the next thing we&rsquo;ll need to do is write that action in the products controller, along with another one called <code>update_individual</code> that the <code>edit_individual</code> action will submit to when we update the selected products.</p>
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+def edit_individual
+
+end
+
+def update_individual
+
+end
+</pre>
+<p>As we&rsquo;re adding actions to a RESTful resource we&rsquo;ll also need to make a change to the routes file.</p> 
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+ActionController::Routing::Routes.draw do |map|
+  map.resources :products, :collection =&gt; { :edit_individual =&gt; :post, :update_individual =&gt; :put }
+  map.resources :categories
+  map.root :products
+end
+</pre>
+<p>We modify the products resource in <code>routes.rb</code>, adding a <code>:collection</code> argument with the two new actions. <code>:edit_individual</code> will be a POST request as we&rsquo;re submitting to it through a form. We&rsquo;re just fetching information so a GET request would be ideal but as we&rsquo;re submitting multiple ids a POST is necessary. We&rsquo;ll be updating records in <code>:update_individual</code> so this will be a PUT request.</p>
+
+<p>If we reload the index page now we&rsquo;ll see checkboxes against each product and a button that we can click to edit those products.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/310/original/E198I04.png" width="809" height="361" alt="The products index with checkboxes and an edit button added."/>
+</div>
+
+<p>We&rsquo;ve not written the <code>edit_individual</code> template yet so we&rsquo;ll see an error if we were to submit the form now. Before we create the template we&rsquo;ll modify the <code>edit_individual</code> action so that it fetches all of the products with <code>id</code>s that match the array of <code>product_ids</code> from the checked checkboxes that are passed in.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+def edit_individual
+  @products = Product.find(params[:product_ids])
+end
+</pre>
+<p>Now on to the <code>edit_individual</code> view code. We give the page a title and then create a form, but  should we use <code>form_for</code> or <code>form_tag</code> here? Well, <code>form_for</code> is meant to be used when editing a single model, but here we&rsquo;re editing a number of models at once so we&rsquo;ll use <code>form_tag</code>. We&rsquo;ll pass it the URL to the <code>update</code> action and specify the method as PUT.</p>
+
+<p>Inside the form we&rsquo;ll loop through the list of products and use <code>fields_for</code> to generate the fields for each product. We do this by passing <code>products[]</code> and the product to <code>fields_for</code>. This will insert the product&rsquo;s <code>id</code> into the empty square brackets so that each product is passed as a separate parameter. We&rsquo;ll need to put the form fields themselves in next, but for now we&rsquo;ll just print each product&rsquo;s name. Finally we add a <code>submit_tag</code>.</p>
+
+<p class="codeFilePath">/app/views/products/edit_individual.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;Edit Products&quot; %&gt;
+
+&lt;% form_tag update_individual_products_path :method =&gt; :put do %&gt;
+  &lt;% for product in @products %&gt;
+    &lt;% fields_for &quot;products[]&quot;, product do |f| %&gt;
+      &lt;h2&gt;&lt;%= h product.name %&gt;&lt;/h2&gt;
+    &lt;% end %&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;&lt;%= submit_tag &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p>So, if we check the checkboxes for our three products and click &ldquo;Edit Checked&rdquo; we&rsquo;ll be taken to the new <code>edit_individual</code> page and we&rsquo;ll see the three products listed.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/311/original/E198I05.png" width="810" height="365" alt="The new edit_individual action before we add the form fields."/>
+</div>
+
+<p>Along with the product&rsquo;s name we want to show form fields for each product&rsquo;s attributes. As these fields are also shown in the product&rsquo;s <code>new</code> and <code>edit</code> actions the form itself is usually separated out into a partial. This partial contains a <code>form_for</code> tag which wraps the form elements for a product. We want to reuse the fields without the surrounding <code>form_for</code> so we&rsquo;ll extract the fields into another partial that we can use both in the form and in the multiple edit page.</p>
+
+<p>We&rsquo;ll put the form fields into a new partial called <code>_fields.html.erb</code>.</p>
+
+<p class="codeFilePath">/app/views/products/_fields.html.erb</p>
+<pre class="ruby">
+&lt;%= f.error_messages %&gt;
+&lt;p&gt;
+    &lt;%= f.label :name %&gt;
+    &lt;%= f.text_field :name %&gt;
+&lt;/p&gt;
+&lt;p&gt;
+  &lt;%= f.label :price %&gt;
+  &lt;%= f.text_field :price %&gt;
+&lt;/p&gt;
+&lt;p&gt;
+  &lt;%= f.label :category_id %&gt;
+  &lt;%= f.collection_select :category_id, Category.all, :id, :name %&gt;
+&lt;/p&gt;
+&lt;p&gt;
+  &lt;%= f.check_box :discontinued %&gt;
+  &lt;%= f.label :discontinued %&gt;
+&lt;/p&gt;
+</pre>
+<p>We can then call this new partial from the <code>_form</code> partial, passing in the <code>f</code> variable.</p>
+
+<p class="codeFilePath">/app/views/products/_form.html.erb</p>
+<pre class="ruby">
+&lt;% form_for @product do |f| %&gt;
+&lt;%= render :partial =&gt; &#x27;fields&#x27;, :f =&gt; f %&gt;
+&lt;p&gt;&lt;%= form.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p>Back in the <code>edit_individual</code> view code we can call this partial so that the fields for each product will be rendered.</p>
+
+<p class="codeFilePath">/app/views/products/edit_individual.html.erb</p>
+<pre class="ruby">
+&lt;% content_for :title do %&gt;
+  Edit Individual
+&lt;% end %&gt;
+
+&lt;% form_tag update_individual_products_path, :method =&gt; :put do %&gt;
+  &lt;% for product in @products %&gt;
+    &lt;% fields_for &quot;products[]&quot;, product do |f| %&gt;
+      &lt;h2&gt;&lt;%= h product.name %&gt;&lt;/h2&gt;
+      &lt;%= render &quot;fields&quot;, :f =&gt; f %&gt;
+    &lt;% end %&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;&lt;%= submit_tag &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p>When we reload the page now we&rsquo;ll see the form fields for each of the selected products with their values filled in.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/312/original/E198I06.png" width="823" height="620" alt="We now have form fields for each product."/>
+</div>
+
+<p>If we look at the appropriate part of the page&rsquo;s source code we can see that the form fields have interesting names. Each name begins with <code>products</code> then has the product&rsquo;s <code>id</code> and its field name in square brackets. This means that the products&rsquo; values will be sent as a hash.</p>
+<pre class="terminal">
+&lt;p&gt;
+  &lt;label for=&quot;products_3_name&quot;&gt;Name&lt;/label&gt;
+  &lt;input id=&quot;products_3_name&quot; name=&quot;products[3][name]&quot; size=&quot;30&quot; type=&quot;text&quot; value=&quot;Stereolab T-Shirt&quot; /&gt;
+&lt;/p&gt;
+&lt;p&gt;
+  &lt;label for=&quot;products_3_price&quot;&gt;Price&lt;/label&gt;
+  &lt;input id=&quot;products_3_price&quot; name=&quot;products[3][price]&quot; size=&quot;30&quot; type=&quot;text&quot; value=&quot;12.49&quot; /&gt;
+&lt;/p&gt;
+</pre>
+
+<p>We can use that <code>products</code> parameter in the <code>update_individual</code> action to update all of the products when the form is submitted. We need to update multiple products simultaneously and there&rsquo;s an ActiveRecord method called update that will do just that for us. update takes two arguments: the first one is either a single <code>id</code> or an array of <code>id</code>s and the second is a hash of values. To update our products we can pass in the <code>keys</code> and <code>values</code> from our products parameter. After updating the products we&rsquo;ll create a flash message and then redirect to the products index page.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+def update_individual
+  Product.update(params[:products].keys, params[:products].values)
+  flash[:notice] = &quot;Products updated&quot;
+  redirect_to products_url
+end
+</pre>
+<p>All of our products are currently in the &ldquo;Groceries&rdquo; category which is clearly wrong. We&rsquo;ll change the categories of the t-shirt and DVD player and reduce their prices a little and submit the form. When we do we&rsquo;ll be directed to the index page where we can see the updated products.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/313/original/E198I07.png" width="811" height="383" alt="The index page after updating two products."/>
+</div>
+
+<p>This means that our form works as we want it to and we can update a number of products at once.</p>
+
+<h3>Validations</h3>
+
+<p>If someone tries to enter invalid values on the new form we want to display any errors in a useful way. The <code>Product</code> model currently doesn&rsquo;t have any validations so we&rsquo;ll add one to ensure that the price is numeric.</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+  validates_numericality_of :price  
+end
+</pre>
+<p>In the products controller we now need to handle validation in the <code>update_individual</code> action. The <code>update</code> method will ignore validation errors and will move on to the next record if it comes across an invalid one. All is not lost, however, as <code>update</code> will return an array of all of the products that it tried to update and we can use that to determine which products were invalid.</p>
+
+<p>One way to get the invalid products would be to use the <code>reject</code> method on the array and, in <code>reject</code>&rsquo;s block, call <code>valid?</code> on each product to filter out the valid ones.</p>
+<pre class="ruby">
+Product.update(params[:products].keys, params[:products].values).reject { |p| p.valid? }
+</pre>
+<p>The problem with this approach is that it will run the validation for each product again. A more efficient way to do this would be to reject the products with an empty <code>errors</code> array. We&rsquo;ll assign this array of invalid products to a variable and check to see if it&rsquo;s empty. If it is we&rsquo;ll redirect to the index page as before, otherwise we&rsquo;ll re-render the <code>edit_individual</code> form to show the errors for those invalid products.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+def update_individual
+  @products = Product.update(params[:products].keys, params[:products].values).reject { |p| p.errors.empty? }
+  if @products.empty? 
+    flash[:notice] = &quot;Products updated&quot;
+    redirect_to products_url
+  else
+    render :action =&gt; &#x27;edit_individual&#x27;
+  end
+end
+</pre>
+<p>If we try to edit the t-shirt and DVD player again but set an invalid value for the DVD player&rsquo;s price we&rsquo;ll now be returned to the edit page and shown the form again but with just the DVD player on it this time and with the validation error shown.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/314/original/E198I08.png" width="808" height="553" alt="The error message shown for an invalid product."/>
+</div>
+
+<p>The title of the error message panel is currently showing the name as &ldquo;products[]&rdquo;, but this is easy to fix. The error messages are generated in the fields partial using the <code>error_messages</code> method. This takes an <code>:object_name</code> parameter that we can use to set the name that will be displayed.</p>
+
+<p class="codeFilePath">/app/views/products/_fields.html.erb</p>
+<pre class="ruby">
+&lt;%= f.error_messages :object_name =&gt; &quot;product&quot; %&gt;
+</pre>
+<p>With that done the error message will now say &ldquo;product&rdquo; instead of &ldquo;products[]&rdquo;.</p>
+
+<h3>One More Thing</h3>
+
+<p>The functionality we were after is now pretty much complete, but to finish off this episode we&rsquo;ll add one more thing to make the application more useful. If we want to change a single attribute on a number of products, for example to update the price, the edit form will become cumbersome. What we&rsquo;re going to do is allow the users to select a single attribute from a list so that they can then update one attribute on a number of products without having to navigate through a long form.</p>
+
+<p>To do this we&rsquo;ll add a pop-up menu next to the &ldquo;edit checked&rdquo; button on the products index page that will allow us to choose which field to edit. We can do that by adding the following line immediately before the <code>submit_tag</code> in the products index view.</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">
+  &lt;p&gt;&lt;%= select_tag :field, options_for_select([[&quot;All Fields&quot;, &quot;&quot;], [&quot;Name&quot;, &quot;name&quot;], [&quot;Price&quot;, &quot;price&quot;], [&quot;Category&quot;, &quot;category_id&quot;], [&quot;Discontinued&quot;, &quot;discontinued&quot;]])%&gt;&lt;/p&gt;
+</pre>  
+<p>Now we&rsquo;ll be able to choose to edit all of the fields or just a single field for each selected product. To restrict the fields that are shown we&rsquo;ll have to update the fields partial so that only the selected field is shown.</p>
+
+<p class="codeFilePath">/app/views/products/_fields.html.erb</p>
+<pre class="ruby">
+&lt;%= f.error_messages, :object_name =&gt; &quot;product&quot; %&gt;
+&lt;% if params[:field].blank? || params[:field] == &quot;name&quot; %&gt;
+&lt;p&gt;
+    &lt;%= f.label :name %&gt;
+    &lt;%= f.text_field :name %&gt;
+&lt;/p&gt;
+&lt;% end %&gt;
+&lt;% if params[:field].blank? || params[:field] == &quot;price&quot; %&gt;
+&lt;p&gt;
+  &lt;%= f.label :price %&gt;
+  &lt;%= f.text_field :price %&gt;
+&lt;/p&gt;
+&lt;% end %&gt;
+&lt;% if params[:field].blank? || params[:field] == &quot;category_id&quot; %&gt;
+&lt;p&gt;
+  &lt;%= f.label :category_id %&gt;
+  &lt;%= f.collection_select :category_id, Category.all, :id, :name %&gt;
+&lt;/p&gt;
+&lt;% end %&gt;
+&lt;% if params[:field].blank? || params[:field] == &quot;discontinued&quot; %&gt;
+&lt;p&gt;
+  &lt;%= f.check_box :discontinued %&gt;
+  &lt;%= f.label :discontinued %&gt;
+&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p>What we&rsquo;ve done above is alter the partial so that it reads the <code>:field</code> attribute from the new pop-up menu on the index form and only shows each field if the attribute is blank (i.e. if the user has selected &ldquo;All Fields&rdquo;) or matches the name of the field. This isn&rsquo;t the tidiest code there is and could be cleaned up by making use of Formtastic but it will work for us for now.</p>
+
+<p>If we select two of the products from the index page now and choose &ldquo;price&rdquo; from the pop-up menu then the edit form will just display the price fields for those two products.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/315/original/E198I09.png" width="812" height="397" alt="Editing just one field for multiple products."/>
+</div>
+
+<p>And that&rsquo;s it for this episode. Editing multiple records in a single form is fairly straightforward if you make the right use of <code>fields_for</code> and this is a useful technique that can be applied in a number of situations.</p>

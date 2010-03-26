@@ -1,0 +1,254 @@
+<p>In this episode we&rsquo;ll cover seven different security issues that are common in Rails applications. Some of these have already been covered in previous episodes, but here we&rsquo;ll show them all at once so that you can review your Rails applications by going though them to make sure that your application is secure.</p> 
+
+<p>The application we&rsquo;ll be working with is a simple project management application. Users can sign up, then log in and create projects.</p>
+
+<div class="imageWrapper"> 
+ <img src="/system/photos/182/original/E178I01.png" width="800" height="475" alt="The home page of our project management application."/>
+</div>
+
+<p>Each project can have an image and a number of tasks associated with it.</p>
+
+<div class="imageWrapper"> 
+ <img src="/system/photos/183/original/E178I02.png" width="800" height="512" alt="The page for a project." />
+</div>
+<p>We&rsquo;ll be using this application to demonstrate the seven security issues and our tips for solving them.</p>
+
+<h3>Tip 1 - Mass Assignment</h3>
+
+<p>We&rsquo;ve put this one at the top of the list as it&rsquo;s one of the most important security issues to consider. It&rsquo;s a problem that can be easily overlooked and which can lead to the application&rsquo;s data being compromised. </p>
+
+<p>When we edit a project the form we use only has fields for the <code>name</code> and <code>photo</code> attributes.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/184/original/E178I03.png" width="801" height="343" alt="The form for editing a project."/>
+</div>
+
+<p>When it&rsquo;s submitted the <code>ProjectsController</code>&rsquo;s update action uses mass-assignment to update the selected project.</p>
+<pre class="ruby">
+def update
+  @project = current_users.projects.find(params[:id])
+  if @project.update_attributes(params[:project])
+    flash[:notice] = &quot;Successfully updated project.&quot;
+    redirect_to @project
+  else
+    render :action =&gt; &#x27;edit&#x27;
+  end
+end
+</pre>
+
+<p>All of the parameters from the form are passed as a hash to the project to update it. A user can therefore update any of the project&rsquo;s attributes and even the attributes of any associated models. As a project <code>has_many :tasks</code> this means that a project&rsquo;s tasks can be altered.</p>
+
+<p>This type of hacking by mass assignment is usually done by using a tool like <code>curl</code> to send POST request to the server, but we&rsquo;ll demonstrate the idea in the console.</p>
+
+<p>First we&rsquo;ll fetch the project with the <code>id</code> of 2, a project which currently has no tasks.</p>
+<pre class="terminal">
+&gt;&gt; p = Project.find(2)
++----+--------+--------+--------+--------+--------+--------+--------+--------+
+| id | name   | cre... | upd... | pho... | pho... | pho... | pho... | use... |
++----+--------+--------+--------+--------+--------+--------+--------+--------+
+| 2  | Coo... | 200... | 200... |        |        |        |        | 2      |
++----+--------+--------+--------+--------+--------+--------+--------+--------+
+1 row in set
+&gt;&gt; p.tasks
+=&gt; []
+</pre>
+<p>One of a project&rsquo;s attributes is <code>task_ids</code>, which takes an array of Task <code>id</code> numbers. Given this we can use <code>update_attributes</code> to change the tasks associated with the project. This way we can assign one of another project&rsquo;s tasks to our project.</p>
+
+<pre class="terminal">
+&gt;&gt; p.update_attributes(:task_ids =&gt; [4])
+=&gt; true
+&gt;&gt; p.tasks
++----+-----------------+-------------------+-------------------+------------+
+| id | name            | created_at        | updated_at        | project_id |
++----+-----------------+-------------------+-------------------+------------+
+| 4  | Sweep the yard. | 2009-09-08 20:... | 2009-09-08 20:... | 2          |
++----+-----------------+-------------------+-------------------+------------+
+1 row in setThe task with the id of 4 now belongs to our project.
+&gt;&gt; p.tasks
++----+-----------------+-------------------+-------------------+------------+
+| id | name            | created_at        | updated_at        | project_id |
++----+-----------------+-------------------+-------------------+------------+
+| 4  | Sweep the yard. | 2009-09-08 20:... | 2009-09-08 20:... | 2          |
++----+-----------------+-------------------+-------------------+------------+
+1 row in set
+</pre>
+<p>Obviously this is a bad security flaw. By using <code>attr_accessible</code> in the model, however, we can define the attributes that we want to be accessible through mass assignment.</p>
+<pre class="ruby">
+class Project &lt; ActiveRecord::Base
+  belongs_to :user
+  has_many :tasks
+  has_attached_file :photo
+  attr_accessible :name, :photo
+end
+</pre>
+<p>With this line in place no-one can set the <code>task_ids</code> or any other attribute of a project by making a web request; only the <code>name</code> and <code>photo</code> can be updated. For more details about this technique <a href="http://railscasts.com/episodes/26-hackers-love-mass-assignment">watch</a> or <a href="http://asciicasts.com/episodes/26-hackers-love-mass-assignment">read</a> episode 26.</p>
+
+<h3>Tip 2 - File Uploads</h3>
+
+<p>In our example application the users have the ability to upload a photograph for a project. We&rsquo;re using Paperclip to handle the files which, by default, can be used to upload any kind of file, not just images. It happens that our application is running on the Apache web server with Passenger and that the Apache server is set up to execute PHP files too. With this setup, what happens if we upload a PHP file instead of an image?</p> 
+
+<p>To test this we&rsquo;ll upload a PHP file that executes PHP&rsquo;s <a href="http://www.php.net/phpinfo">phpinfo</a> function. When run this file will display information about the server.</p>
+
+<pre class="terminal">
+&lt;?php phpinfo() ?&gt;
+</pre>
+
+<p>When we upload the file we&rsquo;ll see a broken image icon where the image should be:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/185/original/E178I04.png" width="800" height="457" alt="The PHP file shows as a broken image."/>
+</div>
+
+<p>But if we use the popup menu to open the image in a new tab then the file will be executed on the server.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/186/original/E178I05.png" width="800" height="479" alt="The PHP file has been executed on the server."/>
+</div>
+
+<p>This is a major security hole as it means that a user can run any script on the browser they want. If we&rsquo;re running a Rails application on Apache and it&rsquo;s configured to execute PHP or CGI scripts we need to be very careful with file upload controls.</p>
+
+<p>As we&rsquo;re using Paperclip to handle file uploads we can add a line like this to the relevant model file to restrict the file types that will be accepted.</p>
+<pre class="ruby">
+validates_attachment_content_type :photo, :content_type =&gt; [&#x27;image/jpeg&#x27;, &#x27;image/png&#x27;]
+</pre>
+<p>This ensures that only files with the content type for JPEG and PNG images are accepted. This isn&rsquo;t a completely secure solution, however, as it&rsquo;s possible to spoof the content type when uploading a file. For additional security the file extension should be checked to ensure that it matches only the file types we want to allow. To be extra sure we should also modify the Apache configuration file so that scripts cannot be executed from the directory to which the files are being uploaded.</p> 
+
+<h3>Tip 3 - Filter Log Params</h3>
+
+<div class="imageWrapper">
+  <img src="/system/photos/187/original/E178I06.png" width="800" height="373" alt="The login page."/>
+</div>
+
+<p>Our application has signup and login forms in which users can enter their username and password. By default, Rails will store all form parameters as plain text which means that when we log in, our username and password are stored in the log file.</p>
+<pre class="terminal">
+Processing UserSessionsController#create (for 127.0.0.1 at 2009-09-10 20:52:16) [POST]
+  Parameters: {&quot;commit&quot;=&gt;&quot;Log in&quot;, &quot;user_session&quot;=&gt;{&quot;username&quot;=&gt;&quot;eifion&quot;, &quot;password&quot;=&gt;&quot;pass&quot;}, &quot;authenticity_token&quot;=&gt;&quot;GepjvVMhxroWGfE2NX4CZTtw6wLzUyd1b+Rm88qXI5g=&quot;}
+</pre>  
+
+<p>While we&rsquo;ve gone to the effort of encrypting our users&rsquo; passwords in the database they are still clearly visible in the application&rsquo;s log file. Fortunately this is easy to rectify. In our application&rsquo;s <code>ApplicationController</code> is a commented out line:</p>
+<pre class="ruby">
+# filter_parameter_logging :password
+</pre>
+<p>Uncommenting this line will filter out password parameters from the log file. Other field names can be added to the list of parameters if there are other fields that need to be filtered.</p>
+
+<p>Now when we log in the password is filtered out from the log file:</p>
+<pre class="terminal">
+Processing UserSessionsController#create (for 127.0.0.1 at 2009-09-10 20:55:24) [POST]
+  Parameters: {&quot;commit&quot;=&gt;&quot;Log in&quot;, &quot;user_session&quot;=&gt;{&quot;username&quot;=&gt;&quot;eifion&quot;, &quot;password&quot;=&gt;&quot;[FILTERED]&quot;}, &quot;action&quot;=&gt;&quot;create&quot;, &quot;authenticity_token&quot;=&gt;&quot;cuI+ljBAcBxcEkv4pbeqLTEnRUb9mUYMgfpkwOtoyiA=&quot;, &quot;controller&quot;=&gt;&quot;user_sessions&quot;}
+</pre>
+
+<h3>Tip 4 - Cross-site Request Forgery Protection</h3>
+
+<p>This tip also revolves around the <code>ApplicationController</code>, specifically this line</p>
+<pre class="terminal">
+protect_from_forgery # :secret =&gt; &#x27;2b964d30ac961dfe405b234c10a42505&#x27;
+</pre>
+<p>It&rsquo;s important to check that this line exists and is uncommented. It&rsquo;s like this by default so should be there. This line helps protect your application from cross-site request forgery. To see how it works we&rsquo;ll look at part of the source code from the edit project form.</p>
+<pre class="ruby">
+&lt;form action=&quot;/projects/1&quot; class=&quot;edit_project&quot; enctype=&quot;multipart/form-data&quot; id=&quot;edit_project_1&quot; method=&quot;post&quot;&gt;
+  &lt;div style=&quot;margin:0;padding:0;display:inline&quot;&gt;
+    &lt;input name=&quot;_method&quot; type=&quot;hidden&quot; value=&quot;put&quot; /&gt;
+    &lt;input name=&quot;authenticity_token&quot; type=&quot;hidden&quot; value=&quot;cuI+ljBAcBxcEkv4pbeqLTEnRUb9mUYMgfpkwOtoyiA=&quot; /&gt;
+  &lt;/div&gt;
+</pre>  
+<p>Inside the form element Rails automatically adds a hidden field called <code>authenticity_token</code>. This field&rsquo;s value is a key that is unique for each user&rsquo;s session and is based on a random string stored in the session. Rails will automatically check this key for every single POST, PUT or DELETE request that is made. This ensures that the request is made by a user who is actually on our site, rather than by another site pretending to be that user. This token is not checked for GET requests so we need to make sure that GET requests can not change or delete our application&rsquo;s data.</p>
+
+<h3>Tip 5 - Authorising Ownership</h3>
+
+<p>If we look at the page for a specific project in our application we can see that the project&rsquo;s <code>id</code> is in the URL. Each user has their own set of projects and we want to make sure that one user cannot view another&rsquo;s projects.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/188/original/E178I07.png" width="800" height="404" alt="The yardwork project belongs to us."/>
+</div>
+
+<p>Project 1 belongs to us, but if we start altering the id in the URL we can view someone else&rsquo;s project.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/189/original/E178I08.png" width="801" height="373" alt="Viewing the cookery project even though it is not ours."/>
+</div>
+
+<p>To fix this we need to look in our ProjectsController, in particular at the code that gets the project from the database.</p>
+
+<pre class="ruby">
+def show
+  @project = Project.find(params[:id])
+end
+</pre>
+<p>This code will fetch any project by its <code>id</code>, with no authorisation to check that the project belongs to the currently logged-in user. There are a few ways we could do this, but one easy way is to use ActiveRecord associations to get the project in the scope of the current user. As a project belongs_to a user we can do this by changing the code above to</p>
+<pre class="ruby">
+def show
+  @project = current_user.projects.find(params[:id])
+end
+</pre>
+<p>This will now scope the search to the projects that belong to the currently logged-in user. If we try to view another user&rsquo;s project now we&rsquo;ll see an error.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/190/original/E178I09.png" width="801" height="373" alt="We now see a 404 page instead."/>
+</div>
+
+
+<p>Note that the SQL condition in the error message has the current user&rsquo;s id in the select condition. A <code>RecordNotFound</code> error means that when this application runs in production mode the user will see a 404 page.</p> 
+
+<h3>Tip 6  - SQL Injection</h3>
+
+<p>SQL injection is a term you&rsquo;re probably familiar with so we&rsquo;ll keep this tip brief.</p> 
+
+<p>On the projects index page we have a search form. The problem with it is that in the controller the search term that is entered is entered directly into a SQL condition.</p>
+<pre class="ruby">
+def index
+  @projects = current_user.projects.all(:conditions =&gt; &quot;name like &#x27;%#{params[:search]}%&#x27;&quot;)
+end
+</pre>
+<p>This is definitely not a good thing to do as it leaves our application wide open to SQL injection attacks. All it takes is a some single quotes in the search term and a maliciously-minded user can view data they shouldn&rsquo;t see, or even modify or remove data from the database.</p>
+
+<p>The code in the index action finds projects scoped by the currently logged-in user, but if we enter <code>&#x27;( or )&#x27;</code> as our search term we can see everyone&rsquo;s projects.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/191/original/E178I10.png" width="800" height="550" alt="Attempting a SQL injection attack."/>
+</div>  
+
+<p>Obviously this is a bad thing, so instead of passing the search term directly into the condition we should use the question mark syntax.</p>
+<pre class="ruby">
+def index
+  @projects = current_user.projects.all(:conditions =&gt; [&quot;name like ?&quot;, &quot;%#{params[:search]}%&quot;])
+end
+</pre>
+<p>We&rsquo;re now passing the condition as an array rather than as a string. The first parameter is the search condition with the parameter replaced by a question mark, while the second parameter is the value we want to pass. Setting up the conditions this way will quote the parameter and escape any special characters in it when it&rsquo;s inserted into the condition.</p>
+
+<p>If we reload the page now we&rsquo;ll see that our search term now returns no results.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/192/original/E178I11.png" width="800" height="341" alt="The injection attack no longer works."/>
+</div>
+
+<p>For more information on SQL injection <a href="http://railscasts.com/episodes/25-sql-injection">watch</a> or <a href="http://asciicasts.com/episodes/25-sql-injection">read</a> episode 25.</p>
+
+<h3>Tip 7 - HTML Injection</h3>
+
+<div class="imageWrapper">
+  <img src="/system/photos/188/original/E178I07.png" width="800" height="404" alt="The yardwork project page."/>
+</div>
+
+<p>While writing our application we forgot to escape the HTML that displays the tasks&rsquo; names. This means that if someone enters some JavaScript between <code>&lt;script&gt;</code> tags in the name of a task then the script will be executed.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/193/original/E178I12.png" width="798" height="341" alt=""/>
+</div>
+
+<p>Every time this page is reloaded the script will be executed which is simply annoying in our case, but which could be used to get sensitive data from our site and silently post it to another server.</p>
+
+<p>All we need to do to solve this problem is to escape the output by wrapping anything that has been entered by a user in the <code>h</code> method.</p>
+<pre class="ruby">
+&lt;%= h(task.name) %&gt;
+</pre>
+<p>This will ensure that any HTML will be escaped and therefore any scripts entered will be displayed rather than run.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/194/original/E178I13.png" width="801" height="404" alt="The JavaScript tags are now escaped."/>
+</div>
+
+<p>Ensuring that all user input is escaped when it&rsquo;s shown on a page will prevent cross-site scripting attacks. If you want to allow certain HTML tags to be displayed the <code>sanitize</code> method can be used instead of <code>h</code>.</p>
+
+<p>Rails 3 will automatically escape content on the page making the <code>h</code> method unnecessary, but until it&rsquo;s released we still need to do this in our applications.</p>
+
+<p>That&rsquo;s all for our list of security tips. Hopefully it gave you a good list to check your own applications against. For more information it&rsquo;s well worth looking at the <a href="http://guides.rubyonrails.org/security.html">Ruby On Rails Security Guide</a> which covers more topics and in greater depth than we&rsquo;ve been able to show in this episode.</p>

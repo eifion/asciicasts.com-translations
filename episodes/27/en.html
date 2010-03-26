@@ -1,0 +1,50 @@
+<p>Cross-site scripting is another common security issue to consider when developing web applications. It happens when you allow the users of your site to enter HTML or JavaScript directly. In the website below we&rsquo;re not escaping the input that&rsquo;s entered in the comments textbox, which leaves our site vulnerable.</p>
+
+<img src="/system/photos/26/original/E027I01.png" width="805" height="525" alt="Our site, showing the comments box."/>
+
+<p>If we enter JavaScript into the comment box, surrounded by &lt;script&gt; tags, that script will be executed when the page reloads and every time it it viewed afterwards. For example if we entered &lt;script&gt;alert(&rsquo;hello&rsquo;)&lt;/script&gt; into the comments box and clicked the button then every subsquent time the page is viewed the user would see an alert box.</p>
+
+<img src="/system/photos/27/original/E027I02.png" width="420" height="153" alt="A JavaScript alert caused by cross-site scripting." />
+
+<p>If we look at the source of the page we can see the JavaScript embedded in it.</p>
+<pre class="terminal">
+&lt;h2&gt;Comments&lt;/h2&gt;
+  &lt;p&gt;I'll start on this now - Paul&lt;/p&gt;
+  &lt;p&gt;&lt;script&gt;alert('hello!');&lt;/script&gt;&lt;/p&gt;
+&lt;hr/&gt;
+</pre>
+<p class="title">The JavaScript embedded in the page.</p>
+<p>Causing an alert box to be shown on a page is annoying, but cross-site scripting can be used for much more malicious purposes. For example it could be used to read the cookies for the site&rsquo;s other users. We&rsquo;ll just alert the cookie, but it could just as easily be sent to a remote server where the session id information in the cookie could be used to hijack another user&rsquo;s session<a href="#fn1"><sup>1</sup></a>.</p>
+
+<img src="/system/photos/28/original/E027I03.png" width="420" height="198" alt="The cookie information shown by JavaScript." >
+<p class="title">The session key in the cookie.</p>
+
+<h3>Stopping The Attacks</h3>
+<p>To stop these attacks you need to escape any user input before you display it on the screen.  We&rsquo;re currently taking the comment&rsquo;s content directly from the database and outputting it into the HTML stream. Rails provides a method simply called h to escape the content before it is output.</p> 
+<pre class="ruby">
+&lt;% @task.comments.each do |comment| %&gt;
+  &lt;p&gt;&lt;%= h(comment.content) %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p class="title">The text entered in to the comments box is now safely escaped.</p>
+<p>Now, when we reload the page we can see that the script is no longer executed. The <code>h</code> command escapes the angle brackets so that the comments entered by the user are displayed safely.</p> 
+<img src="/system/photos/29/original/E027I04.png" width="805" height="525" alt="The comments are now safely escaped."/>
+<p>Rails also provides a <code>sanitize</code> method which allows certain tags to be included via a white list. To be on the safe side and escape any HTML that may be entered by a user it is safer to stick to <code>h</code>.</p>
+
+<h3>An Alternative Approach</h3>
+<p>Instead of escaping the user&rsquo;s input when sending it out to the browser we could escape it when we store it in the database. The <code>h</code> method isn&rsquo;t available in a controller so instead we&rsquo;ll use <code>CGI::escapeHTML()</code>.</p>
+<pre class="ruby">
+  def create
+    @task = Task.find(params[:task_id])
+    @comment = @task.comments.new(params[:comment])
+    @comment.content = CGI::escapeHTML(params[:comment][:content])
+    @comment.save
+    redirect_to task_path(@task)
+  end
+</pre>
+<p class="title">Escaping the comment&rsquo;s HTML before it is stored in the database.</p>
+<p>Storing escaped HTML in the database is fine as long as you only ever want to display that data in a browser. If you think you might need it in its unescaped form as well then it&rsquo;s better to escape the output with <code>h</code>.</p>
+
+<ol class="footnotes">
+  <li id="fn1"><a href="http://en.wikipedia.org/wiki/Session_hijacking">http://en.wikipedia.org/wiki/Session_hijacking</a></li>
+</ol>

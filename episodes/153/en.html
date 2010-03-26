@@ -1,0 +1,107 @@
+<p>In this episode we&rsquo;re going to show you how to generate PDFs from Rails Applications. Below is the order page from an e-commerce application. What we&rsquo;d like to be able to do is add a link to it that will allow the customer to download the order as a PDF.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/60/original/E153I01.png" width="809" height="348" alt="The order page for our e-commerce application."/>
+</div>
+<p><a href="http://railscasts.com/episodes/78-generating-pdf-documents">Railscast 78</a> showed how to generate PDFs with the <code>PDF::Writer</code> gem. That is still a good way to generate PDF files, but there is now a much newer gem called Prawn available and all the cool kids are using that. <a href="http://prawn.majesticseacreature.com/">Prawn</a> is a very fast Ruby PDF generator that is installed as as gem, but it isn&rsquo;t specifically targeted towards Rails. There is a Rails plugin called <a href="http://cracklabs.com/prawnto">Prawnto</a>, however, that makes it easier to work with Prawn in Rails. It adds a new template handler class that will process any views with a .prawn extension, so we can generate PDF files in the same way we generate any other file format.</p>
+
+<h3>Installing Prawn and Prawnto</h3>
+<p>To start off we&rsquo;ll need to install the prawn gem. It&rsquo;s installed in the usual way.</p>
+<pre class="terminal">sudo gem install prawn</pre>
+<p>Once we have Prawn installed we can install the Prawnto plugin from GitHub. In our application&rsquo;s directory we just run the following comand.</p>
+<pre class="terminal">script/plugin install git://github.com/thorny-sun/prawnto.git</pre>
+<p>Now we&rsquo;re all set and can start generating PDFs.</p>
+
+<h3>Generating our Order</h3>
+<p>In our e-commerce application the show page for the order renders the order summary as an HTML table. For the PDF version we&rsquo;ll need to create another view file. Note that unless we already have a <code>respond_to</code> block in our order controller there&rsquo;s no need to add a new block for the PDF format, we can just create the new view template. The template file should be called <code>show.pdf.prawn</code>, <code>pdf</code> for the file format we&rsquo;re generating and <code>prawn</code> for the template handler that will generate the file.</p> 
+<p><code>prawnto</code> gives us a <code>pdf</code> object that we can use in the view code. We can call any Prawn method on this object to start creating our PDF. We&rsquo;ll start off simply by using the <code>text</code> method to print &ldquo;Hello, World!&rdquo;.</p>
+<pre class="ruby">pdf.text &quot;Hello, World!&quot;</pre>
+<p>We can view our PDF file by just adding .pdf to the URL of the order page. We should then see the generated PDF.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/61/original/E153I02.png" width="804" height="256" alt="Our first Hello, World! PDF"/>
+</div>
+
+<h3>Populating The Order Data</h3>
+<p>Obviously we want our order information on the screen rather than &ldquo;Hello, World!&rdquo;.  At the top of the page we&rsquo;ll put the order number, which we&rsquo;ll render in 30 point, bold text.</p>
+<pre class="ruby">pdf.text &quot;Order ##{@order.id}&quot;, :size =&gt; 30, :style =&gt; :bold</pre>
+<p>Below that we&rsquo;ll want to render our list of products.</p>
+<pre class="ruby">
+@order.cart.line_items.each do |item|
+  pdf.text item.product.name
+end
+</pre>
+<p>We could just render the names out as a list, but it would look better if we displayed them as a table along with the price and the quantity bought. Prawn has support for rendering tables with the <code>pdf.table</code> method, which takes a two-dimensional array of items to render in cells. To create the array we&rsquo;ll loop through the line items in the order&rsquo;s cart and use <code>map</code> on each item.</p>
+<pre class="ruby">
+items = @order.cart.line_items.map do |item|
+  [
+		item.product.name,
+		item.quantity,
+		item.unit_price,
+		item.full_price
+  ]
+end
+pdf.table items
+</pre>
+<p>When we reload our PDF file now we&rsquo;ll see the order&rsquo;s items in a table.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/62/original/E153I03.png" width="809" height="348" alt="Our orders are now shown in a table."/>
+</div>
+
+<h3>Formatting The Table</h3>
+<p>Our order&rsquo;s items are now listed but the table looks quite basic. Fortunately, the <code>pdf.table</code> method takes a lot of parameters that enable us to customise the table to suit our needs.</p> 
+<pre class="ruby">
+pdf.table items, :border_style =&gt; :grid,
+  :row_colors =&gt; [&quot;FFFFFF&quot;, &quot;DDDDDD&quot;],
+  :headers =&gt; [&quot;Product&quot;, &quot;Qty&quot;, &quot;Unit Price&quot;, &quot;Full Price&quot;],
+  :align =&gt; { 0 =&gt; :left, 1 =&gt; :right, 2 =&gt; :right, 3 =&gt; :right }
+</pre>
+<p>The complete list of parameters can be found on the <a href="http://prawn.majesticseacreature.com/docs/prawn-layout/">Prawn documentation pages</a>. We&rsquo;re going to add some to render the borders as a grid; to provide alternating background colours for the rows; to supply header text and to align the cells so that the three numeric columns are right-aligned. Reloading the document again shows the changes.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/63/original/E153I04.png" width="809" height="348" alt="The table is now formatted better."/>
+</div>
+
+<h3>Adding Spacing</h3>
+<p>Although the table looks better now, it&rsquo;s pushed up against the header. We can adjust the gap by using  <code>move_down</code>. We&rsquo;ll move it down by 30 points by adding the following line between the header and table.</p>
+<pre class="ruby">pdf.move_down(30)</pre>
+<p>The next thing we&rsquo;ll want to add to our table is the total price of the order. To do that we&rsquo;ll just use <code>move_down</code> again then add the text in 16 point bold.</p>
+<pre class="ruby">
+pdf.move_down(10)
+pdf.text &quot;Total Price: #{@order.cart.total_price}&quot;, :size =&gt; 16, :style =&gt; :bold</pre>
+
+<h3>Formatting The Currency Fields</h3>
+<p>The PDF order is nearly there now, but the currency fields aren&rsquo;t formatted correctly. One of the benefits of using Prawnto with a PDF template is that it gives us access to all of Rails&rsquo; helper methods so we can use <code>number_to_currency</code> to format the fields. The final code is below.</p>
+<pre class="ruby">
+pdf.text &quot;Order##{@order.id}&quot;, :size =&gt; 30, :style =&gt; :bold
+pdf.move_down(30)
+items = @order.cart.line_items.map do |item|
+  [
+		item.product.name,
+		item.quantity,
+		number_to_currency(item.unit_price, :unit =&gt; &quot;&pound;&quot;),
+		number_to_currency(item.full_price, :unit =&gt; &quot;&pound;&quot;)
+  ]
+end
+pdf.table items, :border_style =&gt; :grid,
+  :row_colors =&gt; [&quot;FFFFFF&quot;, &quot;DDDDDD&quot;],
+  :headers =&gt; [&quot;Product&quot;, &quot;Qty&quot;, &quot;Unit Price&quot;, &quot;Full Price&quot;],
+  :align =&gt; { 0 =&gt; :left, 1 =&gt; :right, 2 =&gt; :right, 3 =&gt; :right }
+
+pdf.move_down(10)
+pdf.text &quot;Total Price: #{number_to_currency(@order.cart.total_price, :unit =&gt; &#x27;&pound;&#x27;)}&quot;, :size =&gt; 16, :style =&gt; :bold
+</pre>
+<p>Note that, unlike when we&rsquo;re generating HTML, we don&rsquo;t have to escape currency symbols such as the pound sign (&pound;). The final PDF document now looks like we want it to.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/64/original/E153I05.png" width="808" height="430" alt="Our final PDF order."/>
+</div>
+
+<h3>Adding The Link</h3>
+<p>The final thing we have to do is add a link from the HTML order page to the PDF one. We&rsquo;ll just have to add a normal <code>link_to</code> to the PDF, but there&rsquo;s a slight change from Rails 2.2 to 2.3 that changes the way the link&rsquo;s path is written. In Rails 2.2 and below we&rsquo;d use</p>
+<pre class="ruby">link_to &quot;Printable Invoice (PDF)&quot;, formatted_order_path(@order, :pdf)</pre>
+<p>Rails 2.3 has removed <code>formatted_x_path</code>. Instead we just use <code>order_path</code> and provide the format as a parameter. Removing the formatted path routes saves memory as it reduces the number of named routes in the application.</p>
+<pre class="ruby">link_to &quot;Printable Invoice (PDF)&quot;, order_path(@order, :format =&gt; &quot;pdf&quot;)</pre>
+<p>Our customers can now click a link on the order page to be taken to the printable PDF version.</p>
+
+<h3>Passing Options to Prawnto</h3>
+<p>In the controller we can specify options to pass options to Prawnto to control how the PDF is generated.  If, for example, we want to add a 75 point margin we can add</p>
+<pre class="ruby">prawnto :prawn =&gt; { :top_margin =&gt; 75 }</pre>
+<p>at the top of our <code>OrdersController</code>. More details about the options you can pass are available on the <a href="http://prawn.majesticseacreature.com/docs/prawn-layout/">Prawnto documentation pages</a>.</p>

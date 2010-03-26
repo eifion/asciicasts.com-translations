@@ -1,0 +1,21 @@
+<p>Below is a user registration form. Let&rsquo;s fill it in and register.</p>
+<img src="/system/photos/7/original/E009I01.png" title="Entering sensitive data in a form" alt="Entering sensitive data in a form" width="800" height="500" />
+<p>If we look in the development log, we can see that all of the parameters we submitted in the form are stored in plain text.</p>
+<pre class="terminal">
+Processing UsersController#create (for 127.0.0.1 at 2009-01-02 10:13:13) [POST]
+Parameters: {"user"=&gt;{"name"=&gt;"eifion", "password_confirmation"=&gt;"secret", "password"=&gt;"secret"}, "commit"=&gt;"Register", "authenticity_token"=&gt;"9efc03bcc37191d8a6dc3676e2e7890ecdfda0b5"}
+User Create (0.5ms)   INSERT INTO "users" ("name", "updated_at", "password_confirmation", "password", "created_at") VALUES('eifion', '2009-01-02 10:13:13', 'secret', 'secret', '2009-01-02 10:13:13')
+</pre>
+<p>The values we entered in the form are clearly visible in the log file and this obviously raises security issues. Rails 1.2 introduced the <code>filter_parameter_logging</code> command. Putting this command in to the <code>ApplicationController</code> allows us to filter parameters based on their name</p>
+<pre class="ruby">
+class ApplicationController &lt; ActionController::Base
+  filter_parameter_logging "password" 
+end
+</pre>
+<p>Later versions of Rails have this line in the application controller by default, but commented out, so we only have to uncomment it to use it. We&rsquo;ll create another new user and see what&rsquo;s in the logs.</p>
+<pre class="terminal">
+Processing UsersController#create (for 127.0.0.1 at 2009-01-02 11:02:33) [POST]
+  Parameters: {"user"=&gt;{"name"=&gt;"susan", "password_confirmation"=&gt;"[FILTERED]", "password"=&gt;"[FILTERED]"}, "commit"=&gt;"Register", "action"=&gt;"create", "authenticity_token"=&gt;"9efc03bcc37191d8a6dc3676e2e7890ecdfda0b5", "controller"=&gt;"users"}
+  User Create (0.4ms)   INSERT INTO "users" ("name", "updated_at", "password_confirmation", "password", "created_at") VALUES('susan', '2009-01-02 11:02:33', 'verysecret', 'verysecret', '2009-01-02 11:02:33')
+</pre>
+<p>Now we see that our <code>create</code> action has put <code>[FILTERED]</code> in the log, rather than the password supplied. The parameter logging will filter any parameter whose name contains the argument passed to it, so in our case the <code>password_confirmation</code> field is filtered too. We can still see the password in the SQL statement in the log, however. This will only be a problem in development mode as by default this data isn&rsquo;t stored to the log in production mode. Also, if we are hashing our passwords before storing them in the database then the passwords won&rsquo;t be sent to the database as clear text and won&rsquo;t be seen in the log.</p>

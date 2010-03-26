@@ -1,0 +1,134 @@
+<p>In your Rails applications you&rsquo;ll often need to handle recurring processes or tasks, be it rolling log files once an hour, restarting a daemon once a week or clearing out old cache files. The most common way of doing this is to use <a href="http://en.wikipedia.org/wiki/Cron">cron</a>, which is available on most UNIX-based systems.</p>
+
+<p>Say you want to run a rake task under cron every morning. You&rsquo;d start by editing a new crontab file by running</p>
+<pre class="terminal">crontab -e</pre>
+<p>which would bring up an empty crontab file for editing. Unless you&rsquo;re familiar with the syntax for crontab you&rsquo;ll probably start reaching for the manuals about now as it can be a little tricky to remember. For example, if you wanted to run a command at 2.30 every morning you&rsquo;d have to enter something like</p>
+<pre class="terminal">
+30 2 * * * cd /Users/eifion/rails/myrailsapp &amp;&amp; execute_some_command
+</pre>
+<p>and then test it to make sure you&rsquo;d got the syntax correct. Another problem with using crontab is that every time you want to make a change you have to log on to the production server. Also, by using cron you&rsquo;re creating an external dependency and have to remember to deploy the cron files when deploying your application.</p>
+
+<p>Given all of this, it would be great if there was a solution that did all of this automatically. And fortunately there is, in a Ruby gem called <a href="http://github.com/javan/whenever/tree/master">Whenever</a> which allows us to write cron jobs in Ruby using a much simpler syntax.</p>
+<pre class="ruby">
+every 3.hours do
+  runner &quot;MyModel.some_process&quot;
+  rake &quot;my:rake:task&quot;
+  command &quot;/usr/bin/my_great_command&quot;
+end
+</pre>
+<p class="title">An Example of a Whenever Task</p>
+
+<p>The code above will create a job that will run every three hours. In each job we can run Ruby code with <code>script/runner</code>, execute rake tasks or run any external command that we choose. Whenever will also automatically handle the behind-the-scenes work, moving to your Rails app&rsquo;s directory, running the rake tasks in production mode and so on.</p>
+
+<p>Whenever has the advantage that it ties your cron jobs into your Rails application. If you have multiple Rails applications on a server then you can keep each app&rsquo;s jobs separate. Also if you deploy an application to a new server then you don&rsquo;t have to remember to manually install crontabs.</p>
+
+<h3>Installing Whenever</h3>
+
+<p>We can install Whenever by adding the gem to our application&rsquo;s <code>/config/environment.rb</code> file.</p>
+<pre class="terminal">
+config.gem &#x27;javan-whenever&#x27;, :lib =&gt; false, :source =&gt; &#x27;http://gems.github.com&#x27;
+</pre>
+<p>This line isn&rsquo;t required, but by adding it we&rsquo;re adding a dependency to the gem in our application so that it gets installed when we deploy it. Next, we&rsquo;ll make sure that the gems has been installed.</p>
+<pre class="terminal">
+sudo rake gems:install
+</pre>
+<p>Now that the Whenever gem is installed we can run the <code>wheneverize</code> command to set it up. We have to pass it the path to the Rails application, which will just be <code>&ldquo;.&rdquo;</code> if you&rsquo;re in your application&rsquo;s directory.</p>
+<pre class="terminal">
+$ wheneverize .
+[add] writing `./config/schedule.rb&#x27;
+[done] wheneverized!
+</pre>
+<p>All that the command does is create a <code>schedule.rb</code> file in the <code>config</code> directory where we can write our cron jobs. The generated file has some commented-out examples in it that are worth reading through, but we&rsquo;re going to delete them and start again.</p>
+
+<h3>Writing Jobs</h3>
+
+<p>Let&rsquo;s say that we&rsquo;re using the excellent <a href="http://freelancing-god.github.com/ts/en/">Thinking Sphinx</a> plugin to manage the searching in our application. We&rsquo;ll need to update the index on a regular basis, say every two hours, by running a rake task. We can do this by writing the following code in <code>schedule.rb</code>.</p>
+<pre class="ruby">
+every 2.hours do
+  rake &quot;thinking_sphinx:index&quot;
+end
+</pre>
+<p>Alternatively, instead of specifying a time period we can use certain keywords. For example we could start Thinking Sphinx when the server boots up.</p>
+<pre class="ruby">
+every :reboot do
+  rake &quot;thinking_sphinx:start&quot;
+end
+</pre>
+<p>Let&rsquo;s say that the size of our cache files is getting out of hand so we want to clear out the cache folder every Friday morning at 4am. We can do this by running <code>rm</code> in the cache folder.</p>
+<pre class="ruby">
+every :friday, :at =&gt; &quot;4am&quot; do
+  command &quot;rm -rf #{RAILS_ROOT}/tmp/cache&quot;
+end
+</pre>
+<p>Each block can take multiple commands, so if we wanted to also run some Ruby code at 4am every Friday we can. If our application was a online store that used carts and we had a class method on our <code>Cart</code> model to remove abandoned carts we could run it at the same time we clear our cache.</p>
+<pre class="ruby">
+every :friday, :at =&gt; &quot;4am&quot; do
+  command &quot;rm -rf #{RAILS_ROOT}/tmp/cache&quot;
+  runner &quot;Cart.remove_abandoned&quot;
+end
+</pre>
+<h3>Generating The Cron Jobs</h3>
+
+<p>Now that we&rsquo;ve defined our jobs in Ruby code how to we turn them into cron jobs? From our application&rsquo;s directory we can call <code>whenever --update-crontab</code> and pass an identifier that uniquely identifies our application, <code>&ldquo;store&rdquo;</code> in our case.</p>
+<pre class="terminal">
+whenever --update-crontab store
+</pre>
+<p>The identifier is important as it ensures that the correct cron jobs are updated when we change our <code>schedule.rb</code> file. After we run the command we can open the crontab file with <code>crontab -l</code> and see the jobs that Whenever has added.</p>
+<pre class="terminal">
+# Begin Whenever generated tasks for: store
+0 0,2,4,6,8,10,12,14,16,18,20,22 * * * cd /Users/eifion/rails/apps_for_asciicasts/ep164 &amp;&amp; RAILS_ENV=production /usr/bin/env rake thinking_sphinx:index
+
+0 4 * * fri rm -rf /Users/eifion/rails/apps_for_asciicasts/ep164/tmp/cache
+
+0 4 * * fri /Users/eifion/rails/apps_for_asciicasts/ep164/script/runner -e production &quot;Cart.remove_abandoned&quot;
+
+@reboot cd /Users/eifion/rails/apps_for_asciicasts/ep164 &amp;&amp; RAILS_ENV=production /usr/bin/env rake thinking_sphinx:start
+
+
+# End Whenever generated tasks for: store
+</pre>
+<p>Our crontab file now has jobs to run the Thinking Sphinx index rake task every two hours; to clear the cache and remove the abandoned carts at 4am on Friday and to start Thinking Sphinx on reboot.</p>
+
+<h3>Making Changes</h3>
+
+<p>Whenever makes it easy to make changes to your jobs too. If we want the tasks that run on Friday at 4am to run at Saturday at, say, 4.38am we can just make the appropriate changes and rerun <code>whenever</code>.</p>
+<pre class="terminal">
+every :saturday, :at =&gt; &quot;4:38am&quot; do
+  command &quot;rm -rf #{RAILS_ROOT}/tmp/cache&quot;
+  runner &quot;Cart.remove_abandoned&quot;
+end
+</pre>
+<p>If we rerun <code>whenever</code> now and view the crontab file we&rsquo;ll see the updated jobs.</p>
+<pre class="terminal">
+$ whenever --update-crontab store
+[write] crontab file updated
+
+$ crontab -l
+
+# Begin Whenever generated tasks for: store
+38 4 * * sat rm -rf /Users/eifion/rails/apps_for_asciicasts/ep164/tmp/cache
+
+38 4 * * sat /Users/eifion/rails/apps_for_asciicasts/ep164/script/runner -e production &quot;Cart.remove_abandoned&quot;
+
+0 0,2,4,6,8,10,12,14,16,18,20,22 * * * cd /Users/eifion/rails/apps_for_asciicasts/ep164 &amp;&amp; RAILS_ENV=production /usr/bin/env rake thinking_sphinx:index
+
+@reboot cd /Users/eifion/rails/apps_for_asciicasts/ep164 &amp;&amp; RAILS_ENV=production /usr/bin/env rake thinking_sphinx:start
+
+
+# End Whenever generated tasks for: store
+</pre>
+
+<h3>Updating Automatically With Capistrano</h3>
+
+<p>You&rsquo;ll probably want to update our cron jobs each time you deploy your application. If you&rsquo;re using Capistrano then you can update its <code>deploy.rb</code> file so that the crontab file is updated automatically. The code you need to add is:</p>
+<pre class="ruby">
+after &quot;deploy:symlink&quot;, &quot;deploy:update_crontab&quot;
+
+namespace :deploy do
+  desc &quot;Update the crontab file&quot;
+  task :update_crontab, :roles =&gt; :db do
+    run &quot;cd #{release_path} &amp;&amp; whenever --update-crontab #{application}&quot;
+  end
+end
+</pre>
+<p>After Capistrano symlinks the release directory file to the current one it will run the whenever command, passing in the name of the application as the identifier and your crontab file will be updated automatically.</p>

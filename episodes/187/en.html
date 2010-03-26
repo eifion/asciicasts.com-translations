@@ -1,0 +1,213 @@
+<p>One thing you really don&rsquo;t want to see in a production Rails application is a 500 error. These are usually seen when your application&rsquo;s code has raised an exception.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/232/original/E187I01.png" width="804" height="280" alt="The 500 error on our site."/>
+</div>
+
+<p>If your application&rsquo;s users are seeing errors like this you should be notified about it as soon as possible so that they can be fixed. This episode will cover the process that should be followed when fixing these errors.</p>
+
+<h3>Notification Options</h3>
+
+<p>There are several solutions that will enable our Rails applications to notify us when a 500 error is raised and we&rsquo;ll briefly discuss four of them here.</p>
+
+<p>The first one on our list is the classic <a href="http://github.com/rails/exception_notification">exception_notification</a> plug in. This is a fairly basic solution but it works well. When installed and configured it will send an email whenever an error is raised by our application. If our app is throwing errors often then the emails will pile up in your inbox but this is an extra incentive to get those errors fixed.</p>
+
+<p>The next option is <a href="http://github.com/defunkt/exception_logger">exception_logger</a>, which was covered back in <a href="http://railscasts.com/episodes/104-exception-notifications">episode 104</a>. This differs from exception_notification in that instead of sending out emails it records exceptions in a database table and displays them through the user interface.</p>
+
+<p>The two other options are commercial solutions. The first is <a href="http://www.hoptoadapp.com">Hoptoad</a> which stores exceptions on their web server and then access them through a slick user interface.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/233/original/E187I02.png" width="800" height="442" alt="The Hoptoad application."/>
+</div>
+
+<p>The final option is <a href="http://getexceptional.com">Exceptional</a>, which another nice solution that you might want to try.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/234/original/E187I03.png" width="800" height="442" alt="The Exceptional application."/>
+</div>
+
+<h3>Debugging Our Application</h3>
+
+<p>So, we have exception_notification installed in our application and have started getting notifications from it. The first one we&rsquo;ll look at is this:</p>
+<pre class="terminal">
+A NoMethodError occurred in ProductsController#create:
+
+  undefined method `add_to&#x27; for #&lt;ActiveRecord::Errors:0x2480bdc&gt;
+  [RAILS_ROOT]/app/models/product.rb:6:in `validate&#x27;
+
+-------------------------------
+Request:
+-------------------------------
+
+  * URL: http://localhost:3000/products
+  * IP Address: 127.0.0.1
+  * Parameters: {&quot;commit&quot;=&gt;&quot;Submit&quot;, &quot;authenticity_token&quot;=&gt;&quot;f8hYo4S/c6iJaTV9wVj6E0BjWyy1soIBQtMUbRB8Ms0=&quot;, &quot;product&quot;=&gt;{&quot;name&quot;=&gt;&quot;Headphones&quot;, &quot;price&quot;=&gt;&quot;-2&quot;}, &quot;action&quot;=&gt;&quot;create&quot;, &quot;controller&quot;=&gt;&quot;products&quot;}
+  * Rails root: /Users/eifion/apps_for_asciicasts/ep187/store
+
+-------------------------------
+Session:
+-------------------------------
+
+  * session id: &quot;0956b27849e48cdbc6de94b89cf5cf14&quot;
+  * data: {&quot;flash&quot;=&gt;{}}
+</pre>  
+<p>Looking at this notification it appears that we have mis-named a method on line 6 of  our <code>Product</code> model. This looks like a fairly simple error to fix so we could dive straight in and correct it. But before we do we should write a failing test. If you&rsquo;re not currently testing your applications you might be thinking that this is going to be another testing episode and considering not reading any further but bear with it a little longer. Even if you&rsquo;re not testing your applications you should still be writing integration tests to cover these errors. As we&rsquo;ll show you shortly it&rsquo;s not difficult to write integration tests and integration testing is the type of testing that definitely gives you the most bang for your buck.</p>
+
+<p>Even if you are using Test-Driven Development you should be writing integration tests to fix these issues. This exception has managed to slip through the cracks of the testing we have done to get this application ready for production so we have obviously found an area of the code that isn&rsquo;t tested well enough.</p> 
+
+<p>The first thing we need to do is to write a failing integration test that covers the area of the exception. We&rsquo;re going to use Rails&rsquo; built-in integration testing, but we could use any type of integration tests, for example Cucumber, to do this.</p> 
+
+<p>We can generate the file for our integration test, which we&rsquo;ll call <code>exceptions</code>, by running the following command.</p>
+<pre class="terminal">
+script/generate integration_test exceptions
+</pre>
+<p>This gives us a single place in which we can put all of the tests that we&rsquo;ll write to cover the exceptions that are being raised. We&rsquo;ll replace the default test in the file with a test that covers our exception.</p>
+<pre class="ruby">
+require &#x27;test_helper&#x27;
+
+class ExceptionsTest &lt; ActionController::IntegrationTest
+  fixtures :all
+
+  test &quot;POST /products&quot; do
+    post &quot;/products&quot;, &quot;commit&quot; =&gt; &quot;submit&quot;, &quot;product&quot; =&gt;{&quot;name&quot;=&gt;&quot;Headphones&quot;, &quot;price&quot; =&gt; &quot;-2&quot;}
+    assert_response :success
+  end
+end
+</pre>
+<p>We&rsquo;re using a convention for our tests&rsquo; names that uses a combination of the request&rsquo;s HTTP method and the URL that we&rsquo;re requesting. As this exception happens when we create a new product we&rsquo;ll be posting to <code>/products</code>. If we look at the request details in the notification above we&rsquo;ll see that there were a number of parameters passed and we&rsquo;ll need to pass some of these too in order to simulate the request in our test, although we can remove the <code>controller</code>, <code>action</code> and <code>authenticity_token</code> parameters.</p>
+
+<p>When a product is created the response will either be a 302 (redirect) or a 200 (success). In this case the attempt to create a product will throw a validation error so we should get a 200 response. Therefore our test asserts that the reponse was <code>:success</code>.</p>
+
+<p>To run our integration test we just need to run</p>
+<pre class="terminal">
+rake test:integration
+</pre>
+<p>In the output from the test run we&rsquo;ll see the following error:</p>
+<pre class="terminal">
+1) Failure:
+test_POST_/products(ExceptionsTest) [/test/integration/exceptions_test.rb:9]:
+Expected response to be a &lt;:success&gt;, but was &lt;500&gt;
+&lt;&quot;undefined method `add_to&#x27; for #&lt;ActiveRecord::Errors:0x1036bc4f8&gt;&quot;&gt;
+
+1 tests, 1 assertions, 1 failures, 0 errors
+</pre>
+
+<p>This shows that we&rsquo;re getting the same error that we saw in the exception notification: a 500 error about an undefined <code>add_to</code> method. We now have a test that successfully duplicates our exception.</p>
+
+<p>By default there is no stack trace shown when an integration test fails. In the comments for the Railscast on which this is based, however, is a nice piece of code that <a href="http://pastie.org/693810">enables this</a>. With this in place we get a more information about the error and where it happens.</p>
+
+<pre class="terminal">
+ 1) Failure:
+test_POST_/products(ExceptionsTest) [/test/integration/exceptions_test.rb:22]:
+app/models/product.rb:6:in `validate&#x27;
+app/controllers/products_controller.rb:16:in `create&#x27;
+/test/integration/exceptions_test.rb:21:in `test_POST_/products&#x27;.
+Expected response to be a &lt;:success&gt;, but was &lt;500&gt;
+&lt;&quot;undefined method `add_to&#x27; for #&lt;ActiveRecord::Errors:0x1036bc188&gt;&quot;&gt;
+</pre>
+<p>This gives us plenty of information about where the error is happening and the culprit seems to be line six of our <code>Product</code> model.</p> 
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+
+  def validate
+    if price &lt; 0
+      errors.add_to :price, &quot;cannot be negative&quot;
+    end
+  end
+end
+</pre>
+<p>This should, of course, be add instead of <code>add_to</code> so we could make that change and run our test again. If we were unit testing our application, and of course we should be, then we  would write a failing unit test to cover this specific functionality before making the fix itself.</p>
+
+<p>When we run our integration tests again, the test passes.</p>
+<pre class="terminal">
+$ rake test:integration
+(in /Users/eifion/rails/apps_for_asciicasts/ep187/store)
+/System/Library/Frameworks/Ruby.framework/Versions/1.8/usr/bin/ruby -I&quot;lib:test&quot; &quot;/Library/Ruby/Gems/1.8/gems/rake-0.8.7/lib/rake/rake_test_loader.rb&quot; &quot;test/integration/exceptions_test.rb&quot; 
+Loaded suite /Library/Ruby/Gems/1.8/gems/rake-0.8.7/lib/rake/rake_test_loader
+Started
+.
+Finished in 0.188851 seconds.
+
+1 tests, 1 assertions, 0 failures, 0 errors
+</pre>
+<p>Now that the test passes we can quickly try to create a new product in the browser to check that our application is now working as it should and our problem is fixed.</p>
+
+<h3>Another Example</h3>
+
+<p>Let&rsquo;s take a look at another example. This time we have an error in the ProductsController&rsquo;s <code>edit</code> template.</p>
+<pre class="terminal">
+A ActionView::TemplateError occurred in ProductsController#edit:
+
+  undefined method `add_to&#x27; for #&lt;ActiveRecord::Errors:0x2480bdc&gt;
+  [RAILS_ROOT]/app/views/products/edit.html.erb:6: syntax error, unexpected tIVAR, expecting &#x27;)&#x27;
+...ncat(( link_to &quot;Show&quot; @product ).to_s); @output_buffer.conca...
+                              ^) on line #6 of app/views/products/edit.html.erb:
+    3: &lt;%= render :partial =&gt; &#x27;form&#x27; %&gt;
+    4: 
+    5: &lt;p&gt;
+    6:   &lt;%= link_to &quot;Show&quot; @product %&gt; |
+    7:   &lt;%= link_to &quot;View All&quot;, products_path %&gt;
+    8: &lt;/p&gt;
+
+        app/views/products/edit.html.erb:12:in `compile!&#x27;
+
+
+-------------------------------
+Request:
+-------------------------------
+
+  * URL: http://localhost:3000/products/8/edit
+  * IP Address: 127.0.0.1
+  * Parameters: {&quot;action&quot;=&gt;&quot;edit&quot;, &quot;controller&quot;=&gt;&quot;products&quot;, &quot;id&quot;=&gt;&quot;8&quot;}
+  * Rails root: /Users/rbates/code/railscasts-episodes/episode-187/store
+
+-------------------------------
+Session:
+-------------------------------
+
+  * session id: &quot;0956b27849e48cdbc6de94b89cf5cf14&quot;
+  * data: {&quot;flash&quot;=&gt;{}}
+</pre>  
+<p>As before we&rsquo;ll start by writing an integration test that covers this exception. This time the failing request is a GET rather than a POST we don&rsquo;t need to pass any parameters, just make a request to the URL and check that response is a 200.</p>
+<pre class="ruby">
+test &quot;GET /products/8/edit&quot; do
+  get &quot;/products/8/edit&quot;
+  assert_response :success
+end
+</pre>
+<p>When we run the integration tests now the test fails, but not with the error we were expecting: instead of a 500 error we get a 404.</p>
+<pre class="terminal">
+  1) Failure:
+test_GET_/products/8/edit(ExceptionsTest) [/test/integration/exceptions_test.rb:26]:
+Expected response to be a &lt;:success&gt;, but was &lt;404&gt;
+</pre>
+<p>The reason for this is that we don&rsquo;t have a product with an <code>id</code> of 8 in our test database. This is one of the tricky parts of writing integration tests: sometimes the test depends on the application being in a certain state. In these cases the test will have to recreate that state to be a true reflection of the code we&rsquo;re testing. This can mean that session variables or database records might need to be created to get the application in the correct state.</p>
+
+<p>For this particular test we need to have an existing product. We could use Factories (as we demonstrated back in <a href="http://asciicasts.com/episodes/158-factories-not-fixtures">episode 158</a>) or make use of fixtures. We have fixtures set up in our app so for simplicity&rsquo;s sake we&rsquo;ll use them and change the test so that it creates a product before calling the URL for that product&rsquo;s <code>edit</code> page.</p>
+<pre class="ruby">
+test &quot;GET /products/8/edit&quot; do
+  product = Product.first
+  get &quot;/products/#{product.id}/edit&quot;
+  assert_response :success
+end
+</pre>
+<p>Run the test again and we&rsquo;ll see the error we were expecting.</p>
+<pre class="terminal">
+  1) Failure:
+test_GET_/products/8/edit(ExceptionsTest) [/test/integration/exceptions_test.rb:27]:
+Expected response to be a &lt;:success&gt;, but was &lt;500&gt;
+&lt;&quot;compile error\n/Users/eifion/rails/apps_for_asciicasts/ep187/store/app/views/products/edit.html.erb:4: syntax error, unexpected tIVAR, expecting &#x27;)&#x27;\n...ncat(( link_to \&quot;Show\&quot; @product ).to_s); @output_buffer.conca...\n                              ^&quot;&gt;
+</pre>
+
+<p>The problem looks to be a syntax error in our edit view. If we look at the code then we can see that we have a missing comma in one of the <code>link_to</code> calls.</p>
+<pre class="ruby">
+&lt;% title &quot;Edit Product&quot; %&gt;
+&lt;%= render :partial =&gt; &#x27;form&#x27; %&gt;
+&lt;p&gt;
+  &lt;%= link_to &quot;Show&quot; @product %&gt;
+  &lt;%= link_to &quot;View All&quot;, products_path %&gt;
+&lt;/p&gt;
+</pre>
+
+<p>If we fix this an run the tests again they both pass so we have fixed both of the exceptions in our application by writing integration tests. Once you get into the habit of working this way this becomes an effective way of dealing with exceptions that are raised by your production application. This is definitely not a replacement for full Test Driven Development but it is a useful addition to the test arsenal for an application. Finally, if you want to improve your applications&rsquo; integration tests then it&rsquo;s worth taking a look a Webrat which was covered in <a href="http://asciicasts.com/episodes/156-webrat">episode 156</a>.</p>

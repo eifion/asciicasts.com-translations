@@ -1,0 +1,119 @@
+<p>In our last episode we showed how to create a checkout process for your Rails e-commerce site with PayPal. By the end of it a customer could add items to their cart and click a &lsquo;checkout&rsquo; list to be taken to the PayPal site. There the same items were shown and they could enter payment information and place an order. One problem we were left with was that after the customer had paid for their order and redirected back to our site the items they had bought were still in their cart. Our site had no way of knowing that the payment had been made so didn&rsquo;t know when to clear the cart. What we needed was a notification from PayPal that the purchase has been made so that we could clear the cart.</p>
+
+<h3>The Checkout Process</h3>
+
+<p>Our checkout process starts on our server with the cart page, then transfers to PayPal&rsquo;s server where the customer views their billing information, makes their purchase, views their receipt then finally redirects back to our site. The process takes place entirely on PayPal&rsquo;s server and so we have no way of knowing how it went.</p>
+
+<p>The solution to this is to use Instant Payment Notification. This is a service that PayPal provides to notify your web server of the status of a purchase, so we can know if a purchase was successful or not. It works by making an asynchronous call to our server from PayPal. This can create problems if the PayPal servers are running slowly, though it generally only takes a few seconds so by the time our customer returns to our site we should know the status of their transaction.</p>
+
+<h3>Creating The Payment Notification Handler</h3>
+
+<p>To use this service we have to create a URL to which PayPal can send its notifications. We&rsquo;re going to create a whole new resource to handle this, called <code>PaymentNotification</code>. That way every time PayPal sends a notification we can create a whole new model and store it in our database. This has an added benefit: as every notification is stored in the database we build up a log of notifications that we can look at if we need to see the history of our notifications</p>
+
+<p>First, we&rsquo;ll generate our model. We&rsquo;ll explain the parameters below.</p>
+<code class="terminal">script/generate model PaymentNotification params:text status:string transaction_id:string cart_id:integer</code>
+<p>The first parameter, <code>params</code>, will be used to store all of the parameters that PayPal sends to us as a serialized hash. We&rsquo;ll also store two of the parameters from PayPal in separate fields, the status of the transaction and the transaction&rsquo;s id, as this will make looking up notification records easier. A Payment Notification will be tied to a specific Cart, so we&rsquo;ll store the cart&rsquo;s id, too.</p>
+<pre class="ruby">
+class PaymentNotification &lt; ActiveRecord::Base
+  belongs_to :cart
+  serialize :params
+  after_create :mark_cart_as_purchased
+  
+private
+  def mark_cart_as_purchased
+    if status == &quot;Completed&quot;
+      cart.update_attributes(:purchased_at =&gt; Time.now)
+    end
+  end
+end
+</pre>
+<p class="title">The PaymentNotification model.</p>
+
+<p>The <code>PaymentNotification</code> model has a <code>cart_id</code>, so <code>belongs_to</code> a cart. We want to serialize our parameters, so we&rsquo;ll use the <code>serialize</code> method which will convert the params hash to a <acronym title="Yet Another Markup Language">YAML</acronym> format string for storing in the database (and turn in back into a hash when we get it back from the database). We also have an <code>after_create</code> filter that marks the cart as purchased by setting its <code>purchased_at</code> attribute to the current time if the payment notification&rsquo;s status is &ldquo;Completed&rdquo;.</p> 
+
+<p>Next we&rsquo;ll generate the controller. The <code>PaymentNotifications</code> controller will only have one action, <code>create</code>, as that&rsquo;s all we want to do for now.</p>
+
+<pre class="ruby">
+class PaymentNotificationsController &lt; ApplicationController
+  protect_from_forgery :except =&gt; [:create]
+  def create
+    PaymentNotification.create!(:params =&gt; params, :cart_id =&gt; params[:invoice], :status =&gt; params[:payment_status], :transaction_id =&gt; params[:txn_id] )
+    render :nothing =&gt; true
+end
+</pre>
+<p class="title">The PaymentNotifications controller.</p>
+
+<p>The <code>create</code> action will be called by PayPal. Note that because of Rails&rsquo; built-in forgery protection we have to exempt the action from the forgery check. As mentioned above when we created the <code>PaymentNotification</code> model, we&rsquo;re storing all of the parameters sent by PayPal in one field, and some of the other parameters separately. A good guide to the parameters that PayPal sends can be found in <a href="https://cms.paypal.com/cms_content/en_US/files/developer/PP_OrderMgmt_IntegrationGuide.pdf">the Order Management Integration Guide on PayPal&rsquo;s website</a>.
+
+  <p>Finally we&rsquo;ll update our database with <code>rake db:migrate</code> and add the line
+  <code>map.resources &rsquo;payment_notifications&rsquo;</code> to our <code>routes.db</code> file and we&rsquo;re ready to go.</p>
+  
+<h3>Changing The Cart</h3>
+
+<p>In our application controller we have a method that fetches the current cart. We&rsquo;re going to alter it so that it is reset if the cart is marked as purchased.</p>
+<pre class="ruby">
+def current_cart
+  if session[:cart_id]
+    @current_cart ||= Cart.find(session[:cart_id])
+    session[:cart_id] = nil if @current_cart.purchased_at
+  end
+  
+  if session[:cart_id].nil?
+    @current_cart = Cart.create!
+    session[:cart_id] ||= @current_cart.id
+  end
+  @current_cart
+end
+</pre>
+<p class="title"The current_cart method in the application controller.</p>
+
+<p>We&rsquo;ve rewritten the <code>current_cart</code> method so that if a cart currently exists for a user (i.e. there is a <code>cart_id</code> in their session) we&rsquo;ll check if that cart has been purchased. If it has we&rsquo;ll remove it from the session. The second part of the method will then create a new cart for that user so that they can, if they wish, start again and buy more items from our shop.</p>
+
+<h3>The Last Step</h3>
+
+<p>There is one last thing to do. Although we&rsquo;ve created the method for PayPal to use, we haven&rsquo;t told them to use it. If you look back to the previous episode you&rsquo;ll see that we pass a number of parameters to PayPal when we send them a cart. We can pass a <code>notify_url</code> parameter to tell PayPal which URL to pass its notifications to. We&rsquo;ll need to make a small change to our cart model to add this parameter to the <code>paypal_url</code> model. 
+<pre class="ruby">
+ def paypal_url(return_url, notify_url)
+    values = {
+      :business =&gt; &rsquo;seller_1234111143_biz@asciicasts.com&rsquo;,
+      :cmd =&gt; &rsquo;_cart&rsquo;,
+      :upload =&gt; 1,
+      :return =&gt; return_url,
+      :invoice =&gt; id,
+      :notify_url =&gt; notify_url
+    }
+    
+    line_items.each_with_index do |item, index|
+      values.merge!({
+        &quot;amount_#{index + 1}&quot; =&gt; item.unit_price,
+        &quot;item_name_#{index + 1}&quot; =&gt; item.product.name,
+        &quot;item_number_#{index + 1}&quot; =&gt; item.product.identifier,
+        &quot;quantity_#{index + 1}&quot; =&gt; item.quantity
+      })
+    end
+    &quot;https://www.sandbox.paypal.com/cgi-bin/webscr?&quot; + values.map { |k,v| &quot;#{k}=#{v}&quot;  }.join(&quot;&amp;&quot;)
+  end
+</pre>
+<p class="title">The updated paypal_url method in the cart model.</p>
+
+<p>As we don&rsquo;t have access to the URL helpers in the model we&rsquo;ll pass the notification URL in as a parameter. We&rsquo;ll change the cart&rsquo;s view page (<code>/app/views/cart/show.html.erb</code>) to pass the payment notification parameter to the model.</p>
+<pre class="ruby">
+&lt;%= link_to &quot;Checkout&quot;, @cart.paypal_url(products_url, payment_notifications_url) %&gt;
+</pre>
+
+<h3>Testing It All</h3>
+<p>Unfortunately, testing that the notification actually works is difficult when we&rsquo;re in development mode as our notification URL will be on <code>localhost</code> which, of course, PayPal won&rsquo;t be able to send notifications to. To test our cart properly we&rsquo;d have to put our site up on a staging server which has a publicly accessible URL. To quickly test our cart code we&rsquo;ll first buy some items on our site and go through the purchase process on PayPal and make a note of our transaction id on the receipt page.
+</p>
+
+<img src="/system/photos/37/original/E142I01.png" width="838" height="447" alt="Copying the transaction id from the receipt page on the PayPal site.">
+<p>Secondly we&rsquo;ll simulate the payment notification by using <code>curl</code>.</p>
+<pre class="terminal">
+curl -d &quot;txn_id=9JU83038HS278211W&amp;invoice=1&amp;payment_status=Completed&quot; http://localhost:3000/payment_notifications
+</pre>
+<p class="terminal">Using <code>curl</code> to simulate a payment notification.</p>
+
+<p>To simulate the payment notification we need to pass through three parameters to our <code>create</code> action: the transaction id from the receipt page, the cart&rsquo;s id and the payment status. The simulated request should return no response but if we check our database there should now be a time in the <code>purchased_at</code> field for that cart in the database. Now, when we click back through to our store and buy another item our cart will be empty.</p>
+
+<h3>What About Security?</h3>
+
+<p>There is still a lot to do with the application in the area of security. We&rsquo;re currently sending the item names and prices in the query string, which is an obviously insecure way to do it as the prices could be changed by altering the values in it. The next episode in this series will focus on making our application&rsquo;s payment process more secure.</p>

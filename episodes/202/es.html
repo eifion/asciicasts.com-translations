@@ -1,0 +1,224 @@
+<p>En los &uacute;ltimos dos episodios hemos visto c&oacute;mo configurar nuestro equipo y crear nuevas aplicaciones con Rails 3.  En este episodio empezaremos a ver algunas de sus nuevas caracter&iacute;sticas empezando por ActiveRecord, que trae una nueva interfaz para  realizar consultas a la base de datos.  Pratik Naik ha tratado este tema con gran detalle en <a href="http://m.onkey.org/2010/1/22/active-record-query-interface"> esta reciente anotaci&oacute;n en su blog</a>  que merece la pena leer.</p>
+
+<h3>Algunos ejemplos b&aacute;sicos</h3>
+<p>Para empezar vamos a ver algunos ejemplos de las antiguas llamadas a <code>find</code> de ActiveRecord y las vamos a convertir al nuevo formato de consulta. Para esto consideraremos una aplicaci&oacute;n Rails b&aacute;sica que incorpore dos modelos: <code>Article</code> y <code>Comment</code> que estar&aacute;n relacionados de manera que un <code>Article</code> tiene <code>has_many :comment</code>.</p>
+
+<p>Empezaremos con el <code>find</code> que devuelve los diez art&iacute;culos publicados m&aacute;s recientes.</p>
+
+<pre class="ruby">
+Article.find(:all, :order =&gt; &quot;published_at desc&quot;, :limit =&gt; 10)
+</pre>
+
+<p>El enfoque b&aacute;sico para convertir una consulta ActiveRecord al nuevo formato de Rails 3 consiste en examinar el <em>hash</em> de opciones que se le pasa a <code>find</code> y reemplazar cada uno de sus elementos por un m&eacute;todo equivalente. As&iacute;, en lugar de llamar a <code>find</code> como arriba ahora podemos utilizar:</p>
+
+<pre class="ruby">
+Article.order(&quot;published_at desc&quot;).limit(10)
+</pre>
+
+<p>Como puede verse es f&aacute;cil convertir los antiguos <code>find</code> de Rails a la nueva sintaxis, pero con la ventaja de que &eacute;sta &uacute;ltima es m&aacute;s clara.</p>
+
+<p>En el pr&oacute;ximo ejemplo veremos que no siempre es posible mapear el antiguo <em>hash</em> de opciones con los nuevos m&eacute;todos.</p>
+
+<pre class="ruby">
+Article.find(:all, :conditions =&gt; [&quot;published_at &lt;= ?&quot;, Time.now], :include =&gt; :comments)
+</pre>
+
+<p>S&oacute;lo hay dos excepciones a la regla anterior, y el ejemplo anterior (de forma oportuna) tiene las dos.  La sentencia anterior recuperar&aacute; todos los art&iacute;culos que tienen una fecha publicada anterior a la fecha actual as&iacute; como su comentarios asociados.  En Rails 3 tenemos que hacer:</p>
+
+<pre style="display: none;" class="ruby">
+Article.where(&quot;published_at &lt;= ?&quot;, Time.now).includes(:comments)
+</pre>
+
+<p>En lugar de <code>:conditions</code> ahora utilizamos el m&eacute;todo <code>where</code> pas&aacute;ndole los mismos argumentos que utilizar&iacute;amos con <code>:conditions</code>. Los argumentos se pueden pasar como un <em>array</em> pero es m&aacute;s f&aacute;cil pasarlos por separado.  Para recuperar los registros asociados como con <code>:include</code> se ha cambiado al plural para convertirse en el m&eacute;todo <code>includes</code> .  El resto de opciones que por lo general pasar&iacute;amos al m&eacute;todo <code>find</code> se convierten en m&eacute;todos con el mismo nombre que la opci&oacute;n.</p>
+
+<p>Nuestro &uacute;ltimo ejemplo recupera el art&iacute;culo publicado m&aacute;s recientemente.</p>
+<pre class="ruby">
+Article.find(:first, :order =&gt; &quot;published_at desc&quot;)
+</pre>
+
+<p>Con la nueva sintaxis de Rails se convierte en:</p>
+
+<pre class="ruby">
+Article.order(&quot;published_at desc&quot;).first()
+</pre>
+
+<p>Obs&eacute;rvese que no llamamos a <code>first</code> hasta el final de la cadena de m&eacute;todos.</p>
+
+<p>Dado que estamos recuperando registros en orden descendiente podr&iacute;amos reescribir la l&iacute;nea anterior como:</p>
+
+<pre class="ruby">
+Article.order(&quot;published_at&quot;).last()
+</pre>
+
+<p>Este c&oacute;digo, un poco m&aacute;s conciso, realizar&aacute; la misma consulta.</p>
+
+<p>En Rails 3.0 podemos utilizar los antiguos m&eacute;todos <code>find</code> o la nueva sintaxis de Rails 3, pero los m&eacute;todos antiguos quedar&aacute;n a extinguir en la versi&oacute;n 3.1 y en la 3.2 se eliminar&aacute;n por completo.  Merece la pena reescribir nuestros <code>find</code> durante el proceso de migraci&oacute;n de nuestras aplicaciones a Rails 3 de forma que nuestras aplicaciones sean compatibles con las siguientes versiones de Rails 3.</p>
+
+<p>En este punto podr&iacute;amos preguntarnos cu&aacute;l es el motivo de utilizar esta nueva sintaxis. Pues bien, hay un prop&oacute;sito detr&aacute;s de todo esto, y reside en el poder de la carga perezosa (N. del T: en ingl&eacute;s, <em>lazy loading</em>).</p>
+
+<h3>Carga perezosa</h3>
+
+<p>Para mostrar en qu&eacute; consiste la carga perezosa utilizaremos la consola de nuestra aplicaci&oacute;n.  Si preguntamos por todos los registros recuperaremos, como era de esperar, un <em>array</em> y veremos que tenemos tres art&iacute;culos en nuestra base de datos.</p>
+<pre class="terminal">
+ruby-1.9.1-p378 &gt; Article.all =&gt; [#&lt;Article id: 1, name: &quot;It&#x27;s Ancient&quot;, published_at: nil, hidden: false, 
+created_at: &quot;2010-02-22 20:35:42&quot;, updated_at: &quot;2010-02-22 20:35:42&quot;&gt;, 
+#&lt;Article id: 2, name: &quot;Can&#x27;t See Me&quot;, published_at: nil, hidden: false, 
+created_at: &quot;2010-02-22 20:37:03&quot;, updated_at: &quot;2010-02-22 20:37:03&quot;&gt;, 
+#&lt;Article id: 3, name: &quot;To the Future!&quot;, published_at: nil, hidden: false, 
+created_at: &quot;2010-02-22 20:38:17&quot;, updated_at: &quot;2010-02-22 20:38:17&quot;&gt;]
+</pre> 
+
+<p>Podemos obtener todos los art&iacute;culos en orden alfab&eacute;tico utilizando el m&eacute;todo <code>order</code>:</p>
+
+<pre class="terminal">
+ruby-1.9.1-p378 &gt; articles = Article.order(&quot;name&quot;)
+ =&gt; #&lt;ActiveRecord::Relation:0x00000101669b90 @table=#&lt;Arel::Table:0x000001023e9af8 
+@name=&quot;articles&quot;, @options={:engine=&gt;#&lt;Arel::Sql::Engine:0x000001023a15c8 @ar=ActiveRecord::Base,
+@adapter_name=&quot;SQLite&quot;&gt;}, @engine=#&lt;Arel::Sql::Engine:0x000001023a15c8 @ar=ActiveRecord::Base,
+@adapter_name=&quot;SQLite&quot;&gt;, &hellip;
+</pre> 
+
+<p>Esta vez en lugar de recibir una lista de art&iacute;culos tenemos un objeto de tipo <code>ActiveRecord::Relation</code>, que guarda informaci&oacute;n sobre la consulta, pero &eacute;sta a&uacute;n no ha sido ejecutada.  Este es, pues, el significado de <em>carga perezosa</em> en este contexto: los datos no se cargan hasta que sea necesario.  Si por ejemplo enumer&aacute;semos los registros con <code>each</code>, o los recuper&aacute;semos todos (con <code>all</code>), o tal vez s&oacute;lo el primero (<code>first</code>) entonces s&iacute; que se lanzar&iacute;a la consulta.</p>
+
+<pre class="terminal">
+ruby-1.9.1-p378 &gt; articles.first
+ =&gt; #&lt;Article id: 2, name: &quot;Can&#x27;t See Me&quot;, published_at: nil, hidden: false, 
+created_at: &quot;2010-02-22 20:37:03&quot;, updated_at: &quot;2010-02-22 20:37:03&quot;&gt;
+</pre> 
+
+<p>Veamos c&oacute;mo afecta esto a nuestra aplicaci&oacute;n.  Hemos generado el andamiaje necesario para el modelo de art&iacute;culo, de forma que tenemos un controlador para los art&iacute;culos con las siete acciones habituales. El c&oacute;digo de la acci&oacute;n <code>index</code> utiliza <code>Article.all</code> para obtener todos los articulos:</p>
+
+<pre class="codeFilePath">/app/controllers/articles_controller.rb</pre>
+<pre class="ruby">
+def index
+  @articles = Article.all
+
+  respond_to do |format|
+    format.html # index.html.erb
+    format.xml  { render :xml =&gt; @articles }
+  end
+end
+</pre>
+
+<p>Como vimos antes si sobre estos art&iacute;culos usamos alguna de las opciones de b&uacute;squeda, como por ejemplo ordenar por nombre, entonces se devuelve un objeto de tipo <code>ActiveRecord::Relation</code> y la consulta no ser&aacute; ejecutada en el controlador sino que se lanzar&aacute; desde el c&oacute;digo de la vista cuando recorramos con <code>each</code> el listado de art&iacute;culos.</p>
+
+<pre class="codeFilePath">/app/views/articles/index.html.erb</pre>
+<pre class="ruby">&lt;% @articles.each do |article| %&gt;
+  &lt;tr&gt;
+    &lt;td&gt;&lt;%= article.name %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= article.published_at %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= article.hidden %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &#x27;Show&#x27;, article %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &#x27;Edit&#x27;, edit_article_path(article) %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &#x27;Destroy&#x27;, article, :confirm =&gt; &#x27;Are you sure?&#x27;, :method =&gt; :delete %&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Si ahora cargamos la p&aacute;gina de &iacute;ndice los art&iacute;culos aparecer&aacute;n ordenados alfab&eacute;ticamente.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/329/original/E202I01.png" alt="The scaffold-generated article index page." width="798" 
+height="368" />
+</div>
+
+<p>Lo interesante de esto es que si estamos usando cach&eacute; de fragmentos en nuestras vistas (con el m&eacute;todo <code>cache</code>) se produce una importante mejora del rendimiento porque la consulta a la base de datos no se ejecutar&aacute; a no ser que el fragmento est&eacute; expirado.</p>
+
+<p>Con la nueva sintaxis nos ser&aacute; mucho m&aacute;s f&aacute;cil construir condiciones complejas.  Por ejemplo, supongamos que queremos filtrar los art&iacute;culos de forma que aparezcan s&oacute;lo los art&iacute;culos ocultos si en la URL se recibe <code>hidden=1</code> como par&aacute;metro.  Podemos hacerlo modificando la acci&oacute;n <code>index</code> de la siguienta manera:</p>
+
+<pre class="codeFilePath">/app/controllers/articles_controller.rb</pre>
+<pre class="ruby">
+def index
+  @articles = Article.order(&#x27;name&#x27;)
+    
+  if params[:hidden]
+    @articles = @articles.where(:hidden =&gt;(params[:hidden] == &quot;1&quot;))
+  end
+
+  respond_to do |format|
+    format.html # index.html.erb
+    format.xml  { render :xml =&gt; @articles }
+  end
+end
+</pre>
+
+<p>Comprobamos si hay un par&aacute;metro <code>hidden</code>, y de haberlo a&ntilde;adimos un m&eacute;todo <code>where</code> a la consulta que mostrar&aacute; s&oacute;lo los art&iacute;culos ocultos si el par&aacute;metro tiene el valor <code>1</code>.  Si a&ntilde;adimos dicho par&aacute;metro a la URL y recargamos la p&aacute;gina veremos &uacute;nicamente los art&iacute;culos ocultos.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/330/original/E202I02.png" 
+alt="Mostrando s&oacute;lo los art&iacute;culos ocultos." width="796" height="280" />
+</div>
+
+<p>Igualmente si pasamos el par&aacute;metro <code>0</code> tan s&oacute;lo veremos los art&iacute;culos visibles.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/331/original/E202I03.png" 
+alt="Ahora s&oacute;lo se muestran los art&iacute;culos visibles." width="796" height="280" />
+</div>
+
+<p>Esta es una forma muy elegante de construir consultas m&aacute;s complejas a la base de datos sabiendo que dichas consultas no se ejecutar&aacute;n realmente hasta que los datos sean necesarios.</p>
+
+<h3>&Aacute;mbitos nominales</h3>
+
+<p>A continuaci&oacute;n veremos algunos de los cambios realizados sobre los &aacute;mbitos nominales (N. del T: en ingl&eacute;s, <em>named scopes</em>) en Rails 3.  Abajo aparece nuestro modelo <code>Article</code> con dos &aacute;mbitos definidos, uno para recuperar los art&iacute;culos visibles y otro para recuperar los art&iacute;culos que han sido publicados.</p>
+
+<pre class="codeFilePath">/app/models/article.rb</pre>
+<pre class="ruby">
+class Article &lt; ActiveRecord::Base
+  named_scope :visible, :conditions =&gt; [&quot;hidden != ?&quot;, true]
+  named_scope :published, lambda { {:conditions =&gt; [&quot;published_at &lt;= ?&quot;, Time.zone.now]} }
+end
+</pre>
+
+<p>Estos &aacute;mbitos nominales se definen igual que har&iacute;amos en una aplicaci&oacute;n 2.x pero en Rails 3 el enfoque es un poco diferente.  La primera diferencia que nos encontramos es que el m&eacute;todo para definir
+un &aacute;mbito nominal ya no es <code>named_scope</code> sino unicamente <code>scope</code>.  Tampoco necesitamos ya pasar las condiciones como un <em>hash</em> sino que al igual que con <code>find</code> podemos utilizar m&eacute;todos.  Tal y como hicimos con los nuevos m&eacute;todos de <code>find</code> utilizaremos <code>where</code> en lugar de <code>:conditions</code>.  En la sintaxis de Rails 3 los &aacute;mbitos nominales ahora tienen el siguiente nombre:</p>
+
+<pre class="codeFilePath">/app/models/article.rb</pre>
+<pre class="ruby">
+class Article &lt; ActiveRecord::Base
+  scope :visible, where(&quot;hidden != ?&quot;, true)
+  scope :published, lambda { where(&quot;published_at &lt;= ?&quot;, Time.zone.now) }
+end
+</pre>
+
+
+<p>Otra funcionalidad  nueva es la posibilidad de agregar &aacute;mbitos.  Si queremos crear un &aacute;mbito llamado <code>recent</code> que devuelva los art&iacute;culos visibles m&aacute;s recientes ordenados por fecha de publicaci&oacute;n podemos hacerlo reutilizando los dos &aacute;mbitos que ya tenemos.</p>
+
+<pre class="ruby">
+scope :recent, visible.published.order(&quot;published_at desc&quot;)
+</pre>
+
+<p>Lo que hemos hecho es encadenar los dos &aacute;mbitos que ya ten&iacute;amos y a&ntilde;adir el m&eacute;todo <code>order</code>  para crear nuestro nuevo &aacute;mbito.  Se trata de una funcionalidad muy poderosa cuando estemos definiendo los &aacute;mbitos que tendr&aacute;n nuestros modelos.</p>
+
+<p>Podemos intentar probar nuestro &aacute;mbito reci&eacute;n creado.  Si invocamos <code>Article.recent</code> se devuelve un objeto de tipo <code>ActiveRecord::NamedScope::Scope</code>.  Este objeto se comporta de forma similar a los objetos <code>ActiveRecord::Relation</code> que vimos anteriormente.</p>
+
+<pre class="terminal">
+ruby-1.9.1-p378 &gt; Article.recent
+ =&gt; #&lt;ActiveRecord::NamedScope::Scope:0x0000010318bd08 @table=#&lt;Arel::Table:0x00000102740ea8 
+ @name=&quot;articles&quot;, @options={:engine=&gt;#&lt;Arel::Sql::Engine:0x00000102651900 @ar=ActiveRecord::Base&gt;}, 
+ @engine=#&lt;Arel::Sql::Engine:0x00000102651900 @ar=ActiveRecord::Base&gt;&gt;, &hellip;
+</pre>
+
+<p>Si invocamos <code>all</code> en el objeto <code>Scope</code> veremos que se devuelven los art&iacute;culos correspondientes.</p>
+
+<pre class="terminal">
+ruby-1.9.1-p378 &gt; Article.recent.all
+ =&gt; [#&lt;Article id: 1, name: &quot;It&#x27;s Ancient&quot;, published_at: &quot;2010-01-01&quot;, 
+ hidden: false, created_at: &quot;2010-02-22 20:35:42&quot;, updated_at: &quot;2010-02-22 23:00:16&quot;&gt;]
+</pre>
+
+<h3>Un &uacute;ltimo consejo</h3>
+
+<p>Acabaremos este episodio con un truco muy &uacute;til.  Si tenemos un objeto <code>Relation</code> o <code>Scope</code> y queremos ver la consulta SQL que se lanzar&iacute;a contra la base de datos se puede invocar su m&eacute;todo <code>to_sql</code>.</p>
+
+<pre class="terminal">
+ruby-1.9.1-p378 &gt; Article.recent.to_sql
+ =&gt; &quot;SELECT     \&quot;articles\&quot;.* FROM       \&quot;articles\&quot; 
+ WHERE     (hidden != &#x27;t&#x27;) AND (published_at &lt;= &#x27;2010-02-22 22:47:12.023289&#x27;) 
+ ORDER BY  published_at desc&quot;
+</pre> 
+
+<p>Esto nos mostrar&aacute; el SQL que enviar&aacute; ActiveRecord para devolvernos los art&iacute;culos publicados m&aacute;s recientemente que no est&eacute;n ocultos.</p>
+
+<p>Y eso es todo por este episodio que ha tratado del uso de consultas ActiveRecord en Rails 3.  Por supuesto hay muchas m&aacute;s novedades que har&aacute;n que el c&oacute;digo de nuestros controladores Rails sea m&aacute;s conciso y epxresivo.  Recuperaremos con creces el tiempo que dediquemos a  jugar con estas nuevas funcionalidades.</p>

@@ -1,0 +1,174 @@
+<p>In the previous episode we introduced <a href="http://github.com/justinfrench/formtastic">Formtastic</a>, a great gem for producing form views with very little code. With it we created a basic application for a vet&rsquo;s surgery that had forms for adding and editing animals and categories of animals. In this episode we&rsquo;ll make use of some of Formtastic&rsquo;s more advanced features to extend our application.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/222/original/E185I01.png" width="800" height="477" alt="The edit page for an animal."/>
+</div>
+
+<p>By the end of the last episode we had a form that we could use to create and update animals&rsquo; details. In this episode we&rsquo;ll be modifying the form to give it some more features.</p>
+
+<h3>Handling Many-to-Many Relationships</h3>
+
+<p>An animal can come to a vet&rsquo;s surgery with a number of problems so the first modification we want to make to our application is to add a <code>Problem</code> model. This model will have a many-to-many relationship with <code>Animal</code>. In the previous episode we saw how well Formtastic handles one-to-many relationships in forms when we used it to create the category dropdown. Needless to say it can work with many-to-many relationships just as well.</p>
+
+<p>We&rsquo;ll start by creating the Problem scaffolding. As in the previous episode we&rsquo;re using Ryan Bates&rsquo; <a href="http://github.com/ryanb/nifty-generators">nifty generators</a> to make creating the scaffolding simple.</p>
+<pre class="terminal">
+script/generate nifty_scaffold problem name:string
+</pre>
+<p>As we&rsquo;re creating a many-to-many relationship we&rsquo;ll create a need a join model. We&rsquo;ll create one called <code>Symptom</code> that will reference both <code>Animal</code> and <code>Problem</code>.</p>
+<pre class="terminal">
+script/generate nifty_scaffold symptom animal_id:integer problem_id:integer --skip-controller
+</pre>
+<p>There&rsquo;s no need to manipulate symptoms directly from the web interface so we can use the <code>--skip-controller</code> option here to avoid creating the controller code.</p>
+
+<p>To complete this step we&rsquo;ll migrate our database to create the new tables.</p>
+<pre class="terminal">
+rake db:migrate
+</pre>
+<p>Next we&rsquo;ll have to set up the associations between the <code>Problem</code>, <code>Symptom</code> and <code>Animal</code> models. A <code>Problem</code> has many <code>Symptoms</code> and <code>Animals</code>:</p>
+<pre class="ruby">
+class Problem &lt; ActiveRecord::Base
+  attr_accessible :name
+  has_many :symptoms
+  has_many :animals, :through =&gt; :symptoms
+end
+</pre>
+<p>A <code>Symptom</code> belongs to a <code>Problem</code> and an <code>Animal</code>:</p>
+<pre class="ruby">
+class Symptom &lt; ActiveRecord::Base
+  attr_accessible :animal_id, :problem_id
+  belongs_to :animal
+  belongs_to :problem
+end
+</pre>
+<p>Finally an <code>Animal</code> has many <code>Symptoms</code> and <code>Problems</code>:</p>
+<pre class="ruby">
+class Animal &lt; ActiveRecord::Base
+  attr_accessible :name, :category_id, :born_on, :female, :problem_ids
+  belongs_to :category
+  has_many :symptoms
+  has_many :problems, :through =&gt; :symptoms
+end
+</pre>
+<p>There&rsquo;s one other change we&rsquo;ve had to make to our <code>Animal</code> model. As we&rsquo;re using <code>attr_accessible</code> to control which fields can be updated by mass assignment we need to add <code>problem_ids</code> to the list of accessible fields so that we can assign multiple problems to an animal by mass assignment and therefore allow updates via the user interface.</p>
+
+<p>Now that we&rsquo;ve modified our models we can update the form so that problems can be assigned to animals. We just need to add <code>&lt;%= f.input :problems %&gt;</code> to the animal form to show the problems as a multiple select.</p>
+<pre class="ruby">
+&lt;% semantic_form_for @animal do |f| %&gt;
+  &lt;% f.inputs do %&gt;
+    &lt;%= f.input :name %&gt;
+    &lt;%= f.input :born_on, :start_year =&gt; 1900 %&gt;
+    &lt;%= f.input :category, :include_blank =&gt; false %&gt;
+    &lt;%= f.input :female, :as =&gt; :radio, :label =&gt; &quot;Gender&quot;, :collection =&gt; [[&quot;Male&quot;, false], [&quot;Female&quot;, true]] %&gt;
+    &lt;%= f.input :problems %&gt;
+  &lt;% end %&gt;
+  &lt;%= f.buttons %&gt;
+&lt;% end %&gt;
+</pre>
+<p>If we reload the page now and we&rsquo;ll see the list of problems on the form. (We&rsquo;ve already added a few problems to the database so that there&rsquo;s something to show.) If we select a couple of problems and save our animal we&rsquo;ll see that they&rsquo;re selected when we go back to edit the animal again.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/223/original/E185I02.png" width="800" height="588" alt="The problems listed as a multple select."/>
+</div>
+
+<p>We&rsquo;d like to show the problems as a list of checkboxes instead of as a multiple select control. Last time we used Formtastic&rsquo;s :as option to change checkboxes to radio buttons and we can do the same here to show the list as checkboxes.</p>
+<pre class="ruby">
+&lt;%= f.input :problems, :as =&gt; :checkboxes %&gt;
+</pre>
+<p>Another refresh and the problems are shown as checkboxes, with the items we previously selected from the multiple select checked.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/224/original/E185I03.png" width="800" height="583" alt="The problems are now rendered as a list of checkboxes."/>
+</div>
+
+<h3>Working With Required Fields</h3>
+
+<p>Each field&rsquo;s label above has an asterisk next to it to indicate that the field is required. Formtastic makes each field required by default. We can override this for a single field by using the <code>:required</code> option.</p>
+<pre class="ruby">
+&lt;%= f.input :problems, :as =&gt; :check_boxes, :required =&gt; false %&gt;
+</pre>
+<p>Controlling this on a field-by-field basis can quickly become a hassle; it would be much easier if we could use the models&rsquo; validations to control which fields are required. Formtastic does support this, but we first need to install a plugin called <a href="http://github.com/redinger/validation_reflection">validation_reflection</a> to make use of it.</p>
+
+<p>We can install the plugin into our application from GitHub.</p>
+<pre class="terminal">
+script/plugin install git://github.com/redinger/validation_reflection.git
+</pre>
+<p>Once validation_reflection is installed we need to restart our server so that the plugin is picked up. If we then reload the page we&rsquo;ll see that the asterisks have gone. This is because none of the fields in the Animal model have validations against them.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/225/original/E185I04.png" width="800" height="583" alt="The required field indicators are no longer shown."/>
+</div>
+
+<p>We can now add validations to the <code>name</code> and <code>born_on</code> attributes so that they&rsquo;re required&hellip;</p>
+<pre class="ruby">
+class Animal &lt; ActiveRecord::Base
+  attr_accessible :name, :category_id, :born_on, :female, :problem_ids
+  belongs_to :category
+  has_many :symptoms
+  has_many :problems, :through =&gt; :symptoms
+  validates_presence_of :name, :born_on
+end
+</pre>
+<p>&hellip;and if we reload the form again the asterisks will have returned against those fields&rsquo; labels.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/226/original/E185I05.png" width="800" height="582" alt="The first two fields are now required because of the model validations"/>
+</div>
+
+<h3>How Formtastic Handles Error Messages</h3>
+
+<p>Formtastic renders a form&rsquo;s error messages inline next to each field. If we remove our animal&rsquo;s name then try to update it the default error message will be shown.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/227/original/E185I06.png" width="797" height="280" alt="The default validation text below the field."/>
+</div>
+
+<p>This is a sensible default, but the behaviour can be changed if necessary by altering Formtastic&rsquo;s configuration.</p>
+
+<p>It&rsquo;s best to place the configuration details in a file in the <code>/config/initializers</code> directory. We&rsquo;ll call the file <code>formtastic_config.rb</code>. The <a href="http://github.com/justinfrench/formtastic">GitHub page for Formtastic</a> has well-documented details on what can be placed in the configuration file and there is an <a href="http://github.com/justinfrench/formtastic/blob/master/generators/formtastic/templates/formtastic.rb">example file</a> that can be viewed. One of the configuration options listed there is <code>inline_errors</code>, which is the one we need to change where the form&rsquo;s errors are shown. To hide the errors we can set <code>inline_errors</code> to <code>:none</code> in the configuration file.</p>
+
+<pre class="ruby">Formtastic::SemanticFormBuilder.inline_errors = :none</pre>
+
+<p>If we try to submit an invalid form now we&rsquo;ll be taken back to the form page but no errors will be shown. If we want to display the errors as a list at the top of the form we can use the <code>error_messages</code> method to show the errors in the &ldquo;classic&rdquo; Rails way.</p>
+<pre class="ruby">
+&lt;% semantic_form_for @animal do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;% f.inputs do %&gt;
+  &lt;!-- rest of form --&gt;
+</pre>
+<p>The form errors are now shown at the top of the form.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/228/original/E185I07.png" width="790" height="380" alt="The errors are now shown at the top of the form."/>
+</div>
+
+<h3>Hints</h3>
+
+<p>There&rsquo;s one Formtastic field option that we&rsquo;ve yet to show: <code>:hint</code>. As its name suggests, <code>:hint</code> shows a hint message next to the field. To add a hint to the name field we just need to add an appropriate hint message.</p>
+
+<pre class="ruby">&lt;%= f.input :name, :hint =&gt; &quot;Enter the owner&amp;rsquo;s name if none is provided.&quot; %&gt;</pre>
+<p>When we reload the page now the hint message will be shown below the form field.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/229/original/E185I08.png" width="816" height="286" alt="The hint shown below the field."/>
+</div>
+
+<p>If we want to style the hint message or any other part of the form we can do so by modifying the <code>formtastic_changes.css</code> file that Formtastic generated in the last episode when we ran</p>
+<pre class="terminal">
+script/generate formtastic_stylesheets
+</pre>
+<p>The file is pre-populated with a comments section which, handily for us, includes an example of how to alter the styling of the hint text. If we want the hint text to be 11px in size and italicized then we can do so by using the following CSS:</p>
+<pre class="terminal">
+form.formtastic fieldset ol li p.inline-hints { 
+  font-style: italic;
+  font-size: 11px;
+}
+</pre>
+<p>Reload the form again and the hint text will have changed.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/230/original/E185I09.png" width="816" height="286" alt="Our hint is now styled."/>
+</div>
+
+<p>If we want to make further changes to the form&rsquo;s appearance it&rsquo;s best to look at the <code>formtastic.css</code> file to see how the default styles are defined. We can then use similar selectors in <code>formtastic_changes.css</code> to override the defaults.</p>
+
+<p>That&rsquo;s about it for this episode. Hopefully it has given you enough information about Formtastic to persuade you to try it out in your own applications. There are a number of features that we&rsquo;ve not managed to cover over the course of these two episodes. The Formtastic documentation6 covers all of its features and is worth referring to for further information, including internationalization support.</p>

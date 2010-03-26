@@ -1,0 +1,211 @@
+<p>En el episodio de la semana pasada utiliz&aacute;bamos <a href="http://nokogiri.org/">Nokogiri</a> para extraer contenidos de una p&aacute;gina HTML. Sin embargo, este mecanismo no funcionar&aacute; si tenemos necesidades m&aacute;s complicadas, como por ejemplo recuperar datos que requieren que por ejemplo iniciemos sesi&oacute;n en un site, to extract content from a single HTML page. Esta vez utilizaremos <a href="http://mechanize.rubyforge.org/mechanize/">Mechanize</a> para interactuar con un site de forma que podamos extraer esos datos.</p>
+<p>Nuestro site de ejemplo ser&aacute; <a href="http://tadalist.com">Ta-da list</a>, que es una aplicaci&oacute;n sencilla de to-dos escrita por 37 Signals. Ya hemos creado una cuenta y hemos creado una lista. Si queremos volver a ver la lista tendremos que entrar en el site y posteriormente hacer click en el nombre de la lista en la p&aacute;gina principal.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/257/original/E191I01.png" alt="Listado de productos en nuestra lista." height="538" width="795"/>
+</div>
+<p>La lista contiene un listado de productos que queremos importar autom&aacute;ticamente a nuestra aplicaci&oacute;n Rails. Tendremos que interactuar con Ta-da List para obtener los &iacute;tems, y luego podremos utilizar el script que escribimos en el episodio anterior para ver el precio de cada uno.</p>
+<p>No podemos simplemenete visitar la URL de la lista porque &eacute;sta es privada. Lo comprobaremos si utilizamos <code>curl</code> para intentar recuperar la p&aacute;gina.</p>
+<pre class="terminal">
+$ curl http://asciicasts.tadalist.com/lists/1463636
+  &lt;html&gt;&lt;body&gt;You are being &lt;a href=&quot;http://asciicasts.tadalist.com/session/new&quot;&gt;redirected&lt;/a&gt;.&lt;/body&gt;&lt;/html&gt;
+</pre>
+<p>Asi que como no podemos acceder a esta p&aacute;gina directamente tendremos que iniciar sesi&oacute;n en la aplicaci&oacute;n antes de acceder a nuestra lista. Aqu&iacute; es donde entra Mechanize. Mechanize utiliza Nokogiri y a&ntilde;ade cierta funcionalidad extra para interactuar con los sites de forma que se puede usar para tareas como hacer clic en enlaces o enviar formularios.</p>
+<p>Como Mechanize es una gema se instala de la forma habitual:</p>
+<pre class="terminal">
+  sudo gem install mechanize
+</pre>
+<p>Una vez que est&aacute; instalado podemos abrir la consola de Rails para ver c&oacute;mo funciona. Primero requerimos Mechanize.</p>
+<pre class="terminal">
+  &gt;&gt; require &#x27;mechanize&#x27;
+  =&gt; []
+</pre>
+<p>Luego instanciaremos un agente de Mechanize:</p>
+<pre class="terminal">
+  &gt; agent = WWW::Mechanize.new
+  =&gt; #&lt;WWW::Mechanize:0x101c74780 @follow_meta_refresh=false, @proxy_addr=nil, @digest=nil, @watch_for_set=nil, @html_parser=Nokogiri::HTML, @pre_connect_hook=#&lt;WWW::Mechanize::Chain::PreConnectHook:0x101c74190 @hooks=[]&gt;, @open_timeout=nil, @log=nil, @keep_alive_time=300, @proxy_pass=nil, @redirect_ok=true, @post_connect_hook=#&lt;WWW::Mechanize::Chain::PostConnectHook:0x101c74168 @hooks=[]&gt;, @conditional_requests=true, @password=nil, @cert=nil, @user_agent=&quot;WWW-Mechanize/0.9.3 (http://rubyforge.org/projects/mechanize/)&quot;, @pluggable_parser=#&lt;WWW::Mechanize::PluggableParser:0x101c74550 @default=WWW::Mechanize::File, @parsers={&quot;application/xhtml+xml&quot;=&gt;WWW::Mechanize::Page, &quot;text/html&quot;=&gt;WWW::Mechanize::Page, &quot;application/vnd.wap.xhtml+xml&quot;=&gt;WWW::Mechanize::Page}&gt;, @verify_callback=nil, @connection_cache={}, @proxy_user=nil, @pass=nil, @ca_file=nil, @request_headers={}, @user=nil, @cookie_jar=#&lt;WWW::Mechanize::CookieJar:0x101c746b8 @jar={}&gt;, @scheme_handlers={&quot;https&quot;=&gt;#&lt;Proc:0x00000001020c12c0@/Library/Ruby/Gems/1.8/gems/mechanize-0.9.3/lib/www/mechanize.rb:152&gt;, &quot;file&quot;=&gt;#&lt;Proc:0x00000001020c12c0@/Library/Ruby/Gems/1.8/gems/mechanize-0.9.3/lib/www/mechanize.rb:152&gt;, &quot;http&quot;=&gt;#&lt;Proc:0x00000001020c12c0@/Library/Ruby/Gems/1.8/gems/mechanize-0.9.3/lib/www/mechanize.rb:152&gt;, &quot;relative&quot;=&gt;#&lt;Proc:0x00000001020c12c0@/Library/Ruby/Gems/1.8/gems/mechanize-0.9.3/lib/www/mechanize.rb:152&gt;}, @redirection_limit=20, @proxy_port=nil, @history_added=nil, @auth_hash={}, @read_timeout=nil, @keep_alive=true, @history=[], @key=nil&gt;
+</pre>
+<p>Con este agente podremos entrar en nuestra lista, accediendo a la p&aacute;gina de login, introduciendo la clave y luego enviando el formulario de login.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/258/original/E191I02.png" alt="La página de login." height="324" width="802"/>
+</div>
+<p>Para leer los contenidos de una p&aacute;gina con una petici&oacute;n GET invocaremos <code>agent.get</code>, pasando la URL de la p&aacute;gina.</p>
+<pre class="terminal">
+  &gt;&gt; agent.get(&quot;http://asciicasts.tadalist.com/session/new&quot;)
+  =&gt; #&lt;WWW::Mechanize::Page
+   {url #&lt;URI::HTTP:0x101c5c180 URL:http://asciicasts.tadalist.com/session/new&gt;}
+   {meta}
+   {title &quot;Ta-da List&quot;}
+   {iframes}
+   {frames}
+   {links
+    #&lt;WWW::Mechanize::Page::Link
+     &quot;forgot password?&quot;
+     &quot;/account/send_forgotten_password&quot;&gt;}
+   {forms
+    #&lt;WWW::Mechanize::Form
+     {name nil}
+     {method &quot;POST&quot;}
+     {action &quot;/session&quot;}
+     {fields
+      #&lt;WWW::Mechanize::Form::Field:0x1035f1708
+       @name=&quot;username&quot;,
+       @value=&quot;asciicasts&quot;&gt;
+      #&lt;WWW::Mechanize::Form::Field:0x1035ef4a8 @name=&quot;password&quot;, @value=&quot;&quot;&gt;}
+     {radiobuttons}
+     {checkboxes
+      #&lt;WWW::Mechanize::Form::CheckBox:0x1035eeb48
+       @checked=false,
+       @name=&quot;save_login&quot;,
+       @value=&quot;1&quot;&gt;}
+     {file_uploads}
+     {buttons}&gt;}&gt;
+</pre>
+<p>Esto nos devuelve un objeto de tipo <code>Mechanize::Page</code> que incluye todos los atributos de la p&aacute;gina incluyendo, en nuestro caso, el formulario de login.</p>
+<p>Si en cualquier momento llamamos a <code>agent.page</code> nos devolver&aacute; la p&aacute;gina actual y podremos llamar a sus propiedades para acceder a los diferentes elementos de la p&aacute;gina. Por ejemplo, para acceder a los formularios de la p&aacute;gina podr&iacute;amos invocar <code>agent.page.forms</code> que nos devolver&aacute; un array de objetos <code>Mechanize::Form</code> y dado que solo hay un formulario en nuestra p&aacute;gina podremos ejecutar <code>agent.page.forms.first</code> para obtener una referencia. Este formulario nos har&aacute; falta m&aacute;s tarde as&iacute; que se lo asignaremos a una variable.</p>
+<pre class="terminal">
+  &gt;&gt; form = agent.page.forms.first
+  =&gt; #&lt;WWW::Mechanize::Form
+   {name nil}
+   {method &quot;POST&quot;}
+   {action &quot;/session&quot;}
+   {fields
+    #&lt;WWW::Mechanize::Form::Field:0x1035f1708
+     @name=&quot;username&quot;,
+     @value=&quot;asciicasts&quot;&gt;
+    #&lt;WWW::Mechanize::Form::Field:0x1035ef4a8 @name=&quot;password&quot;, @value=&quot;&quot;&gt;}
+   {radiobuttons}
+   {checkboxes
+    #&lt;WWW::Mechanize::Form::CheckBox:0x1035eeb48
+     @checked=false,
+     @name=&quot;save_login&quot;,
+     @value=&quot;1&quot;&gt;}
+   {file_uploads}
+   {buttons}&gt;
+</pre>
+<p>Si nos fijamos en la coleecci&oacute;n <code>fields</code> del formulario en la salida anterior veremos que el campo usuario ya ha sido rellenado pero que el campo de la contrase&ntilde;a est&aacute; a&uacute;n vac&iacute;o. Para rellenar un campo de un formulario s&oacute;lo tenemos que hacerlo de la misma manera que modificar&iacute;amos un atributo en un objeto Ruby:</p>
+<pre class="terminal">
+  form.password = &quot;password&quot;
+</pre>
+<p>El env&iacute;o del formulario es igual de f&aacute;cil: s&oacute;lo hay que hacer <code>form.submit</code>. Esto nos devolver&aacute; otro objeto <code>Mechanize::Page</code> distinto.</p>
+<pre class="terminal">
+  &gt;&gt; form.submit
+  =&gt; #&lt;WWW::Mechanize::Page
+   {url #&lt;URI::HTTP:0x10336ad68 URL:http://asciicasts.tadalist.com/lists&gt;}
+   {meta}
+   {title &quot;My Ta-da Lists&quot;}
+   {iframes}
+   {frames}
+   {links
+    #&lt;WWW::Mechanize::Page::Link &quot;Highrise&quot; &quot;http://www.highrisehq.com&quot;&gt;
+    #&lt;WWW::Mechanize::Page::Link &quot;Try it free&quot; &quot;http://www.highrisehq.com&quot;&gt;
+    #&lt;WWW::Mechanize::Page::Link
+     &quot;Tada-mark-bg&quot;
+     &quot;http://asciicasts.tadalist.com/lists&quot;&gt;
+    #&lt;WWW::Mechanize::Page::Link &quot;Create a new list&quot; &quot;/lists/new&quot;&gt;
+    #&lt;WWW::Mechanize::Page::Link &quot;Wish List&quot; &quot;/lists/1463636&quot;&gt;
+    #&lt;WWW::Mechanize::Page::Link
+     &quot;Rss&quot;
+     &quot;http://asciicasts.tadalist.com/lists.rss?token=8ee4a563af677d3ebf3ceb618dac600a&quot;&gt;
+    #&lt;WWW::Mechanize::Page::Link &quot;Log out&quot; &quot;/session&quot;&gt;
+    #&lt;WWW::Mechanize::Page::Link &quot;change password&quot; &quot;/account/change_password&quot;&gt;
+    #&lt;WWW::Mechanize::Page::Link &quot;change email&quot; &quot;/account/change_email_address&quot;&gt;
+    #&lt;WWW::Mechanize::Page::Link &quot;cancel account&quot; &quot;/account/destroy&quot;&gt;
+    #&lt;WWW::Mechanize::Page::Link &quot;FAQs&quot; &quot;http://www.tadalist.com/help&quot;&gt;
+    #&lt;WWW::Mechanize::Page::Link
+     &quot;Terms of Service&quot;
+     &quot;http://www.tadalist.com/terms&quot;&gt;
+    #&lt;WWW::Mechanize::Page::Link
+     &quot;Privacy Policy&quot;
+     &quot;http://www.tadalist.com/privacy&quot;&gt;
+    #&lt;WWW::Mechanize::Page::Link
+     &quot;other products from 37signals&quot;
+     &quot;http://www.37signals.com&quot;&gt;}
+   {forms}&gt;
+</pre>
+<p>Esta es la p&aacute;gina que muestra nuestras listas, por tanto el pr&oacute;ximo paso es hacer click en el enlace del listado de productos. Abajo se muestra la p&aacute;gina tal y como aparece en pantalla. Cuando utilizamos Mechanize es bastante &uacute;til ir repitiendo los pasos en nuestro navegador para que nos sea m&aacute;s f&aacute;cil determinar cu&aacute;l es el siguiente paso a automatizar.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/259/original/E191I03.png" alt="Nuestras listas." height="434" width="801"/>
+</div>
+<p>Para acceder al listado tenemos que hacer clic en el enlace &quot;Wish List&quot;. Hay algunos enlaces en la p&aacute;gina y necesitamos averiguar c&oacute;mo recuperar el enlace adecuado para que Mechanize haga clic en &eacute;l. Podr&iacute;amos recuperar todos los enlaces con <code>agent.page.links</code> y luego iterar sobre ellos leyendo la propiedad <code>text</code> de cada uno de ellos hasa que encontremos el que nos interesa pero hay una forma m&aacute;s f&aacute;cil de hacerlo empleando <code>link_with</code>:</p>
+<pre class="terminal">
+  &gt;&gt; agent.page.link_with(:text =&gt; &quot;Wish List&quot;)
+  =&gt; #&lt;WWW::Mechanize::Page::Link &quot;Wish List&quot; &quot;/lists/1463636&quot;&gt;
+</pre>
+<p>El m&eacute;todo <code>link_with</code> devolver&aacute; un enlace que cumpla cierta condici&oacute;n, en este caso que el texto sea &quot;Wish List&quot;. Existe un m&eacute;todo similar para los formularios denominado, c&oacute;mo no, <code>form_with</code> y tambi&eacute;n existen los m&eacute;todos plurales <code>links_with</code> y <code>forms_with</code> para encontrar varios enlaces o formularios que cumplan una condici&oacute;n dada.</p>
+<p>Y ya que hemos encontrado nuestro enlace podemos ejecutar <code>click</code> para ser redirigidos a la p&aacute;gina de la lista. (Obs&eacute;rvese que el listado de las propiedades de la p&aacute;gina ha sido omitido debajo, por su longitud).</p>
+<pre class="terminal">
+  agent.page.link_with(:text =&gt; &quot;Wish List&quot;).click
+  =&gt; #&lt;WWW::Mechanize::Page
+   {url
+    #&lt;URI::HTTP:0x103261138 URL:http://asciicasts.tadalist.com/lists/1463636&gt;}
+</pre>
+<p>Hemos alcanzado al fin nuestro destino y hemos encontrado la p&aacute;gina de la que queremos extraer los datos. Podemos usar Nokogiri para hacerlo pero en primer lugar teneos que encontrar el selector CSS que escoge los &iacute;tems de la lista. Como hicimos la vez antrior utilizaremos SelectorGadget para determinar qu&eacute; selector es.</p>
+<p>Haciendo clic en el primer item de la lista veremos que se selecciona tan s&oacute;lo ese item, pero si seleccionamos el siguiente tambi&eacute;n se seleccionar&aacute;n todos los dem&aacute;s y ya tendremos el selector que necesit&aacute;bamos: <code>.edit_item</code>.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/260/original/E191I04.png" alt="Utilizamos SelectorGadget para encontrar el selector CSS de los items de la lista." height="657" width="813"/>
+</div>
+<p>Hay dos m&eacute;todos en el objeto <code>page</code> que podemos usar para extraer elementos de una p&aacute;gina utilizando Nokogiri. El primer de ellos se llama <code>at</code> y devolver&aacute; un &uacute;nico elemento que casa con un selector.</p>
+<pre class="ruby">
+  agent.page.at(&quot;.edit_item&quot;)
+</pre>
+<p>El segundo m&eacute;todo es <code>search</code>. Es similar, pero devuelve un array de todos los elementos que son seleccionados.</p>
+<pre class="ruby">
+  agent.page.search(&quot;.edit_item&quot;)
+</pre>
+<p>Como tenemos varios &iacute;tems en nuestra lista vamos a utilizar el segundo. El comando anterior devolver&aacute; un largo array de <code>Nokogiri::XML::Element</code> cada uno de los cuales representa un &iacute;tem de la lista. Podemos modificar la salida para mostrar algo m&aacute;s legible.</p>
+<pre class="terminal">
+  &gt;&gt; agent.page.search(&quot;.edit_item&quot;).map(&amp;:text).map(&amp;:strip)
+  =&gt; [&quot;Settler&#x27;s of Catan&quot;, &quot;Go for Beginners book&quot;, &quot;Nintendo DSi&quot;, &quot;Chess Set&quot;, &quot;Dark Knight on Blu Ray&quot;, &quot;Modern Warfare 2 for Xbox&quot;, &quot;Scrabble&quot;, &quot;Dragon Age Strategy Guide&quot;, &quot;Wario Land: Shake It!&quot;]
+</pre>
+<p>Si leemos el atributo <code>text</code> y sobre &eacute;l invocamos el m&eacute;todo <code>strip</code> para eliminar los espacios en blanco nos quedaremos con un array de nombres que es exactamente lo que buscamos.</p>
+<h3>C&oacute;mo integrar Mechanize en nuestra aplicaci&oacute;n Rails</h3>
+<p>Ahora que tenemos una idea de c&oacute;mo utilizar Mechanize podemos utilizar todo lo aprendido en una aplicaci&oacute;n Rails. Utilizaremos la misma aplicaci&oacute;n de tienda del episodio anterior.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/261/original/E191I05.png" alt="El listado de productos de nuestra aplicación." height="371" width="808"/>
+</div>
+<p>Esta vez en lugar de hacer <em>scraping</em> de los precios en otro sitio web queremos importar los productos desde nuestra lista en Ta-da Lists. Crearemos una tarea de Rake que podemos poner en el mismo fichero en que pusimos la otra <code>/lib/tasks/product_prices.rake</code>. Pero &iquest;qu&eacute; c&oacute;digo tendremos que a&ntilde;adir a la tarea? Un buen punto de partida es el c&oacute;digo que hemos escrito anteriormente en la consola, as&iacute; que podemos epezar copi&aacute;ndolo.</p>
+<p>El problema aqu&iacute; es que es dif&iacute;cil extrer el c&oacute;digo que hemos tecleado en la consola porque est&aacute; entremezclado con la salida de cada comando. Sin embargo hay un comando que podemos usar y que nos devolver&aacute; cada una de las sentencias que hemos tecleado.</p>
+<pre class="terminal">
+  &gt;&gt; puts Readline::HISTORY.entries.split(&quot;exit&quot;).last[0..-2].join(&quot;\n&quot;)
+  require &#x27;mechanize&#x27;
+  agent = WWW::Mechanize.new
+  agent.get(&quot;http://asciicasts.tadalist.com/session/new&quot;)
+  form = agent.page.forms.first
+  form.password = &quot;password&quot;
+  form.submit
+  agent.page.link_with(:text =&gt; &quot;Wish List&quot;).click
+  agent.page.search(&quot;.edit_item&quot;).map(&amp;:text).map(&amp;:strip)
+  =&gt; nil
+</pre>
+<p>Ahora que tenemos un listado de los comandos podemos copiarlos en nuestra tarea Rake. Luego limpiaremos un poco el script e iteraremos sobre cada uno de los items recuperados, creando un n&uacute;mero objeto <code>Product</code> para cada uno.</p>
+<pre class="ruby">
+  desc &quot;Import wish list&quot;
+  task :import_list =&gt; :environment do
+    require &#x27;mechanize&#x27;
+    agent = WWW::Mechanize.new
+    agent.get(&quot;http://asciicasts.tadalist.com/session/new&quot;)
+    form = agent.page.forms.first
+    form.password = &quot;password&quot;
+    form.submit
+    agent.page.link_with(:text =&gt; &quot;Wish List&quot;).click
+    agent.page.search(&quot;.edit_item&quot;).each do |product|
+      Product.create!(:name =&gt; product.text.strip)
+    end
+  end
+</pre>
+<p>Podr&iacute;amos modificar este script para eliminar el usuario y clave y convertirlos en argumentos que se pasan por par&aacute;metros, pero por ahora lo dejaremos as&iacute;. Veamos si nuestra tarea de Rake funciona.</p>
+<pre class="terminal">
+  $ rake import_list
+  (in /Users/eifion/rails/apps_for_asciicasts/ep191/shop)
+</pre>
+<p>No se han lanzado excepciones durante la ejecuci&oacute;n del script, as&iacute; que recarguemos la p&aacute;gina de productos.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/262/original/E191I06.png" alt="Los productos de la lista están ahora en la aplicación." height="791" width="810"/>
+</div>
+<p>
+  El script ha funcionado: ahora tenemos un Product para cada uno de los &iacute;tems guardados en nuestra lista. Si ejecutamos la tarea Rake que escribimos la semana pasada podremos obtener los precios de todos estos nuevos &iacute;tems.
+</p>
+<div class="imageWrapper">
+  <img src="/system/photos/263/original/E191I07.png" alt="Ahora todos los productos muestran su precio" height="791" width="810"/>
+</div>
+<p>Hemos alcanzado nuestro objetivo utilizando Mechanize y Nokogiri para navegar por varias pag&iacute;nas de un site, interactuando con ellas para rellenar formularios y hacer clic en enlaces y extrayendo la informaci&oacute;n que busc&aacute;bamos. Esta es una gran soluci&oacute;n para extraer datos de sitios web cuando no hay una alternativa mejor.</p>

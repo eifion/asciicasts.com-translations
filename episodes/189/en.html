@@ -1,0 +1,179 @@
+ <p>In the previous episode we created a role-based authentication system. On the application&rsquo;s sign-up page a series of checkboxes allowed a user to assign themselves to one or more roles.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/249/original/E189I01.png" width="808" height="510" alt="The signup page showing the roles checkboxes."/>
+</div>
+
+<p>The application has a <code>Role</code> model in which the roles are defined and a many-to-many relationship between the <code>Role</code> and <code>User</code> via an <code>Assignment</code> model.  If we look in the database we&rsquo;ll see the three existing roles.</p>
+<pre class="terminal">
+&gt;&gt; Role.all
++----+-----------+-------------------------+-------------------------+
+| id | name      | created_at              | updated_at              |
++----+-----------+-------------------------+-------------------------+
+| 1  | Admin     | 2009-11-16 21:22:59 UTC | 2009-11-16 21:22:59 UTC |
+| 2  | Moderator | 2009-11-16 21:23:06 UTC | 2009-11-16 21:23:06 UTC |
+| 3  | Author    | 2009-11-16 21:23:16 UTC | 2009-11-16 21:23:16 UTC |
++----+-----------+-------------------------+-------------------------+
+3 rows in set
+</pre>
+<p>The main problem with this set up is that there is a tight coupling between the roles in the database and the code in the <code>authorization_rules</code> file that defines the permissions for that role.</p> 
+<pre class="ruby">
+role :author do
+  includes :guest
+  has_permission_on :articles, :to =&gt; [:new, :create]
+  has_permission_on :articles, :to =&gt; [:edit, :update] do
+    if_attribute :user =&gt; is { user }
+  end
+end
+</pre>
+<p>With the role and permissions defined this way we can&rsquo;t make changes to the roles table without also needing to change the Ruby code that defines each role and so the benefits of storing the roles in the database are lost. This episode will show you how to remove this coupling by defining the roles only in the code and not in a database table.</p>
+
+<p>As we&rsquo;ll no longer have a <code>Role</code> model the first change we&rsquo;ll make is to the <code>User</code> model where we&rsquo;ll remove the associations with assignments and roles by deleting the following two lines.</p>
+<pre class="ruby">
+has_many :assignments
+has_many :roles, :through =&gt; :assignments
+</pre>
+<p>Having done this we&rsquo;ll have to create the roles somewhere else. As the roles are related to users we&rsquo;ll define them as a constant in the <code>User</code> model.</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  acts_as_authentic
+  has_many :articles
+  has_many :comments
+
+  ROLES = %w[admin moderator author]
+
+  def role_symbols
+    roles.map do |role|
+      role.name.underscore.to_sym
+    end
+  end
+end
+</pre>
+<p>Now we only have to modify the code when we need to alter the roles. But the question remains: how to we associate a user with their roles? As we no longer have a roles table we&rsquo;re going to have to embed this association within the <code>User</code> model somehow.</p>
+
+<p>Below we&rsquo;ll show you two ways of doing this, dependent on the type of association you&rsquo;re working with.</p> 
+
+<h3>Embedding a One-to-Many Relationship</h3>
+
+<p>Currently our application has a many-to-many relationship between users and roles. We&rsquo;ll change this to a one-to-many relationship so that a user can only be a member of one role. The role will have to be stored in the <code>users</code> table but as we&rsquo;re just storing a single value the role can be stored in a string field. We&rsquo;ll generate the role field with the following migration.</p>
+<pre class="terminal">
+script/generate migration add_role_to_users role:string
+</pre>
+<p>Then we&rsquo;ll migrate the database to add the new field to the table.</p>
+<pre class="terminal">
+rake db:migrate
+</pre>
+<p>The next step is to modify the sign-up form to replace the roles checkboxes with a select menu. To do this we&rsquo;ll replace this code in <code>/app/views/users/new.html.erb</code>.</p>
+<pre class="ruby">
+&lt;%= form.label :roles %&gt;
+&lt;% for role in Role.all %&gt;
+  &lt;%= check_box_tag &quot;user[role_ids][]&quot;, role.id, @user.roles.include?(role) %&gt;
+  &lt;%=h role.name %&gt;&lt;br /&gt;
+&lt;% end %&gt;
+</pre>
+<p>with this:</p>
+<pre class="ruby">
+&lt;%= form.label :role %&gt;
+&lt;%= form.collection_select :role, User::ROLES, :to_s, :humanize %&gt;
+</pre>
+<p>We&rsquo;re using <code>collection_select</code> to generate the select menu. This is usually used with a model, but it works just as well in this scenario. When used with a model we pass it a collection of model objects and the properties for the model that should be used to set the value and text for each option. Instead of that we pass it the array of role names that we defined in the <code>User</code> model. We set the value for each option by calling <code>:to_s</code> on each role and the display text by calling <code><a href="http://api.rubyonrails.org/classes/ActiveSupport/CoreExtensions/String/Inflections.html#M001370">:humanize</a></code> on each role to prettify it for display. The result of this is a select menu that allows users to select a single role.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/250/original/E189I02.png" width="808" height="478" alt="The checkboxes have now been replaced by a select menu."/>
+</div>
+
+<p>As we&rsquo;re using declarative authorization in our application we&rsquo;ll also need to make a change to the <code>role_symbols</code> method in the <code>User</code> model, changing so that it returns the user&rsquo;s role converted to a symbol.</p>
+<pre class="ruby">
+def role_symbols
+  [role.to_sym]
+end
+</pre>
+<p>Now when we create a new user their role is stored in the <code>role</code> field in the <code>users</code> table.</p>
+<pre class="ruby">
+&gt;&gt; User.last.role
+=&gt; &quot;moderator&quot;
+</pre>
+
+<h3>Embedding a Many-to-Many Relationship</h3>
+
+<p>So we&rsquo;ve successfully embedded a one-to-many relationship into a single model but what if we want to keep the ability for users to assign themselves to many roles without having to restore the <code>Role</code> model? This is a little more difficult to achieve as we have to squeeze multiple values into a single column in the users table.</p> 
+
+<p>One solution would be to create a text column called <code>roles</code> in our <code>users</code> table and use Rails&rsquo; <code>serialize</code> method to store the user&rsquo;s roles in that column. This will call <code>to_yaml</code> on the roles before storing the field in the database. This approach works but it makes it difficult to do things such as finding all of the users in a given role so we&rsquo;ll try a different approach.</p>
+
+<p>Instead of serializing the roles we&rsquo;re going to use a bitmask. This way we can store multiple values in a single integer column and still have the ability to retrieve users by their role.</p>
+
+<p>The first thing we&rsquo;ll do is add a new integer column called <code>roles_mask</code> to the <code>users</code> table to store the bitmask value.</p>
+<pre class="terminal">
+script/generate migration add_roles_mask_to_users roles_mask:integer
+</pre>
+<p>Then run the migration</p>
+<pre class="terminal">
+rake db:migrate
+</pre>
+<p>In the <code>User</code> model we&rsquo;ll need to handle the <code>roles_mask</code> by writing getter and setter methods so that we can convert easily between the bitmask and an array of roles.</p>
+<pre class="ruby">
+def roles=(roles)
+  self.roles_mask = (roles &amp; ROLES).map { |r| 2**ROLES.index(r) }.sum
+end
+
+def roles
+  ROLES.reject { |r| ((roles_mask || 0) &amp; 2**ROLES.index(r)).zero? }
+end
+</pre>
+<p>The setter method takes an array of roles and converts it into a bitmask integer which is assigned to the <code>roles_mask</code> attribute. The getter loops through each role and returns an array of the roles whose bit is set in the mask. There are plugins available to make bitmasks easier to work with but as we only have one field and have only needed to write a few lines of code to implement this we won&rsquo;t use one.</p>
+
+<p>Again we&rsquo;ll need to change the <code>role_symbols</code> method to work with our altered roles. To do this we&rsquo;ll take the array of roles and convert each one to a symbol.</p>
+<pre class="ruby">
+def role_symbols
+  roles.map(&amp;:to_sym)
+end
+</pre>
+<p>The final change we need to make is to alter the view again to replace the select menu with checkboxes so that a user can pick a number of roles when they sign up.</p>
+<pre class="ruby">
+&lt;%= form.label :roles %&gt;
+&lt;% for role in User::ROLES %&gt;
+  &lt;%= check_box_tag &quot;user[roles][]&quot;, role, @user.roles.include?(role) %&gt;
+  &lt;%= h role.humanize %&gt;
+&lt;% end %&gt;
+&lt;%= hidden_field_tag &quot;user[roles][]&quot;%&gt;
+</pre>
+<p>The technique used here to create checkboxes for a many-to-many relationship is similar to the one shown back in episode 17 [<a href="http://railscasts.com/episodes/17-habtm-checkboxes">watch</a>, <a href="http://asciicasts.com/episodes/17-habtm-checkboxes">read</a>]. The empty square brackets in <code>user[roles][]</code> mean that the values of the checked checkboxes will be passed as an array to the <code>User</code> model where the setter method we wrote will convert them to a bitmask value. The last parameter passed to <code>check_box_tag</code> will check the checkbox if the user is a member of that role. The hidden field ensures that an empty array is passed if no checkboxes are checked.</p>
+
+<p>When we go to the sign-up form now the checkboxes have returned. We&rsquo;ll sign up a new user and assign them to two roles.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/251/original/E189I03.png" width="808" height="478" alt="Signing up a new user and assigning their roles."/>
+</div>
+
+<p>If we look at the newly-added user in the console we can see their roles and the value assigned to their <code>roles_mask</code>.</p>
+<pre class="ruby">
+&gt;&gt; User.last.roles
+=&gt; [&quot;admin&quot;, &quot;author&quot;]
+&gt;&gt; User.last.roles_mask
+=&gt; 5
+</pre>
+<p>Each role has a value twice that of the role next to it, with the lowest-value role having a value of 1. So the value of 5 for our user is calculated from <code>(1*1) + (2*0) + (4*1)</code>.</p>
+
+<p>Having stored our roles in a single column how do we find all of the users in a given role? Let&rsquo;s say we want to find all of the users with moderator privileges. We can do this by adding a named scope to our <code>User</code> model.</p>
+<pre class="ruby">
+named_scope :with_role, lambda { |role| {:conditions =&gt; &quot;roles_mask &amp; #{2**ROLES.index(role.to_s)} &gt; 0 &quot;} }
+</pre>
+<p>This named scope takes a role as an argument and performs a bitwise operation on it to determine whether a user belongs to that role. We can test this in the console by finding all of the users in the admin role.</p>
+<pre class="terminal">
+&gt;&gt; User.with_role(&quot;admin&quot;)
++----+----------+-------------+-------------+-------------+-------------+------------+
+| id | username | email       | crypted_... | password... | persiste... | roles_mask |
++----+----------+-------------+-------------+-------------+-------------+------------+
+| 6  | paul     | paul@tes... | cffada11... | FDGoNtM1... | 35a7d8c8... | 5          |
++----+----------+-------------+-------------+-------------+-------------+------------+
+1 row in set
+</pre>
+<p>This returns only the most recent user as this is the only user we&rsquo;ve added since we created the <code>roles_mask</code> field.</p>
+
+<p>If you nned to add extra roles to the application later there&rsquo;s a potential trap you need to tale care with. As the bitmask is based on the position of the role in the <code>ROLES</code> array you can only add new roles to the end of this array. If new roles are added at the start or in the middle of the array then any existing users may have their roles changed.</p>
+<pre class="ruby">
+ROLES = %w[admin moderator author editor]
+</pre>
+<p class="title">Adding an extra role to the list.</p>
+
+<p>That&rsquo;s it for this episode. Bitmasking is a powerful technique for embedding a many-to-many relationship within a single integer attribute in a model. That said, it&rsquo;s only worth applying this method if you have a list of records that don&rsquo;t belong in a database table. Our list of roles is so tightly bound to the code that it&rsquo;s pointless storing them outside the code itself as we can&rsquo;t change a role without having to make changes to the code to define that role&rsquo;s permissions. If you can see a situation where you could add or alter one of these records without needing to make changes to the code then the traditional many-to-many relationship in the database is still the best approach.</p>

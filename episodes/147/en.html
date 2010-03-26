@@ -1,0 +1,81 @@
+<p>The site we&rsquo;re working on has a page that shows a list of Frequently Asked Questions. The site administrators would like to be able to sort the list so that the FAQs can be seen in a specific order by end users instead of in the order they were created. We&rsquo;ll implement a drag and drop interface that will post the updated order back via an AJAX call to enable them to do this.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/48/original/E147I01.png" height="331" width="811" alt="The page showing our list of FAQs."/>
+</div>
+<h3>Changing The FAQ Model</h3>
+<p>The Faq model in our application has two fields: <code>question</code> and <code>answer</code>. The first thing we need to do is to add a position attribute so that we can give each FAQ a position in the list by which it can be sorted. To do that we&rsquo;ll generate a migration.</p>
+<pre class="terminal">script/generate migration add_position_to_faqs position:integer</pre>
+<p>The name of the migration and the argument we&rsquo;ve passed to it are enough for it to generate all of the migration code, so we can now just run <code>rake db:migrate</code>. (For more information on this see the migrations page on the excellent <a href="http://guides.rails.info/migrations.html#creatingastandalonemigration">Rails Guides website</a>.)</p>
+
+<h3>Updating The View Code</h3>
+<p>Next we need to add the prototype and scriptaculous libraries to the application. To do this we just add the following line to the head section of our layout file.</p>
+<pre class="ruby">&lt;%= javascript_include_tag :defaults %&gt;</pre>
+<p>Having done that we&rsquo;ll now need to make some changes to our <code>index</code> view file. The FAQs are displayed as an unordered list; in order to be able to identify each one we&rsquo;ll have to give it a unique id. We&rsquo;ll give the list itself an id too. To do that we&rsquo;re going to use the <a href="http://api.rubyonrails.org/classes/ActionView/Helpers/RecordTagHelper.html#M001612"><code>content_tag_for</code> method</a>, which will create an HTML element, in this case an <code>&lt;li&gt;</code>, with an id attribute based on the model&rsquo;s numeric id. This is how the updated index view looks.</p>
+<pre class="ruby">
+&lt;h1&gt;FAQs&lt;/h1&gt;
+&lt;ul id=&quot;faqs&quot;&gt;
+  &lt;% @faqs.each do |faq| %&gt;
+    &lt;% content_tag_for :li, faq do %&gt;
+      &lt;%= link_to faq.question, faq_path(faq) %&gt;
+    &lt;% end %&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;
+&lt;%= link_to &quot;New FAQ&quot;, new_faq_path %&gt;
+</pre>
+<p class="title">The index view with ids for each list element.</p>
+<p>If we refresh the page and look at the source we can see that each li element in the list now has an id of the form <code>faq_n</code>, where n is the model&rsquo;s id.</p>
+
+<h3>Making The List Sortable</h3>
+<p>All we have to do to make the list sortable is add the <code>sortable_element</code> helper method to the index view. We&rsquo;ll pass it the id of the element we want to be sortable, and a URL that is called via an AJAX request so that the updated positions can be stored in the database. As we don&rsquo;t yet have a method for storing the updated positions we&rsquo;ll leave the URL for now and come back to it later.</p>
+<pre class="ruby">&lt;%= sortable_element(&#x27;faqs&#x27;, :url =&gt; &#x27;TODO&#x27;) %&gt;</pre>
+<p>The items in the list can now be dragged and dropped, but the new order isn&rsquo;t persisted back to the database. When the page is reloaded the items are shown back in their default position. We are going to have to write a method in our <code>FaqsController</code> that will store the updated position orders. The controller currently has the standard seven RESTful actions for listing, showing, creating and deleting FAQs; we&rsquo;ll add a new method called <code>sort</code>.</p>
+<pre class="ruby">
+def sort
+  params[:faqs].each_with_index do |id, index|
+    Faq.update_all([&rsquo;position=?&rsquo;, index+1], [&rsquo;id=?&rsquo;, id])
+  end
+  render :nothing =&gt; true
+end
+</pre>
+<p>The <code>sort</code> method will loop through each FAQ parameter passed to it and update the position for that FAQ. The FAQ&rsquo;s ids are passed in the correct updated order so we use <code>update_all</code> to set the position attribute of each FAQ to be its index in the list plus one.We don&rsquo;t need to send anything back from the AJAX call so the method finally returns nothing.</p>
+<p>Now that the positions are being stored we&rsquo;ll make a small change to our index action to tell it to get the list of FAQs ordered by position.</p>
+<pre class="ruby">
+def index
+  @faqs = Faq.all(:order =&gt; &rsquo;position&rsquo;)
+end
+</pre>
+<p>There&rsquo;s one further change to make, which is to the routes file. Our <code>sort</code> action isn&rsquo;t one of the seven default actions so we&rsquo;ll have to add it.</p>
+<pre class="ruby">map.resources :faqs, :collection =&gt; { :sort =&gt; :post}</pre>
+<p>The line above adds the new action and makes it a POST request, which is the type that our AJAX call uses when making XMLHTTP requests. Now that we have made these changes we can go back and add the URL to the <code>sortable_element</code> method call that we created earlier.</p>
+<pre class="ruby">&lt;%= sortable_element(&rsquo;faqs&rsquo;), :url =&gt; sort_faqs_path %&gt;</pre>
+<p>The <code>sort_faqs_path</code> will call our sort method in the <code>FaqsController</code> via AJAX. Now when we drag items about and then reload the page the items new position is persisted to the database.</p>
+
+<h3>Improving The UI</h3>
+<p>The list of FAQs is now fully functional, but the user interface is still a little rough around the edges. For example if we use one of the links to drag an item around then the link will be triggered and we&rsquo;ll be taken to the page for that item. We can improve the interface by adding a handle to each item that will become the draggable area. In the view code we&rsquo;ll add a <code>&lt;span&gt;</code> element to each item in the list.</p>
+<pre class="ruby">
+&lt;% content_tag_for :li, faq do %&gt;
+  &lt;span class=&quot;handle&quot;&gt;[drag]&lt;/span&gt;
+  &lt;%= link_to faq.question, faq_path(faq) %&gt;
+&lt;% end %&gt;
+</pre>
+<p>The span has a class of <code>handle</code>, so that we can tell the <code>sortable_element</code> method which element within each item should be draggable. This is done by adding a handle option to the method.</p>
+<pre class="ruby">&lt;%= sortable_element(&rsquo;faqs&rsquo;), :url =&gt; sort_faqs_path, :handle =&gt; &rsquo;handle&rsquo; %&gt;</pre>
+<p>To make the draggable area more obvious we&rsquo;ll add some CSS for the handle so that when the cursor is over it it changes to a &rsquo;move&rsquo; cursor.</p>
+<pre class="css">li .handle { color: #777; cursor: move; font-size: 12px; }&#xFFFC;</pre>
+
+<div class="imageWrapper">
+  <img src="/system/photos/49/original/E147I02.png" width="813" height="333" alt="Dragging using the handle."/>
+  <p class="title">Dragging Using The Handle</p>
+</div>
+
+<h3>Using acts_as_list</h3>
+<p>While it&rsquo;s not required for our application, we&rsquo;re going to use the <code>acts_as_list</code> plugin to supply some more functionality. We&rsquo;ll <a href=" http://github.com/rails/acts_as_list/tree/master">download it from github</a> and install it in the usual way.</p>
+<pre class="terminal">script/plugin install git://github.com/rails/acts_as_list.git</pre>
+<p>  To use it we&rsquo;ll add it to our <code>Faq</code> model.</p>
+<pre class="ruby">
+class Faq &lt; ActiveRecord::Base
+  acts_as_list
+end
+</pre>
+<p>Now the Faq model will be treated as a sortable list. One of the advantages of using <code>acts_as_list</code> is that when we create a new FAQ, the position column will automatically be filled for the new FAQ.</p>
+<p>Our list is now fully draggable. If this was a real application the next part would be to restrict the dragging functionality to administrative users only, but that is out of the scope of this episode so we&rsquo;ll stop here.</p>

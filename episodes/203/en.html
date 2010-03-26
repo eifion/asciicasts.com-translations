@@ -1,0 +1,187 @@
+<p>We&rsquo;ll continue our look into Rails 3&rsquo;s new features in this episode, this time concentrating on routing. Rails 3 has a new API for defining routes and some new features. To show how the new routing works we&rsquo;ll create a new application called detour and create some routes for it.</p>
+<pre class="terminal">
+rails detour
+</pre>
+<p>Once we&rsquo;ve created the application we can open it up in a text editor to look at the <code>config/routes.rb</code> file. The default file contains some documentation and examples of the new API and is worth reading through.  We&rsquo;re going to replace the default contents with an example of some old routes and show their Rails 3 equivalents.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Detour::Application.routes.draw do |map|
+  map.resources :products, :member =&gt; { :detailed =&gt; :get }
+  
+  map.resources :forums, :collection =&gt; { :sortable =&gt; :get, :sort =&gt; :put } do |forums|
+    forums.resources :topics
+  end
+  
+  map.root :controller =&gt; &quot;home&quot;, :action =&gt; &quot;index&quot;
+  
+  map.about &quot;/about&quot;, :controller =&gt; &quot;info&quot;, :action =&gt; &quot;about&quot;
+end
+</pre>
+<p class="title">The old-style routes that we&rsquo;re going to convert.</p>
+
+<p>We&rsquo;ll start with the first route in the collection above:</p>
+<pre class="ruby">
+map.resources :products, :member = { :detailed =&gt; :get }
+</pre>
+<p>This route has a products resource and a specific additional member action called detailed which is called via a GET request.</p>
+
+<p>The first change to note in Rails 3&rsquo;s routing is that we no longer deal with the <code>map</code> object, instead calling <code>resources</code> directly in the <code>routes.draw</code> block. <code>:member</code> and <code>:collection</code> actions inside resources are defined inside a block. The route can therefore be rewritten like this:</p>
+<pre class="ruby">
+resources :products do
+  get :detailed, :on =&gt; :member
+end
+</pre>
+<p>Next we&rsquo;ll look at a more complex route:</p>
+<pre class="ruby">
+map.resources :forums, :collection =&gt; { :sortable =&gt; :get, :sort =&gt; :put } do |forums|
+  forums.resources :topics
+end
+</pre>
+<p>In this route we have a forum resource with two additional collection items and a nested topics resource. With the new API this route can be written like this:</p>
+<pre class="ruby">
+resources :forums do
+  collection do
+    get :sortable
+    put :sort
+  end
+  resources :topics
+end
+</pre>
+<p>Again we use <code>resources</code> instead of <code>map.resources</code> and pass in a block. We have two collection actions in the route. While we could define those in the same way we did with the detailed action in the first route making use of the <code>:on</code> argument instead we&rsquo;ll define a <code>collection</code> block (members can be treated the same way in a <code>member</code> block) and any routes defined inside the block will act on the collection of forums. In our block we&rsquo;ve defined two new actions sortable as a GET request and sort as a PUT.</p>
+
+<p>For the nested topics resource we just call <code>resources</code> again, nesting the topics resource inside forums.</p>
+
+<p>The next route we&rsquo;ll look at is the one that defines the controller and action that the root URL point to:</p>
+<pre class="ruby">
+map.root :controller =&gt; &quot;home&quot;, :action =&gt; &quot;index&quot;
+</pre>
+<p>Here we can just call <code>root</code> and use a <code>:to</code> argument to which we pass a string that contains the name of the controller and action separated by a hash.</p>
+<pre class="ruby">
+root :to =&gt; &quot;home#index&quot;
+</pre>
+<p>This ability to specify a controller and action in a single string is a new feature of Rails 3. We can do something similar for a named route:</p>
+<pre class="ruby">
+map.about &quot;/about&quot;, :controller =&gt; &quot;info&quot;, :action =&gt; &quot;about&quot;
+</pre>
+<p>With the Rails 3 API this can be rewritten like this:</p>
+<pre class="ruby">
+match &quot;/about&quot; =&gt; &quot;info#about&quot;, :as =&gt; :about
+</pre>
+<p>Without the <code>:as</code> argument the route above would just be a generic route. Adding  <code>:as</code> makes it a named route so that we can use <code>about_path</code> or <code>about_url</code> in our application.</p>
+
+<h3>New Features</h3>
+
+<p>As you can see from the examples above it&rsquo;s not difficult to convert routes from the old API to the new one but what really makes the new routing API interesting is the new features it provides and we&rsquo;ll spend the rest of the episode covering some of them.</p>
+
+<h4>Optional Parameters</h4>
+
+<p>Optional parameters were supported in previous versions of Rails but the syntax was a little clumsy. Lets see how it&rsquo;s done in Rails 3.</p> 
+
+<p>It will be easier to demonstrate optional parameters if our application has a controller so we&rsquo;ll create an <code>info</code> controller with an about action. Note that in Rails 3 we can use <code>rails g</code> as a shortcut for <code>rails generate</code>.</p>
+<pre class="terminal">
+rails g controller info about
+</pre>
+<p>We can start up our server with another new shortcut:</p>
+<pre class="terminal">
+rails s
+</pre>
+<p>Now, if we visit <a href="http://localhost:3000/about">http://localhost:3000/about</a> we&rsquo;ll see the <code>info#about</code> action as determined by the routes we wrote earlier.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/332/original/E203I01.png" width="797" height="280" alt="The about action."/>
+</div>
+
+<p>With that working we want to provide a PDF version of this action but if we visit <a href="http://localhost:3000/about.pdf">http://localhost:3000/about.pdf</a> we&rsquo;ll get a routing error as our application doesn&rsquo;t know how to match the route.</p>
+
+<p>In the routes file we can change the <code>about</code> route to accept a format parameter by adding a full stop and <code>:format</code>:</p>
+<pre class="ruby">
+match &quot;/about.:format&quot; =&gt; &quot;info#about&quot;, :as =&gt; :about
+</pre>
+<p>If we reload PDF view now the route will be matched but we&rsquo;ll see a missing template error as our application doesn&rsquo;t know how to render that action as a PDF.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/333/original/E203I02.png" width="797" height="280" alt="The PDF route is now matched."/>
+</div>
+
+<p>It looks like we&rsquo;ve fixed the problem but the format isn&rsquo;t optional so when we go back to the default view for that page we&rsquo;ll get a routing error. Fortunately it&rsquo;s easy to make part of a route optional: all we need to do is wrap the optional part in parentheses, like this:</p>
+<pre class="ruby">
+match &quot;/about(.:format)&quot; =&gt; &quot;info#about&quot;, :as =&gt; :about
+</pre>
+<p>Now we can visit either <a href="http://localhost:3000/about">http://localhost:3000/about</a> or <a href="http://localhost:3000/about.pdf">http://localhost:3000/about.pdf</a> without seeing a routing error.</p>
+
+<p>Next we&rsquo;ll show you how to use more complex optional parameters. Let&rsquo;s say that our application has a number of blog articles that we want to filter by specifying a year with an optional month (or month and day) in the URL.</p>
+
+<p>We can do this by defining a route like this, directing any matching route to our <code>info#about</code> action. Note that we can nest parentheses when creating optional parameters.</p>
+<pre class="ruby">
+match &quot;/:year(/:month(/:day))&quot; =&gt; &quot;info#about&quot;
+</pre>
+<p>In the view code we&rsquo;ll add some debug code so that we can see what parameters are being passed in:</p>
+<p class="codeFilePath">/app/views/info/about.html.erb</p>
+<pre class="ruby">
+&lt;h1&gt;Info#about&lt;/h1&gt;
+&lt;p&gt;Find me in app/views/info/about.html.erb&lt;/p&gt;
+&lt;%= debug params %&gt;
+</pre>
+<p>Now if we specify a year in the URL it will be passed into the about action and likewise if we specify a year, month and day all three parameters are passed.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/334/original/E203I03.png" width="798" height="280" alt="The date paramters are passed to the route."/>
+</div>
+
+<p>This route is fairly generic though and if we were to visit, say, <a href="http://localhost:3000/foo/bar">http://localhost:3000/foo/bar</a> this will also be passed through to the about action when we only want parameters that look like a date to be passed. We can do this with constraints.</p> 
+
+<h4>Constraints</h4>
+
+<p>Constraints are available in Rails 2 where they&rsquo;re known as requirements. We can pass a <code>:constraints</code> option to our route with a hash of the values and the constraints that each one should match. We&rsquo;ll constrain the route so that it will only match if the the year parameter is four digits and the month and day parameters are two digits:</p>
+<pre class="ruby">
+match &quot;/:year(/:month(/:day))&quot; =&gt; &quot;info#about&quot;, :constraints =&gt; { :year =&gt; /\d{4}/, :month =&gt; /\d{2}/, :day =&gt; /\d{2}/ }
+</pre>
+<p>With this constraint in place when we visit the <code>/foo/bar</code> path again we get a routing error as the path doesn&rsquo;t match the date constraints.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/335/original/E203I04.png" width="798" height="280" alt="The route now doesn't match unless the parameters match a date."/>
+</div>
+
+<p>What we&rsquo;ve done with constraints so far was possible with Rails 2&rsquo;s requirements but with constraints in Rails 3 we can do much more. For example we can use a <code>user_agent</code> parameter to restrict a route to a specific browser, in this case Firefox.</p>
+<pre class="ruby">
+match &quot;/secret&quot; =&gt; &quot;info#about&quot;, :constraints =&gt; { :user_agent =&gt; /Firefox/ }
+</pre>
+<p>If we visit <a href="http:/localhost:3000/secret">http:/localhost:3000/secret</a> in Safari, Chrome or Opera we&rsquo;ll see a routing error but if we visit in Firefox, or set another browser to identify itself as Firefox, then the user agent passed by the browser will match the constraint and we&rsquo;ll see the page.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/336/original/E203I05.png" width="973" height="287" alt="The route only matches when viewed in Firefox"/>
+</div>
+
+<p>We can also add a constraint for something a little more useful, say the host:</p>
+<pre class="ruby">
+match &quot;/secret&quot; =&gt; &quot;info#about&quot;, :constraints =&gt; { :host =&gt; /localhost/ }
+</pre>
+<p>This constraint means that we can visit <a href="http://localhost:3000/secret">http://localhost:3000/secret</a> and see the page but we&rsquo;ll get a routing error if we try to visit by using the IP address instead ( <a href="http://127.0.0.1/secret">http://127.0.0.1/secret</a> ) even though the two addresses are equivalent. This can be used to restrict certain routes to a given subdomain. This ability is currently a little clunky but in a future version of Rails we&rsquo;ll be able to pass a <code>:subdomain</code> option to perform this kind of constraint.</p>
+
+<p>If we have a number of routes that match a certain constraint there can be a lot of duplication in the routes file. We can reduce this duplication by using the constraints method and putting the matching routes into a block.</p>
+<pre class="ruby">
+constraints :host =&gt; /localhost/ do
+  match &quot;/secret&quot; =&gt; &quot;info#about&quot;
+  match &quot;/topsecret&quot; =&gt; &quot;info#about&quot;
+end
+</pre>
+<p>There&rsquo;s much more that can be done with the constraint option but we won&rsquo;t cover it here.</p>
+
+<h3>Routing with Rack</h3>
+
+<p>There&rsquo;s a lot more to routing in Rails 3 than we&rsquo;ve had time to cover here, but we&rsquo;ll be coming back to the topic of routing in future episodes. One last feature we&rsquo;ll take a look at is how Rails 3 routing embraces Rack.  Normally we pass a controller and action name to a route but we can also pass in a Rack application which is an extremely powerful feature.   To demonstrate this we&rsquo;ll create a route that points to a simple Rack application.</p>
+<pre class="ruby">
+match &quot;/hello&quot; =&gt; proc { |env| [200, {}, &quot;Hello Rack!&quot;] }
+</pre>
+<p>If you aren&rsquo;t familiar with Rack then either <a href="http://asciicasts.com/episodes/151-rack-middleware">watch</a> or <a href="http://asciicasts.com/episodes/151-rack-middleware">read</a> episode 151. All we&rsquo;re doing above is passing a return code, an (empty) hash of headers and a simple body.</p>
+
+<p>If we visit <code>/hello</code> in the browser now we&rsquo;ll see &ldquo;Hello Rack!&rdquo; so that we know our Rack application is working and generating the response. This opens up a lot of power and flexibility in how you define routes and route them to different applications. It&rsquo;s easy now to route to a Sinatra application for example.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/337/original/E203I06.png" width="799" height="280" alt="The response is seen from the Rack app."/>
+</div>
+
+<p>Rails 3&rsquo;s new routing features provide a number of exciting possibilities. Although we&rsquo;ve only given an overview of the potential here we&rsquo;ll be looking at certain parts of it in more detail in the future.</p>
+
+<p>For more documentation there is more information about Rails 3 routing on <a href="http://yehudakatz.com/2009/12/26/the-rails-3-router-rack-it-up/">Yehuda Katz&rsquo;s blog</a> and on <a href="http://guides.rails.info/routing.html">RailsGuides</a>.</p>

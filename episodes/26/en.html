@@ -1,0 +1,93 @@
+<p>Mass assignment is something most Rails programmers make use of as it provides an easy way to populate the properties of a model object from a form. Unfortunately its simplicity can make it a target for hackers. We&rsquo;ll explain how and show you how to solve it in this episode.</p>
+
+<img src="/system/photos/25/original/E026I01.png" width="731" height="323" />
+<p class="title">Our simple registration form.</p>
+<p>Above is a simple user registration form. When a user enters their user name and clicks &ldquo;submit&rdquo; a new User model is created. Our user model is defined in the schema like this, with a string field called <code>name</code> and a boolean field called <code>admin</code> that defaults to false.</p>
+<pre class="ruby">
+create_table :users do |t|
+  t.string :name
+  t.boolean :admin, :default =&gt; false, :null =&gt; false
+end
+</pre>
+<p>When a user fills in the form and clicks register, the create action is called.</p>
+<pre class="ruby">
+def create
+  @user = User.new(params[:user])
+  if @user.save
+    flash[:notice] = &quot;Successfully registered&quot;
+    redirect_to :action =&gt; &rsquo;show&rsquo;, :id =&gt; @user.id
+  else
+    render :action =&gt; :new
+  end
+end
+</pre>
+<p>When a user is created, the new User is populated from the <code>params</code> hash which, as discussed in the previous episode, should not be trusted. We are passing all of the values in the <code>params[:user]</code> hash and setting them as attributes of our new user. We&rsquo;ll show now how this can be compromised by a malicious hacker to make himself an admin.</p>
+
+<h3>Hacking The Site</h3>
+<p>A command-line tool like <code>curl</code> can be used to pass POST parameters to a page.</p>
+<pre class="terminal">
+curl -d &quot;user[name]=hacker&amp;user[admin]=1&quot; http://localhost:3000/Users/
+</pre>
+<p>In the line above we&rsquo;ve sent a name of &lsquo;hacker&rsquo; and set admin to <code>true</code>. If we look in our development log we can see that new user has become an admin.</p>
+<pre class="terminal">
+Processing UsersController#create (for 127.0.0.1 at 2009-02-03 20:18:54) [POST]
+  Session ID: 8daeaad6eb382c903e595e704b626ef7
+  Parameters: {&quot;user&quot;=&gt;{&quot;name&quot;=&gt;&quot;hacker&quot;, &quot;admin&quot;=&gt;&quot;1&quot;}, &quot;action&quot;=&gt;&quot;create&quot;, &quot;controller&quot;=&gt;&quot;users&quot;}
+  SQL (0.000390) INSERT INTO users (&quot;name&quot;, &quot;admin&quot;) VALUES(&rsquo;hacker&rsquo;, &rsquo;t&rsquo;)
+Redirected to http://localhost:3000/users/show/2
+</pre>
+<p>The hacker was able to do this because of mass assignment: we&rsquo;re creating a new user using the parameters supplied in the params hash and the hacker has supplied an admin parameter which has been passed through. The hacker has therefore made himself an admin.</p>
+
+<h3>Protecting Attributes</h3>
+<p>The way to stop this kind of attack is to limit the attributes that can be set from the form (or from a POST method). We do this in the model, in this case our User model. Rails has a method called <code>attr_protected</code> which allows you to define which of a method&rsquo;s attributes can&rsquo;t be set via mass assignment.</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  has_many :comments
+  attr_protected :admin
+end
+</pre>
+<p class="title">Our User model with a protected admin attribute.</p>
+<p>Now, if we send our <code>curl</code> command again and look in the development log then we can see that the admin attribute hasn&rsquo;t been set to true, even though it was supplied as true in the params hash.</p>
+<pre class="terminal">
+Processing UsersController#create (for 127.0.0.1 at 2009-02-03 20:37:49) [POST]
+  Session ID: 381cee077c1367bf0cc410a2259adb96
+  Parameters: {&quot;user&quot;=&gt;{&quot;name&quot;=&gt;&quot;hacker&quot;, &quot;admin&quot;=&gt;&quot;1&quot;}, &quot;action&quot;=&gt;&quot;create&quot;, &quot;controller&quot;=&gt;&quot;users&quot;}
+  SQL (0.000327)   INSERT INTO users (&quot;name&quot;, &quot;admin&quot;) VALUES(&rsquo;hacker&rsquo;, &rsquo;f&rsquo;)
+Redirected to http://localhost:3000/users/show/5
+</pre>
+<p class="title">The admin attribute is now set from the params hash.</p>
+
+<h3>Not Quite There Yet</h3>
+<p>We&rsquo;ve now stopped that method of hacking, but there&rsquo;s still a hole in our site. There is a relationship in our application so that a user has many comments and has_many provides a way of setting the comment_ids via mass assignment. We use <code>curl</code> again to hack the comment ids.</p>
+<pre class="ruby">
+curl -d &quot;user[name]=hacker&amp;user[admin]=1&amp;user[comment_ids][]=1&amp;user[comment_ids]=2&quot;
+http://localhost:3000/users/create
+</pre>
+<p class="title">Gaining control of comments that aren&rsquo;t ours.</p>
+<p>The <code>has_many</code> relationship between <code>User</code> and <code>Comment</code> gives the User model a <code>comment_ids</code> method that takes an array of comment ids. We&rsquo;ve hacked the parameters hash above to claim ownership of the comments with ids 1 and 2. In the development log we can see that our hacker now owns those comments.</p>
+<pre class="terminal">
+Processing UsersController#create (for 127.0.0.1 at 2009-02-04 20:27:36) [POST]
+Session ID: e6bee21260899c7dce47bc5040dcd467
+Parameters: {&quot;user&quot;=&gt;{&quot;name&quot;=&gt;&quot;hacker&quot;, &quot;comment_ids&quot;=&gt;[&quot;1&quot;, &quot;2&quot;], &quot;admin&quot;=&gt;&quot;1&quot;}, &quot;action&quot;=&gt;&quot;create&quot;, &quot;controller&quot;=&gt;&quot;users&quot;}
+Comment Load (0.001) SELECT * FROM comments WHERE (comments.&quot;id&quot; IN (1,2)) 
+SQL (0.001) INSERT INTO users (&quot;name&quot;, &quot;admin&quot;) VALUES(&rsquo;hacker&rsquo;, &rsquo;f&rsquo;)
+  Comment Update (0.000094)   UPDATE comments SET &quot;title&quot; = &rsquo;Comment 1&rsquo;, &quot;user_id&quot; = 8 WHERE &quot;id&quot; = 1
+  Comment Update (0.000071)   UPDATE comments SET &quot;title&quot; = &rsquo;Comment 2&rsquo;, &quot;user_id&quot; = 8 WHERE &quot;id&quot; = 2
+</pre>
+<p class="title">Our hacker now owns comments that aren&rsquo;t his.</p>
+<p>To stop this happening it&rsquo;s better to use <code>attr_accessible</code> in our model instead of <code>attr_protected</code>. Now we&rsquo;re explicitly saying which attributes can be modified by mass assignment. We&rsquo;ll update our User model to just allow updates to the name attribute.</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  has_many :comments
+  attr_accessible :name
+end
+</pre>
+<p>A last look in the development log shows that our hacker hasn&rsquo;t got admin privileges and hasn&rsquo;t got ownership of any comments that aren&rsquo;t his.</p>
+<pre class="ruby">
+Processing UsersController#create (for 127.0.0.1 at 2009-02-04 20:39:15) [POST]
+  Session ID: 48b9264e8da94d0a0edadce5e31ac500
+  Parameters: {&quot;user&quot;=&gt;{&quot;name&quot;=&gt;&quot;hacker&quot;, &quot;comment_ids&quot;=&gt;[&quot;1&quot;, &quot;2&quot;], &quot;admin&quot;=&gt;&quot;1&quot;}, &quot;action&quot;=&gt;&quot;create&quot;, &quot;controller&quot;=&gt;&quot;users&quot;}
+  SQL (0.000307)   INSERT INTO users (&quot;name&quot;, &quot;admin&quot;) VALUES(&rsquo;hacker&rsquo;, &rsquo;f&rsquo;)
+Redirected to http://localhost:3000/users/show/9
+</pre>
+<p>We&rsquo;ve seen in this episode that it&rsquo;s easy for unprotected models to have their attributes manipulated by malicious users. Use of <code>attr_accessible</code> can stop these attacks and keep your models safe.</p>

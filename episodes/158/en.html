@@ -1,0 +1,242 @@
+<p>This episode will revisit the topic of creating test objects without using fixtures, which was first covered back in <a href="http://railscasts.com/episodes/60-testing-without-fixtures">episode 60</a>. This can now be done by making use of factories, and there are a number of factory tools available. We&rsquo;ll demonstrate some ways in which factories can be used to improve your Rails tests.</p>
+
+<p>We&rsquo;ll start by looking at the spec for a user model. The spec has two tests in it related to authentication. The first test checks that when the correct username and password is passed to the <code>authenticate</code> method a <code>User</code> object is returned; the second passes a correct username but an incorrect password and checks that the method returns <code>nil</code>.</p>
+<pre class="ruby">
+require File.dirname(__FILE__) + &#x27;/../spec_helper&#x27;
+
+describe User do
+  fixtures :all
+  it &quot;should authenticate with matching username and password&quot; do
+    User.authenticate(&#x27;bob&#x27;, &#x27;secret&#x27;).should == users(:bob)
+  end
+
+  it &quot;should not authenticate with incorrect password&quot; do
+    User.authenticate(&#x27;bob&#x27;, &#x27;incorrect&#x27;).should be_nil
+  end
+end
+</pre>
+<p>Note that we&rsquo;re using fixtures in the tests. Fixtures have several weaknesses that make them less than ideal, but the main problem is that they separate the data we&rsquo;re testing with from the behaviour we&rsquo;re testing. In the first test above we&rsquo;re testing the behaviour of the <code>User</code> model, but we don&rsquo;t create an actual <code>User</code>, we rely on the data in the fixtures. Relying on fixtures makes tests more brittle and more difficult to read. You have to look at the fixtures file to fully understand the test and even then things don&rsquo;t always become totally clear.</p>
+<pre class="ruby">
+bob:
+  username: bob
+  email: bob@example.com
+  password_hash: 3488f5f7efecab14b91eb96169e5e1ee518a569f
+  password_salt: bef65e058905c379436d80d1a32e7374b139e7b0
+  admin: false
+
+admin:
+  username: admin
+  email: admin@example.com
+  password_hash: 3488f5f7efecab14b91eb96169e5e1ee518a569f
+  password_salt: bef65e058905c379436d80d1a32e7374b139e7b0
+  admin: true
+</pre>  
+<p>For example, the password for our <code>User</code> model is encrypted, so although we&rsquo;re checking for the password &ldquo;secret&rdquo; in the test, we can&rsquo;t tell for sure that that&rsquo;s the correct password from looking at the test data.</p>
+
+<h3>Removing The Fixtures</h3>
+
+<p>Before we make any changes to our tests we&rsquo;ll run them to make sure that they currently pass.</p>
+<pre class="terminal">
+$ rake spec
+(in /Users/eifion/rails/apps_for_asciicasts/ep158)
+<span class="passed">.....</span>
+
+Finished in 0.217478 seconds
+
+<span class="passed">5 examples, 0 failures</span>
+</pre>
+<p>They do, so we can begin to make our changes. Before we start using factories we&rsquo;ll try creating our objects directly and see how that goes. The first change we&rsquo;ll make is to remove the dependency on fixtures and to create a user in the database for each test.</p>
+<pre class="ruby">
+require File.dirname(__FILE__) + &#x27;/../spec_helper&#x27;
+
+describe User do
+  it &quot;should authenticate with matching username and password&quot; do
+    user = User.create!(:username =&gt; &quot;bob&quot;, :password =&gt; &quot;secret&quot;)
+    User.authenticate(&#x27;bob&#x27;, &#x27;secret&#x27;).should == user
+  end
+
+  it &quot;should not authenticate with incorrect password&quot; do
+    user = User.create!(:username =&gt; &quot;bob&quot;, :password =&gt; &quot;secret&quot;)
+    User.authenticate(&#x27;bob&#x27;, &#x27;incorrect&#x27;).should be_nil
+  end
+end
+</pre>
+<p>Now we run the tests again and&hellip;</p>
+<pre class="terminal">
+$ rake spec
+(in /Users/eifion/rails/apps_for_asciicasts/ep158)
+<span class="passed">...</span><span class="failed">FF</span>
+
+1)
+<span class="failed">ActiveRecord::RecordInvalid in &#x27;User should authenticate with matching username and password&#x27;</span>
+
+2)
+<span class="failed">ActiveRecord::RecordInvalid in &#x27;User should not authenticate with incorrect password&#x27;
+Validation failed: Username has already been taken, Email is invalid</span>
+Finished in 0.167193 seconds
+
+<span class="failed">5 examples, 2 failures</span>
+</pre>
+<p>&hellip;this time we see two failures. It seems from the second failure that our <code>User</code> model has an <code>email</code> field that has some validation against it. We could go back and add this field to the tests, and for our two tests this wouldn&rsquo;t take long, but if we had dozens of tests that used a model this would involve a lot of work. If at some point we added another field to the <code>User</code> model that had validation we&rsquo;d have to change every test that created a user. In some cases we might have to add data for a field that the test isn&rsquo;t concerned with. For example our two tests above don&rsquo;t test the <code>email</code> field and don&rsquo;t care what value we give for that field but we still have to supply one.</p>
+
+<h3>Using Factories</h3>
+<p>We can solve this problem by using factories. A factory can be used to create valid default model objects for our tests. We can then modify the object&rsquo;s attributes to create objects that are relevant to the test they&rsquo;re in.</p>
+
+<p>There are a number of factory plugins available, but for this episode we&rsquo;re going to use <a href="http://www.thoughtbot.com/projects/factory_girl/">Factory Girl</a>. To install Factory Girl we need to add the following line to <code>/config/environments/test.rb</code>.</p>
+<pre class="ruby">
+config.gem &quot;thoughtbot-factory_girl&quot;, :lib =&gt; &quot;factory_girl&quot;, :source =&gt; &quot;http://gems.github.com&quot;
+</pre>
+<p>Once that&rsquo;s done, we&rsquo;ll run rake to make sure that the gem is installed.</p>
+<pre class="terminal">
+$ sudo rake gems:install RAILS_ENV=test
+(in /Users/eifion/rails/apps_for_asciicasts/ep158)
+gem install thoughtbot-factory_girl --source http://gems.github.com
+Successfully installed thoughtbot-factory_girl-1.2.1
+1 gem installed
+Installing ri documentation for thoughtbot-factory_girl-1.2.1...
+Installing RDoc documentation for thoughtbot-factory_girl-1.2.1...
+</pre>
+<p>Now that we have the Factory Girl gem installed we can create our first factory. It&rsquo;s a good idea to keep your factories in one place and, as we&rsquo;re using RSpec, we&rsquo;ll create a <code>factories.rb</code> file under our <code>spec</code> directory.</p>
+
+<p>Next we&rsquo;ll need to make RSpec aware of our factory by making a change to the <code>/spec/spec_helper.rb</code> file. At the top of the file we&rsquo;ll require the <code>factories.rb</code> file we created.</p>
+<pre class="ruby">
+require File.dirname(__FILE__) + &quot;/factories&quot;
+</pre>
+<p>If we were using Test::Unit or Shoulda we&rsquo;d put the <code>factories.rb</code> file under the test directory and add the line above to <code>/test/test_helper.rb</code>.</p>
+
+<p>With that done we can create our first factory, the one for our <code>User</code> model.</p>
+<pre class="ruby">
+Factory.define :user do |f|
+  f.username &quot;foo&quot;
+  f.password &quot;foobar&quot;
+  f.password_confirmation { |u| u.password }
+  f.email &quot;foo@example.com&quot;
+end
+</pre>
+<p>We define a factory object with <code>Factory.define</code> and pass it the name of the model, in this case <code>:user</code>, and a block which takes a factory object. In the block we can call attributes on the object to set their default values. In the user factory above we&rsquo;ve defined four attributes. The <code>username</code>, <code>password</code> and <code>email</code> attributes have been given string values but for the <code>password_confirmation</code> field we&rsquo;ve had to do something a little different. If we set the <code>password_confirmation</code> field&rsquo;s value to <code>&ldquo;foobar&rdquo;</code> then we&rsquo;d have to make sure we&rsquo;d changed both fields every time we wanted to create an object with a different password. Instead we&rsquo;ve passed a block which takes the current object and set the confirmation to match whatever the password is. This will ensure that the password and confirmation always match.</p>
+
+<p>Now that we&rsquo;ve defined our <code>User</code> factory, we can modify our tests to make use of factory objects. Instead of creating user objects for tests directly with <code>User.create!</code> we create them from our factory.</p>
+<pre class="ruby">
+require File.dirname(__FILE__) + &#x27;/../spec_helper&#x27;
+
+describe User do
+  it &quot;should authenticate with matching username and password&quot; do
+    user =  Factory.create(:user, :username =&gt; &quot;frank&quot;, :password =&gt; &quot;secret&quot;)
+    User.authenticate(&quot;frank&quot;, &quot;secret&quot;).should == user
+  end
+
+  it &quot;should not authenticate with incorrect password&quot; do
+    user = Factory.create(:user, :username =&gt; &quot;frank&quot;, :password =&gt; &quot;secret&quot;)
+    User.authenticate(&quot;frank&quot;, &quot;incorrect&quot;).should be_nil
+  end
+end
+</pre> 
+<p>We&rsquo;re now using <code>Factory.create</code> to create our users, passing first the type of the object we want to create, and then a list of the parameters that we want to change from the defaults. (Note that we&rsquo;ve changed the username from Bob to Frank so that there&rsquo;s no clash with the data originally generated by the fixtures.)</p>
+
+<p>Running our tests again, they all pass.</p>
+<pre class="terminal">
+$ rake spec
+(in /Users/eifion/rails/apps_for_asciicasts/ep158)
+<span class="passed">.....</span>
+
+Finished in 0.163722 seconds
+
+<span class="passed">5 examples, 0 failures</span>
+</pre>
+<h3>Creating Sequences</h3>
+
+<p>Our <code>User</code> model has a number of validations and the factory objects generally cope well with them, except for one:</p>
+<pre class="ruby">
+  validates_uniqueness_of :username, :email, :allow_blank =&gt; true
+</pre>  
+<p>Our <code>User</code> model requires a unique <code>username</code> and <code>email</code> so we can&rsquo;t write a test that creates more than one user as we have hard-coded the values for these fields. Factory Girl provides us with a way of using sequences so that each factory object created has a unique value.</p>
+<pre class="ruby">
+Factory.define :user do |f|
+  f.sequence(:username) { |n| &quot;foo#{n}&quot; } 
+  f.password &quot;foobar&quot;
+  f.password_confirmation { |u| u.password }
+  f.sequence(:email) { |n| &quot;foo#{n}@example.com&quot; }
+end
+</pre>
+<p>We&rsquo;ve now replaced the concrete values for the username and email with a call to the <code>sequence</code> method, which we pass the name of an attribute and a block. The block is passed a number, which we can use in the string value to create a unique value for each attribute. Now when we create a User from our factory it will have unique default <code>username</code> and <code>email</code> attributes.</p>
+
+<h3>Associations</h3>
+<p>As well as a <code>User</code> model, our application has an <code>Article</code> model. <code>Article</code> has a <code>belongs_to</code> relationship to <code>User</code> and a validator that ensures that the article has a <code>user_id</code>.</p>
+<pre class="ruby">
+class Article &lt; ActiveRecord::Base
+  belongs_to :user
+  has_many :comments, :dependent =&gt; :destroy
+  validates_presence_of :name, :user_id
+  acts_as_list
+
+  def editable_by?(some_user)
+    some_user.admin? || some_user == user
+  end
+end
+</pre>
+<p>Factory Girl allows us to define an association in a factory definition by calling <code>association</code> and passing it the name of the associated model.</p>
+<pre class="ruby">
+Factory.define :article do |f|
+  f.name &quot;foo&quot;
+  f.association :user
+end
+</pre>
+<p>When an <code>Article</code> object is created it will look for a factory definition that matches <code>:user</code> and automatically build the related object. If our association has a different name, say author, we can explicit say which association should be used.</p>
+<pre class="ruby">
+f.association :author, :factory =&gt; :user
+</pre>
+
+<h3>Some Final Tips</h3>
+<p>We&rsquo;ll finish off our look at Factory Girl by going back to one of our tests and looking at a few more of its features.</p>
+<pre class="ruby">
+it &quot;should authenticate with matching username and password&quot; do
+  user =  Factory.create(:user, :username =&gt; &quot;frank&quot;, :password =&gt; &quot;secret&quot;)
+  User.authenticate(&quot;frank&quot;, &quot;secret&quot;).should == user
+end
+</pre>
+<p>When we call <code>Factory.create</code> to create an object that object is stored in the database. If we just want to work with it in memory we can use <code>Factory.build</code> instead.</p>
+<pre class="ruby">
+user =  Factory.build(:user, :username =&gt; &quot;frank&quot;, :password =&gt; &quot;secret&quot;)
+</pre>
+<p>The <code>Factory</code> class also has an <code>attributes_for</code> method which returns a hash of values.</p>
+<pre class="terminal">
+&gt;&gt; Factory.attributes_for :user
+=&gt; {:email=&gt;&quot;foo2@example.com&quot;, :password=&gt;&quot;foobar&quot;, :username=&gt;&quot;foo2&quot;, :password_confirmation=&gt;&quot;foobar&quot;}
+</pre>
+<p>This is useful in controller tests where you might need a hash of params to pass to a controller action. (Note the sequence values in the email and username fields).</p>
+
+<p>Finally, we can just call <code>Factory</code> directly which has the same effect as using <code>Factory.create</code>.</p>
+<pre class="ruby">
+user =  Factory(:user, :username =&gt; &quot;frank&quot;, :password =&gt; &quot;secret&quot;)
+</pre>
+<p>We&rsquo;ve only covered the basic of what Factory Girl can do here. For more information see the <a href="http://dev.thoughtbot.com/factory_girl/">documentation pages</a>.</p>
+
+<p>It is also worth taking a look at some of the alternatives to Factory Girl. Machinist3 allows you to define blueprints rather than factories and uses a very concise syntax.</p>
+<pre class="ruby">
+require &#x27;faker&#x27;
+
+Sham.name  { Faker::Name.name }
+Sham.email { Faker::Internet.email }
+Sham.title { Faker::Lorem.sentence }
+Sham.body  { Faker::Lorem.paragraph }
+
+User.blueprint do
+  name
+  email
+end
+
+Post.blueprint do
+  title
+  author
+  body
+end
+</pre>
+<p>Another alternative worth a look is <a href="http://github.com/flogic/object_daddy/tree/master">Object Daddy</a>. This takes a different approach in that it adds a <code>generate</code> method to every ActiveRecord model which can be called in your tests to generate a valid model. You can define default values for your test object within the model itself.</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  generator_for(:start_time) { Time.now }
+  generator_for :name, &#x27;Joe&#x27;
+  generator_for :age =&gt; 25
+end
+</pre>
+<p>Whichever way you choose to generate test objects, factories are an excellent way to improve the tests in your Rails application.</p>

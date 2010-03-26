@@ -1,0 +1,99 @@
+<p>Any medium or large-sized website probably has a large amount of CSS spread across one or more stylesheets and the chances are that there are selectors in those stylesheets that are no longer used on any of the pages in that site. These selectors should be removed but they rarely are as there&rsquo;s always a small risk that they&rsquo;re still used somewhere on the site. Fortunately a couple of useful tools exist to search through a site and find any unused CSS and we&rsquo;ll take a look at them in this episode.</p>
+
+<h3>Dust-Me Selectors</h3>
+<p>The first solution we&rsquo;ll look at is a Firefox plugin called <a href="https://addons.mozilla.org/en-US/firefox/addon/5392">Dust-Me Selectors</a>. Once it&rsquo;s installed we can visit a web page, click the pink brush in the status bar at the bottom and Dust-Me Selectors will scan through the page&rsquo;s stylesheets and pop up a report that shows the unused selectors on that page.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/195/original/E180I01.png" width="800" height="600" alt="Dust Me Selectors&rsquo; results for a page" style="border: solid 1px #666;" />
+</div>
+<p>Of course some CSS selectors might be marked as unused as the elements that match them are on other pages. To help with this Dust-Me selectors has a Spider Log tab which can take the URL of a <a href="http://en.wikipedia.org/wiki/Sitemaps">sitemap</a> file. Dust Me Selectors will then report on the selectors that weren&rsquo;t found on any of the pages in the sitemap which will give us a more accurate report about the CSS selectors that aren&rsquo;t used in our site.</p> 
+<div class="imageWrapper">
+  <img src="/system/photos/196/original/E180I02.png" width="334" height="236" alt="" style="display: block; margin: 0 auto; border: solid 1px #666;" />
+</div>
+
+<h3>Deadweight</h3>
+
+<p>Dust-Me Selectors is a good solution for looking for unused CSS selectors across a website but what if we&rsquo;re looking for a solution that integrates more tightly with a Ruby on Rails application and which we can have more control over scripting? This is where a gem called Deadweight comes in. It does exactly what we want, searching through a Rails application&rsquo;s CSS for unused selectors and using Ruby code to specify the pages and stylesheets to parse.</p> 
+<p>To install the gem we first need to ensure that we have Github in our sources list. If not we can add it with</p>
+<pre class="terminal">
+gem sources -a http://gems.github.com
+</pre>
+<p>Once it&rsquo;s added we can install the gem.</p>
+<pre class="terminal">
+sudo gem install aanand-deadweight
+</pre>
+<h3>Creating a rake Task</h3>
+
+<p>The usual way to run Deadweight is as a rake task, so we&rsquo;ll create a <code>deadweight.rake</code> file in our application&rsquo;s <code>/lib/tasks</code> directory to do this.</p>
+<p>At the top of the file we&rsquo;ll need to require the Deadweight gem. We have to be careful when requiring gems in rake tasks. If we don&rsquo;t have the gem installed, say on our production server, then every rake task will break. To protect against this we&rsquo;ll wrap the require statement in a <code>begin</code>/<code>rescue</code> block.</p>
+<pre class="ruby">
+begin
+  require &#x27;deadweight&#x27;
+rescue LoadError
+end
+</pre>
+<p>We can now write the rest of the task.</p>
+<pre class="ruby">
+desc &quot;run Deadweight (requires script/server)&quot;
+task :deadweight do
+  dw = Deadweight.new
+  dw.stylesheets = [&#x27;/stylesheets/application.css&#x27;]
+  dw.pages = [&#x27;/&#x27;]
+  puts dw.run
+end
+</pre>
+<p>We start by adding a description of the task, then create the task itself. This creates a new instance of Deadweight then specifies the full path to the stylesheets and pages that should be parsed.  We finish by outputting the results of the Deadweight run.</p>
+<p>Note from the description that we need to have start <code>script/server</code> to run our rake task. With the server running we can try out our task.</p>
+<pre class="terminal">
+$ rake deadweight
+(in /Users/eifion/rails/asciicasts)
+/stylesheets/application.css
+/
+  html
+  body
+  h1
+  ...
+found 31 unused selectors out of 60 total
+h2 a
+code
+pre
+form.searchForm input[type=text]
+form.searchForm input[type=submit]
+...
+</pre>
+<p>The (truncated) output above shows a list of the selectors that are matched on a page followed by a list of those for which no match was found. There are 31 unused selectors in the list above, but we&rsquo;re only checking for matching selectors on the home page so we should add more of the pages from our application to the array of pages that Deadwood searches. One way to work out which pages we should be searching is to use <code>rake routes</code> to see a list of the routes in our application.</p>
+<p>To get a more accurate view of the unused selectors in our stylesheets we&rsquo;ll add a few more pages from our site to the array of pages. It&rsquo;s not a complete list, but it&rsquo;s enough to cover most of the site.</p>
+<pre class="ruby">
+dw.pages = [&#x27;/&#x27;, &#x27;/episodes/all&#x27;, &#x27;/about&#x27;, &#x27;/episodes/150-rails-metal&#x27;, &#x27;/episodes/155-beginning-with-cucumber&#x27;, &#x27;/search/index&#x27;]
+</pre>
+<p>If we run <code>rake deadweight</code> again it will run through the pages we&rsquo;ve supplied and we&rsquo;ll see a shorter list of unmatched selectors. (Again this list has been cut down here.)</p>
+<pre class="terminal">
+$ rake deadweight
+(in /Users/eifion/rails/asciicasts)
+/stylesheets/application.css
+/
+  html
+  body
+  h1
+  ...
+/episodes/all
+  dl#episodeArchive dt
+  dl#episodeArchive dd
+/about
+/episodes/150-rails-metal
+  h2 a
+  code
+  pre
+  ...
+/search/index
+found 10 unused selectors out of 60 total
+form.searchForm input[type=text]
+form.searchForm input[type=submit]
+code.terminal
+...
+</pre>
+<p>If there are selectors that we know are used in a site, but which only show under certain circumstances, such as selectors used to display error messages or flash notifications we can use <code>ignore_selectors</code> to exclude them from the results.</p>
+<pre class="ruby">
+dw.ignore_selectors = /flash_notice|flash_error|errorExplanation|fieldWithErrors/
+</pre>
+<p>When we run <code>rake deadweight</code> now it will return an even smaller list of unmatched selectors. We now have few enough to be able to manually work through them and remove the ones we know aren&rsquo;t used. For the ones we&rsquo;re not sure about we could use TextMate&rsquo;s Find In Project option (or whatever similar feature your favourite text editor provides). to search through the site to see if there are any matches.</p>
+<p>That&rsquo;s all for this episode. We&rsquo;ve covered most of the basic features of Deadweight, but there are some advanced options that are worth looking at too. These are detailed on <a href="http://github.com/aanand/deadweight">Deadweight&rsquo;s GitHub page</a>.</p>

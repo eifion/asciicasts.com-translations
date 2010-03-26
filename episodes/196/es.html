@@ -1,0 +1,393 @@
+<p>All&aacute; por 2007 cubrimos durante una <a  href="http://railscasts.com/episodes/73-complex-forms-part-1">serie de episodios</a> la creaci&oacute;n de formularios complejos que pod&iacute;an gestionar m&uacute;ltiples modelos en un &uacute;nico formulario, pero esa serie ha quedado desfasada ya. En este episodio vamos a empezar a ver t&eacute;cnicas m&aacute;s modernas para gestionar este tipo de formularios.</p>
+
+<p>La mayor novedad a la hora de enfocar este problema viene dada por el m&eacute;todo <a  href="http://api.rubyonrails.org/classes/ActiveRecord/NestedAttributes/ClassMethods.html"><code>accepts_nested_attributes_for</code></a> que se a&ntilde;adi&oacute; en Rails 2.3.  Vamos a usarlo a lo largo de toda esta serie, de modo que necesitaremos ejecutar la &uacute;ltima versi&oacute;n de Rails para poder utilizar esta t&eacute;cnica en nuestras aplicaciones.</p>
+
+ <p>Merece la pena repasar la <a  href="http://api.rubyonrails.org/classes/ActiveRecord/NestedAttributes/ClassMethods.html">documentaci&oacute;n</a> de <code>accepts_nested_attributes_for</code> donde se muestra c&oacute;mo utilizar esta funci&oacute;n con atributos anidados en una &uacute;nica llamada. Pero esta documentaci&oacute;n es menos clara a la hora de explicar c&oacute;mo utilizarlo en la propia vista, as&iacute; que nos centraremos en eso.</p>
+
+<h3>Nuestra aplicaci&oacute;n de encuestas</h3>
+
+<p>La aplicaci&oacute;n que queremos construir durante esta serie de episodios es una aplicaci&oacute;n para realizar encuestas. Esta aplicaci&oacute;n tendr&aacute; un formulario compuesto para crear y editar encuestas que nos dejar&aacute; introducir el nombre de la encuesta as&iacute; como un n&uacute;mero de preguntas con un n&uacute;mero de respuestas m&uacute;ltiples.  El formulario tambi&eacute;n tendr&aacute; enlaces para permitirnos a&ntilde;adir y eliminar preguntas y respuestas din&aacute;micamente  de la encuesta.</p>
+
+ <div class="imageWrapper">
+   <img src="/system/photos/290/original/E196I01.png" alt="El formulario compuesto para la creaci&oacute;n y edici&oacute;n de encuestas." height="598" width="815" />
+ </div>
+<p class="title">El formulario compuesto para la creaci&oacute;n y edici&oacute;n de encuestas.</p>
+
+<p>Se trata de una asociaci&oacute;n profundamente anidada en la que una encuesta tiene muchas preguntas y una pregunta tiene muchas repuestas. En las series anteriores sobre formularios compuestos no era posible crear este tipo de formularios con anidaci&oacute;n pero con Rails 2.3 s&iacute; se puede.</p>
+
+<h3>Empezamos</h3>
+
+<p>Vamos a crear nuestra aplicaci&oacute;n de encuestas desde cero, as&iacute; que iremos creando una nueva aplicaci&oacute;n Rails denominada  <code>surveysays</code>.</p>
+
+<pre class="terminal">
+rails surveysays
+</pre>
+
+<p>Vamos a usar dos de los <a href="http://github.com/ryanb/nifty-generators">Nifty Generators</a> de Ryan Bates: en primer lugar, el generador de layouts para crear un layout general para la aplicaci&oacute;n.</p>
+
+
+<pre class="terminal">
+script/generate nifty_layout
+</pre>
+
+<p>Nuestra aplicaci&oacute;n tendr&aacute; tres modelos: <code>Survey</code>, <code>Question</code> y <code>Answer</code>.  Empezaremos con el modelo <code>Survey</code>, usando el generado <code>nifty_scaffold</code> para crear un <em>scaffold</em> a juego. En <code>Survey</code> tan s&oacute;lo tendremos un atributo llamado <code>name</code>.</p>
+
+<pre class="terminal">
+script/generate nifty_scaffold survey name:string
+</pre>
+
+<p>A continuaci&oacute;n ejecutaremos las migraciones para crear la tabla de encuestas en la base de datos.</p>
+
+<pre class="terminal">
+rake db:migrate
+</pre>
+
+<p>Si examinamos nuestra aplicaci&oacute;n veremos que tenemos  archivos generados autom&aacute;ticamente con el c&oacute;digo necesario para poder listar, crear y editar encuestas, y un formulario b&aacute;sico para las encuestas sobre el que podemos empezar a trabajar.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/291/original/E196I02.png" alt="El formulario básico generado para la encuesta." height="343" width="800" />
+</div>
+
+<p>Lo que queremos poner en el formulario son los campos que nos permitir&aacute;n a&ntilde;adir y eliminar preguntas y respuestas cuando creemos una encuesta. El primer paso ser&aacute; generar el modelo <code>Question</code> que tendr&aacute; un campo <code>survey_id</code> para relacionarlo con la encuesta y un campo de contenido para albergar el texto de la pregunta.</p>
+
+<pre class="terminal">
+script/generate model question survey_id:integer content:text
+</pre>
+
+<p>Una vez hecho esto migraremos otra vez la base de datos para crear a tabla de preguntas.</p>
+
+<pre class="terminal">
+rake db:migrate
+</pre>
+
+<p>A continuaci&oacute;n establecemos la relaci&oacute;n entre <code>Survey</code> y <code>Question</code> en sus modelos.</p>
+
+<pre class="codeFilePath">
+/app/models/question.rb
+</pre>
+<pre class="ruby">
+class Question &lt; ActiveRecord::Base
+  belongs_to :survey
+end
+</pre>
+
+<pre class="codeFilePath">
+/app/models/survey.rb
+</pre>
+<pre class="ruby">
+class Survey &lt; ActiveRecord::Base
+  has_many :questions, :dependent =&gt; :destroy
+end
+</pre>
+
+<p>Obs&eacute;rvese que en <code>Survey</code> hemos usado <code>:dependent =&gt; :destroy</code> para que cuando eliminemos una encuesta se eliminen tambi&eacute;n todas sus preguntas.</p>
+
+<p>En el modelo <code>Survey</code> vamos a utilizar <code>accepts_nested_attributes_for</code> para poder gestionar las preguntas a trav&eacute;s de <code>Survey</code>. Con esto podremos crear, actualizar y destruir preguntas cuando actualicemos los atributos de una encuesta.</p>
+
+<pre class="codeFilePath">
+/app/models/survey.rb
+</pre>
+<pre class="ruby">
+  class Survey &lt; ActiveRecord::Base
+    has_many :questions, :dependent =&gt; :destroy
+    accepts_nested_attributes_for :questions
+  end
+</pre>
+
+<h3>Creaci&oacute;n del formulario</h3>
+
+<p>Una vez que los modelos <code>Survey</code> <code>Question</code> ya est&aacute;n listos, pasaremos al formulario de encuesta. Lo que queremos es a&ntilde;adir al formulario los campos para cada una de las preguntas del fomulario. Podemos usar el m&eacute;todo <code>fields_for</code> para gestionar los ficheros asociados en un formulario, pas&aacute;ndole el nombre del modelo asociado y luego iterando por todas las preguntas y creando un constructor de formularios para cada una de ellas. El constructor mostrar&aacute; una etiqueta y un &aacute;rea de texto para cada pregunta.</p>
+
+<pre class="codeFilePath">
+/app/views/survey/_form.html.erb
+</pre>
+<pre class="ruby">
+&lt;% form_for @survey do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;% f.fields_for :questions do |builder| %&gt;
+  &lt;p&gt;
+    &lt;%= builder.label :content, &quot;Question&quot; %&gt;&lt;br /&gt;
+    &lt;%= builder.text_area :content, :rows =&gt; 3 %&gt;
+  &lt;/p&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Si recargamos el formulario veremos que tiene el mismo aspecto que antes.  Esto es porque una nueva encuesta no tendr&aacute; ninguna pregunta asociada que mostrar.  En &uacute;ltima instancia tendremos que  a&ntilde;adir un enlace para a&ntilde;adir preguntas en el formulario pero por ahora solamente crearemos algunas preguntas en la acci&oacute;n <code>new</code> de <code>SurveyController</code>.</p>
+
+<pre class="codeFilePath">
+/app/controllers/surveys_controller.rb
+</pre>
+<pre class="ruby">
+def new
+  @survey = Survey.new
+  3.times { @survey.questions.build }
+end
+</pre>
+
+<p>Con esto a&ntilde;adiremos tres preguntas a una nueva encuesta que veremos en el formulario al recargar la p&aacute;gina.  Ahora podemos rellenar el nombre y las primeras dos preguntas y enviar un nuevo formulario.</p>
+
+ <div class="imageWrapper">
+   <img src="/system/photos/292/original/E196I03.png" alt="Rellenando el formulario de nueva encuesta." height="570" width="800" />
+ </div>
+
+<p>Cuando rellenemos el formulario se crear&aacute; un nuevo registro <code>Survey</code>, si bien no veremos sus preguntas porque a&uacute;n no las estamos mostrando en la p&aacute;gina. Para corregir esto modificaremos la vista <code>show</code> de <code>Survey</code> para ver las preguntas de una encuesta.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/293/original/E196I04.png" alt="No vemos las preguntas en la p&aacute;gina de una encuesta." height="320" width="800" />
+</div>
+<pre class="codeFilePath">
+/app/views/survey/show.html.erb
+</pre>
+<pre class="ruby">
+&lt;% title &quot;Survey&quot; %&gt;
+
+&lt;p&gt;
+  &lt;strong&gt;Name:&lt;/strong&gt;
+  &lt;%=h @survey.name %&gt;
+&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;% for question in @survey.questions %&gt;
+  &lt;li&gt;&lt;%= h question.content %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;
+  &lt;%= link_to &quot;Edit&quot;, edit_survey_path(@survey) %&gt; |
+  &lt;%= link_to &quot;Destroy&quot;, @survey, :confirm =&gt; &#x27;Are you sure?&#x27;, :method =&gt; :delete %&gt; |
+  &lt;%= link_to &quot;View All&quot;, surveys_path %&gt;
+&lt;/p&gt;
+</pre>
+
+<p>Si recargamos la p&aacute;gina de la encuesta veremos las preguntas, con lo que se comprueba que cuando se a&ntilde;adi&oacute; la encuesta tambi&eacute;n se almacenaron sus preguntas.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/294/original/E196I05.png" alt="Ahora se muestran las preguntas." height="338" width="800" />
+</div>
+
+<p>Podemos tambi&eacute;n editar una encuesta y si cambiamos cualquiera de las preguntas &eacute;stas se actualizar&aacute;n cuando enviemos el formulario.</p>
+
+<p>En la p&aacute;gina de arriba vemos que aparecen tres preguntas aunque s&oacute;lo hemos introducido las primeras dos.  Ser&iacute;a mejor que las que se dejasen en blanco fueran eliminadas autom&aacute;ticamente.  Para esto podemos usar la opci&oacute;n <code>reject_if</code> del m&eacute;todo <code>accepts_nested_attributes_for</code>. Este m&eacute;todo acepta un <em>lambda</em> al que se le pasa un <em>hash</em> de atributos que podemos usar para rechazar una pregunta si su atributo <code>content</code> viene vac&iacute;o.</p>
+
+<pre class="codeFilePath">
+/app/models/survey.rb
+</pre>
+<pre class="ruby">
+class Survey &lt; ActiveRecord::Base
+  has_many :questions, :dependent =&gt; :destroy
+  accepts_nested_attributes_for :questions, :reject_if =&gt; lambda { |a| a[:content].blank? }
+end
+</pre>
+
+<p>Si ahora creamos una nueva encuesta rellenando s&oacute;lo dos campos de pregunta, s&oacute;lo se crear&aacute;n dichas preguntas y no veremos una pregunta vac&iacute;a al final de la lista.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/295/original/E196I06.png" alt="Ya no se muestran las preguntas vac&iacute;as." height="363" width="800" />
+</div>
+
+<p>&iquest;Y si queremos eliminar alguna pregunta cuando estamos editando una encuesta?  En la aplicaci&oacute;n final queremos tener un enlace para eliminar preguntas pero por ahora vamos a tirar por el camino r&aacute;pido y utilizaremos una caja de selecci&oacute;n que a&ntilde;adiremos en el parcial del  formulario de la encuesta, junto con una etiqueta.</p>
+
+<pre class="codeFilePath">
+/app/views/survey/_form.html.erb
+</pre>
+<pre class="ruby">
+&lt;% form_for @survey do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;% f.fields_for :questions do |builder| %&gt;
+  &lt;p&gt;
+    &lt;%= builder.label :content, &quot;Question&quot; %&gt;&lt;br /&gt;
+    &lt;%= builder.text_area :content, :rows =&gt; 3 %&gt;
+    &lt;%= builder.check_box :_destroy %&gt;
+    &lt;%= builder.label :_destroy, &quot;Remove Question&quot; %&gt;
+  &lt;/p&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>El truco est&aacute; en el nombre de atributo para la caja de selecci&oacute;n: <code>_destroy</code>. Cuando tenga un valor <code>true</code> (cuando haya sido marcada), el  registro ser&aacute; eliminado al enviar el formulario.</p>
+
+<p>Paa que esto funcione tenemos que habilitarlo en el modelo <code>Survey</code> a&ntilde;adiendo en  <code>accepts_nested_attributes_for</code> la opci&oacute;n <code>:allow_destroy =&gt;  true</code>.</p>
+
+<pre class="codeFilePath">
+/apps/models/survey.rb
+</pre>
+<pre class="ruby">
+class Survey &lt; ActiveRecord::Base
+  has_many :questions, :dependent =&gt; :destroy
+  accepts_nested_attributes_for :questions, :reject_if =&gt; lambda { |a| a[:content].blank? }, :allow_destroy =&gt; true
+end
+</pre>
+
+<p>Si recargamos la p&aacute;gina, veremos que ahora tenemos el <em>checkbox</em> de borrado junto a cada pregunta.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/296/original/E196I07.png" alt="Ya aparecen los checkboxes para poder borrar preguntas." height="529" width="815" />
+</div>
+
+<p>...y si marcamos la caja de una de las preguntas, &eacute;sta ser&aacute; borrada cuando enviemos el formulario.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/297/original/E196I08.png" alt="Se borran correctamente las preguntas" height="356" width="800"/>
+</div>
+
+<h3>Ahora las respuestas</h3>
+
+<p>Ya tenemos las preguntas como queremos pero a&uacute;n nos faltan las respuestas.  Empezaremos, al igual que antes, a&ntilde;adiendo el modelo <code>Answer</code> y configurando su anidamiento. Primero generaremos el modelo.</p>
+
+<pre class="terminal">
+script/generate model answer question_id:integer content:string
+</pre>
+
+<p>Y luego migraremos la base de datos otra vez.</p>
+
+<pre class="terminal">
+rake db:migrate
+</pre>
+
+<p>A continuaci&oacute;n, configuraremos la relaci&oacute;n entre <code>Answer</code> y  <code>Question</code>.</p>
+
+<pre class="codeFilePath">
+/app/models/answer.rb
+</pre>
+<pre class="ruby">
+class Answer &lt; ActiveRecord::Base
+  belongs_to :question
+end
+</pre>
+
+<p>Para <code>Question</code> tendremos que utilizar <code>accepts_nested_attributes_for</code> igual que hicimos en el modelo  <code>Survey</code> model.</p>
+
+<pre class="codeFilePath">
+/app/models/question.rb
+</pre>
+<pre class="ruby">
+class Question &lt; ActiveRecord::Base
+  belongs_to :survey
+  has_many :answers, :dependent =&gt; :destroy
+  accepts_nested_attributes_for :answers, :reject_if =&gt; lambda { |a| a[:content].blank? }, :allow_destroy =&gt; true
+end
+</pre>
+
+<p>En este formulario podr&iacute;amos a&ntilde;adir los campos para las respuestas pero el c&oacute;digo de la vista del formulario quedar&aacute; bastante recargado si a&ntilde;adi&eacute;semos otro modelo anidado.  Por otro lado queremos que la adici&oacute;n de preguntas se haga, m&aacute;s adelante, mediante Javascript.  As&iacute; que por ambas razones moveremos el c&oacute;digo del formulario que muestra cada pregunta a su propio parcial llamado  <code>question_fields</code>.</p>
+
+<p>Despu&eacute;s de hacerlo la vista del formulario tendr&aacute; este aspecto.</p>
+
+<pre class="codeFilePath">
+/app/views/surveys/_form.html.erb
+</pre>
+<pre class="ruby">
+&lt;% form_for @survey do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;% f.fields_for :questions do |builder| %&gt;
+    &lt;%= render &#x27;question_fields&#x27;, :f =&gt; builder %&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Obs&eacute;rvese que tan s&oacute;lo pasamos el nombre del parcial como una cadena a mostrar, haciendo uso de la nueva notaci&oacute;n breve que se introdujo en Rails 2.3.  Tambi&eacute;n pasamos el <code>builder</code> al parcial con el nombre <code>f</code>. En el nuevo parcial  <code>question_fields</code> podemos usar la variable <code>f</code> para pintar los elementos de formulario de una pregunta.</p>
+
+<pre class="codeFilePath">
+/app/views/surveys/_question_fields.html.erb
+</pre>
+<pre class="ruby">
+&lt;p&gt;
+  &lt;%= f.label :content, &quot;Question&quot; %&gt;&lt;br /&gt;
+  &lt;%= f.text_area :content, :rows =&gt; 3 %&gt;&lt;br /&gt;
+  &lt;%= f.check_box :_destroy %&gt;
+  &lt;%= f.label :_destroy, &quot;Remove Question&quot; %&gt;
+&lt;/p&gt;
+</pre>
+
+<p>Podemos gestionar los campos de las respuestas de una forma similar y ponerlos en su propio parcial.  En el parcial <code>_question_fields</code> recorremos todas las respuestas de una pregunta y llamaremos a un nuevo parcial llamado <code>_answer_fields</code>.</p>
+
+<pre class="codeFilePath">
+/app/views/surveys/_question_fields.html.erb
+</pre>
+<pre class="ruby">
+&lt;p&gt;
+  &lt;%= f.label :content, &quot;Question&quot; %&gt;&lt;br /&gt;
+  &lt;%= f.text_area :content, :rows =&gt; 3 %&gt;&lt;br /&gt;
+  &lt;%= f.check_box :_destroy %&gt;
+  &lt;%= f.label :_destroy, &quot;Remove Question&quot; %&gt;
+&lt;/p&gt;
+&lt;% f.fields_for :answers do |builder| %&gt;
+  &lt;%= render &#x27;answer_fields&#x27;, :f =&gt; builder %&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>En nuestro nuevo parcial llamado <code>_answer_fields</code> pondremos el c&oacute;digo para mostrar una respuesta.</p>  
+
+<pre class="codeFilePath">
+/app/views/survey/_answer_fields.html.erb
+</pre>
+<pre class="ruby">
+&lt;p&gt;
+  &lt;%= f.label :content, &quot;Answer&quot; %&gt;
+  &lt;%= f.text_field :content %&gt;
+  &lt;%= f.check_box :_destroy %&gt;
+  &lt;%= f.label :_destroy, &quot;Remove&quot; %&gt;
+&lt;/p&gt;
+</pre>
+
+<p>Igual que antes para poder ver los campos de respuestas en el formulario vamos a modificar la acci&oacute;n <code>new</code> de <code>SurveyController</code> para que se creen cuatro respuestas para cada una de las tres nuevas preguntas.</p>
+
+<pre class="codeFilePath">
+/app/controllers/survey_controller.rb
+</pre>
+<pre class="ruby">
+def new
+  @survey = Survey.new
+  3.times do
+    question = @survey.questions.build
+    4.times { question.answers.build }
+  end
+end
+</pre>
+
+<p>A partir de ahora cuando creemos una encuesta tendremos tres preguntas con cuatro posibles respuestas cada una.</p>
+
+<div class="imageWrapper">
+   <img src="/system/photos/298/original/E196I09.png" alt="En el formulario de la encuesta ya se muestran los campos de las respuestas." height="509" width="815" />
+</div>
+
+<p>Cuando se env&iacute;en los campos del formulario a&uacute;n no veremos las respuestas pero esto lo resolveremos f&aacute;cilmente. En la vista <code>show</code> de una encuesta, a&ntilde;adiremos c&oacute;digo para mostrar las respuestas en la secci&oacute;n que recorre cada pregunta .</p>
+
+<pre class="codeFilePath">
+/app/views/survey/show.html.erb
+</pre>
+<pre class="ruby">
+&lt;ol&gt;
+  &lt;% for question in @survey.questions %&gt;
+  &lt;li&gt;&lt;%= h question.content %&gt;&lt;/li&gt;
+  &lt;ul&gt;
+    &lt;% for answer in question.answers %&gt;
+      &lt;li&gt;&lt;%= h answer.content %&gt;&lt;/li&gt;
+    &lt;% end %&gt;
+  &lt;/ul&gt;
+  &lt;% end %&gt;
+&lt;/ol&gt;
+</pre>
+
+<p>Si ahora recargamos la p&aacute;gina de la encuesta veremos las preguntas y sus repuestas.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/299/original/E196I10.png" alt="Las respuestas aparecen ahora debajo de las preguntas" height="509" width="815"/>
+</div>
+
+<p>Todav&iacute;a no hemos terminado puesto que queremos poder a&ntilde;adir o eliminar din&aacute;micamente preguntas y respuestas del formulario usando enlaces.  Esto lo veremos en el pr&oacute;ximo episodio.</p>

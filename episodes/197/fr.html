@@ -1,0 +1,242 @@
+<p>Dans l&#x27;&eacute;pisode pr&eacute;c&eacute;dent, nous avions abord&eacute; comment cr&eacute;er un formulaire pouvant g&eacute;rer plusieurs mod&egrave;les imbriqu&eacute;s. Dans cette application, on avait cr&eacute;&eacute; pour cela un mod&egrave;le Enqu&ecirc;te <code>Survey</code>, pour lequel chaque <code>Survey</code> poss&egrave;de plusieurs <code>Questions</code> et chaque <code>Question</code> ayant elle-m&ecirc;me plusieurs r&eacute;ponses <code>Answers</code>.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/300/original/E197I01.png" width="816" height="490" alt="Edition d&#x27;une enqu&ecirc;te."/>
+</div>
+
+<p>Dans les mod&egrave;les <code>Survey</code> et <code>Question</code>, on a utilis&eacute; <code>accepts_nested_attributes_for</code> pour pouvoir cr&eacute;er, &eacute;diter et supprimer des enregistrements imbriqu&eacute;s &agrave; travers un seul mod&egrave;le.</p>
+
+<p>Actuellement dans notre application, si on veut supprimer une question ou une r&eacute;ponse, on doit utiliser un checkbox. Parall&egrave;lement, on n&#x27;a aucun autre moyen d&#x27;ajouter de nouvelles questions ou r&eacute;ponses au moyen du m&ecirc;me formulaire. Dans cet &eacute;pisode on se propose de r&eacute;gler ces probl&egrave;mes par l&#x27;utilisation de JavaScript afin de modifier le formulaire existant au moyen de liens, pour cr&eacute;er et supprimer des mod&egrave;les dynamiquement.</p>
+
+<p>Le JavaScript que l&#x27;on va &eacute;crire implique quelques manipulations du DOM, aussi allons-nous utiliser <a href="http://www.prototypejs.org">Prototype</a> pour nous simplifier la t&acirc;che.  Pour ajouter Prototype &agrave; notre application, on va rajouter la ligne suivante dans la partie &lt;head&gt; de la layout de l&#x27;application.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= javascript_include_tag :defaults, :cache =&gt; true %&gt;
+</pre>
+<p>Si vous pr&eacute;f&eacute;rez utiliser jQuery, c&#x27;est tout &agrave; fait possible et vous trouverez l&#x27;&eacute;quivalent jQuery &agrave; la fin de cet &eacute;pisode.</p> 
+
+<h3>Ajout de liens pour supprimer des r&eacute;ponses</h3>
+
+<p>Commen&ccedil;ons par la partie la plus facile: remplacer les checkbox, utilis&eacute;s pour supprimer les questions et les r&eacute;ponses, par des liens. Tout d&#x27;abord, voyons le cas des r&eacute;ponses.</p>
+
+<p>Le code responsable de l&#x27;affichage de chaque r&eacute;ponse se trouve dans le partial appel&eacute; <code>answer_fields</code> et ressemble &agrave; ceci:</p>
+
+<p class="codeFilePath">/app/views/surveys/_answer_fields.html.erb</p>
+<pre class="ruby">
+&lt;p&gt;
+  &lt;%= f.label :content, &quot;Answer&quot; %&gt;
+
+  &lt;%= f.text_field :content %&gt;
+  &lt;%= f.check_box :_destroy %&gt;
+  &lt;%= f.label :_destroy, &quot;Remove&quot; %&gt;
+&lt;/p&gt;
+</pre>
+<p>Dans le code ci-dessus, se trouve le checkbox <code>_destroy</code>, que nous voulons cocher pour supprimer la r&eacute;ponse. On va le remplacer par un champ cach&eacute;, dont la valeur sera d&eacute;finie quand le lien &ldquo;remove&rdquo; sera cliqu&eacute;. De cette fa&ccedil;on, on pourra toujours indiquer quelle sera la r&eacute;ponse &agrave; supprimer.</p>
+
+<p>On va remplacer le label du code ci-dessus par un lien et utiliser <code>link_to_function</code> pour cr&eacute;er un lien qui d&eacute;clenchera un appel Javascript lorsqu&#x27;il sera cliqu&eacute;.  Avec le champ cach&eacute; et le lien, le code du partial devrait ressembler &agrave; ceci:</p>
+
+<p class="codeFilePath">/app/views/surveys/_answer_fields.html.erb</p>
+<pre class="ruby">
+&lt;p class=&quot;fields&quot;&gt;
+  &lt;%= f.label :content, &quot;Answer&quot; %&gt;
+
+  &lt;%= f.text_field :content %&gt;
+  &lt;%= f.hidden_field :_destroy %&gt;
+  &lt;%= link_to_function &quot;remove&quot;, &quot;remove_fields(this)&quot; %&gt;
+&lt;/p&gt;
+</pre>
+
+<p>Quand le lien &ldquo;remove&rdquo; &agrave; c&ocirc;t&eacute; d&#x27;une r&eacute;ponse est cliqu&eacute;, cela va d&eacute;clencher un appel &agrave; une fonction JavaScript, appel&eacute;e <code>remove_fields</code>, qui sera pass&eacute;e comme argument dans le lien, nous permettant ainsi d&#x27;utiliser comme &eacute;l&eacute;ment de reference pour retrouver les autres &eacute;l&eacute;ments relatifs &agrave; cette r&eacute;ponse. Il n&#x27;y a pas de moyen direct d&#x27;avoir acc&egrave;s &agrave; tous ces champs, si bien que l&#x27;on va ajouter un nom de class au paragraphe englobant tous ces &eacute;l&eacute;ments, de telle sorte qu&#x27;on puisse les retrouver plus facilement.</p>
+
+<p>Ensuite il nous faut &eacute;crire cette fonction <code>remove_fields</code>. On va le faire dans le fichier <code>application.js</code>, car c&#x27;est un fichier qui est automatiquement charg&eacute; dans nos pages, parce qu&#x27;on a sp&eacute;cifi&eacute; la propri&eacute;t&eacute; JavaScript <code>:defaults</code>.</p> 
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">
+function remove_fields(link) {
+	$(link).previous(&quot;input[type=hidden]&quot;).value = &quot;1&quot;;
+	$(link).up(&quot;.fields&quot;).hide();
+}
+</pre>
+<p>Cette fonction effectue deux actions. La premi&egrave;re utilise la fonction Prototype <a href="http://api.prototypejs.org/dom/element.html#previous-class_method"><code>previous</code></a> pour trouver le premier champ cach&eacute; relatif au lien qui l&#x27;a appel&eacute;, le champ _destroy, et lui assigne sa valeur &agrave; <code>1</code>, de telle sorte que la r&eacute;ponse sera marqu&eacute;e comme &eacute;tant &agrave; supprimer. Elle utilise ensuite <a href="http://api.prototypejs.org/dom/element.html#up-class_method"><code>up</code></a> pour remonter l&#x27;arbre du DOM &agrave; partir du lien, jusqu&#x27;&agrave; ce qu&#x27;elle retrouve un &eacute;l&eacute;ment de la classe  <code>fields</code>, qui est le nom de la classe que nous avons donn&eacute; au paragraphe, englobant les champs r&eacute;ponses, et qui le masque aussi lorsque la r&eacute;ponse est cach&eacute;e.</p>
+
+<p>Si maintenant on recharge la page enqu&ecirc;te, on verra appara&icirc;tre un lien en face de chaque r&eacute;ponse.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/301/original/E197I02.png" width="816" height="471" alt="Les checkbox &ldquo;remove&rdquo; ont &eacute;t&eacute; remplac&eacute; par des liens."/>
+</div>
+
+<p>Si on clique sur quelques liens, la valeur du champ cach&eacute; <code>_destroy</code> sera mise &agrave; <code>1</code> pour toutes ces r&eacute;ponses comme &eacute;tant &agrave; supprimer et leurs champs dans le formulaire seront cach&eacute;s.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/302/original/E197I03.png" width="816" height="471" alt="Les r&eacute;ponses sont cach&eacute;es quand on clique sur le lien &ldquo;remove&rdquo;."/>
+</div>
+
+<p>Notez bien que l&#x27;on n&#x27;utilise pas AJAX pour renvoyer les valeurs mises &agrave; jour du formulaire, lorsque l&#x27;on clique sur le lien et bien que l&#x27;on masque imm&eacute;diatement les r&eacute;ponses supprim&eacute;es, rien ne sera mis &agrave; jour dans la base de donn&eacute;es tant que le formulaire n&#x27;aura pas &eacute;t&eacute; envoy&eacute;. Lorsqu&#x27;on envoie le formulaire, les r&eacute;ponses seront supprim&eacute;es et on verra le r&eacute;sultat appara&icirc;tre sur la <code>show</code> de l&#x27;enqu&ecirc;te.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/303/original/E197I04.png" width="816" height="471" alt="Les réponses sont maintenant supprimées."/>
+</div>
+
+<h3>Suppression des Questions</h3>
+<p>A pr&eacute;sent que l&#x27;on peut supprimer des r&eacute;ponses via des liens, on va s&#x27;int&eacute;resser au cas des questions. La mani&egrave;re de supprimer une question est fondamentalement la m&ecirc;me que celle pour une r&eacute;ponse, on va pouvoir r&eacute;utiliser une partie du code que l&#x27;on avait &eacute;crit un peu plus t&ocirc;t.</p>
+<p>Comme on l&#x27;a fait pour les r&eacute;ponses, on va remplacer le checkbox et le label par un champ cach&eacute; et on va reprendre cette partie du code du partial <code>answer_fields</code> et on va le placer dans une nouvelle helper m&eacute;thode appel&eacute;e <code>link_to_remove_fields</code>,  en lui passant dans le lien, le texte qu&#x27;on veut lui voire appara&icirc;tre et la variable form <code>f</code>.</p>
+
+<p class="codeFilePath">/app/views/surveys/_answer_fields.html.erb</p>
+<pre class="ruby">
+&lt;p class=&quot;fields&quot;&gt;
+  &lt;%= f.label :content, &quot;Answer&quot; %&gt;
+  &lt;%= f.text_field :content %&gt;
+  &lt;%= link_to_remove_fields &quot;remove&quot;, f %&gt;
+
+&lt;/p&gt;
+</pre>
+<p>On va maintenant &eacute;crire cette m&eacute;thode dans le fichier <code>application_helper</code>.</p>
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+# Methods added to this helper will be available to all templates in the application.
+module ApplicationHelper
+  def link_to_remove_fields(name, f)
+    f.hidden_field(:_destroy) + link_to_function(name, &quot;remove_fields(this)&quot;)
+  end
+end
+</pre>
+
+<p>Les m&eacute;thodes qui cr&eacute;ent des champs de formulaire retournent des cha&icirc;nes de caract&egrave;res (strings), si bien que l&#x27;on peut concatenater le HTML g&eacute;n&eacute;r&eacute; par les m&eacute;thodes <code>f.hidden_field</code> et <code>link_to_function</code>et les retourner dans le partial.</p>
+<p>On pourra aussi utiliser notre m&eacute;thode dans le partial <code>question_fields</code>.</p>
+
+<p class="codeFilePath">/app/views/surveys/_question_fields.html.erb</p>
+<pre class="ruby">
+&lt;div class=&quot;fields&quot;&gt;
+  &lt;p&gt;
+    &lt;%= f.label :content, &quot;Question&quot; %&gt;
+    &lt;%= link_to_remove_fields &quot;remove&quot;, f%&gt;&lt;br /&gt;
+
+    &lt;%= f.text_area :content, :rows =&gt; 3 %&gt;&lt;br /&gt;
+  &lt;/p&gt;
+  &lt;% f.fields_for :answers do |builder| %&gt;
+    &lt;%= render &#x27;answer_fields&#x27;, :f =&gt; builder %&gt;
+
+  &lt;% end %&gt;
+&lt;/div&gt;
+</pre>
+<p>Comme notre fonction JavaScript <code>remove_fields</code> recherche un &eacute;l&eacute;ment de la classe <code>fields</code> lorsque l&#x27;on masque une question ou une r&eacute;ponse, on a englob&eacute; tout le partial dans un &eacute;l&eacute;ment <code>div</code> avec ce m&ecirc;me nom de classe, de telle sorte que lorsqu&#x27;on clique sur un lien &ldquo;remove&rdquo; pour une question, cette question sera masqu&eacute;e en m&ecirc;me temps que ses r&eacute;ponses.</p>
+
+<p>Si maintenant, on regarde la page <code>edit</code> d&#x27;une enqu&ecirc;te et que l&#x27;on clique sur le lien &ldquo;remove&rdquo; d&#x27;une question, celle-ci va &ecirc;tre supprim&eacute;e en m&ecirc;me temps que ses r&eacute;ponses qui l&#x27;accompagnent, et quand on envoie le formulaire, la question et toutes ses r&eacute;ponses seront supprim&eacute;es de l&#x27;enqu&ecirc;te.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/304/original/E197I05.png" width="815" height="423" alt="La question a &eacute;t&eacute; supprim&eacute;e avec ses r&eacute;ponses."/>
+</div>
+
+<h3>Ajout de Questions et R&eacute;ponses</h3>
+
+<p>Et maintenant, la partie la plus d&eacute;licate: ajouter de nouvelles questions and r&eacute;ponses. On veut des liens sur le formulaire qui cr&eacute;eront les nouveaux champs dynamiquement lorsqu&#x27;on cliquera dessus. Ce qui rend ceci difficile est que le JavaScript aura besoin d&#x27;avoir acc&egrave;s &agrave; un ensemble de champs vides pour que l&#x27;on puisse cr&eacute;er une nouvelle question ou r&eacute;ponse, lorsque le lien est cliqu&eacute;.</p>
+
+<p>Pour ce faire, on va &eacute;crire une nouvelle m&eacute;thode dans l&#x27;application helper, appel&eacute;e <code>link_to_add_fields</code>. On pourra utiliser cette m&eacute;thode d&egrave;s lors que l&#x27;on a besoin d&#x27;afficher un lien pour ajouter les champs d&#x27;une nouvelle question, ou r&eacute;ponse, sur le formulaire. Le code de cette m&eacute;thode ressemblera &agrave; ceci:</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+def link_to_add_fields(name, f, association)
+  new_object = f.object.class.reflect_on_association(association).klass.new
+  fields = f.fields_for(association, new_object, :child_index =&gt; &quot;new_#{association}&quot;) do |builder|
+    render(association.to_s.singularize + &quot;_fields&quot;, :f =&gt; builder)
+  end
+  link_to_function(name, h(&quot;add_fields(this, \&quot;#{association}\&quot;, \&quot;#{escape_javascript(fields)}\&quot;)&quot;))
+end
+
+</pre>
+<p>Cette m&eacute;thode prend trois arguments: <code>name</code>, qui sera le texte du lien, <code>f</code>, l&#x27;objet form builder et l&#x27;<code>association</code>, qui dans ce cas sera soit &ldquo;questions&rdquo; soit &ldquo;answers&rdquo;.</p>
+
+<p>La premi&egrave;re ligne de cette m&eacute;thode cr&eacute;e une nouvelle instance de la classe de cette nouvelle association, c-&agrave;-d une nouvelle <code>Question</code> ou <code>Answer</code>. Cela signifie que l&#x27;on a un objet template, qui va nous servir &agrave; cr&eacute;er les nouveaux champs du formulaire.</p>
+
+<p>La seconde partie du code construit une cha&icirc;ne avec les champs du formulaire de cet objet, de telle sorte que l&#x27;on peut les ins&eacute;rer dans la fonction javascript qui les ajoutera au formulaire quand le lien sera cliqu&eacute;. Ceci est possible en appelant le partial appropri&eacute;, pass&eacute; par le form builder f. La seule chose vraiment nouvelle ici est <code>:child_index</code>. On a fait cela pour avoir une r&eacute;f&eacute;rence de la nouvelle question ou r&eacute;ponse lors de la cr&eacute;ation des champs. Dans le code JavaScript, on va remplacer ce nom par un identifiant unique bas&eacute; sur l&#x27;heure courante. De cette fa&ccedil;on, chaque fois que l&#x27;on va cr&eacute;er une question ou r&eacute;ponse, on aura un index unique, qui nous permettra de l&#x27;identifier lorsqu&#x27;on enverra le formulaire.</p>
+
+<p>On va de nouveau utiliser la m&eacute;thode <code>link_to_function</code>, lui passant le nom du lien etun appel &agrave; la fonction JavaScript appel&eacute;e <code>add_fields</code>, &agrave; laquelle on lui passe le lien, le nom de l&#x27;association et une cha&icirc;ne contenant le texte &eacute;chapp&eacute; des champs du formulaire.</p>
+
+<p>Maintenant, revenons au JavaScript et &eacute;crivons la fonction <code>add_fields</code>.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">
+function add_fields(link, association, content) {
+  var new_id = new Date().getTime();
+  var regexp = new RegExp(&quot;new_&quot; + association, &quot;g&quot;);
+  $(link).up().insert({
+	before: content.replace(regexp, new_id)
+  });
+}
+</pre>
+<p>Cette fonction prend les 3 arguments, dont on a parl&eacute; un peu plus t&ocirc;t: le lien qui a &eacute;t&eacute; cliqu&eacute;, le nom de l&#x27;association et une cha&icirc;ne contenant le HTML des champs du formulaire. La premi&egrave;re chose que cette fonction fait est de cr&eacute;er un nouvel id pour les &eacute;l&eacute;ments du formulaire. Si on cr&eacute;e plusieurs nouvelles questions ou r&eacute;ponses, on ne veut pas qu&#x27;ils aient tous le m&ecirc;me index, sinon ils seraient consid&eacute;r&eacute;s comme appartenant au m&ecirc;me mod&egrave;le lors de l&#x27;insertion. On va utiliser l&#x27;heure courante pour rendre l&#x27;id unique dans une expression r&eacute;guli&egrave;re pour remplacer la cha&icirc;ne &ldquo;new_question&rdquo; ou &ldquo;new_answer&rdquo; des champs du formulaire par ce nouvel identifiant unique. Ceci &eacute;tant fait, on va ins&eacute;rer la  cha&icirc;ne des champs du formulaire &agrave; la bonne place dans le DOM.</p>
+
+<p>Ceci marque la fin de la partie la plus d&eacute;licate. Tout ce que l&#x27;on a &agrave; faire maintenant, c&#x27;est de rajouter les liens eux-m&ecirc;mes. Dans le partial <code>question_fields</code>, on va rajouter un lien <code>link_to_add_fields</code>, qui permet d&#x27;ajouter une nouvelle r&eacute;ponse, en lui passant comme param&egrave;tre  :answers comme de l&#x27;association ,car une question poss&egrave;de plusieurs r&eacute;ponses.</p>
+
+<p class="codeFilePath">/app/views/surveys/_question_fields.html.erb</p>
+<pre class="ruby">
+&lt;div class=&quot;fields&quot;&gt;
+
+  &lt;p&gt;
+    &lt;%= f.label :content, &quot;Question&quot; %&gt;
+    &lt;%= link_to_remove_fields &quot;remove&quot;, f %&gt;&lt;br /&gt;
+    &lt;%= f.text_area :content, :rows =&gt; 3 %&gt;&lt;br /&gt;
+
+  &lt;/p&gt;
+  &lt;% f.fields_for :answers do |builder| %&gt;
+    &lt;%= render &#x27;answer_fields&#x27;, :f =&gt; builder %&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;&lt;%= link_to_add_fields &quot;Add Answer&quot;, f, :answers %&gt;&lt;/p&gt;
+
+&lt;/div&gt;
+</pre>
+<p>On peut faire la m&ecirc;me chose dans le formulaire enqu&ecirc;te pour ajouter un lien &ldquo;Add Question&rdquo;.</p>
+
+<p class="codeFilePath">/app/views/surveys/_form.html.erb</p>
+<pre class="ruby">
+&lt;% form_for @survey do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;% f.fields_for :questions do |builder| %&gt;
+    &lt;%= render &#x27;question_fields&#x27;, :f =&gt; builder %&gt;
+
+  &lt;% end %&gt;
+  &lt;p&gt;&lt;%= link_to_add_fields &quot;Add Question&quot;, f, :questions %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+
+&lt;% end %&gt;
+</pre>
+<p>Si on recharge la page enqu&ecirc;te maintenant, on devrait voir les liens pour ajouter une nouvelle question ou r&eacute;ponse et lorsqu&#x27;on clique sur l&#x27;un d&#x27;eux, un nouveau champ va appara&icirc;tre sur le formulaire.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/305/original/E197I06.png" width="800" height="546" alt="A new blank field appears when we click the &ldquo;Add Answer&rdquo; link."/>
+</div>
+<p class="title">Un champ r&eacute;ponse appara&icirc;t sur le formulaire, lorqu&#x27;on clique sur le lien  &ldquo;Add Answer&rdquo;.</p>
+
+<p>Si on remplit le nouveau champ r&eacute;ponse ci-dessus avec &ldquo;jQuery&rdquo; et que l&#x27;on soumet le formulaire, la nouvelle r&eacute;ponse sera ajout&eacute;e.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/306/original/E197I07.png" width="801" height="375" alt="La nouvelle question a été ajoutée."/>
+</div>
+
+<p>Nous avons atteint notre but et maintenant nous avons un formulaire, sur lesquel on peut dynamiquement ajouter ou supprimer des champs et avoir la base de donn&eacute;es mise &agrave; jour de fa&ccedil;on appropri&eacute;e, lorsque le formulaire est envoy&eacute;.</p>
+
+<h3>Alternative utilisant jQuery</h3>
+
+<p>Le code JavaScript, que l&#x27;on a &eacute;crit dans cet &eacute;pisode fonctionne avec Prototype. Si vous pr&eacute;f&eacute;rez utilier jQuery, le code devrait ressembler &agrave; ceci:</p>
+<pre class="javascript">
+function remove_fields(link) {
+	$(link).prev(&quot;input[type=hidden]&quot;).val(&quot;1&quot;);
+	$(link).closest(&quot;.fields&quot;).hide();
+}
+
+function add_fields(link, association, content) {
+	var new_id = new Date().getTime();
+	var regexp = new RegExp(&quot;new_&quot; + association, &quot;g&quot;);
+	$(link).parent().before(content.replace(regexp, new_id));
+}
+
+</pre>
+<p>Ce code est tr&egrave;s semblable au code pour Prototype, que l&#x27;on a pu &eacute;crire.</p>
+
+<p>Certains d&#x27;entre vous seront peut-&ecirc;tre choqu&eacute;s que le JavaScript que nous avons &eacute;crit manque un peu de discr&eacute;tion. Bien qu&#x27;une solution discr&egrave;te soit toujours pr&eacute;f&eacute;rable, il n&#x27;y en a pas vraiment pour notre probl&egrave;me, qui soit suffisamment simple &agrave; pr&eacute;senter dans cet &eacute;pisode. Ryan Bates travaille actuellement sur un plugin appel&eacute; <a href="http://github.com/ryanb/nested_form">nested_form</a>, utilisant jQuery et qui permettra de g&eacute;rer des formulaires imbriqu&eacute;s de fa&ccedil;on discr&egrave;te. Ce plugin en est encore &agrave; un stade primitif, et s&#x27;il peut vous &ecirc;tre utile, pensez &agrave; venir le visiter de temps &agrave; autre et &agrave; suivre ses &eacute;volutions.</p>

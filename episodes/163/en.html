@@ -1,0 +1,194 @@
+<p>Below is a page from a basic social networking application. A user can sign up, then log in and interact with other users. The page shown displays a list of the users and has a link next to each one that allows you to add them as a friend.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/110/original/E163I01.png" width="808" height="452" alt="The users list page on our application."/>
+</div>
+
+<p>Although the link is there, it currently does nothing. In this episode we&rsquo;ll write the code needed to enable a user to add other users as friends. To do this we&rsquo;re going to need to create a self-referencing association: users will have relationships with other users, but instead of creating a relationship between two different models, we&rsquo;ll be creating a relationship between two instances of the same model.</p>
+
+<h3>Generating The Right Actions</h3>
+
+<p>The &ldquo;Add Friend&rdquo; link on the users page doesn&rsquo;t as yet link to anything.</p>
+<pre class="ruby">
+&lt;%= link_to &quot;Add Friend&quot; %&gt;
+</pre>
+<p>At some point we&rsquo;re going to have to wire it up to an action in a controller, and it&rsquo;s worth thinking a little now about what controller and action it will call when it&rsquo;s clicked. We already have a <code>UsersController</code>, so this might seem the obvious place to deal with friends as friends are just other users. We could add two new actions to the <code>UsersController</code> to deal with adding and removing friends.</p>
+<pre class="ruby">
+def add_friend
+    
+end
+  
+def remove_friend
+    
+end
+</pre>
+<p>This, however, is wrong for several reasons. The first alarm bell that should ring in your head when you start creating controller methods like these is that they are not among the seven standard RESTful methods (index, show, new, create, edit, update and destroy). Another concern should be raised by the fact that these methods both have <code>_friend</code> appended to them. This suggests that we&rsquo;re putting these methods in their own namespace. The final clue that this isn&rsquo;t the best approach is the first part of each method name: <code>add</code> and <code>remove</code> indicate that we&rsquo;re creating and destroying a resource. All of these points give us a big hint that we should be creating a new controller for handling friends.</p>
+
+<h3>Creating Friendships</h3>
+
+<p>The controller we&rsquo;ll create will be called <code>FriendshipsController</code>. The naming of this controller is important. We might have called it <code>FriendsController</code> but in our application a friend is just another <code>User</code>, and we&rsquo;ll be using our new controller to create and destroy relationships between users, not to create and destroy users.</p>
+
+<p>A user can have many friends and be befriended by many other users so we&rsquo;re going to have to create a many-to-many relationship. There are two ways to define this type of relationship in Rails: <code>has_and_belongs_to_many</code> and <code>has_many :through</code>. (You can find more information about these two methods by watching <a href="http://railscasts.com/episodes/47-two-many-to-many">Railscast 47</a>). These days, <code>has_many :through</code> is the most used, and it&rsquo;s what we&rsquo;ll be using to define our friendships.</p>
+
+<p>To use <code>has_many :through</code> we&rsquo;ll need to create a join model, which we&rsquo;ll call <code>Friendship</code>. This model will have two fields, a <code>user_id</code> that represents the current user who&rsquo;s adding a friend and a <code>friend_id</code> that represents the user who&rsquo;s being befriended.</p>
+
+<p>We&rsquo;ll create our new model in the usual way,</p>
+<pre class="terminal">
+script/generate model Friendship user_id:integer friend_id:integer
+</pre>
+<p>and then run the generated migration.</p>
+<pre class="terminal">
+rake db:migrate
+</pre>
+<p>Along with the model we&rsquo;ll need to generate the <code>FriendshipsController</code> we mentioned earlier.</p>
+<pre class="terminal">
+script/generate controller Friendships
+</pre>
+<p>As we&rsquo;re using <code>Friendship</code> as a resource we&rsquo;ll need to add the following line to <code>/config/routes.rb</code>.</p>
+<pre class="ruby">
+map.resources :friendships
+</pre>
+<p>Now that we have our model and controller we can start to define how a <code>Friendship</code> works. We&rsquo;ll start off by defining the relationships between <code>User</code> and <code>Friendship</code> in the model classes.</p>
+<pre class="ruby">
+class Friendship &lt; ActiveRecord::Base
+  belongs_to :user
+  belongs_to :friend, :class_name =&gt; &#x27;User&#x27;
+end
+</pre>
+<p>A <code>Friendship</code> will <code>belong_to</code> a <code>User</code>, who will be the user who initialised the relationship, and will also belong to a <code>Friend</code>, who is the user who has been befriended. For the <code>friend</code> relationship we need to explicitly specify the class name as ActiveRecord cannot work out the model to use from the name in the association.</p>
+
+<p>We&rsquo;ll also need to define the other half of the relationship in the <code>User</code> model.</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  
+  has_many :friendships
+  has_many :friends, :through =&gt; :friendships
+
+  # rest of class omitted. 
+end
+</pre>
+<p>The relationship here is defined as you would define any other many-to-many relationship. There&rsquo;s no need to specify any custom naming as the relationships can all be worked out from the names of the relationships.</p>
+
+<h3>Wiring Up The &ldquo;Add Friend&rdquo; Link</h3>
+
+<p>Now that the relationships between the models have been defined, and we have our <code>FriendshipsController</code> we can start work on the &ldquo;Add Friend&rdquo; link in the users&rsquo; <code>index</code> view.</p>
+<pre class="ruby">
+&lt;% for user in @users %&gt;
+  &lt;div class=&quot;user&quot;&gt;
+    &lt;p&gt;
+      &lt;strong&gt;&lt;%=h user.username %&gt;&lt;/strong&gt;
+      &lt;%= link_to &quot;Add Friend&quot;, friendships_path(:friend_id =&gt; user), :method =&gt; :post %&gt;
+      &lt;div class=&quot;clear&quot;&gt;&lt;/div&gt;
+    &lt;/p&gt;
+  &lt;/div&gt;
+&lt;% end %&gt;
+</pre>
+<p>The link needs to call the <code>create</code> method in the <code>FriendshipsController</code>. To do that we have the link POST to the <code>friendships_path</code>. That isn&rsquo;t quite enough though; we also need to pass the user that we&rsquo;re going to befriend. We do that by adding it as a parameter to the <code>friendships_path</code> method. That will pass the <code>id</code> of the user to the <code>create</code> action so that it knows which user we&rsquo;re befriending.</p>
+
+<p>Now that the link code is written we&rsquo;ll move on to the <code>FriendshipsController</code> and write the <code>create</code> action.</p>
+<pre class="ruby">
+def create
+  @friendship = current_user.friendships.build(:friend_id =&gt; params[:friend_id])
+  if @friendship.save
+    flash[:notice] = &quot;Added friend.&quot;
+    redirect_to root_url
+  else
+    flash[:notice] = &quot;Unable to add friend.&quot;
+    redirect_to root_url
+  end
+end
+</pre>
+<p>We create the new friendship by taking our current user and building a friendship through it, passing it the <code>id</code> of the user we&rsquo;re befriending. Using <code>build</code> will mean that the <code>user_id</code> of the new <code>Friendship</code> is automatically set, and as we&rsquo;ve passed the <code>friend_id</code> from the parameters the relationship is fully defined. We can then save the relationship and redirect back to the home page, displaying a <code>flash</code> notice that says that the friend has been added. If for some reason the relationship is invalid then we&rsquo;ll show a different <code>flash</code> notice. Obviously, if this was an application that was going into production then we&rsquo;d give the user more specific information as to why their request failed.</p>
+
+<h3>Viewing Our Friends</h3>
+
+<p>A logged-in user can now click the &ldquo;Add Friend&rdquo; link and make another user their friend. They can&rsquo;t, however, see a list of their friends. To fix this we&rsquo;ll modify the user&rsquo;s profile page so that they can see who they have added as a friend. The profile page is the <code>show</code> page for a <code>User</code>. Currently it just shows their name and provides a link that allows them to find friends.</p>
+<pre class="ruby">
+&lt;% title &quot;My Profile&quot; %&gt;
+&lt;p&gt;Username: &lt;%=h @user.username %&gt;&lt;/p&gt;
+&lt;p&gt;&lt;%= link_to &quot;Find Friends&quot;, users_path %&gt;&lt;/p&gt;
+</pre>
+<p>To display a list of their friends, we can loop through the user&rsquo;s <code>friends</code> collection and display each one.</p>
+<pre class="ruby">
+&lt;h2&gt;Your Friends&lt;/h2&gt;
+&lt;ul&gt;
+  &lt;% for user in @user.friends %&gt;
+  &lt;li&gt;&lt;%= h. user.username %&gt;&lt;/li&gt;
+  &lt;% end %&gt;  
+&lt;/ul&gt;
+</pre>
+<p>The profile page will now show the list of our friends.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/111/original/E163I02.png" width="808" height="452" alt="Our friends are now listed on our profile page."/>
+</div>
+
+<h3>Removing Friends</h3>
+
+<p>It would be useful if there was a link next to each of our listed friends that allowed us to remove that user as a friend. To implement that we need to add a link to the <code>FriendshipController</code>&rsquo;s <code>destroy</code> action, passing the <code>id</code> of the friendship. It&rsquo;s here where things could get a little tricky as we&rsquo;re looping through <code>User</code>s and don&rsquo;t have access to the <code>Friendship</code> model to get the <code>id</code> that identifies the relationship. This is a common problem that beginners to Rails encounter when they use many-to-many relationships as they can forget that there is a join model that we can interact with directly rather than, in this case jumping directly from <code>User</code> to <code>Friend</code>.</p>
+
+<p>Instead of looping through a user&rsquo;s friends to create the list, we&rsquo;ll instead loop through their friendships. The code in the view will now change to this:</p>
+<pre class="ruby">
+&lt;h2&gt;Your Friends&lt;/h2&gt;
+&lt;ul&gt;
+  &lt;% for friendship in @user.friendships %&gt;
+  &lt;li&gt;
+    &lt;%= h friendship.friend.username %&gt;
+    (&lt;%= link_to &quot;remove&quot;, friendship, :method =&gt; :delete %&gt;)
+  &lt;/li&gt;
+  &lt;% end %&gt;  
+&lt;/ul&gt;
+</pre>
+<p>We can now get each friend&rsquo;s name by using <code>friendship.friend.username</code> and create our delete link by passing the friendship as a parameter to the link and telling it to use DELETE as the method so that it will call the <code>destroy</code> action.</p>
+
+<p>Talking of the <code>destroy</code> action, it&rsquo;s now time to implement it in the <code>FriendshipsController</code>.</p>
+<pre class="ruby">
+def destroy
+  @friendship = current_user.friendships.find(params[:id])
+  @friendship.destroy
+  flash[:notice] = &quot;Removed friendship.&quot;
+  redirect_to current_user
+end
+</pre>
+<p>Note that in the first line of the action we search for the friendship only within the current user&rsquo;s friendships. If we just called <code>Friendship.find(params[:id])</code> then a maliciously minded user could destroy relationships between any two users, when they should be restricted to only destroying relationships they themselves have made. The rest of the action destroys the friendship and then redirects back to the user&rsquo;s profile page.</p>
+
+<p>The profile page will now show a link and we&rsquo;ll be able to remove a friendship with another user by clicking the link next to their name.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/112/original/E163I03.png" width="808" height="452" alt="Removing a friend from our list."/>
+</div>
+
+<h3>Inverse Relationships</h3>
+
+<p>When creating self-referential relationships it&rsquo;s important to remember that we&rsquo;re only creating one side of the relationship. Although <code>eifion</code> has <code>paul</code> listed as a friend above, if we were to visit <code>paul</code>&rsquo;s profile we wouldn&rsquo;t see <code>eifion</code> listed unless <code>paul</code> had chosen to add him. We need two <code>Friendship</code> records to create a mutual friendship.</p>
+
+<p>To finish this episode we&rsquo;ll add a list to the profile page so that a user can see who has them listed as a friend so that we can see the other side of this relationship. To do this we need to add two more relationships to the <code>User</code> model.</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  
+  has_many :friendships
+  has_many :friends, :through =&gt; :friendships
+  
+  has_many :inverse_friendships, :class_name =&gt; &quot;Friendship&quot;, :foreign_key =&gt; &quot;friend_id&quot;
+  has_many :inverse_friends, :through =&gt; :inverse_friendships, :source =&gt; :users
+
+  #rest of class omitted.
+end
+</pre>
+<p>It&rsquo;s difficult to think up appropriate names to define the other side of the relationship so we&rsquo;ll prefix both with the word &ldquo;inverse&rdquo; to give us <code>inverse_friendships</code> and <code>inverse_friends</code>. We need to specify some additional options to make the relationships work. For <code>inverse_friendships</code> we&rsquo;ll have to specify the name of the other model as it can&rsquo;t be inferred from the relationship name and we&rsquo;ll also have to define the foreign key as <code>friend_id</code>. For the <code>inverse_friends</code> relationship we need to specify the <code>source</code> as <code>users</code>, as again it cannot be inferred from the name of the relationship.</p>
+
+<p>Back in the profile page we want to show a list of the users who have befriended us. To do this we just need to loop through our <code>inverse_friends</code> and display their user names.</p>
+<pre class="ruby">
+&lt;h2&gt;Users Who Have Befriended You&lt;/h2&gt;
+&lt;ul&gt;
+  &lt;% for user in @user.inverse_friends %&gt;
+  &lt;li&gt;&lt;%= h user.username %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;
+</pre>
+<p>If we log in as <code>paul</code> and add <code>eifion</code> as one of his friends, then log back in as <code>eifion</code> we&rsquo;ll now see <code>paul</code> listed as having added <code>eifion</code> as a friend.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/113/original/E163I04.png" width="808" height="472" alt="We can now see who call us a friend."/>
+</div>
+
+<p>That&rsquo;s it for this episode. We haven&rsquo;t quite recreated Facebook, but hopefully you&rsquo;ve now got a good idea of how self-referential relationships work in Ruby on Rails.</p>

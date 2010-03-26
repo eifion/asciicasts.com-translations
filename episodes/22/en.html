@@ -1,0 +1,61 @@
+<p>A good place to start when you&rsquo;re trying to improve the performance of your Rails applications is to look at the database access. Reducing the number of queries made to the database can speed up your application significantly. One way to do this is to use a technique called eager loading.</p>
+<img src="/system/photos/19/original/E022I01.png" width="637" height="348"/>
+<p class="title">Our app has Task and Project models.</p>
+<p>The page above lists a large number of tasks, and the project that each one belongs to. In our <code>TaskController</code> we&rsquo;re getting all of the tasks and looping through them in the view.</p>
+<pre class="ruby">
+&lt;h1&gt;Tasks&lt;/h1&gt;
+&lt;ul&gt;
+&lt;% @tasks.each do |task| %&gt;
+  &lt;li&gt;&lt;%= link_to task.name, task %&gt; in &lt;%= task.project.name %&gt;&lt;/li&gt;
+&lt;% end %&gt;
+&lt;/ul&gt;The view code for the Tasks index page. 
+</pre>
+<p>The view page gets the name of the task and then the name of its project through an association. The problem with this approach is that a SQL query is generated each time we get the task&rsquo;s project name. You can see this by looking inside the development log.</p>
+
+<pre class="terminal">
+ Project Load (0.2ms)   SELECT * FROM &quot;projects&quot; WHERE (&quot;projects&quot;.&quot;id&quot; = 60) 
+ CACHE (0.0ms)   SELECT * FROM &quot;projects&quot; WHERE (&quot;projects&quot;.&quot;id&quot; = 60) 
+ CACHE (0.0ms)   SELECT * FROM &quot;projects&quot; WHERE (&quot;projects&quot;.&quot;id&quot; = 60) 
+ CACHE (0.0ms)   SELECT * FROM &quot;projects&quot; WHERE (&quot;projects&quot;.&quot;id&quot; = 60) 
+ CACHE (0.0ms)   SELECT * FROM &quot;projects&quot; WHERE (&quot;projects&quot;.&quot;id&quot; = 60)
+</pre>
+<p class="title">Our request makes repeated database calls.</p>
+<p>We can see from the development log that the same call is made again and again as we get the name for a task&rsquo;s project. Rails helps to reduce the number of calls by caching requests and retrieving repeated requests from the cache, rather than from the database. Caching was introduced in Rails 2.0; if we&rsquo;d made this request in a Rails 1.x app then every request for a task&rsquo;s project name would have caused a call to the database.</p>
+<p>Caching is useful, but eager loading reduce the calls to the database even further. We enable it by making a change in the TasksController.</p>
+<pre class="ruby">
+class TasksController &lt; ApplicationController
+  def index
+    @tasks = Task.find(:all, :include =&gt; :project)
+  end
+end
+</pre>
+<p>What we have done above is added a parameter to the line that fetches all of the tasks so that it gets the related projects too. The reason we use the singular <code>:project</code>, rather than <code>:projects</code> is that we use the name of the association, and in the <code>Task</code> model we have <code>belongs_to =&gt; :project</code>. Now, if we reload our index page and look in the development log we can see that the number of database requests is now reduced from 101 to two, which will improve the performance of our application.<p>
+  
+<h3>Including More Than One Association</h3>
+<p>As well as belonging to a <code>Project</code>, our <code>Task</code> model has another association with the <code>Comment</code> model.</p>
+<pre class="ruby">
+class Task &lt; ActiveRecord::Base
+  belongs_to :project
+  has_many :comments
+end
+</pre>
+<p>We can fetch the comments for a task along with its project by including both association names in an array. (Note that for comments we use the plural form as this is the name of the association.)</p>
+<pre class="ruby">
+class TasksController &lt; ApplicationController
+  def index
+    @tasks = Task.find(:all, :include =&gt; [:project, :comments])
+  end
+end
+</pre>
+<p>We can make use of even more complex associations. If our Comment model looks like this&hellip;</p>
+<pre class="ruby">
+class Comment &lt; ActiveRecord::Base
+  belongs_to :task
+  belongs_to :user
+end
+</pre>
+<p>&hellip;we can fetch the users for the comments by using a hash.</p>
+<pre class="ruby">
+@tasks = Task.find(:all, :include =&gt; [:project, {:comments =&gt; :user }])
+</pre>
+<p>Using eager loading provides a great way of reducing your Rails application&rsquo;s database access and can provide real. There is more information about them on the Rails API site at <a href="http://api.rubyonrails.org/classes/ActiveRecord/Associations/ClassMethods.html">http://api.rubyonrails.org/classes/ActiveRecord/Associations/ClassMethods.html</a>.</p>

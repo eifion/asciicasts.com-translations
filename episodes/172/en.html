@@ -1,0 +1,130 @@
+<p>Rails has recently been updated to version 2.3.3. This is a minor update and most of it consists of bug fixes, but there are a few new features too. One of these is called <code>touch</code>, and  in this episode we&rsquo;ll show you how to use it to improve your application&rsquo;s caching.</p>
+
+<p>If you haven&rsquo;t upgraded to version 2.3.3 yet you can run</p>
+<pre class="terminal">
+sudo gem update rails
+</pre>
+<p>from the command line to install the new version. Then in any applications you want to update, you can change the version number listed at the top of <code>/config/environment.rb</code>.</p>
+<pre class="rails">
+# Specifies gem version of Rails to use when vendor/rails is not present
+RAILS_GEM_VERSION = &#x27;2.3.3&#x27; unless defined? RAILS_GEM_VERSION
+</pre>
+<p>If you&rsquo;re upgrading an application make sure that it has a good test suite so that you can be sure that upgrading hasn&rsquo;t broken anything.</p>
+
+<p>Using touch With Fragment Caching</p>
+
+<p>The article page for a blog application is shown below. This page gets a lot of traffic so we want to improve its performance.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/151/original/E172I01.png" width="823" height="551" alt ="The articles page of our application."/>
+</div>
+
+<p>One way we could improve the response time is to add fragment caching to the page. This might not be the ideal solution, but it&rsquo;s a quick-and-dirty fix for the problem. Let&rsquo;s implement fragment caching on the page and see how we get on.</p>
+
+<p>Caching is disabled by default in development mode so first we&rsquo;ll have to turn it on. We do this in <code>/config/environments/default.rb</code>.</p>
+<pre class="ruby">
+config.action_controller.perform_caching = true
+</pre>
+<p>An alternative to this is would be set up a staging environment. If you need more information about how to do that it was covered back in <a href="http://railscasts.com/episodes/72-adding-an-environment">episode 72</a>. Setting up a staging environment removes the need to enable and disable caching in your development environment.</p>
+
+<p>The fragment caching will be added to the articles&rsquo; <code>show</code> view. The view code looks like this.</p>
+<pre class="ruby">
+&lt;% title @article.name %&gt;
+&lt;p class=&quot;author&quot;&gt;&lt;em&gt;from &lt;%=h @article.author_name %&gt;&lt;/em&gt;&lt;/p&gt;
+&lt;%= simple_format @article.content %&gt;
+&lt;p&gt;&lt;%= link_to &quot;Back to Articles&quot;, articles_path %&gt;&lt;/p&gt;
+&lt;% unless @article.comments.empty? %&gt;
+  &lt;h2&gt;&lt;%= pluralize(@article.comments.size, &#x27;comment&#x27;) %&gt;&lt;/h2&gt;
+  &lt;div id=&quot;comments&quot;&gt;
+  &lt;% for comment in @article.comments %&gt;
+    &lt;div id=&quot;comment&quot;&gt;
+      &lt;strong&gt;&lt;%= link_to_unless comment.site_url.blank?, h(comment.author_name), h(comment.site_url) %&gt;&lt;/strong&gt;
+      &lt;em&gt;on &lt;%= comment.created_at.strftime(&#x27;%b %d, %Y at %H:%M&#x27;) %&gt;&lt;/em&gt;
+      &lt;%= simple_format comment.content %&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+  &lt;/div&gt;
+&lt;% end %&gt;
+&lt;h3&gt;Add your comment:&lt;/h3&gt;
+&lt;%= render :partial =&gt; &#x27;comments/form&#x27; %&gt;
+</pre>
+<p>To add fragment caching we call <code>cache</code> and wrap the part of the page we want to cache in its block.</p>
+<pre class="ruby">
+&lt;% title @article.name %&gt;
+&lt;% cache @article do %&gt;
+  &lt;p class=&quot;author&quot;&gt;&lt;em&gt;from &lt;%=h @article.author_name %&gt;&lt;/em&gt;&lt;/p&gt;
+  &lt;!-- Rest of code omitted --&gt;
+&lt;% end %&gt;
+&lt;h3&gt;Add your comment:&lt;/h3&gt;
+&lt;%= render :partial =&gt; &#x27;comments/form&#x27; %&gt;
+</pre>
+<p>The <code>cache</code> method takes an optional argument and the argument&rsquo;s value is used as the key that the cache is stored under (by default the page&rsquo;s URL is used). If we pass a model, then its <code>cache_key</code> is used. This means that the item will be expired automatically when the article is updated. We can demonstrate this in the console.</p>
+<pre class="terminal">
+&gt;&gt; a = Article.first
+=&gt; #&lt;Article id: 1, name: &quot;The Piano, a Marvellous Instrument&quot;, content: &quot;The piano is a musical instrument played by means o...&quot;, author_name: &quot;Billy Belmer&quot;, created_at: &quot;2009-06-14 19:39:40&quot;, updated_at: &quot;2009-07-29 19:14:17&quot;&gt;
+&gt;&gt; a.cache_key
+=&gt; &quot;articles/1-20090729191417&quot;
+</pre>
+<p>The <code>cache_key</code> is a string made up of the name of the model, and its <code>id</code> and <code>updated_at</code> attributes. The last part of the key is very useful as it means that the key changes every time the model is updated. Therefore the item is expired from the cache when any of the model&rsquo;s attributes change.</p>
+
+<p>We can show the cache in action by refreshing our article&rsquo;s page twice and looking at the development log.</p>
+<pre class="terminal"> 
+  Processing ArticlesController#show (for 127.0.0.1 at 2009-07-30 20:22:30) [GET]
+    Parameters: {"id"=>"1"}
+    Article Load (0.2ms)   SELECT * FROM "articles" WHERE ("articles"."id" = 1) 
+  Rendering /Users/eifion/rails/apps_for_asciicasts/ep172/app/views/articles/show.html.erb
+  Cached fragment hit: views/articles/1-20090729225258 (0.0ms)
+    SQL (0.2ms)   SELECT count(*) AS count_all FROM "comments" WHERE ("comments".article_id = 1) 
+    CACHE (0.0ms)   SELECT count(*) AS count_all FROM "comments" WHERE ("comments".article_id = 1) 
+    Comment Load (0.3ms)   SELECT * FROM "comments" WHERE ("comments".article_id = 1) 
+  Cached fragment miss: views/articles/1-20090729225258 (0.0ms)
+
+  Processing ArticlesController#show (for 127.0.0.1 at 2009-07-30 20:22:45) [GET]
+    Parameters: {"id"=>"1"}
+    Article Load (0.2ms)   SELECT * FROM "articles" WHERE ("articles"."id" = 1) 
+  Rendering /Users/eifion/rails/apps_for_asciicasts/ep172/app/views/articles/show.html.erb
+  Cached fragment hit: views/articles/1-20090729225258 (0.0ms)
+</pre>
+<p>The first time the page reloaded there was a cached fragment miss as no item matching the key was found. The data was therefore pulled from the database and the cache item created. The second time the cached item is found so we have a cached fragment hit and there is no need to get the comments the database.</p> 
+
+<p>If we edit the article, say by changing the title, then the cache item will automatically be expired and the page will be updated. This is because a new <code>cache_key</code> is created when we update the article based on the its changed updated_at attribute.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/152/original/E172I02.png" width="841" height="471" alt ="The article page is updated when the article changes."/>
+</div>
+
+<h3>Using Touch</h3>
+
+<p>All the work we&rsquo;ve done so far would work in previous versions of Rails, so how does <code>touch</code> fit in? We&rsquo;ll begin by showing how <code>touch</code> works in the console.</p>
+
+<p>We&rsquo;ll get the first Article and find its updated_at attribute.</p>
+<pre class="terminal">
+&gt;&gt; a = Article.first
+=&gt; #&lt;Article id: 1, name: &quot;The Piano, a Beautiful Instrument.&quot;, content: &quot;The piano is a musical instrument played by means o...&quot;, author_name: &quot;Billy Belmer&quot;, created_at: &quot;2009-06-14 19:39:40&quot;, updated_at: &quot;2009-07-29 20:27:34&quot;&gt;
+&gt;&gt; a.updated_at
+=&gt; Wed, 29 Jul 2009 22:27:34 UTC +00:00
+</pre>
+<p>If we call <code>touch</code> on the article its <code>updated_at</code> attribute will be changed.</p>
+<pre class="terminal">
+&gt;&gt; a.touch
+=&gt; true
+&gt;&gt; a.updated_at
+=&gt; Wed, 29 Jul 2009 22:27:53 UTC +00:00
+</pre>
+<p>This is basically all <code>touch</code> does. When called on a model it changes its <code>updated_at</code> attribute to the current time. This doesn&rsquo;t seem like a particularly useful method to have, but it comes into its own when dealing with associations.</p>
+
+<p>In our application an <code>Article</code> can have many <code>Comments</code>. If we use the form on an article&rsquo;s page to add a comment to that article, the comment won&rsquo;t be shown as the part of the page that shows the comments is cached. The article&rsquo;s timestamp is not changed when a comment is added so the cache item won&rsquo;t be expired.</p>
+
+<p>All we have to do to ensure that the article is touched when a comment is added or changed is make a small change to the <code>Comment</code> model.</p>
+<pre class="ruby">
+class Comment &lt; ActiveRecord::Base
+  belongs_to :article, :touch =&gt; true
+end
+</pre>
+<p>Adding <code>:touch =&gt; true</code> to the <code>belongs_to</code> relationship means that when a comment is created, updated or destroyed the article it belongs to is <code>touch</code>ed. Now when we add a third comment the cache will be expired and the page updated to show the new comment.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/153/original/E172I03.png" width="812" height="655" alt ="The article page is updated when the article changes."/>
+</div>
+
+<p>This technique can be used outside of fragment caching. This works well, for example with Memcached. Memcached will automatically roll off the old caches as new ones are created. There is no need to use sweepers and to have to deal with the extra code that they require.</p>

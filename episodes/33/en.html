@@ -1,0 +1,148 @@
+<p>In the last episode we showed how to edit a datetime column with a text field, rather than with a series of dropdown menus. The date and time for a task were entered in a text field then parsed as a date and time before being stored in the database.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/171/original/E033I01.png" width="816" height="381" alt="Editing a time in a textfield."/>
+</div>
+
+<p>We did this by creating a virtual attribute in our <code>Task</code> model called <code>due_at_string</code>. This attribute has a getter method that displays the date in a format that is suitable for storing in the database and a setter method that parses the string to turn it back into a date.</p>
+<pre class="ruby">
+def due_at_string
+  due_at.to_s(:db)
+end
+  
+def due_at_string=(due_at_str)
+  self.due_at = Time.parse(due_at_str)
+rescue ArgumentError
+  @due_at_invalid = true
+end
+</pre>
+<p>This approach works if there&rsquo;s only one attribute we want to modify this way, but if there are several then we&rsquo;ll quickly have a lot of duplication in the model as we create getter and setter methods for each attribute.</p>
+
+<p>Instead of this we&rsquo;re going to create a class method in our model, which we&rsquo;ll call <code>stringify_time</code>. This method will dynamically generate getter and setter methods for any attribute we pass to it. As this is something we may well want to use in other applications we&rsquo;ll develop this as a plugin.</p>
+
+<h3>Creating a Plugin</h3>
+
+<p>To start we&rsquo;ll generate an empty plugin called <code>stringify_time</code>. To do this we run</p>
+<pre class="ruby">
+script/generate plugin stringify_time
+</pre>
+<p>from our application&rsquo;s directory. This will generate a number of files in a new <code>stringify_time</code> directory under <code>/vendor/plugins</code>.</p> 
+<div class="imageWrapper">
+  <img src="/system/photos/172/original/E033I02.png" width="250" height="273" alt="The files that are created when generating a plugin." style="margin: 4px; border: solid 1px #333;" />
+</div>
+
+<p>We&rsquo;ll look at the <code>init.rb</code> file first. This file is loaded when the plugin loads, so here we&rsquo;ll <code>require</code> the file in the lib directory where we&rsquo;ll develop the plugin&rsquo;s functionality.</p>
+
+<pre class="ruby">
+require &#x27;stringify_time&#x27;
+</pre>
+<p>The <code>stringify_time.rb</code> file is where we&rsquo;ll write the code that generates getter and setter methods similar to the <code>due_at_string</code> methods we used earlier. We&rsquo;ll start by defining a module with a <code>stringify_time</code> method.</p>
+<pre class="ruby">
+module StringifyTime
+  def stringify_time(*names)
+    
+  end
+end
+</pre>
+<p>The <code>stringify_time</code> method takes a list of names as a parameter. We&rsquo;ve used the &ldquo;splat&rdquo; mark to indicate that the method can take a number of arguments, each of which will be put into an array called <code>names</code>.</p>
+
+<p>The method will need to loop through the <code>names</code> array and create two methods for each name, a getter and a setter. Ruby makes this kind of metaprogramming easy; all we need to do to dynamically create a method in a class is to call <code>define_method</code>. The code to create the getter methods is:</p>
+<pre class="ruby">
+names.each do |name|
+
+  define_method &quot;#{name}_string&quot; do
+    read_attribute(name).to_s(:db)
+  end
+
+end
+</pre>
+<p>This code loops through each name in the array and uses <code>define_method</code> to dynamically create a method whose name is the passed name with <code>_string</code> appended to it, so if we pass <code>due_at</code> we&rsquo;ll get a new <code>due_at_string</code> method. <code>define_method</code> takes a block, the code within the block becoming the body of the method. The <code>due_at_string</code> method we created earlier took the value of the model&rsquo;s <code>due_at</code> attribute and returned it as a formatted string. We do the same here, but as our attribute is dynamic we have to use <code>read_attribute</code> to get the value.</p>
+
+<p>With the getter defined we can now write the setter method.</p>
+<pre class="ruby">
+define_method &quot;#{name}_string=&quot; do |time_str|
+  begin
+    write_attribute(name, Time.parse(time_str))
+  rescue ArgumentError
+    instance_variable_set(&quot;@#{name}_invalid&quot;, true)
+  end
+end
+</pre>
+<p>We use <code>define_method</code> again here. As we&rsquo;re creating a setter method the method name ends in an equals sign and, as it needs to take a parameter, we define that as a block variable.</p>
+
+<p>Our <code>due_at_string=</code> method parses the string passed to it and converts it to a <code>Time</code> value, then sets <code>due_at</code> to that value. If the value cannot be parsed, the exception is caught and a instance variable called <code>@due_at_invalid</code> is set to <code>true</code>. In our dynamic setter we use <code>write_attribute</code> to set the dynamic attribute instead and if that fails call <code>instance_variable_set</code> to set the corresponding instance variable.</p>
+
+<p>Putting the pieces above together, our <code>StringifyTime</code> module looks like this:</p>
+<pre class="ruby">
+module StringifyTime
+  def stringify_time(*names)
+    names.each do |name|
+      
+      define_method &quot;#{name}_string&quot; do
+        read_attribute(name).to_s(:db)
+      end
+      
+      define_method &quot;#{name}_string=&quot; do |time_str|
+        begin
+          write_attribute(name, Time.parse(time_str))
+        rescue ArgumentError
+          instance_variable_set(&quot;@#{name}_invalid&quot;, true)
+        end
+      end
+      
+    end
+  end
+end
+</pre>
+<p>There is one more change we&rsquo;ll have to make before our plugin will work. We&rsquo;ll be calling <code>stringify_time</code> in model classes that inherit from <code>ActiveRecord::Base</code>, so we&rsquo;ll have to extend ActiveRecord with our new module. Back in <code>init.rb</code> we can do that by adding</p>
+<pre class="ruby">
+class ActiveRecord::Base
+  extend StringifyTime
+end
+</pre>
+<p>Note that we&rsquo;re using <code>extend</code> rather than <code>include</code> as that makes the method in our module a class method rather than an instance method.</p>
+
+<p>Now that we&rsquo;ve defined our plugin we can use it in our <code>Task</code> model, replacing the getter and setter methods with a call to <code>stringify_time</code>.</p>
+<pre class="ruby">
+class Task &lt; ActiveRecord::Base
+  belongs_to :project
+  stringify_time :due_at
+  
+  def validate
+    errors.add(:due_at, &quot;is invalid&quot;) if @due_at_invalid
+  end
+  
+end
+</pre>
+<p>Before we refresh the edit task page to see if our plugin works we&rsquo;ll have to restart the web server. With that done we can refresh the page and see if it all works.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/173/original/E033I03.png" width="815" height="389" alt="The edit page now works with our plugin." />
+</div>
+
+<p>It seems to be OK. The task&rsquo;s time has been displayed correctly in the time field. Let&rsquo;s now try entering an invalid value and seeing if that is handled correctly.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/174/original/E033I04.png" width="815" height="435" alt="The validation is working too." />
+</div>
+<p>That works too, but the validation is only working because we&rsquo;re using the correct instance variable name from the plugin to detect whether the model is valid or not.</p>
+<pre class="ruby">
+def validate
+  errors.add(:due_at, &quot;is invalid&quot;) if @due_at_invalid
+end
+</pre>
+<p>It seems a little ugly to be relying on an instance variable generated by a plugin so instead we&rsquo;ll use a method.</p>
+<pre class="ruby">
+def validate
+  errors.add(:due_at, &quot;is invalid&quot;) if due_at_invalid?
+end
+</pre>
+<p>We&rsquo;ll have to generate one more dynamic method in <code>stringify_time.rb</code> to create this method. Immediately below the code that creates the dynamic getter and setter methods we can add this</p>
+<pre class="ruby">
+define_method &quot;#{name}_is_invalid?&quot; do
+  return instance_variable_get(&quot;@#{name}_invalid&quot;)
+end
+</pre>
+<p>to create the <code>_invalid?</code> method.</p>
+
+<p>And that&rsquo;s it. We have succesfully created our first Rails plugin. While it&rsquo;s a fairly basic one, the principle is the same no matter how complex a plugin you need to create.</p>

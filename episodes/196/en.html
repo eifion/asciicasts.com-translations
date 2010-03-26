@@ -1,0 +1,345 @@
+<p>Back in 2007 a <a href="http://railscasts.com/episodes/73-complex-forms-part-1">series of episodes</a> covered the creation of complex forms that could manage multiple models in a single form. That series is now rather out of date so beginning with this episode we&rsquo;ll show you the more modern techniques for handling forms with multiple models.</p>
+
+<p>One thing that makes a big difference in our approach to handling this problem is the <a href="http://api.rubyonrails.org/classes/ActiveRecord/NestedAttributes/ClassMethods.html"><code>accepts_nested_attributes_for</code> method</a> which was added in Rails 2.3. We&rsquo;ll be using it throughout this series so you&rsquo;ll need to be running the latest version of Rails to make use of this technique in your own applications.</p>
+
+<p>The <a href="http://api.rubyonrails.org/classes/ActiveRecord/NestedAttributes/ClassMethods.html">documentation</a> for <code>accepts_nested_attributes_for</code> is worth reading and shows how to use it with nested attributes in a single update call but it less clear on how we would get this working in the view itself, so we&rsquo;ll focus on this.</p>
+
+<h3>Our Survey Application</h3>
+
+<p>Let&rsquo;s first take a look at the application we want to build over the course of this series, which is an application for making surveys. The application will have a complex form for creating and editing surveys that lets us enter a survey&rsquo;s name along with a number of questions, each with multiple answers. The form will also have links to allow us to dynamically add and remove questions and answers from a survey.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/290/original/E196I01.png" width="815" height="598" alt="The complex form for creating and editing surveys." />
+</div>
+<p class="title">The complex form for creating and editing surveys.</p>
+
+<p>What we have here is a deeply-nested association in which a survey has many questions and a question many answers. In the previous series on complex forms it was not possible to have create deeply nested forms like this but with Rails 2.3 we can.</p>
+
+<h3>Getting Started</h3>
+
+<p>We&rsquo;re going to create our survey application from scratch, so we&rsquo;ll start by creating a new Rails application called <code>surveysays</code>.</p>
+<pre class="terminal">
+rails surveysays
+</pre>
+<p>To make writing the application easier we&rsquo;ll use two of <a href="http://github.com/ryanb/nifty-generators">Ryan Bates&rsquo; nifty generators</a>. We&rsquo;ll use the nifty layout generator first to create a layout for the application.</p>
+<pre class="terminal">
+script/generate nifty_layout
+</pre>
+<p>Our application will have three models: <code>Survey</code>, <code>Question</code> and <code>Answer</code>. We&rsquo;ll start with the <code>Survey</code> model and use the nifty scaffold generator to create a scaffold to go with it. <code>Survey</code> will have just one attribute called <code>name</code>.</p>
+<pre class="terminal">
+script/generate nifty_scaffold survey name:string
+</pre>
+<p>Next we&rsquo;ll run the migrations to create the surveys table in the database.</p>
+<pre class="terminal">
+rake db:migrate
+</pre>
+<p>If we look at the application now we&rsquo;ll have scaffold files to allow us to list, create and edit surveys and a basic survey form that we can build on.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/291/original/E196I02.png" width="800" height="343" alt="The scaffold-generated basic survey form."/>
+</div>
+
+<p>What we want on the form are fields that will allow us to add questions and answers when we create a new survey. The first step we&rsquo;ll take is to generate the <code>Question</code> model. This will have a <code>survey_id</code> field and a content field to hold the question&rsquo;s text.</p>
+<pre class="terminal">
+script/generate model question survey_id:integer content:text
+</pre>
+<p>Having done that we&rsquo;ll migrate the database again to create the <code>questions</code> table.</p>
+<pre class="terminal">
+rake db:migrate
+</pre>
+<p>Next we&rsquo;ll set up the relationship between <code>Survey</code> and <code>Question</code> in their model files.</p>
+<pre class="codeFilePath">
+/app/models/question.rb
+</pre>
+<pre class="ruby">
+class Question &lt; ActiveRecord::Base
+  belongs_to :survey
+end
+</pre>
+<pre class="codeFilePath">
+/app/models/survey.rb
+</pre>
+<pre class="ruby">
+class Survey &lt; ActiveRecord::Base
+  has_many :questions, :dependent =&gt; :destroy
+end
+</pre>
+<p>Note that in <code>Survey</code> we&rsquo;ve used <code>:dependent =&gt; :destroy</code> so that when we delete a survey all of its questions are deleted too.</p>
+
+<p>In the <code>Survey</code> model we&rsquo;re going to use <code>accepts_nested_attributes_for</code> so that we can manage questions through <code>Survey</code>. By using this we can create, update and destroy questions when we update a survey&rsquo;s attributes.</p>
+<pre class="codeFilePath">
+/app/models/survey.rb
+</pre>
+<pre class="ruby">
+  class Survey &lt; ActiveRecord::Base
+    has_many :questions, :dependent =&gt; :destroy
+    accepts_nested_attributes_for :questions
+  end
+</pre>
+<h3>Creating The Form</h3>
+
+<p>Having set up the <code>Survey</code> and <code>Question</code> models we&rsquo;ll move on to the survey form. What we want to do here is add fields for each of the survey&rsquo;s questions to the form. We can use the <code>fields_for</code> method to manage associated fields in a form, passing it the name of the associated model and then loop through all of the associated question records and create a form builder for each of them. The builder will render a label and textarea for each question.</p>
+<pre class="codeFilePath">
+/app/views/survey/_form.html.erb
+</pre>
+<pre class="ruby">
+&lt;% form_for @survey do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;% f.fields_for :questions do |builder| %&gt;
+  &lt;p&gt;
+    &lt;%= builder.label :content, &quot;Question&quot; %&gt;&lt;br /&gt;
+    &lt;%= builder.text_area :content, :rows =&gt; 3 %&gt;
+  &lt;/p&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p>When we reload the form now it will look like it did before. This is because a new survey won&rsquo;t have any questions associated with it and therefore none of the question fields will be shown. Ultimately we want to have an &ldquo;Add Question&rdquo; link on the form but for now we&rsquo;ll just create some questions in the <code>SurveyController</code>&rsquo;s new action.</p>
+<pre class="codeFilePath">
+/app/controllers/surveys_controller.rb
+</pre>
+<pre class="ruby">
+def new
+  @survey = Survey.new
+  3.times { @survey.questions.build }
+end
+</pre>
+<p>This will add three questions to a new survey that we&rsquo;ll see in the form when we reload the page. We can now fill in the name and the first two questions and submit a new survey.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/292/original/E196I03.png" width="800" height="570" alt="Filling in the new survey form."/>
+</div>
+
+<p>When we submit the survey a new <code>Survey</code> record will be created but we won&rsquo;t see its questions as we&rsquo;re not displaying them on the page. To fix this we can modify the <code>show</code> view for <code>Survey</code> to show a survey&rsquo;s questions.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/293/original/E196I04.png" width="800" height="320" alt="The questions aren't shown on the survey page."/>
+</div>
+<pre class="codeFilePath">
+/app/views/survey/show.html.erb
+</pre>
+<pre class="ruby">
+&lt;% title &quot;Survey&quot; %&gt;
+
+&lt;p&gt;
+  &lt;strong&gt;Name:&lt;/strong&gt;
+  &lt;%=h @survey.name %&gt;
+&lt;/p&gt;
+
+&lt;ol&gt;
+  &lt;% for question in @survey.questions %&gt;
+  &lt;li&gt;&lt;%= h question.content %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ol&gt;
+
+&lt;p&gt;
+  &lt;%= link_to &quot;Edit&quot;, edit_survey_path(@survey) %&gt; |
+  &lt;%= link_to &quot;Destroy&quot;, @survey, :confirm =&gt; &#x27;Are you sure?&#x27;, :method =&gt; :delete %&gt; |
+  &lt;%= link_to &quot;View All&quot;, surveys_path %&gt;
+&lt;/p&gt;
+</pre>
+<p>When we reload the survey&rsquo;s page we&rsquo;ll see the questions listed which shows that when we added the survey its questions were saved too.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/294/original/E196I05.png" width="800" height="338" alt="The questions are now shown."/>
+</div>
+
+<p>We can also edit a survey and if we change any of the questions they will be updated when we submit the form.</p>
+
+<p>On the page above we have three questions listed even though we only entered values for the first two. It would be better if blank questions were automatically removed. The <code>accepts_nested_attributes_for</code> method has a <code>reject_if</code> option that we can use to do this. The method accepts a <code>lambda</code> which has a hash of attributes passed to it and we can use that hash to reject a question if its <code>content</code> is blank.</p>
+<pre class="codeFilePath">
+/app/models/survey.rb
+</pre>
+<pre class="ruby">
+class Survey &lt; ActiveRecord::Base
+  has_many :questions, :dependent =&gt; :destroy
+  accepts_nested_attributes_for :questions, :reject_if =&gt; lambda { |a| a[:content].blank? }
+end
+</pre>
+<p>If we create a new survey now with only two of question fields filled in only two questions will be created and we won&rsquo;t see a blank question in the list.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/295/original/E196I06.png" width="800" height="363" alt="Blank questions are no longer shown."/>
+</div>
+
+<p>What if we want to delete existing questions when we&rsquo;re editing a survey? In the final application we want to use a link to delete questions but for now we&rsquo;re going to take the easier option and use a checkbox. In the survey form partial we&rsquo;ll add a checkbox and a label to go with it.</p>
+<pre class="codeFilePath">
+/app/views/survey/_form.html.erb
+</pre>
+<pre class="ruby">
+&lt;% form_for @survey do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;% f.fields_for :questions do |builder| %&gt;
+  &lt;p&gt;
+    &lt;%= builder.label :content, &quot;Question&quot; %&gt;&lt;br /&gt;
+    &lt;%= builder.text_area :content, :rows =&gt; 3 %&gt;
+    &lt;%= builder.check_box :_destroy %&gt;
+    &lt;%= builder.label :_destroy, &quot;Remove Question&quot; %&gt;
+  &lt;/p&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p>The trick here is the attribute name for the checkbox: <code>_destroy</code>. When this has a value of <code>true</code>, i.e. when the checkbox is checked, the record will be removed when the form is submitted.</p>
+
+<p>In order to make this work we need to enable it in <code>accepts_nested_attributes_for</code> in the <code>Survey</code> model by adding <code>:allow_destroy =&gt; true</code>.</p>
+<pre class="codeFilePath">
+/apps/models/survey.rb
+</pre>
+<pre class="ruby">
+class Survey &lt; ActiveRecord::Base
+  has_many :questions, :dependent =&gt; :destroy
+  accepts_nested_attributes_for :questions, :reject_if =&gt; lambda { |a| a[:content].blank? }, :allow_destroy =&gt; true
+end
+</pre>
+<p>When we reload the page now we&rsquo;ll have a &ldquo;Remove Question&rdquo; checkbox against each question.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/296/original/E196I07.png" width="815" height="529" alt="We now have checkboxes so that we can remove questions."/>
+</div>
+ 
+<p>And if we check the &ldquo;Remove Question&rdquo; checkbox against one of the questions and submit the form that question will be removed.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/297/original/E196I08.png" width="800" height="356" alt="The question has been succesfully removed."/>
+</div>
+
+<h3>Adding Answers</h3>
+
+<p>We now have the questions set up as we want them but not the answers. We&rsquo;ll start on that now by creating the <code>Answer</code> model and setting up the nesting. First we&rsquo;ll generate the model.</p>
+<pre class="terminal">
+script/generate model answer question_id:integer content:string
+</pre>
+<p>Then migrate the database again.</p>
+<pre class="terminal">
+rake db:migrate
+</pre>
+<p>Next we&rsquo;ll set up the relationship between <code>Answer</code> and <code>Question</code>. <code>Answer</code> will <code>belong_to</code> <code>Question</code>.</p>
+<pre class="codeFilePath">
+/app/models/answer.rb
+</pre>
+<pre class="ruby">
+class Answer &lt; ActiveRecord::Base
+  belongs_to :question
+end
+</pre>
+
+<p>For <code>Question</code> we&rsquo;ll need to use <code>accepts_nested_attributes_for</code> as we did in the <code>Survey</code> model.</p>
+<pre class="codeFilePath">
+/app/models/question.rb
+</pre>
+<pre class="ruby">
+class Question &lt; ActiveRecord::Base
+  belongs_to :survey
+  has_many :answers, :dependent =&gt; :destroy
+  accepts_nested_attributes_for :answers, :reject_if =&gt; lambda { |a| a[:content].blank? }, :allow_destroy =&gt; true
+end
+</pre>
+<p>In the form we&rsquo;ll need to add fields for answers but the form view code will become cluttered if we add another nested model to it. Later on we&rsquo;ll want to add questions on the form via a link with JavaScript so for both these reasons we&rsquo;ll move the form code that renders each question into a partial called <code>question_fields</code>.</p>
+
+<p>After doing this the form view will look like this.</p>
+<pre class="codeFilePath">
+/app/views/surveys/_form.html.erb
+</pre>
+<pre class="ruby">
+&lt;% form_for @survey do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;% f.fields_for :questions do |builder| %&gt;
+    &lt;%= render &#x27;question_fields&#x27;, :f =&gt; builder %&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p>Note that we&rsquo;re just passing the name of the partial as a string to render, making use of the new short form that was introduced in Rails 2.3. We also pass the <code>builder</code> to the partial with a name of <code>f</code>. In the new <code>question_fields</code> partial we can then use that <code>f</code> variable to render the form elements for a <code>Question</code>.</p>
+<pre class="codeFilePath">
+/app/views/surveys/_question_fields.html.erb
+</pre>
+<pre class="ruby">
+&lt;p&gt;
+  &lt;%= f.label :content, &quot;Question&quot; %&gt;&lt;br /&gt;
+  &lt;%= f.text_area :content, :rows =&gt; 3 %&gt;&lt;br /&gt;
+  &lt;%= f.check_box :_destroy %&gt;
+  &lt;%= f.label :_destroy, &quot;Remove Question&quot; %&gt;
+&lt;/p&gt;
+</pre>
+<p>We can handle the answer fields in a similar way and put them in their own partial file. In the <code>_question_fields</code> partial we&rsquo;ll loop through the answers for the question and render a new partial called <code>_answer_fields</code>.</p>
+<pre class="codeFilePath">
+/app/views/surveys/_question_fields.html.erb
+</pre>
+<pre class="ruby">
+&lt;p&gt;
+  &lt;%= f.label :content, &quot;Question&quot; %&gt;&lt;br /&gt;
+  &lt;%= f.text_area :content, :rows =&gt; 3 %&gt;&lt;br /&gt;
+  &lt;%= f.check_box :_destroy %&gt;
+  &lt;%= f.label :_destroy, &quot;Remove Question&quot; %&gt;
+&lt;/p&gt;
+&lt;% f.fields_for :answers do |builder| %&gt;
+  &lt;%= render &#x27;answer_fields&#x27;, :f =&gt; builder %&gt;
+&lt;% end %&gt;
+</pre>
+<p>In our new <code>_answer_fields</code> partial we&rsquo;ll put the code to render an <code>Answer</code>.</p>  
+<pre class="codeFilePath">
+/app/views/survey/_answer_fields.html.erb
+</pre>
+<pre class="ruby">
+&lt;p&gt;
+  &lt;%= f.label :content, &quot;Answer&quot; %&gt;
+  &lt;%= f.text_field :content %&gt;
+  &lt;%= f.check_box :_destroy %&gt;
+  &lt;%= f.label :_destroy, &quot;Remove&quot; %&gt;
+&lt;/p&gt;
+</pre>
+<p>So that we can see the answer fields on the form we&rsquo;ll modify the <code>SurveyController</code>&rsquo;s <code>new</code> action so that the three new questions that are created each create four answers.</p>
+<pre class="codeFilePath">
+/app/controllers/survey_controller.rb
+</pre>
+<pre class="ruby">
+def new
+  @survey = Survey.new
+  3.times do
+    question = @survey.questions.build
+    4.times { question.answers.build }
+  end
+end
+</pre>
+<p>Now, when we create a survey we have three questions each with four answers.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/298/original/E196I09.png" width="815" height="509" alt="Answer fields are now shown in the survey form."/>
+</div>
+
+<p>When we fill in the fields and submit the form the answers won&rsquo;t be shown but we can easily fix that. In the section of the <code>show</code> view for a survey that renders each question we&rsquo;ll add some code to render each question&rsquo;s answers.</p>
+<pre class="codeFilePath">
+/app/views/survey/show.html.erb
+</pre>
+<pre class="ruby">
+&lt;ol&gt;
+  &lt;% for question in @survey.questions %&gt;
+  &lt;li&gt;&lt;%= h question.content %&gt;&lt;/li&gt;
+  &lt;ul&gt;
+    &lt;% for answer in question.answers %&gt;
+      &lt;li&gt;&lt;%= h answer.content %&gt;&lt;/li&gt;
+    &lt;% end %&gt;
+  &lt;/ul&gt;
+  &lt;% end %&gt;
+&lt;/ol&gt;
+</pre>
+<p>If we reload the survey&rsquo;s page now it will show the questions and the answers.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/299/original/E196I10.png" width="815" height="509" alt="The answers are now displayed underneath their questions."/>
+</div>
+
+<p>We aren&rsquo;t quite done yet as we want to be able to add or remove questions or answers on the form dynamically via links. We&rsquo;ll cover this in the next episode.</p>

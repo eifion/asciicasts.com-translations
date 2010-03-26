@@ -1,0 +1,260 @@
+<p>Using OpenID authentication in Rails applications was covered in <a href="http://railscasts.com/episodes/68-openid-authentication">episode 68</a>. This episode will show you how to combine OpenID with Authlogic which is substantially different from using OpenID on its own. If you&rsquo;re new to Authlogic they you should <a href=" http://asciicasts.com/episodes/160-authlogic">read</a> or <a href="http://railscasts.com/episodes/160-authlogic">watch</a> episode 160 to see how it can be used to provide normal username and password authentication. In this episode we&rsquo;ll extend the application we created in episode 160 so that a user can also log in using OpenID.</p>
+
+<h3>Setting Up</h3>
+<p>To use OpenID with Authlogic we&rsquo;ll need the <a href="http://authlogic-oid.rubyforge.org">Authlogic OpenID</a> and <a href="http://rubyforge.org/projects/ruby-openid/">Ruby OpenID</a> gems
+and the <a href="http://github.com/rails/open_id_authentication/tree/master">OpenID Authentication plugin</a> in our application. The first thing we&rsquo;ll do is open our app&rsquo;s <code>/config/environment.rb</code> file and add references to both gems.</p>
+<pre class="ruby">
+config.gem &quot;authlogic-oid&quot;, :lib =&gt; &quot;authlogic_openid&quot;
+config.gem &quot;ruby-openid&quot;, :lib =&gt; &quot;openid&quot;
+</pre>
+<p>Then we&rsquo;ll run the command below to install the gems on our system.</p>
+<pre class="terminal">
+sudo gem install ruby-openid authlogic-oid
+</pre>
+<p>And then this command to install the OpenID Authentication plugin from Github.</p>
+<pre class="terminal">
+script/plugin install git://github.com/rails/open_id_authentication.git
+</pre>
+<p>The plugin comes with a rake task for generating a migration to create two database tables. We&rsquo;ll need to run this task to create the migration</p>
+<pre class="terminal">
+rake open_id_authentication:db:create
+</pre>
+<p>then migrate the database to create the new tables.</p>
+<pre class="terminal">
+rake db:migrate
+</pre>
+<h3>Updating Our Users Table</h3>
+<p>Our application has a <code>users</code> table which, as the name suggests, stores the user information. We&rsquo;ll need to add a new column to this table to store each user&rsquo;s OpenID URL so we&rsquo;ll generate a migration to do so.</p>
+<pre class="terminal">
+script/generate migration add_openid_identifier_to_users openid_identifier:string
+</pre>
+<p>The Authlogic OpenID gem expects the column to be called <code>openid_identifier</code>, so that&rsquo;s what we&rsquo;ll use. After generating the migration we&rsquo;ll run</p>
+<pre class="terminal">
+rake db:migrate
+</pre>
+<p>again to add the column to the table.</p>
+
+<h3>Adding OpenID Login To Our Forms</h3>
+
+<p>There are two places in our application where we&rsquo;ll want to add the ability to log in with OpenID: the login page and the registration page. We&rsquo;ll start with the registration form. The code currently looks like this:</p>
+<pre class="ruby">
+&lt;% form_for @user do |form| %&gt;
+&lt;%= form.error_messages %&gt;
+&lt;ol class=&quot;formList&quot;&gt;
+  &lt;li&gt;
+    &lt;%= form.label :username, &quot;Username&quot; %&gt;
+    &lt;%= form.text_field :username %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.label :email, &quot;Email&quot; %&gt;
+    &lt;%= form.text_field :email %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.label :password, &quot;Password&quot; %&gt;
+    &lt;%= form.password_field :password %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.label :password_confirmation, &quot;Password confirmation&quot; %&gt;
+    &lt;%= form.password_field :password_confirmation %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.submit &quot;Submit&quot; %&gt;
+  &lt;/li&gt;
+&lt;/ol&gt;
+&lt;% end %&gt;
+</pre>
+<p>To add OpenID functionality we&rsquo;ll add the following code just above the closing &lt;% end %&gt; in the form.</p>
+<pre class="ruby">
+&lt;h2&gt;Or use OpenID&lt;/h2&gt;
+&lt;ol class=&quot;formList&quot;&gt;
+  &lt;li&gt;
+    &lt;%= form.label :openid_identifier, &quot;OpenID URL &quot;%&gt;
+    &lt;%= form.text_field :openid_identifier %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.submit &quot;Submit&quot; %&gt;
+  &lt;/li&gt;
+&lt;/ol&gt;
+</pre>
+<p>We&rsquo;ll want the same functionality on the login page too, so can copy and paste the code into that form too.</p>
+<pre class="ruby">
+&lt;% form_for @user_session do |form| %&gt;
+&lt;%= form.error_messages %&gt;
+&lt;ol class=&quot;formList&quot;&gt;
+  &lt;li&gt;
+    &lt;%= form.label :username, &quot;Username&quot; %&gt;
+    &lt;%= form.text_field :username %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.label :password, &quot;Password&quot; %&gt;
+    &lt;%= form.password_field :password %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.submit &quot;Submit&quot; %&gt;
+  &lt;/li&gt;
+&lt;/ol&gt;
+&lt;h2&gt;Or use OpenID&lt;/h2&gt;
+&lt;ol class=&quot;formList&quot;&gt;
+  &lt;li&gt;
+    &lt;%= form.label :openid_identifier, &quot;OpenID URL &quot;%&gt;
+    &lt;%= form.text_field :openid_identifier %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.submit &quot;Submit&quot; %&gt;
+  &lt;/li&gt;
+&lt;/ol&gt;
+&lt;% end %&gt;
+</pre>
+<p class="title">The OpenID login added to user_sessions/new.html/erb.</p>
+
+<p>When user registers or logs in now they&rsquo;ll see two ways to do so.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/141/original/E170I01.png" width="812" height="559" alt="The registration form with the OpenID field added." />
+</div>
+
+<h3>Changes To The Controllers</h3>
+
+<p>Having made the changes to our forms we can begin to modify the controllers so that users can register or log in with their OpenID identifiers. When a user logs in the create action of the <code>UserSessionsController</code> is called.</p>
+<pre class="ruby">
+def create
+  @user_session = UserSession.new(params[:user_session])
+  if @user_session.save
+    flash[:notice] = &quot;Successfully logged in.&quot;
+    redirect_to root_url
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end
+</pre>
+<p>In order to make this method work with OpenID we&rsquo;re going to have to make a change to the part of the code that saves the <code>UserSession</code>. Instead of calling the <code>save</code> method and using an <code>if</code> condition to see if the login was sucessful we&rsquo;ll have to use a block.</p>
+<pre class="ruby">
+def create
+  @user_session = UserSession.new(params[:user_session])
+  @user_session.save do |result|
+    if result
+      flash[:notice] = &quot;Successfully logged in.&quot;
+      redirect_to root_url
+    else
+      render :action =&gt; &#x27;new&#x27;
+    end
+  end
+end
+</pre>
+<p>The reason we need to use the block is that Authlogic handles the saving in a &lsquo;magic&rsquo; way. The block won&rsquo;t be executed immediately; instead the user will be redirected to their OpenID provider where they will authenticate before being redirected back. Only then will the code in the block be run and if <code>result</code> is <code>true</code> then the user is redirected to the home page.</p>
+
+<p>We&rsquo;ll have to do the same thing in the <code>UsersController</code> so that users can register via OpenID. We&rsquo;ll modify the create method so that it too uses a block.</p>
+<pre class="ruby">
+def create
+  @user = User.new(params[:user])
+  @user.save do |result|
+    if result
+      flash[:notice] = &quot;Registration successful.&quot;
+      redirect_to root_url
+    else
+      render :action =&gt; &#x27;new&#x27;
+    end
+  end
+end
+</pre>
+<p>Then modify the update method in a similar way.</p>
+<pre class="ruby">
+def update
+  @user = current_user
+  @user.attributes = params[:user]
+  @user.save do |result|
+    if result
+      flash[:notice] = &quot;Successfully updated profile.&quot;
+      redirect_to root_url
+    else
+      render :action =&gt; &#x27;edit&#x27;
+    end
+  end
+end
+</pre>
+<p>As we can&rsquo;t use <code>update_attributes</code> with a block to update the user we&rsquo;ll set the attributes with <code>@user.attributes</code> before calling <code>save</code>.</p>
+
+<h3>Trying To Register</h3>
+
+<p>We&rsquo;ll try our new registration system out now. On the registration page we&rsquo;ll log in with our OpenID URL.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/142/original/E170I02.png" width="808" height="559" alt="Registering with OpenID." />
+</div>
+
+<p>When we click &ldquo;Submit&rdquo; we&rsquo;ll be redirected to our OpenID provider&rsquo;s page where we can authenticate ourselves.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/143/original/E170I03.png" width="808" height="559" alt="Authenticating at our OpenID provider&rsquo;s site." />
+</div>
+
+<p>Once we&rsquo;ve signed in on our OpenID provider&rsquo;s site we&rsquo;ll be redirected back to our site. Unfortunately we&rsquo;re not quite there yet though.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/144/original/E170I04.png" width="795" height="562" alt="Validation errors on the registration form." />
+</div>
+
+<p>Although the registration seems to have worked the registration page is showing validation errors as we didn&rsquo;t supply a username or password and these aren&rsquo;t being fetched by our OpenID provider. There are a couple of ways we can solve this problem. One would to make the form more clear and it indicate that the OpenID URL is an alternative to providing a password and that a user name and email address are still required. The other would be to try to retrieve a username and password from the OpenID provider so that we can register the new user without them having to provide any more details other than their OpenID. We&rsquo;ll take the latter approach so that if the OpenID provider doesn&rsquo;t return either field we can prompt the user to enter them.</p>
+
+<p>So, we want to configure Authlogic to request the OpenID email address and username from the provider as it authenticates the user. We can do this by passing a block to acts_as_authentic and calling methods on the block variable.</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  acts_as_authentic do |c|
+    c.openid_required_fields = [:nickname, :email]
+  end
+end
+</pre>
+<p>The method we need to call to return the fields we want is <code>open_id_required_fields</code>, which takes an array of the names of the fields. The username is known in OpenID terms as <code>nickname</code> and the email address is <code>email</code>.</p>
+
+<p>There&rsquo;s a little more we need to do. We&rsquo;re requesting the fields from OpenID but we&rsquo;re not mapping them to the attributes in our User model when the user is created. To do this in the <code>User</code> model we have to override a method that Authlogic provides, <code>map_openid_registration</code>.</p>
+<pre class="ruby">
+private
+def map_openid_registration(registration)
+  self.email = registration[&quot;email&quot;] if email.blank?
+  self.username = registration[&quot;nickname&quot;] if username.blank?
+end
+</pre>
+<p>The method takes a hash, which contains the OpenID registration details. We&rsquo;ll set the email address and username of our user from these details unless they&rsquo;ve been set in the form.</p>
+
+<p>It&rsquo;s worth noting here that some OpenID providers will not supply these details unless a user has explicitly allowed it. For example <a href="http://www.myopenid.com">MyOpenId</a> lets you define a persona and set the fields that you want to be sent back to the requesting website when you log in.</p>
+
+<p>Let&rsquo;s try registering again and see how well our form works now.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/145/original/E170I05.png" width="823" height="551" alt="The form shows a different validation error now." />
+</div>
+
+<p>We&rsquo;ve still not made it past the registration form, but we&rsquo;re geting a different error message. The username and email fields are filled in with the data from the registration hash, but we&rsquo;ve not successfully registered as the email address we&rsquo;re using is already registered with the site.</p>
+
+<p>The last change we&rsquo;ll make to the form is to hide the password fields when a user registers with OpenID. We can do this by modifying the registration form by wrapping the password fields, the first submit button and the &ldquo;Or user OpenID&rdquo; header in an if condition.</p>
+<pre class="ruby">
+&lt;% if @user.openid_identifier.blank? %&gt;
+  &lt;!-- password fields --&gt;
+&lt;% end %&gt;
+</pre>
+<p>When we login with OpenID now and there are validation errors, the user will see a neater form.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/146/original/E170I06.png" width="823" height="462" alt="The form now hides the unrequired password fields." />
+</div>
+
+<p>If we fix the error by changing the email address we can finally register successfully and now we&rsquo;ll be able to log in to the application with our OpenID address.</p>
+
+<h3>One Final Change</h3>
+
+<p>We&rsquo;ll make one last change to our site and add the OpenID logo to the OpenID field in the registration and login forms. We can easily do this by adding some CSS.</p>
+<pre class="terminal">
+input#user_openid_identifier, input#user_session_openid_identifier {
+  background: url(http://openid.net/images/login-bg.gif) no-repeat;
+  background-color: #FFF;
+  color: #000;
+  background-position: 0 50%;
+  padding-left: 18px;
+} 
+</pre>
+<p>The OpenID field will now be more easy to identify on the forms.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/147/original/E170I07.png" width="823" height="462" alt="The OpenID field now shows the OpenId logo." />
+</div>
+
+<p>That&rsquo;s it! Now we can let the users of our site login or register in two different ways.</p>

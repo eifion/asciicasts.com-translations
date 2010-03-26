@@ -1,0 +1,146 @@
+<p>In the last episode we used <a href="http://www.cukes.info">Cucumber</a>, a high-level testing framework, to write integration tests for a Rails application. Cucumber allows you to write integration tests in English, then write Ruby code to satisfy each of the English steps in your tests. You might, however, prefer to write integration tests directly in Ruby and if so there is an integration test library called Webrat that you can use to do this.</p>
+
+<h3>How Does Webrat Work?</h3>
+<p>Frameworks such as  <a href="http://seleniumhq.org/">Selenium</a> or <a href="http://wtr.rubyforge.org">Watir</a> are used to test web applications by simulating a user interacting with a web browser. You write test code to perform tasks such as filling in form fields and clicking links or buttons and then use assertions to ensure that the application is behaving as expected. When you run these tests a browser is opened and you can actually watch the tests taking place. Webrat differs from Selenium or Webrat in that it uses a library called <a href="http://github.com/tenderlove/nokogiri/tree/master">Nokogiri</a> to parse the (X)HTML response from a Rails application rather than an actual web browser. This has the advantage of making the tests browser-independent and quicker to run.</p>
+
+<h3>Getting Started</h3>
+
+<p>We&rsquo;ll start with a brand-new Rails application. Once we&rsquo;ve created it we&rsquo;ll need to configure the test environment to use Webrat. To do this we add this line to the <code>/config/environments/test.rb</code> file.</p>
+<pre class="ruby">
+config.gem &quot;webrat&quot;, :version =&gt; &quot;&gt;=0.4.4&quot;
+</pre>
+<p>Then we use rake to ensure that the gems we need are installed.</p>
+<pre class="ruby">
+sudo rake gems:install RAILS_ENV=test
+</pre>
+<p>Once Webrat is installed we&rsquo;ll need to configure it to work with Rails. Webrat works with several Ruby web frameworks and also with Selenium, so we&rsquo;ll have to tell it that it&rsquo;s going to be used in a Rails application. We&rsquo;ll be using Rails&rsquo; built-in integration testing framework, so the configuration goes in <code>/test/test_helper.rb</code>. We&rsquo;ll need to add the following code right at the end of the file.</p>
+<pre class="ruby">
+Webrat.configure do |config|
+  config.mode = :rails
+end
+</pre>
+
+<h3>Writing Our First Test</h3>
+<p>We&rsquo;re going to be taking a test-driven approach to our application so we&rsquo;ll start by writing our first integration test. The first part of the application that we&rsquo;re going to implement is the authentication system so we&rsquo;ll create an integration test called <code>authentication</code>.</p>
+<pre class="terminal">
+script/generate integration_test authentication
+</pre>
+<p>The generator will create a file called <code>authentication_test.rb</code> in the <code>test</code> directory. In that file we&rsquo;ll remove the reference to the fixtures, as we won&rsquo;t be using them, and replace the default test with our first test, which will define the steps required to make a successful login.</p>
+<pre class="ruby">
+require &#x27;test_helper&#x27;
+
+class AuthenticationTest &lt; ActionController::IntegrationTest
+  test &quot;logging in with valid username and password&quot; do
+    User.create!(:username =&gt; &quot;eifion&quot;, :password =&gt; &quot;secret&quot;)
+    visit login_url
+    fill_in &quot;Username&quot;, :with =&gt; &quot;eifion&quot;
+    fill_in &quot;Password&quot;, :with =&gt; &quot;secret&quot;
+    click_button &quot;Log in&quot;
+    assert_contain &quot;Logged in successfully.&quot;
+  end
+end
+</pre>
+<p>The test above creates a user with <code>username</code> and <code>password</code> fields then uses three Webrat methods to visit a page in our application, fill in two text fields and click a button. The test then checks that page contains the text &ldquo;Logged in successfully.&rdquo;.</p>
+
+<h3>Repeat Until Passing</h3>
+<p>With our first test written we&rsquo;ll run it and see what it tells us. Before we run the test we&rsquo;ll need to run <code>rake db:migrate</code> to create the schema file. We can then run the integration tests with</p>
+<pre class="terminal">
+rake test:integration
+</pre>
+<p>As expected the test fails.</p>
+<pre class="terminal">
+  1) Error:
+test_logging_in_with_valid_username_and_password(AuthenticationTest):
+NameError: uninitialized constant AuthenticationTest::User
+    /test/integration/authentication_test.rb:5:in `test_logging_in_with_valid_username_and_password&#x27;
+</pre>
+<p>The test fails because we&rsquo;re creating a <code>User</code> but we haven&rsquo;t yet created the <code>User</code> model. We&rsquo;ll do that and try again.</p>
+<pre class="terminal">
+script/generate model User username:string password:string
+</pre>
+<p>After we&rsquo;ve run <code>rake db:migrate</code> again we&rsquo;ll rerun the test. This time it fails because the <code>login_url</code> route doesn&rsquo;t exist.</p>
+<pre class="terminal">
+  1) Error:
+test_logging_in_with_valid_username_and_password(AuthenticationTest):
+NoMethodError: undefined method `login_url&#x27; for #&lt;ActionController::Integration::Session:0x221ca58&gt;
+    /test/integration/authentication_test.rb:6:in `test_logging_in_with_valid_username_and_password&#x27;
+</pre>
+<p>To fix this we&rsquo;ll need to create the login page and its define its routes. We&rsquo;ll create a <code>sessions</code> controller to handle the logins, and route <code>/login</code> to <code>/sessions/new</code>.</p>
+<pre class="terminal">
+script/generate controller sessions new
+</pre>
+<p>Then we&rsquo;ll add the route to <code>routes.rb</code>, along with the normal RESTful routes for the sessions controller. (The RESTful routes aren&rsquo;t strictly necessary right now but we&rsquo;ll need them shortly when we create the form to log in.)</p>
+<pre class="ruby">
+map.resources &#x27;sessions&#x27;
+map.login &#x27;login&#x27;, :controller =&gt; &#x27;sessions&#x27;, :action =&gt; &#x27;new&#x27;
+</pre>
+<p>That step now passes, but the first <code>fill_in</code> step fails. Webrat&rsquo;s <code>fill_in</code> method looks for a text field either by its name or by the text of its associated label and we haven&rsquo;t yet created the login form. Our tests look for two text fields with the labels &ldquo;Username&rdquo; and &ldquo;Password&rdquo; and a button with the text &ldquo;Log in&rdquo;, so we&rsquo;ll create a form in <code>/app/views/sessions/new.html.erb</code> that will satisfy the tests.</p>
+<pre class="ruby">
+&lt;% form_tag sessions_path do |form| %&gt;
+  &lt;ol class=&quot;formList&quot;&gt;
+    &lt;li&gt;
+      &lt;%= label_tag :username, &quot;Username&quot; %&gt;
+      &lt;%= text_field_tag :username %&gt;
+    &lt;/li&gt;
+    &lt;li&gt;
+      &lt;%= label_tag :password, &quot;Password&quot; %&gt;
+      &lt;%= text_field_tag :password %&gt;
+    &lt;/li&gt;
+    &lt;li&gt;
+      &lt;%= submit_tag &quot;Log in&quot; %&gt;
+    &lt;/li&gt;
+  &lt;/ol&gt;
+&lt;% end %&gt;
+</pre>
+<p>We run the test again and it now passes as far as the <code>assert_contains</code> line, which expects the page&rsquo;s content to contain &ldquo;Successfully logged in&rdquo;. This time, not only does the test fail, but the code throws an exception and in these cases a browser window will open and show the error that the application has thrown.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/78/original/E156I01.png" width="721" height="256" alt="The application&rsquo;s exception is shown in a browser window."/>
+</div>
+<p>We haven&rsquo;t written the <code>create</code> action yet; we&rsquo;ll do so with an eye on the next line of the test which says that there should be the text &ldquo;Logged in successfully.&rdquo; somewhere on the page. We also want to redirect after a successful login, so we&rsquo;ll have the application redirect to the home page. We don&rsquo;t yet have a default controller so we&rsquo;ll create a <code>home</code> controller with an <code>index</code> action then add a <code>map.root</code> line to <code>routes.rb</code> to define it as the root controller.</p>
+<pre class="ruby"> 
+map.root :controller =&gt; &#x27;home&#x27;
+</pre>
+<p>As we&rsquo;ve now defined a root controller we&rsquo;ll have to remember to remove the default home page in <code>/public/index.html</code>.</p>
+<p>Now that we have a default controller we can write the session controller&rsquo;s <code>create</code> action.</p>
+<pre class="ruby">
+def create
+  @user = User.create!(params[:user])
+  flash[:notice] = &quot;Logged in successfully.&quot;
+  redirect_to &#x27;/&#x27;
+end
+</pre>
+<p>Finally, to put the flash notice on the page we&rsquo;ll create an application layout file and display it there.</p>
+<pre class="ruby">
+&lt;%= content_tag :p, flash[:notice] unless flash[:notice].nil? %&gt;
+</pre>
+<p>We should have fulfilled all of the test&rsquo;s conditions now and when we run it the test is successful.</p>
+
+<h3>Another Test</h3>
+<p>Now that the test for a successful login passes we&rsquo;ll write another one to describe a failing login.</p>
+<pre class="ruby">
+test &quot;logging in with invalid username and password&quot; do
+  User.create!(:username =&gt; &quot;eifion&quot;, :email =&gt; &quot;eifion@example.com&quot;, :password =&gt; &quot;secret&quot;)
+  visit login_url
+  fill_in &quot;username&quot;, :with =&gt; &quot;eifion&quot;
+  fill_in &quot;password&quot;, :with =&gt; &quot;wrong&quot;
+  click_button &quot;Log in&quot;
+  assert_contain &quot;Username or password are incorrect.&quot;
+end
+</pre>
+<p>When we run this test it passes the first few steps, but then fails when asserting that the page contains &ldquo;Username or password are incorrect&rdquo;. We&rsquo;ll need to modify the session controller&rsquo;s <code>create</code> action to make the test pass.</p>
+<pre class="ruby">
+def create
+  @user = User.find_by_username_and_password(params[:username], params[:password])
+  if @user
+    flash[:notice] = &quot;Logged in successfully.&quot;
+    redirect_to &#x27;/&#x27;
+  else
+    flash[:notice] = &quot;Username or password are incorrect.&quot;
+    render :action =&gt; &#x27;new&#x27;
+  end
+end
+</pre>
+<p>Both integration tests now pass and so we&rsquo;re now at the stage where we&rsquo;d write our third test and repeat the cycle.</p>
+
+<h3>Webrat With Selenium</h3>
+<p>With a few changes Webrat tests can use Selenium so that they run in an actual web browser, rather than with Webrat&rsquo;s in-memory browser. For more details look at <a href="http://www.brynary.com/2009/4/6/switching-webrat-to-selenium-mode">Bryan Helkamp&rsquo;s blog</a>.</p>

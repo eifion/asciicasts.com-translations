@@ -1,0 +1,105 @@
+<p>Below is a page for a product in an e-commerce application. We&rsquo;d like to add an image of the product to this page and modify the admin system so that an image can be uploaded when a product is created or modified. In this episode we&rsquo;ll show you how to use a plugin called <a href="http://github.com/thoughtbot/paperclip/tree/master">Paperclip</a> to do this.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/75/original/E134I01.png" width="811" height="353" alt="The product page for our application."/>
+</div>
+<p>Paperclip makes adding attachments to a model simple. We&rsquo;re going to use it to add a field to our <code>Product</code> model so that each product can have an image.</p>
+
+<p>Paperclip is installed in the same way as any other plugin. From our application&rsquo;s directory we can install it from Github.</p>
+<pre class="terminal">
+script/plugin install git://github.com/thoughtbot/paperclip.git
+</pre>
+
+<h3>Updating The Model</h3>
+<p>Now that we have Paperclip installed we can run its generator to add an attachment field to the <code>Product</code> model.</p>
+<pre class="terminal">
+script/generate paperclip product photo
+</pre>
+<p>The generator takes two arguments. The first is the name of the model, in our case our <code>Product</code> model, and the second is the name of the model&rsquo;s new attachment field. The generator will create a migration that will add four new fields to the model.</p>
+<pre class="ruby">
+add_column :products, :photo_file_name, :string
+add_column :products, :photo_content_type, :string
+add_column :products, :photo_file_size, :integer
+add_column :products, :photo_updated_at, :datetime
+</pre>
+<p class="title">The four new fields added by the Paperclip generator.</p>
+<p>We&rsquo;ll then need to run <code>rake db:migrate</code> to update the products table in the database.</p>
+
+<p>The next step is to update the model code. We need to use <code>has_attached_file</code> to tell it the name of the attachment field we specified when we ran the migration.</p>
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+  has_attached_file :photo
+end
+</pre>
+<h3>Modifying The Views</h3>
+<p>The form that creates or updates a product will need a file upload field adding to it.</p>
+<pre class="ruby">
+&lt;% form_for @product, :html =&gt; { :multipart =&gt; true } do |form| %&gt;
+  &lt;ol class=&quot;formList&quot;&gt;
+    &lt;!-- Other fields go here... --&gt;
+    &lt;li&gt;
+      &lt;%= form.label :photo, &quot;Photo&quot; %&gt;
+      &lt;%= form.file_field :photo %&gt;
+    &lt;li&gt;
+      &lt;%= form.submit &quot;Submit&quot; %&gt;
+    &lt;/li&gt;
+  &lt;/ol&gt;
+&lt;% end %&gt;
+</pre>
+<p>As well as adding a <code>file_field</code> to the form we need to modify the <code>form_for</code> so that the form will accept file attachments. This is done by adding <code>:multipart =&gt; true</code> to the <code>:html</code> hash, which will add the attribute <code>enctype=&quot;multipart/form-data&quot;</code> to the form&rsquo;s opening tag.</p>
+
+<p>Of course there&rsquo;s no point uploading images if we don&rsquo;t then show them, so we&rsquo;ll need to make a change to the <code>show</code> view. To add the image we just need to add an <code>image_tag</code> to the page. Our <code>Product</code> model will now have a <code>photo</code> object as a property with a <code>url</code> method that will give us the correct path to the image.</p>
+<pre class="ruby">
+&lt;%= image_tag @product.photo.url %&gt;
+</pre>
+<p>That done we can edit a product, add an image to it and see the results.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/76/original/E134I02.png" width="785" height="591" alt="The product's page now shows an image."/>
+</div>
+<p>It&rsquo;s worked! Our product now has an image, but it&rsquo;s a bit too big. While we could make sure that we only upload pictures of the correct size, it would be easier if we could resize the images on the server and with Paperclip there&rsquo;s a way to do just that.</p>
+
+<h3>Resizing Images</h3>
+<p>The <code>has_attached_file</code> method that we added to our <code>Product</code> model takes a number of <a href="http://dev.thoughtbot.com/paperclip/classes/Paperclip/ClassMethods.html#M000008">options</a>. One of these is <code>styles</code> which allows us to define different sizes for our image. To create a thumbnail for each image we just need to define a style and specify the size.</p>
+<pre class="ruby">
+has_attached_file :photo, :styles =&gt; { :small =&gt; &quot;150x150&gt;&quot; }
+</pre>
+<p>With the new style added, Paperclip will now generate a thumbnail of each image that fits within 150x150 pixels. The greater than sign at the end tells Paperclip to keep the aspect ratio of the picture so that it isn&rsquo;t distorted when its resized. Note that to enable resizing you&rsquo;ll need to have <a href="http://www.imagemagick.org/script/index.php">ImageMagick</a> installed on your server.</p>
+
+<p>To display the resized image in the product&rsquo;s <code>show</code> view we&rsquo;ll have to change the <code>image_tag</code> so that the url points to the smaller version.</p>
+<pre class="ruby">
+&lt;%= image_tag @product.photo.url(:small) %&gt;
+</pre>
+<p>If we pass the style to the <code>url</code> method the appropriate image will be returned. The smaller image is only generated when an image is uploaded, so to resize our picture we&rsquo;ll have to edit our product and upload the file again. Once we&rsquo;ve done that our product&rsquo;s photo will now appear at the thumbnail size we specified.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/77/original/E134I03.png" width="808" height="492" alt="The product page now shows the image at the correct size."/>
+</div>
+
+<h3>Setting Paperclip&rsquo;s Path</h3>
+<p>By default Paperclip will store attachments in a <code>system</code> directory under our application&rsquo;s <code>public</code> directory.</p>
+<pre class="terminal">
+&lt;img alt=&quot;Phone_large&quot; src=&quot;/system/photos/1/small/phone_large.jpg?1238845838&quot; /&gt;
+</pre>
+<p>Paperclip creates its own hierarchy to store attachments, creating directories based on the the <code>id</code> of the product and <code>style</code> we set in the model. Most of the time the default directory is fine, but if we want to store the images elsewhere then we can change it.</p>
+<p>To store the images elsewhere we just add two more options to the has_attached_file method, url and path.</p>
+<pre class="ruby">
+has_attached_file :photo, :styles =&gt; { :small =&gt; &quot;150x150&gt;&quot; },
+  :url =&gt; &quot;/system/:attachment/:id/:style/:basename.:extension&quot;,
+  :path =&gt; &quot;:rails_root/public/system/:attachment/:id/:style/:basename.:extension&quot;
+</pre>
+<p>The url and path shown above are the defaults that Paperclip uses. The url is specified relative to the <code>public</code> directory and there are placeholders in the string for the name of the attachment field, the model&rsquo;s <code>id</code> and the style. There are similar placeholders in the string for the path. We want to store our images in an <code>assets</code> directory, so we&rsquo;ll change the url and the path to suit.</p>
+<pre class="ruby">
+has_attached_file :photo, :styles =&gt; { :small =&gt; &quot;150x150&gt;&quot; },
+  :url =&gt; &quot;/assets/products/:id/:style/:basename.:extension&quot;,
+  :path =&gt; &quot;:rails_root/public/assets/products/:id/:style/:basename.:extension&quot;
+</pre>
+<p>Any images we upload now will be stored in the assets directory rather than in system/photos.</p>
+
+<h3>Validating Attachments</h3>
+
+<p>One final useful part of Paperclip is that it can validate the attachments that are uploaded. To validate the photos that are uploaded we could add validators like these to our <code>Product</code> model:</p>
+<pre class="ruby">
+validates_attachment_presence :photo
+validates_attachment_size :photo, :less_than =&gt; 5.megabytes
+validates_attachment_content_type :photo, :content_type =&gt; [&#x27;image/jpeg&#x27;, &#x27;image/png&#x27;]
+</pre>
+<p>With the validators above we&rsquo;re checking that an attachment has been uploaded, that it is no bigger than five megabytes in size and that it is either a JPEG or PNG image. Using these we can validate an attachment as easily as any other form field. One thing to take care with if you&rsquo;re checking the content type is that Internet Explorer can report different MIME types from other browsers. For example it can treat JPEG files as <code>image/pjpeg</code> rather than <code>image/jpeg</code>.</p>

@@ -1,0 +1,107 @@
+<p>Polymorphic associations aren&rsquo;t a new feature of Rails, they&rsquo;ve been around since Rails 1.1, but they can be a little confusing for less experienced Rails developers to understand. In this episode we&rsquo;re going to give a simple demonstration of how to use them that will hopefully explain how they&rsquo;re used.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/71/original/E154I01.png" width="826" height="508" alt="The site we want to add comments to."/>
+</div>
+
+<p>Above is a page from a site that has three different models: articles, photos and events. We&rsquo;d like to enhance the site so that its users can add comments to an article, a photograph or an event. If we were just adding comments to one of the models, say articles we&rsquo;d create a <code>Comment</code> model and have a <code>has_many</code> / <code>belongs_to</code> relationship between <code>Article</code> and <code>Comment</code>. Without polymorphic associations we&rsquo;d have to create three different types of comment model so that each one could <code>belong_to</code> the appropriate model, which would create a lot of repetition in the code. Polymorphic associations allow us to create just one Comment model and have each comment know which other model it should be associated with.</p>
+
+<h3>Creating The Comment Model</h3>
+<p>The first thing to do is to create the <code>Comment</code> model. We&rsquo;ll create this in the normal way, but with one small difference. If we were just creating comments for an <code>Article</code> we&rsquo;d have an integer field called <code>article_id</code> in the model to store the foreign key, but in this case we&rsquo;re going to need something more abstract. All of the models we&rsquo;re adding comments to have one thing in common: they allow comments. Therefore we&rsquo;ll call the foreign key <code>commentable_id</code>. A comment will need to know which model it&rsquo;s associated with, so we&rsquo;ll need another field to store that, which we&rsquo;ll call <code>commentable_type</code>. This field will hold the class name of the model the comment is associated with.</p>
+<pre class="terminal">
+script/generate model Comment content:text commentable_id:integer commentable_type:string
+</pre>
+<p>Once we&rsquo;ve created the model and run the migration we&rsquo;ll need to associate our comment model with the article, photo and event models.</p>
+<pre class="ruby">class Comment &lt; ActiveRecord::Base
+  belongs_to :commentable, :polymorphic =&gt; true
+end</pre>
+<p>Instead of saying that a comment <code>belongs_to</code> another model, we make it belong to <code>commentable</code> and declare it as a polymorphic relationship. Now, any other model that <code>has_many commentable</code>s can have comments. In the <code>Article</code>, <code>Photo</code> and <code>Event</code> classes we define the relationship like this.</p>
+<pre class="ruby">
+has_many :comments, :as =&gt; :commentable
+</pre>
+<p>This tells the classes that they have many comments through the polymorphic commentable relationship.</p>
+
+<h3>Sorting Out Comments and Views</h3>
+<p>Now that the relationships are set up between our models we need to look at the controllers and views. We&rsquo;ll need a controller to go with our <code>Comment</code> model.</p>
+<pre class="terminal">script/generate controller Comments</pre>
+<p>We can mostly treat our comments model as we would any other relationship, for example to get an article&rsquo;s comments we can use <code>article.comments</code>.</p> 
+
+<h3>Getting The Right Comments</h3>
+<p>Difficulty can arise when we try to use nested resources, such as <code>/articles/1/comments</code> 
+to see all of the comments for an article. To get this to work we need to configure the <code>routes.rb</code> file so that the comments are seen as a nested resource for each of the other models.</p>
+<pre class="ruby">
+  map.resources :articles, :has_many =&gt; :comments
+  map.resources :photos, :has_many =&gt; :comments
+  map.resources :events, :has_many =&gt; :comments
+</pre>
+<p>If we go to URL that shows the comments for a given article (<code>/articles/1/comments</code>), the <code>index</code> action in the <code>CommentsController</code> will be executed, and here we find a problem.</p>
+<pre class="ruby">
+def index
+  @comments = Comment.all
+end
+</pre>
+<p>The same index action will be called whether we get the comments for an <code>Article</code>, a <code>Photo</code> or an <code>Event</code>. We need a way for the <code>index</code> action to know which comments to return. One way to do this is to loop through the parameters passed to the action to look one called <code><em>&lt;parent_resource&gt;</em>_id</code> which will enable us to know which of the <code>commentable</code> models we&rsquo;re dealing with. We can write a method to do this and add it to the <code>CommentsController</code>.</p>
+<pre class="ruby">
+def find_commentable
+  params.each do |name, value|
+    if name =~ /(.+)_id$/
+      return $1.classify.constantize.find(value)
+    end
+  end
+  nil
+end
+</pre>
+<p>The method above loops through each of the params and looks for one ending in <code>_id</code>. If we were looking for the first <code>Article</code>&rsquo;s comments then there should be a parameter called <code>article_id</code> with a value of <code>1</code>.</p>
+
+<p>If the method finds a matching parameter it calls <a href="http://rails.rubyonrails.org/classes/Inflector.html#M001636"><code>classify</code></a> on the part of the name before the <code>_id</code> to turn in it from a table name in to a model name (so <code>&ldquo;articles&rdquo;</code>; or <code>&ldquo;article&rdquo;</code> will become <code>&ldquo;Article&rdquo;</code>) and then calls <a href="http://rails.rubyonrails.org/classes/Inflector.html#M001638"><code>contantize</code></a> on that which tries to find a constant to match the name in the string returned by <code>classify</code>.  Finally <code>find</code> is called on that constant with the value of the matching key to return the <code>commentable</code> record whose comments we&rsquo;re looking for. In our example it will return the first <code>Article</code>.</p>
+<p>We can now use this method in the index action to get the appropriate comments.</p>
+<pre class="ruby">
+def index
+  @commentable = find_commentable
+  @comments = @commentable.comments
+end
+</pre>
+<h3>Adding a Comment</h3>
+<p>As well as listing the comments on the <code>index</code> page we want users to be able to add a new comment. Here&rsquo;s what the view code looks like.</p>
+<pre class="ruby">
+&lt;h1&gt;Comments&lt;/h1&gt;
+
+&lt;ul id=&quot;comments&quot;&gt;
+  &lt;% @comments.each do |comment| %&gt;
+    &lt;li&gt;&lt;%= comment.content %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;
+
+&lt;h2&gt;New Comment&lt;/h2&gt;
+&lt;% form_for [@commentable, Comment.new] do |form| %&gt;
+  &lt;ol class=&quot;formList&quot;&gt;
+    &lt;li&gt;
+      &lt;%= form.label :content %&gt;
+      &lt;%= form.text_area :content, :rows =&gt; 5 %&gt;
+    &lt;/li&gt;
+    &lt;li&gt;&lt;%= submit_tag &quot;Add comment&quot; %&gt;&lt;/li&gt;
+  &lt;/ol&gt;
+&lt;% end %&gt;
+</pre>
+<p>The first part of the view code renders the comments as an unordered list. Below that is the form for adding a comment. As the form is for a nested resource we pass an array to <code>form_for</code>; the first element in the array being the <code>commentable</code> object we returned from <code>find_commentable</code> and the second being a new <code>Comment</code>.</p>
+<p>When the form is submitted it will call the <code>create</code> action of the <code>CommentsController</code>.</p>
+<pre class="ruby">
+def create
+  @commentable = find_commentable
+  @comment = @commentable.comments.build(params[:comment])
+  if @comment.save
+    flash[:notice] = &quot;Successfully saved comment.&quot;
+    redirect_to :id =&gt; nil
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end
+</pre>
+<p>The first thing to note here is that we use <code>find_commentable</code> again to get the current commentable record, be it an <code>Article</code>,<code>Photo</code> or <code>Event</code>. Once we&rsquo;ve got it we use <code>build</code> to create the new <code>Comment</code>. Once we&rsquo;ve saved the model we have a problem knowing which <code>index</code> page to redirect back to as we don&rsquo;t know what resource the comment is nested under. We can take advantage of a small hack and redirect to an <code>id</code> of <code>nil</code>. That will redirect back to the current index action and show the right page.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/72/original/E154I02.png" width="808" height="396" alt="We can now add a comment to an article, a photo or an event."/>
+  <p class="title">Our comment form works and redirects back to the index action.</p>
+</div>
+<p>Our comment form now works. We&rsquo;ve added a comment and it has redirected back to the correct page. This will work too with comments for the <code>Photo</code> and <code>Event</code> models.</p>
+
+<h3>An Exercise For The Reader</h3>
+<p>The next thing we&rsquo;d have to do would be to apply what we&rsquo;ve done to the <code>index</code> and <code>create</code> actions to the other actions in the <code>CommentsController</code>. That will be left as an exercise for the reader.</p>

@@ -1,0 +1,173 @@
+<p>Over the last two episodes we&rsquo;ve written a small e-commerce application that uses PayPal&rsquo;s checkout process to handle orders. We haven&rsquo;t yet made any attempts to secure the data that is sent to PayPal; currently all of the details for each item the cart are sent in plain text via a hyperlink, including the price. This would make it easy for anyone to buy any of our products at any price they chose by simply altering the URL sent to PayPal.</p>
+<pre class="terminal">item_name_1=Black%20Leather%20Sofa&amp;upload=1&amp;amount_1=899</pre>
+<p class="title">The details for one of the items in the cart.</p>
+
+<h3>Encrypting Our Cart&rsquo;s Data</h3>
+
+<p>PayPal gives us with a method that will allow us to encrypt our cart data before it is sent. To use it we&rsquo;ll first have to create a private key and a public certificate, then upload our certificate to PayPal and download their public certificate. We can then use these to encrypt the cart&rsquo;s data.</p>
+
+<p>The key and certificates will live in a directory in our Rails app. We&rsquo;ll create a <code>certs</code> directory in our app, then generate the private key there.</p>
+<pre class="terminal">
+NooNoo:ep143 eifion$ mkdir certs
+NooNoo:ep143 eifion$ cd certs
+NooNoo:certs eifion$ openssl genrsa -out app_key.pem 1024
+Generating RSA private key, 1024 bit long modulus
+........................................................++++++
+.....................................................++++++
+e is 65537 (0x10001)
+NooNoo:certs eifion$ 
+</pre>
+<p class="title">Generating a private key.</p>
+
+<p>Our private key will be used to make a public certificate. We&rsquo;ll be asked a few simple questions along the way about our organisation. For more information about the parameters used by the <code>openssl</code> command <a href="http://openssl.org/">see their website</a>.</p>
+<pre class="terminal">
+NooNoo:certs eifion$ openssl req -new -key app_key.pem -x509 -days 365 -out app_cert.pem
+You are about to be asked to enter information that will be incorporated
+into your certificate request.
+What you are about to enter is what is called a Distinguished Name or a DN.
+There are quite a few fields but you can leave some blank
+For some fields there will be a default value,
+If you enter '.';, the field will be left blank.
+-----
+Country Name (2 letter code) [AU]:UK
+State or Province Name (full name) [Some-State]:Conwy
+Locality Name (eg, city) []:Glan Conwy
+Organization Name (eg, company) [Internet Widgits Pty Ltd]:ASCIIcasts
+Organizational Unit Name (eg, section) []:
+Common Name (eg, YOUR name) []:Eifion
+Email Address []:eifion@asciicasts.com
+NooNoo:certs eifion$</pre>
+<p class="title">Generating the public certificate.</p>
+
+<h3>Swapping Certificates With PayPal</h3>
+<p>There should now be a certificate file called <code>app_cert.pem</code> in our <code>certs</code> directory that we can upload to PayPal. To do that we&rsquo;ll log in to the PayPal sandbox with the seller account we created back in episode 141. Once logged in we can click the &lsquo;profile&rsquo; link under &lsquo;My Account&rsquo;, then on the Profile Summary page click the &lsquo;Encrypted Payment Settings&rsquo; link under the &lsquo;Selling Preferences&rsquo; tab. On this page are options for uploading and downloading certificates.</p>
+
+<p>Clicking the &lsquo;add&rsquo; button at the bottom of the &lsquo;Your Public Certificates&rsquo; part of the page will take us to another page where we can upload our certificate. We&rsquo;ll upload the <code>app_cert.pem</code> file we generated earlier (not the <code>app_key.pem</code> file which is our own private key). After the certifcate has been uploaded we should see our certificate listed. We&rsquo;ll make a note of the Cert ID that PayPal gives to the certificate as we&rsquo;ll need to use it in our code.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/38/original/E143I01.png" width="633" height="364" alt="Our uploaded certificate showing in our PayPal account."/>
+  <p class="title">Part of the PayPal page showing our uploaded certificate.</p>
+</div>
+<p>Having uploaded our certificate we&rsquo;ll now have to download PayPal&rsquo;s public certificate. There is a button on the same page that allows us to do this and which will give us a file called <code>paypal_cert_pem.txt</code>. We&rsquo;ll copy this file into our application&rsquo;s <code>certs</code> directory and rename it to <code>paypal_cert.pem</code>. We now have the three files needed to encrypt our cart data before it is sent to PayPal.</p>
+
+<h3>Updating Our Checkout Link</h3>
+<p>Currently, our checkout link is just a hyperlink. We could keep it as a link to send our encrypted data but the URL could easily become very long so instead we&rsquo;re going to use a form with a submit button and POST the data instead. The checkout link code at the bottom of the cart&rsquo;s view page will be replaced with the code below.</p>
+<pre class="ruby">
+&lt;% form_tag &quot;https://www.sandbox.paypal.com/cgi-bin/webscr&quot; do %&gt;
+  &lt;%= hidden_field_tag :cmd, &quot;_s-xclick&quot; %&gt;
+  &lt;%= hidden_field_tag :encrypted, @cart.paypal_encrypted(products_url, payment_notifications_url) %&gt;
+    &lt;p&gt;&lt;%= submit_tag &quot;Checkout&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p class="title">The form that replaces the checkout link</p>
+
+<p>The form POSTs to the same PayPal page as the link did and the parameters are passed in two hidden fields. The first, <code>cmd</code>, has the value <code>_s-xclick</code>, which tells PayPal to expect encrypted data. The second, <code>encrypted</code>, will contain the encrypted cart data. This data will come from our cart model. We will reuse the <code>paypal_url</code> method, renamed to <code>paypal_encrypted</code> to provide the parameters for the form.</p> 
+<pre class="ruby">
+def paypal_encrypted(return_url, notify_url)
+    values = {
+      :business =&gt; 'seller_1234111143_biz@asciicasts.com',
+      :cmd =&gt; &rsquo;_cart&rsquo;,
+      :upload =&gt; 1,
+      :return =&gt; return_url,
+      :invoice =&gt; id,
+      :notify_url =&gt; notify_url,
+      :cert_id =&gt; &quot;DSGGUT3F4TTSW&quot;
+    }
+
+    line_items.each_with_index do |item, index|
+      values.merge!({
+        &quot;amount_#{index + 1}&quot; =&gt; item.unit_price,
+        &quot;item_name_#{index + 1}&quot; =&gt; item.product.name,
+        &quot;item_number_#{index + 1}&quot; =&gt; item.product.identifier,
+        &quot;quantity_#{index + 1}&quot; =&gt; item.quantity
+      })
+    end
+    encrypt_for_paypal(values)
+  end
+</pre>
+<p class="title">The <code>paypal_encrypted</code> method in the Cart model.</p>
+<p>The method has had two changes made from the original one that generated the URL. We&rsquo;ve added a <code>cert_id</code> item to the values hash that takes the Cert Id value we were given by PayPal when we added our certificate and, instead of returning the values hash as a query string we&rsquo;re calling a new method called <code>encrypt_for_paypal</code> that will return the encrypted values.</p>
+<p>The <code>encrypt_for_paypal</code> method is fairly complex. Above it we define three constants to hold the contents of both public certificates and our private key. The method itself contains two long and rather ugly lines that read the values hash and encode it using OpenSSL.</p>
+<pre class="ruby">
+PAYPAL_CERT_PEM = File.read(&quot;#{Rails.root}/certs/paypal_cert.pem&quot;)
+APP_CERT_PEM = File.read(&quot;#{Rails.root}/certs/app_cert.pem&quot;)
+APP_KEY_PEM = File.read(&quot;#{Rails.root}/certs/app_key.pem&quot;)
+def encrypt_for_paypal(values)
+    signed = OpenSSL::PKCS7::sign(OpenSSL::X509::Certificate.new(APP_CERT_PEM),	OpenSSL::PKey::RSA.new(APP_KEY_PEM, ''), values.map { |k, v| &quot;#{k}=#{v}&quot; }.join(&quot;\n&quot;), [], OpenSSL::PKCS7::BINARY)
+    OpenSSL::PKCS7::encrypt([OpenSSL::X509::Certificate.new(PAYPAL_CERT_PEM)], signed.to_der, OpenSSL::Cipher::Cipher::new(&quot;DES3&quot;),	OpenSSL::PKCS7::BINARY).to_s.gsub(&quot;\n&quot;, &quot;&quot;)
+end
+</pre>
+<p class="title">Encrypting The Data</p>
+
+<p>If we reload our cart page and view the source we&rsquo;ll see the encrypted cart details in the <code>encrypted</code> hidden field in the cart&rsquo;s form. As the cart items details are no longer stored in plain text this makes it impossible for the prices of the items to be changed. Clicking the &lsquo;checkout&rsquo; button will take us to the PayPal site where we can see our items.</p>
+<div class="imageWrapper">
+<img src="/system/photos/39/original/E143I02.png" width="808" height="564" alt="Our encrypted data has been successfully decrypted by PayPal."/>
+</div>
+<h3>A Further Security Measure</h3>
+<p>Now that we&rsquo;re using encryption it&rsquo;s a good idea to block unencrypted requests. To do this we&rsquo;ll go back to the profile section of our seller&rsquo;s PayPal account and click the &lsquo;Website Payment Preferences&rsquo; link. On that page is a section that will allow us to refuse all unencrypted requests.</p>
+<div class="imageWrapper">
+<img src="/system/photos/40/original/E143I03.png" width="873" height="410" alt="Turning off unencrypted payments."/>
+</div>
+<h3>One More Thing</h3>
+<p>Our application is not entirely secure yet as there&rsquo;s still one area where we interact with PayPal. Instant Payment Notification makes a call back to our site as the transaction is processed. This call can be spoofed, which could lead to our site believing that a cart had been purchased when it actually had not.</p>
+<p>There are two ways around this problem. The first is to create a &lsquo;post back&rsquo;. When we receive our notification we can send a request back to PayPal for a confirmation that the request actually came from them. The other option is to create a shared secret. For this we append a variable to the notification URL and then check that that variable holds the same value when the notification is made. This method is only useful if the values are encrypted which for our site is now the case, so we&rsquo;ll do this. In the cart&rsquo;s view we&rsquo;ll add a parameter to the <code>payment_notifications_url</code>.</p> 
+<pre class="ruby">
+ &lt;%= hidden_field_tag :encrypted, @cart.paypal_encrypted(products_url, payment_notifications_url(:secret =&gt; &rsquo;foobar&rsquo;)) %&gt;
+</pre> 
+<p class="title">Adding a parameter to the payment notification URL.</p>
+<p>In the <code>PaymentNotification</code> model we&rsquo;ll check that parameter and only mark the cart as purchased if it matches the value we passed it.</p>
+<pre class="ruby">
+def mark_cart_as_purchased
+  if status == &quot;Completed&quot; &amp;&amp; params[:secret] == &quot;foobar&quot;
+    cart.update_attributes(:purchased_at =&gt; Time.now)
+  end
+end
+</pre>
+<p class="title">Checking for the extra parameter sent back by PayPal.</p>
+<p>We could go further and mark the cart as fraudulent and send emails out to the site administrators if the shared secret is missing or incorrect. To be really sure that the transaction is correct we can check more of the parameters that are sent back, for example that the seller email is correct and that the total price matches the price of the items in the cart. We could, if we wanted to, check absolutely every parameter that PayPal sends back to us, but we&rsquo;re going to leave it as it is for this application.</p>
+<pre class="ruby">
+def mark_cart_as_purchased
+  if status == &quot;Completed&quot; &amp;&amp; params[:secret] == &quot;foorbar&quot; &amp;&amp;
+    params[:receiver_email] == &quot;eifion_1234609007_biz@asciicasts.com&quot; &amp;&amp;
+    params[:mc_gross] == cart.total_price.to_s &amp;&amp; params[:mc_currency] ==   &quot;GBP&quot;
+      cart.update_attributes(:purchased_at =&gt; Time.now)
+  end  
+end
+</pre>
+<p class="title">Making further checks to ensure that our transaction is genuine.</p>
+
+<h3>Some Final Tidying Up</h3>
+<p>Our application now sends encrypted data, but there are several hard-coded strings littered around the code that are specific to the development environment. It would be good if we could move these out into a configuration file so that they can be easily changed when our application goes into production. We&rsquo;ll need to create two new files to do this. The first will live in the <code>/config/initializers</code> folder. This is a special folder that was introduced with Rails 2.0 and all of the files in it will be run when our application starts up. The file is below and is called <code>load_app_config.rb</code>.</p>
+<pre class="ruby">
+raw_config = File.read(RAILS_ROOT + &quot;/config/app_config.yml&quot;)
+APP_CONFIG = YAML.load(raw_config)[RAILS_ENV].symbolize_keys
+</pre>
+<p>This file reads the contents of a file called <code>app_config.yml</code> in the <code>/config</code> directory and searches in it for a key named after the current environment (development, test or production). The config file can now contain all of the variables that differ across environments.</p>
+<pre class="ruby">
+development:
+    paypal_email: eifion_1234609007_biz@asciicasts.com
+    paypal_secret: foobar
+    paypal_cert_id: DSGGUT3F4TTSW
+    paypal_url: https://www.sandbox.paypal.com/cgi-bin/webscr
+
+test:
+    paypal_email: test@example.com
+    paypal_secret: testsecret
+    paypal_cert_id: X123456789
+    paypal_url: testpaypalurl
+
+production:
+    paypal_email: seller@example.com
+    paypal_secret: reallysecretpassword
+    paypal_cert_id: EDRFGH909CERT
+    paypal_url: https://www.paypal.com/cgi-bin/webscr
+</pre>
+<p class="title">The configuration file with the variables for each environment.</p>
+<p>We can now replace each hard-coded value with the appropriate key from the config file and the appropriate value will be read for the current environment. For example in the <code>PaymentNotification</code> model we  can replace</p>
+<pre class="ruby">params[:receiver_email] == &quot;eifion_1234609007_biz@asciicasts.com&quot;</pre>
+<p>with</p>
+<pre class="ruby">params[:receiver_email] = APP_CONFIG[:paypal_email]</pre>
+<p>We won&rsquo;t show the replacement of all of the other variables here, but each replacement follows the same form, replacing the hard-coded value with the appropriate key from the <code>APP_CONFIG</code> hash.</p>
+
+<h3>We&rsquo;re Done!</h3>
+<p>The changes we&rsquo;ve made to our application have made it much more secure against attempts to make fraudulent purchases. We have also made it much easier to change the configuration of our application dependent on whether we&rsquo;re in development or production. This is the final episode on using PayPal for the whole checkout process. The next episode will concentrate on using ActiveMerchant.</p>

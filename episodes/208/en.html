@@ -1,0 +1,224 @@
+<p>The second beta version of Rails 3.0 has just been released. One of the more significant changes in this release is to the way blocks are handled in the view layers. In this episode we&rsquo;ll take a look at what has changed.</p>
+
+<h3>Upgrading Ruby and Rails</h3>
+
+<p>Before we upgrade to the new beta version of Rails 3 we&rsquo;re going to update our version of Ruby to 1.9.2. In episode 200 [<a href="http://railscasts.com/episodes/200-rails-3-beta-and-rvm">watch</a>, <a href="http://asciicasts.com/episodes/200-rails-3-beta-and-rvm">read</a>] we used rvm to install Ruby 1.9.1, but Ruby 1.9.1 is a little buggy while 1.9.2 feels more solid, even though it is still under development.</p>
+
+<p>To install Ruby 1.9.2 with rvm we need to run this command:</p>
+<pre class="terminal">
+rvm install ruby-head
+</pre>
+<p>As Ruby 1.9.2 isn&rsquo;t out yet this will get us the latest version of it. We&rsquo;re living on the edge here, but Ruby 1.9.2 is close to release so we&rsquo;re using a pretty solid version. Once rvm has installed the new version we can switch to it with:</p>
+<pre class="terminal">
+rvm ruby-head --default
+</pre>
+<p>Note that we&rsquo;ve used the <code>--default</code> switch to make 1.9.2 the default version of Ruby. This means that any new terminal windows we open will still have Ruby 1.9.2 as their current version.</p>
+
+<p>Rails 3.0 beta 2 requires RubyGems version 1.3.6 so before we install it we&rsquo;ll run</p>
+<pre class="terminal">
+gem -v
+</pre>
+<p>to see which version we have. If we have a version earlier than 1.3.6 we can run</p>
+<pre class="terminal">
+gem update --system
+</pre>
+<p>to update it. Now we can install Rails 3.0 beta 2 with:</p>
+<pre class="terminal">
+gem install rails --pre
+</pre>
+
+<h3>Upgrading Applications</h3>
+
+<p>Any applications developed with the first beta version of Rails 3.0 can be upgraded by simply changing the version number in the Gemfile for that application from <code>3.0.0.beta</code> to <code>3.0.0.beta2</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+gem &quot;rails&quot;, &quot;3.0.0.beta2&quot;
+</pre>
+<p>Then we can run
+<code>bundle install</code> to make sure that all of the dependencies are resolved.</p>
+
+<h3>What&rsquo;s Changed in erb</h3>
+
+<p>Now that we have Rails 3.0 beta 2 installed let&rsquo;s begin to look at what&rsquo;s changed. There are two types of tags used in erb files. If code is placed between <code>&lt;%= %&gt;</code> tags then whatever is returned by the Ruby code between the tags will be output to the view. If the equals sign is omitted then the code is interpreted but the output is discarded. This is a common concept in erb and in Rails 3 it has been extended to work this way inside blocks.</p>
+
+<p>The most common place you&rsquo;ll see this is in forms. Below is an erb template for a form for a <code>Product</code> model.</p>
+
+<p class="codeFilePath">/app/views/products/_form.html.erb</p>
+<pre class="ruby">
+&lt;% form_for @product do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :category_id %&gt;&lt;br /&gt;
+    &lt;%= f.collection_select :category_id, Category.all, :id, :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :price %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :price %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :description %&gt;&lt;br /&gt;
+    &lt;%= f.text_area :description %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p>In the first line of this code we use <code>form_for</code>. This will insert form tags into the view around the content in the block, but there is no equals sign in the erb tags. This breaks the rule that erb blocks that output code to the view should use <code>&lt;%= %&gt;</code> and has made this difficult to work with the internals of <code>form_for</code> in previous versions of Rails. From the new beta version onwards, however, we use an equals signs here as we would with any other erb code that generates output.</p>
+
+<p class="codeFilePath">/app/views/products/_form.html.erb</p>
+<pre class="ruby">
+&lt;%= form_for @product do |f| %&gt;
+  &lt;!-- rest of form --&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Even though we&rsquo;re passing in a block we now use the equals sign with <code>form_for</code>, although the closing <code>end</code> tag stays as it is. This will insert the <code>form</code> tag and the form&rsquo;s contents correctly. This also cleans up the internals quite a bit as we&rsquo;ll show you shortly.</p>
+
+<p>You might be wondering when the equals sign is needed and when it isn&rsquo;t. Let&rsquo;s take a look at a couple of examples. First, <a href="http://api.rubyonrails.org/classes/ActionView/Helpers/RecordTagHelper.html#M001643">div_for</a>:</p>
+
+<pre class="ruby">
+&lt;%= div_for @product do %&gt;
+
+&lt;% end %&gt;
+</pre>
+
+<p>In earlier versions of Rails we wouldn&rsquo;t use the equals sign here but now it&rsquo;s required as we&rsquo;re outputting content around the block, in this case a <code>div</code> tag. In fact most helpers in Rails now require the equals sign as they output something around the block they take.</p>
+
+<p>There are still some cases that don&rsquo;t take an equals sign, however. One example is anything that uses the <code>each</code> method:</p>
+
+<pre class="ruby">
+&lt;% @comments.each do |c|%&gt;
+
+&lt;% end %&gt;
+</pre>
+
+<p>The <code>each</code> method doesn&rsquo;t return anything that we want to output to the view so this still doesn&rsquo;t use an equals sign as what&rsquo;s being returned by the <code>each</code> method isn&rsquo;t output.</p>
+
+<p>Another example is the <code>content_for</code> method.</p>
+<pre class="ruby">
+&lt;% content_for :side do %&gt;
+
+&lt;% end %&gt;
+</pre>
+
+<p>The equals sign isn&rsquo;t used here as the <code>content_for</code> call stores the content of the block in a variable to use later on in the layout. Nothing is being output to the view here so the equals sign isn&rsquo;t required.</p>
+
+<p>Unfortunately there is one exception to this rule: the <code>cache</code> method. Ideally <code>cache</code> would use an equals sign as it might return some cached content into the view, but because of how it works internally it doesn&rsquo;t use an equals sign.</p> 
+
+<pre class="ruby">
+&lt;% cache do %&gt;
+
+&lt;% end %&gt;
+</pre>
+
+<h3>Using Blocks in Helper Methods</h3>
+
+<p>At first this might all seem a little overwhelming but once you&rsquo;ve got used to it the changes make a lot of sense. The main reason this change has been made is that it cleans up the internals of the code. <a href="http://railscasts.com/episodes/40-blocks-in-view">Episode 40</a> showed how to use blocks in views in earlier versions of Rails. It was necessary then to use the <code>concat</code> method to place text before or after the block which was a little difficult to work with.</p>
+
+<pre class="ruby">
+def admin_area(&amp;block)
+  concat(&#x27;&lt;div class=&quot;admin&quot;&gt;&#x27;, block.binding)
+  block.call
+  concat(&quot;&lt;/div&gt;&quot;, block.binding)
+end
+</pre>
+
+<p>To demonstrate how much easier it is to use blocks in helper methods now we&rsquo;ll use a simple store application that has a number of links that should only be visible to system administrators.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/358/original/E208I01.png" width="800" height="339" alt="The show page for a product showing the admin links."/>
+</div>
+
+<p>We want the &ldquo;Edit&rdquo;, &ldquo;Destroy&rdquo; and &ldquo;View All&rdquo; links to be visible only if the user is an admin and we also want to wrap the links in a <code>div</code>. The links are created in the view with the following code:</p>
+
+<p class="codeFilePath">/app/views/products/show.html.erb</p>
+<pre class="ruby">
+&lt;p&gt;
+  &lt;%= link_to &quot;Edit&quot;, edit_product_path(@product) %&gt; | 
+  &lt;%= link_to &quot;Destroy&quot;, @product, :confirm =&gt; &quot;Are you sure?&quot;, :method =&gt; :delete %&gt; | 
+  &lt;%= link_to &quot;View All&quot;, products_path %&gt;
+&lt;/p&gt;
+</pre>
+
+<p>We&rsquo;re going to replace the paragraph tags that the links are wrapped in with a new helper method called <code>admin_area</code> like this:</p>
+
+<p class="codeFilePath">/app/views/products/show.html.erb</p>
+<pre class="ruby">
+&lt;%= admin_area do %&gt;
+  &lt;%= link_to &quot;Edit&quot;, edit_product_path(@product) %&gt; | 
+  &lt;%= link_to &quot;Destroy&quot;, @product, :confirm =&gt; &quot;Are you sure?&quot;, :method =&gt; :delete %&gt; | 
+  &lt;%= link_to &quot;View All&quot;, products_path %&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>The <code>admin_area</code> method will add the <code>div</code> tag and show or hide the links depending on whether the current user is an admin. Note that because our helper method outputs to the view we&rsquo;ve used an equals sign in its opening tag.</p>
+
+<p>We&rsquo;ll define the method inside the application helper. What&rsquo;s nice about this new way of working with blocks in helper methods is that it behaves like you would expect it to so if the method just returns a string then that string will be output in the view.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+module ApplicationHelper
+  def admin_area(&amp;block)
+    &quot;OH HAI!&quot;
+  end
+end
+</pre>
+
+<p>If we reload the page now the content of the block will be replaced by the string that the <code>admin_area</code> method returns. The links aren&rsquo;t shown as we&rsquo;re not executing the block anywhere in the method.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/359/original/E208I02.png" width="800" height="339" alt="The contents of the block are replaced by the string."/>
+</div>
+
+<p>In order to execute the block and return the content we need to call a new method called <code>with_output_buffer</code> and pass it the block. This will call the block in a separate output buffer so that the content isn&rsquo;t rendered out directly to the view. We can assign that output to a variable and then do whatever we like with it. We want to wrap the content in a <code>div</code> with a <code>class</code> of <code>admin</code> so we&rsquo;ll change our <code>admin_area</code> method to look like this:</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+def admin_area(&amp;block)
+  content = with_output_buffer(&amp;block)
+  content_tag(:div, content, :class =&gt; &#x27;admin&#x27;)
+end
+</pre>
+
+<p>When we reload the page now we&rsquo;ll see the admin links wrapped in a div. As we&rsquo;ve already created a style for the admin class in the application&rsquo;s stylesheet the div will have that styling applied it it.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/360/original/E208I03.png" width="800" height="339" alt="The block in now wrapped in a div."/>
+</div>
+
+<p>If we look in the source code for the page we can see the div around the links.</p>
+<pre class="html">
+&lt;div class=&quot;admin&quot;&gt;
+  &lt;a href=&quot;/products/1/edit&quot;&gt;Edit&lt;/a&gt; | 
+  &lt;a href=&quot;/products/1&quot; data-confirm=&quot;Are you sure?&quot; data-method=&quot;delete&quot; rel=&quot;nofollow&quot;&gt;Destroy&lt;/a&gt; | 
+  &lt;a href=&quot;/products&quot;&gt;View All&lt;/a&gt;
+&lt;/div&gt;
+</pre>
+
+<p>So, if we ever need to fetch the contents of a block in a view we can use the <code>with_output_buffer</code> method and pass the block to it and that will return the content of the block. That said, the code we&rsquo;ve written in our helper method was mainly for demonstration purposes and there is a more efficient way to to do the same thing.</p> 
+
+<p>The <code>content_tag</code> method can take a block as an argument and that will handle the output buffer switching automatically. That means that our helper method can be rewritten like this:</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+def admin_area(&amp;block)
+  content_tag(:div, :class =&gt; &#x27;admin&#x27;, &amp;block)
+end
+</pre>
+
+<p>Of course to make the helper method fully functional we&rsquo;d want to output the tag only if the user is an admin which we can do by making use of a method that returns a boolean value based on whether the current user is an admin.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+def admin_area(&amp;block)
+  content_tag(:div, :class =&gt; &#x27;admin&#x27;, &amp;block) if admin?
+end
+</pre>
+
+<p>That&rsquo;s pretty much it for this episode. Using an equals sign with blocks in views might take a little getting used to but in the long run it does make more sense as these blocks do output content. With the cleaner implementation behind the scenes as well then this is an improvement the implementation of Rails&rsquo; view code.</p>
+
+<p>As a bonus here&rsquo;s an extra tip. In earlier versions of Rails you can add a minus sign to the beginning or end of an erb tag to help strip out whitespace so that your markup is a little cleaner. In Rails 3 this is no longer necessary. If an erb tag has no output it will automatically be stripped away so there&rsquo;s no unnecessary whitespace where the erb tags were.</p>

@@ -1,0 +1,76 @@
+<p>In questo episodio vi mostrer&ograve; il perch&egrave; &egrave; una cattiva idea salvare un modello in sessione.</p>
+<pre class="ruby">
+class UserController &lt; ApplicationController
+  def prepare
+    session[:user] = User.find(:first)
+    redirect_to :action =&gt; :'show'
+  end
+
+  def show
+    @user = session[:user]
+  end
+
+  def update
+    @user = session[:user]
+    @user.name = 'Foo'
+    redirect_to :action =&gt; 'show'
+  end  
+end
+</pre>
+<p class="title">Controller con action che salvano un modello nella sessione.</p>
+<p>Nel codice sopra abbiamo un controller con tre action. La prima, <code>prepare</code>, recupera il primo <code>User</code>, lo salva nella sessione e infine esegue un redirect alla vista <code>show</code>. La vista <code>show</code> prende l&rsquo;utente corrente dalla sessione e stampa alcune informazioni su tale utente.</p>
+<pre class="ruby">
+&lt;%= debug(@user) %&gt;
+&lt;%= link_to 'update', :action =&gt; 'update' %&gt;
+</pre>
+<p class="title">Il codice della vista <code>show</code>.</p>
+<p>La vista <code>show</code> ha un collegamento alla action <code>update</code>. L&rsquo; action <code>update</code> prende nuovamente l&rsquo;utente corrente dalla sessione, cambia una delle sue propriet&agrave; e poi ridirige indietro alla vista <code>show</code>. Le modifiche fatte nella action update dovrebbero essere temporanee dal momento che non sono rese persistenti sul database. Infine, <code>update</code> ridirige indietro alla vista <code>show</code>, in modo tale che possiamo rivedere nuovamente le propriet&agrave; dell&rsquo;utente.</p>
+<img src="/system/photos/9/original/E013I01.png" alt="" width="800" height="570"/>
+<p>Per prima cosa, puntiamo a <code>/user/prepare</code> che inserisce il primo utente nell&rsquo;oggetto sessione e ridirige verso la vista <code>show</code>. Nella <code>show</code> possiamo vedere che il nome &egrave; corretto. Poi clicchiamo  &lsquo;Update&rsquo;, la property name per l&rsquo;utente &egrave; cambiata e siamo ridiretti nuovamente alla vista <code>show</code>. Il nome ora &egrave; &lsquo;Foo&rsquo;, diverso rispetto al nome di quell&rsquo;utente cos&igrave; come risulta sul database. Dal momento che abbiamo salvato il modello utente nella sessione, qualsiasi modifica fatta su quel modello &egrave; mantenuta fra le varie richieste, per cui ogni volta che otteniamo l&rsquo;utente dalla sessione, vediamo lo <code>User</code> modificato piuttosto che quello salvato sul database. Ci&ograve; pu&ograve; condurre ad anomalie piuttosto rognose.</p>
+<pre class="terminal">
+NooNoo:ep13 eifion$ script/console
+Loading development environment (Rails 2.2.2)
+&gt;&gt; User.first.name
+=&gt; "Eifion" 
+&gt;&gt;
+</pre>
+<p class="title">Lo <code>User</code> sul database ha ancora il nome &lsquo;Eifion&rsquo;.</p>
+
+<h3>Problemi con le validazioni</h3>
+<p>Il nostro modello <code>User</code> ha una validazione che controlla che il nome esista (con la <code>validates_presence_of</code>). Aggiorniamo la action <code>update</code> in modo tale che imposti il nome ad una stringa vuota e controlli che l&rsquo;utente sia valido e vediamo che succede.</p>
+<pre class="ruby">
+def update
+  @user = session[:user]
+  @user.name = ''
+  @user.valid?
+  redirect_to :action =&gt; 'show'
+end    
+</pre>
+<p class="title">La action <code>update</code> aggiornata.</p>
+<img src="/system/photos/10/original/E013I02.png" alt="" width="800" height="500"/>
+<p>Ora abbiamo impostato il nome ad una stringa vuota, ma ci sono ancora errori. Una volta che veniamo ridiretti ad un&rsquo;altra pagina gli errori non dovrebbero rimanere, ma, poich&egrave; ci stiamo portando dietro il modello in sessione, continuano ad esserci, anche dopo una ridirezione. Ci&ograve; pu&ograve; causare confusione agli utenti che potrebbero vedersi degli errori di validazione in una pagina, per poi ritrovarseli ancora ritornando nella pagina pi&ugrave; tardi.</p>
+
+<h3>Il modo corretto</h3>
+<p>Ora faremo la modifica corretta. Anzich&egrave; salvare il modello <code>User</code> nella sessione, ne salviamo solo la chiave primaria (<code>id</code>). Il codice del controller, aggiornato, sar&agrave; il seguente:</p>
+<pre class="ruby">
+class UserController &lt; ApplicationController
+  def prepare
+    session[:user_id] = User.find(:first).id
+    redirect_to :action =&gt; :'show'
+  end
+
+  def show
+    @user = User.find(session[:user_id])
+  end
+
+  def update
+    @user = User.find(session[:user_id])
+    @user.name = 'Foo'
+    redirect_to :action =&gt; 'show'
+  end  
+end
+</pre>
+<p class="title">Controller con le action che salvano un <code>id</code> nella sessione.</p>
+<p>Ora, soltanto l&rsquo;<code>id</code> viene salvato in sessione e l&rsquo;utente &rsquo; recuperato ogni volta dal database per ogni richiesta. Questa volta, la modifica fatta la nome dell&rsquo;utente non &egrave; mantenuta fra le varie richieste.</p>
+<img src="/system/photos/11/original/E013I03.png" alt="" width="800" height="400" />
+<p>Speriamo che questo episodio abbia evidenziato i pericoli derivanti dal salvataggio di modelli e altri oggetti complessi nella sessione Rails. L&rsquo;oggetto di sessione, in definitiva, dovrebbe essere utilizzato solamente per mantenere oggetti semplici come array, stringhe e interi.</p>

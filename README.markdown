@@ -6,7 +6,7 @@ A central place where everyone is welcome to add, review, discuss and (of course
 How it works
 ------------
 
-This repository is basically really simple: In the folder episodes, you'll find a subfolder for each episode that has at least one translation. The folder name for each episode is simply the episode's number. Inside those episode folders there is a single HTML file for each translation named after the ISO 639-1 language code. For example 'fr' for French or 'de' for German. If a folder doesn't exist in a specific episode folder, there are simply no translations for that episode yet.
+This repository is basically really simple: In the folder episodes, you'll find a subfolder for each episode that has at least one translation. The folder name for each episode is simply the episode's number. Inside those episode folders there is a single HTML file for each translation named after the ISO 639-1 language code. For example 'fr' for French or 'de' for German. Eifion will always try to keep the English versions of each episode up-to-date so they can serve as template for translations. If, however, a folder doesn't exist for a specific episode, there are simply no translations for that episode yet.
 
 Contributing
 ------------
@@ -19,3 +19,26 @@ Organizing
 If you plan to submit a new translation, it's recommended that you create a ticket here in this repository's issue tracking system and label it with the **Translation in Progress** label. This way, others can see that you're currently already working on that specific language of that specific episode so no one ends up spending redundant work. If you're satisfied with your translation and want to submit it, you can use the **Closes #xx.** notation to automatically close the issue. For example, when I committed my German translation of episode 201 for which I had the issue #3 open, I typed:
 
 >  git commit -m "Added German translation of Episode 201. Closes #3."
+
+Project Structure
+-----------------
+
+* .gitignore
+
+    Keeping the repository clean from temp files and the infamous .DS_Store files
+
+* README.markdown
+
+    This file
+
+* doc/
+
+    Serving as container for translations of this file.
+
+* episodes/
+
+    Containing the episodes. Special folder: _000\_summaries_. It may contain short summaries (and their respective translations, of course) for the episodes.
+
+* template.html
+
+    A blank _html_ template for new episodes.

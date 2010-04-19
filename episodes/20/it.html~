@@ -1,0 +1,77 @@
+<h3>Limitare gli accessi</h3>
+
+<p>Nell&rsquo;ultimo episodio abbiamo creato i link per creare, modificare e cancellare gli episodi sul sito web ASCIIcasts. I link funzionano, ma un po&rsquo; troppo bene, dal momento che possono essere utilizzati da chiunque raggiunga il sito.</p>
+<img src="/system/photos/17/original/E019I03.png" width="663" height="558"/>
+<p class="title">La pagina che mostra l&rsquo;elenco degli episodi con i collegamenti amministrativi visibili per tutti gli utenti.</p>
+
+<p>Quello che vorremmo &egrave; di restringere l&rsquo;accesso a tali link ai soli utenti che hanno i permessi per usarli. Modifichiamo il nostro partial degli episodi in modo tale che mostri i link <code>edit</code> e <code>destroy</code> solo se la chiamata a un metodo <code>admin?</code> restituisce true. (e facciamo lo stesso anche per gli altri link amministrativi, anche se il codice di questi non &egrave; riportato qui)</p>
+
+<pre class="ruby">
+&lt;li&gt;
+  &lt;p class=&quot;episodeId&quot;&gt;&lt;%= episode.episode_id %&gt;&lt;/p&gt;
+  &lt;h3&gt;&lt;%= link_to episode.title, episode_path(episode.identifier) %&gt;&lt;/h3&gt;
+  &lt;p class=&quot;summary&quot;&gt;&lt;%= episode.summary %&gt;&lt;/p&gt;
+  &lt;p class=&quot;tagList&quot;&gt;
+    Tags: &lt;% episode.tags.each do |tag| %&gt;&lt;%= link_to tag.title, tag_path(tag.title) %&gt;&lt;% end %&gt;
+  &lt;/p&gt;
+  &lt;% if admin? %&gt;
+  &lt;p class=&quot;adminActions&quot;&gt;
+    &lt;%= link_to &quot;Edit&quot;, edit_episode_path(episode) %&gt;
+    &lt;%= link_to &quot;Destroy&quot;, episode_path(episode), :confirm =&gt; &quot;Are you sure?&quot;, :method =&gt; :delete %&gt;
+  &lt;/p&gt;
+  &lt;% end %&gt;
+&lt;/li&gt;
+</pre>
+<p class="title">Il partial dell&rsquo;episodio con il controllo sulla funzione <code>admin?</code> che maschera i link edit e destroy.</p>
+
+<p>Abbiamo bisogno di scrivere il metodo <code>admin?</code>, ma dove deve andare? Dal momento che stiamo richiamando il metodo da una vista, la prima immediata risposta che viene in mente &egrave; l&rsquo; application helper, ma volendo poter richiamarlo anche dai controller, &egrave; meglio metterlo nell&rsquo;application controller:</p>
+<pre class="ruby">
+class ApplicationController &lt; ActionController::Base
+  helper_method :admin?  
+  protected
+  def admin?
+    false
+  end  
+end
+</pre>
+<p class="title">Il metodo <code>admin?</code> aggiunto all&rsquo;<code>ApplicationController</code>.</p>
+
+<p>Per ora, il nostro metodo <code>admin?</code> restituir&agrave; semplicemente e sempre <code>false</code>, (implementeremo correttamente questo metodo nel prossimo episodio). Poich&egrave; vogliamo anche usarlo nelle nostre viste, useremo il metodo <code>helper_method</code> che lo rende il metodo sul controller disponibile anche alle viste.</p>
+
+<h3>Quasi arrivati</h3>
+<p>Ora che abbiamo scritto il nostro metodo <code>admin?</code>, i nostri link vengono nascosti agli utenti non aministrativi. C&rsquo;&egrave; ancora un problema, tuttavia: chiunque pu&ograve; ancora visitare le pagine amministrative direttamente e aggiungere o modificare gli episodi in questo modo. Possiamo sistemarlo con il <code>before_filter</code>:</p>
+<pre class="ruby">
+class EpisodesController &lt; ApplicationController
+  before_filter :authorize, :except =&gt; [:index, :show ]
+  
+  def index
+    @episodes = Episode.find(:all)
+  end
+  # show, new, create, edit, update and destroy methods hidden.
+end
+</pre>
+<p class="title">Il controller degli episodi (con il corpo dei metodi rimosso).</p>
+
+<p>Il <code>before_filter</code> di sopra esegue un metodo chiamato <code>authorize</code> prima di eseguire qualsiasi metodo nel nostro controller, eccetto i metodi <code>index</code> e <code>show</code>. Ora abbiamo bisogno di scrivere il metodo <code>authorize</code>. Lo mettiamo in application controller in modo tale da renderlo disponibile per tutti i controller:</p>
+<pre class="ruby">
+class ApplicationController &lt; ActionController::Base
+  helper_method :admin?  
+  protected
+  def admin?
+    false
+  end  
+
+  def authorize
+    unless admin?
+      flash[:error] = &ldquo;Unauthorized access&rdquo;
+      redirect_to home_path
+      false
+    end
+  end
+end
+</pre>
+<p class="title">L&rsquo; <code>ApplicationController</code> con l&rsquo;aggiunta del metodo <code>authorize</code>.</p>
+<p>Il metodo controlla che l&rsquo;utente sia un amministratore e, se non lo &egrave;, mostra un messaggio flash e ridirige alla home page. Infine ritorna <code>false</code> in modo tale che nessuna ulteriore action venga eseguita. Ora, se proviamo a visitare direttamente la pagina di creazione di un nuovo episodio, verremo rimandati alla home page. In alternativa, se non volessimo nemmeno che l%rsquo;utente non autorizzato fosse a conoscenza di tale pagina, potremmo lanciare un errore HTTP 404 (Page Not Found).
+
+<h3>#DA FARE:</h3>
+<p>Il nostro sistema di admin &egrave; quasi finito, ci manca solo di implementare correttamente il metodo <code>admin?</code>. Lo faremo nel prossimo episodio.</p>

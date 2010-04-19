@@ -1,0 +1,96 @@
+<p>Come nel&rsquo;episodio precedente, ci concentreremo sulle performance. Sotto abbiamo un&rsquo;applicazione che mostra una lista di progetti assieme al numero di task ad essi associati.</p>
+ 
+<img src="/system/photos/20/original/E023I01.png" width="735" height="325">
+<p class="title">Il ProjectsController e la vista index sono qui di seguito mostrati:</p>
+<pre class="ruby">
+class ProjectsController &lt; ApplicationController
+  def index
+    @projects = Project.find(:all)
+  end
+end
+</pre>
+<p class="title">Il <code>ProjectsController</code>.</p>
+<pre class="ruby">
+&lt;h1&gt;Projects&lt;/h1&gt;
+&lt;ol&gt;
+  &lt;% @projects.each do |project| %&gt;
+  &lt;li&gt;&lt;%= link_to project.name, project_path(project) %&gt; (&lt;%= pluralize project.tasks.size, &rsquo;task&rsquo; %&gt;)&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ol&gt;
+</pre>
+<p class="title">La vista <code>index</code>.</p>
+<p>Nella vista c&rsquo;&egrave; un ciclo per ogni <code>Project</code>, che serve a mostrare il nome del progetto e il numero di task (ottenuti con <code>projects.tasks.size</code>) che ha associati. Si usa anche il  <code>pluralize</code> in modo tale da mostrare &quot;task&quot; o &quot;tasks&quot; a seconda del fatto che i task associati siano uno o pi&ugrave;.</p>
+
+<h3>Migliorare gli accessi al database</h3>
+<p>Diamo un&rsquo;occhiata ai log di sviluppo per vedere in che modo stiamo accedendo al databasequando carichiamo la pagina <code>index</code>:</p>
+<pre class="terminal">
+Rendering projects/index
+  SQL (0.3ms)   SELECT count(*) AS count_all FROM &quot;tasks&quot; WHERE (&quot;tasks&quot;.project_id = 61) 
+  SQL (0.2ms)   SELECT count(*) AS count_all FROM &quot;tasks&quot; WHERE (&quot;tasks&quot;.project_id = 62) 
+  SQL (0.3ms)   SELECT count(*) AS count_all FROM &quot;tasks&quot; WHERE (&quot;tasks&quot;.project_id = 63) 
+  SQL (0.2ms)   SELECT count(*) AS count_all FROM &quot;tasks&quot; WHERE (&quot;tasks&quot;.project_id = 64) 
+  SQL (0.2ms)   SELECT count(*) AS count_all FROM &quot;tasks&quot; WHERE (&quot;tasks&quot;.project_id = 65) 
+</pre>
+<p>Viene fatta una chiamata al database per ogni progetto presente nella lista, per ottenere un conteggio dei task che ogni progetto ha. Come possiamo ridurre il numero di query fatte? Uno dei modi potrebbe essere quello di utilizzare l&rsquo;eager loading, come abbiamo visto nell&rsquo;episodio precedente. Lo faremmo, cambiando il <code>ProjectsController</code> in modo tale da fargli prendere i task insieme ai modelli di progetto:</p>
+<pre class="ruby">
+    @projects = Project.find(:all, :include =&gt; :tasks)
+</pre>
+<p>Ora, ricaricando la pagina, vedremmo che il numero di richieste al database si &egrave; ridotto a due:</p>
+<pre class="terminal">
+Processing ProjectsController#index (for 127.0.0.1 at 2009-01-26 21:24:28) [GET]
+  Project Load (1.1ms)   SELECT * FROM &quot;projects&quot; 
+  Task Load (7.1ms)   SELECT &quot;tasks&quot;.* FROM &quot;tasks&quot; WHERE (&quot;tasks&quot;.project_id IN (61,62,63,64,65)) 
+</pre>
+<p>Questa &egrave; sicuramente una miglioria, ma comporta un traffico di informazione inutile, in quanto ci stiamo caricando tutte le informazioni sui task, pur avendo bisogno di sapere solo il loro numero per progetto. Invece di usare l&rsquo;eager loading, dunque, useremo la colonna di conteggio di cache:</p>
+
+<h3>Implementare una colonna di conteggio cache</h3>
+<p>La prima cosa da fare &egrave; di aggiungere una colonna alla tabella <code>Projects</code> che contenga il numero di <code>Task</code> associati al progetto. Generiamo la nuova colonna con una migration:</p>
+<pre class="ruby">script/generate migration add_tasks_count</pre>
+<p>La nostra migration sar&agrave; cos&igrave; fatta. La spiegheremo sotto:</p>
+<pre class="ruby">
+class AddTasksCount &lt; ActiveRecord::Migration
+  def self.up
+    add_column :projects, :tasks_count, :integer, :default =&gt; 0
+    
+    Project.reset_column_information
+    Project.all.each do |p|
+      p.update_attribute :tasks_count, p.tasks.length
+    end
+  end
+
+  def self.down
+    remove_column :projects, :tasks_count
+  end
+end
+</pre>
+<p>Il nome dato alla colonna &egrave; fondamentale. Deve essere esattamente lo stesso del nome del modello che vogliamo contare, seguito da <code>_count</code>. Anche il valore di default &egrave; importante. Se non fosse 0, il conteggio non funzionerebbe correttamente. Una volta creata la nuova colonna, c&rsquo;&egrave; bisogno di impostare il valore della colonna count per ogni record di progetto. Per farlo, iteriamo su ogni progetto e impostiamo il suo attributo <code>tasks_count</code> al numero di task che il progetto ha. Usiamo <code>length</code> anzich&egrave; <code>size</code> per avere il numero di task, poich&egrave; <code>size</code> userebbe la colonna appena creata per risponderci, che conterrebbe il valore di default 0.</p>
+<p>Dal momento che stiamo un <code>Project</code> nella stessa migration in cui aggiungiamo una colonna alla sua tabella, c&egrave; la possibilit&agrave; che l&rsquo;informazione della nuova colonna possa essere cached. E&rsquo; buona norma sincerarsi che sia resettata e lo facciamo con <code>Project.reset_column_information</code>.</p>
+
+<h3>Ha funzionato?</h3>
+<p>Ora che abbiamo aggiunto la colonna, rimuoviamo l&rsquo;eager loading dal <code>ProjectsController</code> e ricarichiamo la pagina.</p>
+<pre class="terminal">
+Processing ProjectsController#index (for 127.0.0.1 at 2009-01-26 22:07:13) [GET]
+  Project Load (0.7ms)   SELECT * FROM &quot;projects&quot; 
+</pre>
+<p>Ora c&rsquo;&egrave; una sola chiamata al database, in quanto tutte le informazioni di cui abbiamo bisogno sono presenti nella tabella dei <code>Projects</code>. Il numero di task per <code>Project</code> ora viene fornito dalla colonna <code>tasks_count</code>.</p>
+
+<h3>Ultimo passo</h3>
+<p>C&rsquo;&egrave; un ultimo passo da compiere. Se aggiungiamo un nuovo task ad un progetto, la colonna di conteggio non sarebbe aggiornata per com&rsquo;&egrave; il codice ora, perch&egrave; non abbiamo detto a Rails di usare la colonna <code>tasks_count</code> come colonna di cache di conteggio. Lo facciamo ora, aggiornando il modello <code>Task</code>:</p>
+<pre class="ruby">
+class Task &lt; ActiveRecord::Base
+  belongs_to :project, :counter_cache =&gt; true
+  has_many :comments
+end
+</pre>
+<p>Stiamo dicendo a Rails di usare per l&rsquo;associazione verso i progetti una colonna di cache di conteggio, mediante l&rsquo;aggiunta dell&rsquo;opzione <code>:counter_cache =&gt; true</code> all&rsquo;associazione stessa. Ora usiamo la console per aggiungere un nuovo task ad un progetto:</p>
+<pre class="terminal">
+&gt;&gt; p = Project.first
+=&gt; #&lt;Project id: 61, name: &quot;Project 1&quot;, created_at: &quot;2009-01-26 20:34:36&quot;, updated_at: &quot;2009-01-26 22:05:22&quot;, tasks_count: 20&gt;
+&gt;&gt; p.tasks.create(:name =&gt; &quot;New task&quot;)
+=&gt; #&lt;Task id: 1201, name: &quot;New task&quot;, project_id: 61, created_at: &quot;2009-01-26 22:24:13&quot;, updated_at: &quot;2009-01-26 22:24:13&quot;&gt;
+</pre>
+<p class="title">Aggiunta di un nuovo task mediante console.</p>
+<p>Ora ricarichiamo la pagina e vedremo come la colonna di conteggio si sia aggiornata.</p>
+<img src="/system/photos/21/original/E023I02.png" width="735" height="325">
+<p class="title">La colonna di cache di conteggio del progetto che &egrave; stata aggiornata.</p>
+<p>Il nostro primo progetto ha ora 21 task and we&rsquo;re still only accessing the projects table in our database.</p>

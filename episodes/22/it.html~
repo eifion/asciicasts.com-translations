@@ -1,0 +1,61 @@
+<p>Un buon punto di partenza per cominciare quando si vogliono aumentare le prestazioni delle vostre applicazioni Rails &egrave; dare un&rsquo;occhiata agli accessi al database. Ridurre il numero di query fatte al database pu&ograve; incrementare la velocit&agrave; delle vostre applicazioni in modo significativo. Un modo per farlo &egrave; quello di adottare una tecnica nota con il nome di eager loading.</p>
+<img src="/system/photos/19/original/E022I01.png" width="637" height="348"/>
+<p class="title">I nostri modelli applicativi Task e Project.</p>
+<p>La pagina di sopra mostra un numero consistente di task, e il progetto a cui ognuno di essi appartiene. Nel nostro <code>TaskController</code>, otteniamo tutti questi task e iteriamo su ciascuno di essi nella vista:</p>
+<pre class="ruby">
+&lt;h1&gt;Tasks&lt;/h1&gt;
+&lt;ul&gt;
+&lt;% @tasks.each do |task| %&gt;
+  &lt;li&gt;&lt;%= link_to task.name, task %&gt; in &lt;%= task.project.name %&gt;&lt;/li&gt;
+&lt;% end %&gt;
+&lt;/ul&gt;The view code for the Tasks index page. 
+</pre>
+<p>La pagina prende il nome del task e poi il nome dei suoi progetti attraverso l&rsquo;associazione. Il problema nell&rsquo;uso di questo approccio &egrave; che ogni volta che si ottiene il nome di un progetto del task, viene generata una query SQL. Ne si pu&ograve; avere conferma controllando i log di sviluppo.</p>
+
+<pre class="terminal">
+ Project Load (0.2ms)   SELECT * FROM &quot;projects&quot; WHERE (&quot;projects&quot;.&quot;id&quot; = 60) 
+ CACHE (0.0ms)   SELECT * FROM &quot;projects&quot; WHERE (&quot;projects&quot;.&quot;id&quot; = 60) 
+ CACHE (0.0ms)   SELECT * FROM &quot;projects&quot; WHERE (&quot;projects&quot;.&quot;id&quot; = 60) 
+ CACHE (0.0ms)   SELECT * FROM &quot;projects&quot; WHERE (&quot;projects&quot;.&quot;id&quot; = 60) 
+ CACHE (0.0ms)   SELECT * FROM &quot;projects&quot; WHERE (&quot;projects&quot;.&quot;id&quot; = 60)
+</pre>
+<p class="title">La nostra richiesta causa ripetute chiamate al database.</p>
+<p>Possiamo vedere dai log che viene eseguita la stessa chiamata tante volte quanti sono i nomi dei progetti. Rails ci aiuta a ridurre il numero di chiamate, facendo cache delle richieste e recuperando le richieste ripetute dalla cache, piuttosto che dal database. Il sistema di caching &egrave; stato introdotto con Rails 2.0; se facessimo la stessa richiesta con Rails 1.x, ogni richiesta per il nome di un progetto associato al task comporterebbe una richiesta al database.</p>
+<p>Il sistema di caching &egrave; utile, ma l&rsquo;eager loading riduce le chiamate al database ulteriormente. Lo possiamo abilitare facendo una piccola modifica al TasksController:</p>
+<pre class="ruby">
+class TasksController &lt; ApplicationController
+  def index
+    @tasks = Task.find(:all, :include =&gt; :project)
+  end
+end
+</pre>
+<p>Ci&ograve; che abbiamo fatto sopra &egrave; di aggiungere un parametro alla linea che recupera tutti i task, in modo tale che nel recupero si porti dietro anche i progetti associati. La ragione per cui nel codice abbiamo usato il simbolo al singolare (<code>:project</code>), anzich&egrave; <code>:projects</code> &egrave; che usiamo il nome dell&rsquo;associazione, e nel modello <code>Task</code> c&egrave; scritto <code>belongs_to =&gt; :project</code>. Ora, se ricarichiamo la pagina e controlliamo i log, vediamo che il numero di richieste al database si &egrave; ridotto da 101 a 2, con un conseguente aumento delle performance della nostra applicazione.<p>
+  
+<h3>Inclusione di pi&ugrave; di una associazione</h3>
+<p>Oltre ad appartenere ad un <code>Project</code>, il nostro modello <code>Task</code> ha anche un&rsquo;altra associazione con il modello <code>Comment</code>.</p>
+<pre class="ruby">
+class Task &lt; ActiveRecord::Base
+  belongs_to :project
+  has_many :comments
+end
+</pre>
+<p>Possiamo portarci dietro i commenti di un task insieme al suo progetto di appartenenza, includendo i nomi di entrambe le associazioni in un array. (notate che per i commenti usiamo il plurale poich&egrave; questo &egrave; ora il nome dell&rsquo;associazione.)</p>
+<pre class="ruby">
+class TasksController &lt; ApplicationController
+  def index
+    @tasks = Task.find(:all, :include =&gt; [:project, :comments])
+  end
+end
+</pre>
+<p>Potremmo fare uso perfino di associazioni ancor pi&ugrave; complesse. Se il nostro modello Comment fosse cos&igrave; &hellip;</p>
+<pre class="ruby">
+class Comment &lt; ActiveRecord::Base
+  belongs_to :task
+  belongs_to :user
+end
+</pre>
+<p>&hellip;potremmo portarci dietro anche gli utenti associati ai commenti, usando un hash:</p>
+<pre class="ruby">
+@tasks = Task.find(:all, :include =&gt; [:project, {:comments =&gt; :user }])
+</pre>
+<p>L&rsquo;utilizzo dell&rsquo;eager loading &egrave; un potente modo per ridurre gli accessi al database delle vostre applicazioni Rails. There is more information about them on the Rails API site at <a href="http://api.rubyonrails.org/classes/ActiveRecord/Associations/ClassMethods.html">http://api.rubyonrails.org/classes/ActiveRecord/Associations/ClassMethods.html</a>.</p>

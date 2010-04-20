@@ -1,0 +1,93 @@
+<p>L&rsquo;assegnamento massivo &egrave; molto usato fra gli sviluppatori Rails poich&egrave; fornisce un modo semplice per popolare le propriet&agrave; di un oggetto di modello da una form. Sfortunatamente la sua semplicit&agrave; pu&ograve; rendere questo meccanismo bersaglio per gli hacker. In questo episodio spiegheremo perch&egrave; e come proteggersi.</p>
+
+<img src="/system/photos/25/original/E026I01.png" width="731" height="323" />
+<p class="title">La nostra semplice form di registrazione.</p>
+<p>Sopra &egrave; mostrata una semplice form di registrazione. Quando un utente inserisce il proprio user name e clicca &ldquo;submit&rdquo; viene creato un nuovo modello <code>User</code>. Il nostro modello &egrave; definito nello schema in questo modo, con un campo string denominato <code>name</code> e un campo boolean <code>admin</code> che di default vale false.</p>
+<pre class="ruby">
+create_table :users do |t|
+  t.string :name
+  t.boolean :admin, :default =&gt; false, :null =&gt; false
+end
+</pre>
+<p>Quando un utente riempie i campi della form e clicca su registra, viene chiamata la action create.</p>
+<pre class="ruby">
+def create
+  @user = User.new(params[:user])
+  if @user.save
+    flash[:notice] = &quot;Successfully registered&quot;
+    redirect_to :action =&gt; &rsquo;show&rsquo;, :id =&gt; @user.id
+  else
+    render :action =&gt; :new
+  end
+end
+</pre>
+<p>Quando l&rsquo;utente viene creato, la nuova istanza di User &egrave; popolata dall&rsquo;hash <code>params</code> che, come visto nel precedente episodio, non dovrebbe essere presa con troppa fiducia. Passiamo tutti i parametri nell&rsquo;hash <code>params[:user]</code> e li impostiamo come attributi del nostro nuovo utente. Mostriamo ora come questo meccanismo possa essere compromesso da un hacker malizioso per far diventare se stesso un amministratore.</p>
+
+<h3>Hacking del sito</h3>
+<p>Uno strumento da linea di comando tipo <code>curl</code> pu&ograve; essere usato per passare parametri POST ad una pagina.</p>
+<pre class="terminal">
+curl -d &quot;user[name]=hacker&amp;user[admin]=1&quot; http://localhost:3000/Users/
+</pre>
+<p>In questa riga stiamo mandando le informazioni per la creazione di un utente di nome &lsquo;hacker&rsquo; che deve essere amministratore (admin vale <code>true</code>). Se diamo un&rsquo;occhiata ai log di sviluppo vediamo che il nuovo utente &egrave; effettivamente un amministratore.</p>
+<pre class="terminal">
+Processing UsersController#create (for 127.0.0.1 at 2009-02-03 20:18:54) [POST]
+  Session ID: 8daeaad6eb382c903e595e704b626ef7
+  Parameters: {&quot;user&quot;=&gt;{&quot;name&quot;=&gt;&quot;hacker&quot;, &quot;admin&quot;=&gt;&quot;1&quot;}, &quot;action&quot;=&gt;&quot;create&quot;, &quot;controller&quot;=&gt;&quot;users&quot;}
+  SQL (0.000390) INSERT INTO users (&quot;name&quot;, &quot;admin&quot;) VALUES(&rsquo;hacker&rsquo;, &rsquo;t&rsquo;)
+Redirected to http://localhost:3000/users/show/2
+</pre>
+<p>L&rsquo;hacker &egrave; stato in grado di fare ci&ograve; a causa del meccanismo di assegnamento massivo: abbiamo creato un nuovo utente utilizzando i parametri forniti dall&rsquo;hash params e l&rsquo;hacker ha fornito, fra questi, il parametro admin valorizzato a suo piacimento. In questo modo l&rsquo;hacker si &egrave; reso amministratore.</p>
+
+<h3>Protezione degli attributi</h3>
+<p>Il modo per fermare questo tipo di attacco &egrave; quello di limitare il numero di attributi che possono essere passati con la form (o da un metodo POST). Lo facciamo nel modello, in questo caso User. Rails ha un metodo chiamato <code>attr_protected</code> che permette di  definire quali fra gli attributi di un metodo non possono essere impostati mediante un assegnamento massivo.</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  has_many :comments
+  attr_protected :admin
+end
+</pre>
+<p class="title">Il nostro modello utente con l&rsquo;attributo admin protetto.</p>
+<p>Ora, rilancando il comando <code>curl</code> precedente e guardando sui log, vediamo come l&rsquo;attributo admin non sia stato messo a true, anche se era stato fornito fra i parametri dell&rsquo;oggetto creando nell&rsquo;hash params.</p>
+<pre class="terminal">
+Processing UsersController#create (for 127.0.0.1 at 2009-02-03 20:37:49) [POST]
+  Session ID: 381cee077c1367bf0cc410a2259adb96
+  Parameters: {&quot;user&quot;=&gt;{&quot;name&quot;=&gt;&quot;hacker&quot;, &quot;admin&quot;=&gt;&quot;1&quot;}, &quot;action&quot;=&gt;&quot;create&quot;, &quot;controller&quot;=&gt;&quot;users&quot;}
+  SQL (0.000327)   INSERT INTO users (&quot;name&quot;, &quot;admin&quot;) VALUES(&rsquo;hacker&rsquo;, &rsquo;f&rsquo;)
+Redirected to http://localhost:3000/users/show/5
+</pre>
+<p class="title">L&rsquo;attributo protetto admin ora non viene valorizzato dall&rsquo;valore presente nell&rsquo;hash params.</p>
+
+<h3>Non &egrave; ancora abbastanza</h3>
+<p>Ora abbiamo protetto quel metodo da possibili attacchi di hacker, ma rimane ancora un buco nel nostro sito. C&rsquo;&egrave; una relazione nella nostra applicazione che dice che un utente ha molti commenti e has_many fornisce un modo per impostare i comment_ids mediante assegnamento massivo. Usiamo nuovamente <code>curl</code> per fare l&rsquo;hack degli id dei commenti.</p>
+<pre class="ruby">
+curl -d &quot;user[name]=hacker&amp;user[admin]=1&amp;user[comment_ids][]=1&amp;user[comment_ids]=2&quot;
+http://localhost:3000/users/create
+</pre>
+<p class="title">Presa di controllo di commenti non nostri.</p>
+<p>La relazione <code>has_many</code> fra <code>User</code> e <code>Comment</code> fornisce al modello User un metodo <code>comment_ids</code> che accetta un array di id di commenti. Abbiamo fatto l&rsquo;hacking dell&rsquo;hash dei parametri qui sopra per millantare la paternit&agrave; dei commenti con id 1 e 2. Nei log di sviluppo possiamo vedere che il nostro hacker ora detiene quei commenti:</p>
+<pre class="terminal">
+Processing UsersController#create (for 127.0.0.1 at 2009-02-04 20:27:36) [POST]
+Session ID: e6bee21260899c7dce47bc5040dcd467
+Parameters: {&quot;user&quot;=&gt;{&quot;name&quot;=&gt;&quot;hacker&quot;, &quot;comment_ids&quot;=&gt;[&quot;1&quot;, &quot;2&quot;], &quot;admin&quot;=&gt;&quot;1&quot;}, &quot;action&quot;=&gt;&quot;create&quot;, &quot;controller&quot;=&gt;&quot;users&quot;}
+Comment Load (0.001) SELECT * FROM comments WHERE (comments.&quot;id&quot; IN (1,2)) 
+SQL (0.001) INSERT INTO users (&quot;name&quot;, &quot;admin&quot;) VALUES(&rsquo;hacker&rsquo;, &rsquo;f&rsquo;)
+  Comment Update (0.000094)   UPDATE comments SET &quot;title&quot; = &rsquo;Comment 1&rsquo;, &quot;user_id&quot; = 8 WHERE &quot;id&quot; = 1
+  Comment Update (0.000071)   UPDATE comments SET &quot;title&quot; = &rsquo;Comment 2&rsquo;, &quot;user_id&quot; = 8 WHERE &quot;id&quot; = 2
+</pre>
+<p class="title">Il nostro hacker ora possiede commenti non suoi.</p>
+<p>Per fermare questo furto &egrave; meglio usare <code>attr_accessible</code> nel nostro modello piuttosto che <code>attr_protected</code>. Ora stiamo dicendo esplicitamente quali attributi possono essere modificati mediante assegnamento massivo. Aggiorniamo il nostro modello <code>User</code> per permettere l&rsquo;aggiornamento del solo attributo <code>name</code>.</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  has_many :comments
+  attr_accessible :name
+end
+</pre>
+<p>Un ultimo sguardo al log di sviluppo ci mostra che il nostro hacker non ha ottentuo i privilegi amministrativi e nemmeno la propriet&agrave; di commenti non suoi.</p>
+<pre class="ruby">
+Processing UsersController#create (for 127.0.0.1 at 2009-02-04 20:39:15) [POST]
+  Session ID: 48b9264e8da94d0a0edadce5e31ac500
+  Parameters: {&quot;user&quot;=&gt;{&quot;name&quot;=&gt;&quot;hacker&quot;, &quot;comment_ids&quot;=&gt;[&quot;1&quot;, &quot;2&quot;], &quot;admin&quot;=&gt;&quot;1&quot;}, &quot;action&quot;=&gt;&quot;create&quot;, &quot;controller&quot;=&gt;&quot;users&quot;}
+  SQL (0.000307)   INSERT INTO users (&quot;name&quot;, &quot;admin&quot;) VALUES(&rsquo;hacker&rsquo;, &rsquo;f&rsquo;)
+Redirected to http://localhost:3000/users/show/9
+</pre>
+<p>Abbiamo visto in questo episodio come sia semplice, da parte di utenti maliziosi, manipolare attributi di modelli non protetti. L&rsquo;uso di <code>attr_accessible</code> pu&ograve; fermare questo genere di attacchi e mantenere al sicuro i modelli.</p>

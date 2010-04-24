@@ -1,0 +1,59 @@
+<p>La seguente applicazione mostra una lista di task. Ogni task ha un campo datetime chiamato <code>due_at</code> che vorremmo poter mostrare accanto al nome del task.</p>
+<img src="/system/photos/45/original/E031I01.png" width="808" height="342" alt="La nostra lista di task."/>
+<p>Per farlo, modifichiamo il codice della vista in <code>/app/views/tasks/index.html.erb</code>. Questo codice itera sui task e ne mostra il nome. Aggiungiamo il campo <code>due_at</code> accanto al nome del task.</p>
+<pre class="ruby">
+&lt;ul id=&quot;taskList&quot;&gt;
+  &lt;% @tasks.each do |task| %&gt;
+  &lt;li&gt;&lt;strong&gt;&lt;%= task.name %&gt;&lt;/strong&gt; &lt;%= task.due_at %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;
+</pre>
+<p class="title">La vista index con l&rsquo;aggiunta del codice per mostrare la data di termine del task.</p>
+
+<h3>Formattare le date</h3>
+<img src="/system/photos/46/original/E031I02.png" width="808" height="342" alt="Le date ora si vedono, ma nel formato sbagliato."/>
+<p>La data di termine task ora si vede, ma la formattazione &egrave; orrenda; non volgiamo certamente mostrare la data in quel modo, con tanto di ore minuti e secondi, n&egrave; tantomeno di time zone. Ci&ograve; invece avviene perch&egrave; <code>due_at</code> &egrave; un oggetto di tipo <code>Time</code> e la vista sta chiamando su di esso il metodo <code>to_s</code> per mostrarlo. Abbiamo un paio di alternative da scegliere. Rails estende il metodo <code>to_s</code> per fornirci alcune option di controllo sul formato di output. Proviamo alcune di queste col nostro primo task e vediamo che formati restituiscono:</p>
+
+<table id="formatsTable">
+  <thead>
+    <tr>
+      <th>Format</th>
+      <th>Result</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>Task.first.due_at.to_s</code></td>
+      <td><code>2009-02-19 00:00:00 UTC</code></td>
+    </tr>
+    <tr>
+      <td><code>Task.first.due_at.to_s(:long)</code></td>
+      <td><code>February 19, 2009 00:00</code></td>
+    </tr>
+    <tr>
+      <td><code>Task.first.due_at.to_s(:short)</code></td>
+      <td><code>19 Feb 00:00</code></td>
+    </tr>
+    <tr>
+      <td><code>Task.first.due_at.to_s(:db)</code></td>
+      <td><code>2009-02-19 00:00:00</code></td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Ci sono un bel po&rsquo; di alternative, ma noi abbiamo gusti difficili e non ce ne va bene nessuna. Come possiamo definire un nostro formato personalizzato? L&rsquo;oggetto Ruby <code>Time</code> ha un metodo chiamato <code>strftime</code> che ci permette di fare proprio ci&ograve; che vorremmo. Ci sono parecchi caratteri di controllo per il pattern di formato, per cui diamo u&rsquo;occhiata alla documentazione Ruby per vedere cosa c&rsquo;&egrave; a disposizione. Possiamo farlo digitando <code>ri Time.strftime</code> da linea di comando, o dando un&rsquo;occhiata all&rsquo; opportuna <a href="http://www.ruby-doc.org/core/classes/Time.html#M000297">pagina di documentazione</a> nelle API Rails. Entrambi i modi ci mostrano una lista di caratteri di formattazione che possiamo usare per il nostro pattern.</p>
+<p>Proviamo a creare il nostro pattern di formattazione. Aggiorniamo la parte significativa della nostra vista per mostrare la data di termine del task nel formato che preferiamo.</p>
+<pre class="ruby">&lt;%= task.due_at.strftime(&quot;due on %B %d at %I:%M %p&quot;) %&gt;&lt;/li&gt;</pre>
+<p>Quando aggiorniamo la pagina, vediamo che le date sono effettivamente mostrate come desideravamo.</p>
+
+<img src="/system/photos/47/original/E031I03.png" width="808" height="342" alt="Ora le nostre date sono mostrate correttamente."/>
+<p class="title">Le date di termine task ora mostrate nel formato corretto.</p>
+
+<h3>Riordiniamo il codice</h3>
+<p>Ora mostriamo le date secondo il formato che volevamo, ma il codice della vista &egrave; un po&rsquo; bruttino e non facilmente riusabile. Presumibilmente vorremmo usare lo stesso formato adottato qui anche in altri punti, per cui ora eseguiamo un piccolo refactoring per migliorare questo aspetto del nostro codice. Ci sono numerosi metodi in cui potremmo procedere nel refactoring: potremmo creare un metodo helper o potremmo aggiungere un nuovo metodo al modello <code>Task</code>. La strada che prenderemo sar&agrave; quella di aggiungere un nuovo formato al metodo <code>to_s</code>. Anzich&egrave; usare <code>:long</code>, <code>:short</code> o <code>:db</code>, possiamo creare un nostro personale formato e dargli un nome.</p>
+<p>Per prima cosa cambiamo il codice nella nostra vista index che mostra la date nel nostro formato:</p>
+<pre class="ruby">&lt;%= task.due_at.to_s(:due_date) %&gt;&lt;/li&gt;</pre>
+<p>Il formato della data deve essere caricato prima del resto dell&rsquo;applicazione, per cui lo aggiungiamo al file di configurazione <code>environment.rb</code>. I vari formati di data sono salvati in un hash nella classe <code>Date</code> chiamato <code>TIME_FORMATS</code>, con le chiavi dell&rsquo;hash che sono stringhe rappresentanti il formato. Tutto quello che dobbiamo fare &egrave; aggiungere una nuova chiave denominata <code>due_date</code> all&rsquo;hash con il valore ugale alla stringa del nostro formato. In fondo al contenuto del file <code>environment.rb</code> aggiungiamo dunque la seguente riga:</p>
+<pre class="ruby">Time::DATE_FORMATS[:due_date] = &quot;due on %B %d at %I:%M %p&quot;</pre>
+<p>Fatto ci&ograve; e salvato, dobbiamo riavviare l&rsquo;applicazione in modo tale che il nostro formato sia preso. Se non riavviassimo, verrebbe mostrato il risultato del <code>to_s</code> di default (e vedremmo lo stesso brutto formato iniziale!)</p>
+<p>Dopo aver riavviato l&rsquo;applicazione ed essere tornati indietro alla pagina di indice dei task, vediamo che il nostro nuovo formato di data sta ancora mostrando le date come volevamo noi ed il codice &egrave; ora molto pi&ugrave; pulito.</p>

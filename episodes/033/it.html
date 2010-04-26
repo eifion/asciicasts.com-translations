@@ -1,0 +1,148 @@
+<p>Nell&rsquo;ultimo episodio abbiamo mostrato come modificare una colonna di tipo datetime con un text field, piuttosto che con una serie di menu a tendina. La data e l&rsquo;ora immesse per un task mediante text field sono poi interpretate prima di essere salvate sul database.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/171/original/E033I01.png" width="816" height="381" alt="Modificare il tempo in un textfield."/>
+</div>
+
+<p>Lo abbiamo fatto creando un attributo virtuale nel nostro modello <code>Task</code>, chiamato <code>due_at_string</code>. Questo attributo ha un metodo getter che mostra la data in un formato adatto al salvataggio su database e un metodo setter che interpreta la stringa per farla diventare una data:</p>
+<pre class="ruby">
+def due_at_string
+  due_at.to_s(:db)
+end
+  
+def due_at_string=(due_at_str)
+  self.due_at = Time.parse(due_at_str)
+rescue ArgumentError
+  @due_at_invalid = true
+end
+</pre>
+<p>Questo approccio funziona se c&rsquo;&egrave; solo un attributo che vogliamo modificare in questo modo, ma se ce ne sono diversi, allora avremmo rapidamente parecchie duplicazioni nel modello, poich&egrave; creeremmo tanti getter e setter quanti sono gli attributi virtuali.</p>
+
+<p>Invece di fare cos&igrave;, creiamo un metodo di classe nel nostro modello, che chiamiamo <code>stringify_time</code>. Questo metodo creer&agrave; dinamicamente i metodi getter e setter per qualunque attributo che gli passiamo. Poich&egrave; questo comportamente molto probabilmente ci torner&agrave; utile anche in altre applicazioni, lo svilupperemo sottoforma di plugin.</p>
+
+<h3>Creare un Plugin</h3>
+
+<p>Per cominciare, generiamo un plugin vuoto chiamato <code>stringify_time</code>. Per farlo, lanciamo:</p>
+<pre class="ruby">
+script/generate plugin stringify_time
+</pre>
+<p>dalla cartella root della nostra applicazione. Quesato comando generer&agrave; una serie di file in una nuova cartella <code>stringify_time</code> sotto la cartella <code>/vendor/plugins</code>.</p> 
+<div class="imageWrapper">
+  <img src="/system/photos/172/original/E033I02.png" width="250" height="273" alt="I file creati in fase di generazione di un plugin." style="margin: 4px; border: solid 1px #333;" />
+</div>
+
+<p>Guardiamo il file <code>init.rb</code> per primo. Questo file viene caricato quando viene caricato il plugin, per cui qui metteremo il <code>require</code> del file nella cartella lib dove svilupperemo le funzionalit&agrave; del plugin.</p>
+
+<pre class="ruby">
+require &#x27;stringify_time&#x27;
+</pre>
+<p>Il file <code>stringify_time.rb</code> &egrave; dove scriveremo il codice che genera il getter e il setter tipo i metodi  <code>due_at_string</code> che abbiamo usato in precedenza. Iniziamo a definire un module con il metodo <code>stringify_time</code>:</p>
+<pre class="ruby">
+module StringifyTime
+  def stringify_time(*names)
+    
+  end
+end
+</pre>
+<p>Il metodo <code>stringify_time</code> accetta una lista di nomi come parametro. Abbiamo usato l&rsquo;asterisco per indicare che quel metodo pu&ograve; prendere un numero di argomenti, ciascuno dei quali sar&agrave; messo in un array denominato <code>names</code>.</p>
+
+<p>Il metodo cicler&agrave; sugli elementi dell&rsquo;array <code>names</code> e creer&agrave; due metodi (getter e setter) per ogni nome. Ruby rende questo genere di metaprogrammazione semplice; tutto ci&ograve; che dobbiamo fare per creare dinamicamente un metodo in una classe &egrave; chiamare la <code>define_method</code>. Il codice per creare i metodi getter &egrave;:</p>
+<pre class="ruby">
+names.each do |name|
+
+  define_method &quot;#{name}_string&quot; do
+    read_attribute(name).to_s(:db)
+  end
+
+end
+</pre>
+<p>Questo codice itera su ogni nome presente nell&rsquo;array e usa la <code>define_method</code> per generare dinamicamente un metodo il cui nome &egrave; il nome passato, con la desinenza <code>_string</code>, per cui se passiamo <code>due_at</code> come nome, avremo un nuovo metodo di istanza <code>due_at_string</code>. La <code>define_method</code> accetta un blocco, il cui codice definito all&rsquo;interno diverr&agrave; il corpo del metodo generando. Il metodo <code>due_at_string</code> che abbiamo cos&igrave; creato poco fa, prende il valore dell&rsquo;attributo di modello <code>due_at</code> e lo restituir&agrave; come una stringa formattata. Facciamo la stessa cosa qui, ma poich&egrave; il nostro attributo &egrave; dinamico, dobbiamo usare la <code>read_attribute</code> per recuperare il valore (anzich&egrave; direttamente il nome dell&rsquo;attributo).</p>
+
+<p>Con il getter definito, possiamo ora scrivere anche il setter:</p>
+<pre class="ruby">
+define_method &quot;#{name}_string=&quot; do |time_str|
+  begin
+    write_attribute(name, Time.parse(time_str))
+  rescue ArgumentError
+    instance_variable_set(&quot;@#{name}_invalid&quot;, true)
+  end
+end
+</pre>
+<p>Usiamo nuovamente la <code>define_method</code>. Dal momento che stiamo creando un metodo setter, il nome del metodo finisce con un uguale e, poich&egrave; necessita di un parametro, lo definiamo come una variabile del blocco:</p>
+
+<p>Il nostro metodo <code>due_at_string=</code> interpreta la stringa passatagli e la converte ad un valore <code>Time</code>, poi imposta l&rsquo;attributo <code>due_at</code> a quel valore. Se il valore non pu&ograve; essere interpretato, l&rsquo;eccezione &egrave; catturata e viene settato a <code>true</code> un flag di istanza chiamato <code>@due_at_invalid</code>. Nel nostro setter dinamico usiamo <code>write_attribute</code> per impostare l&rsquo;attributo dinamico e se quello fallisce, si chiama la  <code>instance_variable_set</code> per impostare la corrispondente variabile di istanza.</p>
+
+<p>Mettendo insieme i vari pezzi, il nostro module <code>StringifyTime</code> appare cos&igrave;:</p>
+<pre class="ruby">
+module StringifyTime
+  def stringify_time(*names)
+    names.each do |name|
+      
+      define_method &quot;#{name}_string&quot; do
+        read_attribute(name).to_s(:db)
+      end
+      
+      define_method &quot;#{name}_string=&quot; do |time_str|
+        begin
+          write_attribute(name, Time.parse(time_str))
+        rescue ArgumentError
+          instance_variable_set(&quot;@#{name}_invalid&quot;, true)
+        end
+      end
+      
+    end
+  end
+end
+</pre>
+<p>C&rsquo;&egrave; ancora un cambiamento che dobbiamo fare affinch&egrave; il nostro plugin funzioni. Dovremo chiamare  <code>stringify_time</code> in classi di modello che ereditano da <code>ActiveRecord::Base</code>, per cui dovremo estendere  ActiveRecord con il nostro nuovo module. Tornando al <code>init.rb</code> possiamo fare ci&ograve; aggiungendo:</p>
+<pre class="ruby">
+class ActiveRecord::Base
+  extend StringifyTime
+end
+</pre>
+<p>Nota che stiamo usando <code>extend</code> piuttosto che <code>include</code> poich&egrave; ci&ograve; rende questo metodo nel nostro module un metodo di classe piuttosto che un metodo di istanza.</p>
+
+<p>Ora che abbiamo definito il nostro plugin, lo possiamo usare nel nostro modello <code>Task</code>, sostituendo i metodi getter e i setter con una chiamata a <code>stringify_time</code>:</p>
+<pre class="ruby">
+class Task &lt; ActiveRecord::Base
+  belongs_to :project
+  stringify_time :due_at
+  
+  def validate
+    errors.add(:due_at, &quot;is invalid&quot;) if @due_at_invalid
+  end
+  
+end
+</pre>
+<p>Prima di aggiornare la pagina di modifica dei task per vedere se il nostro plugin funziona, dobbiamo riavviare il server web. Fatto ci&ograve; possiamo aggironare la pagina e vedere se funziona tutto.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/173/original/E033I03.png" width="815" height="389" alt="La pagina di edit ora funziona con il nostro plugin." />
+</div>
+
+<p>Sembra tutto a posto. I campi temporali del task si vedono bene. Proviamo ora a immettere un valore non valido per vedere se viene gestito correttamente.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/174/original/E033I04.png" width="815" height="435" alt="Anche la validazione funziona." />
+</div>
+<p>Anche questo funziona, ma la validazione sta funzionando solo perch&egrave; stiamo usando il nome sorretto della variabile di istanza dal plugin per riconoscere se il modello sia valido o meno.</p>
+<pre class="ruby">
+def validate
+  errors.add(:due_at, &quot;is invalid&quot;) if @due_at_invalid
+end
+</pre>
+<p>Sembra piuttosto brutto fare affidamento ad una variabile di istanza generata da un plugin, per cui piuttosto usiamo un metodo.</p>
+<pre class="ruby">
+def validate
+  errors.add(:due_at, &quot;is invalid&quot;) if due_at_invalid?
+end
+</pre>
+<p>Dobbiamo generare un altro metodo dinamico in <code>stringify_time.rb</code> per creare questo metodo. Subito sotto al codice che crea i metodi getter e setter dinamici, possiamo aggiungere questo:</p>
+<pre class="ruby">
+define_method &quot;#{name}_is_invalid?&quot; do
+  return instance_variable_get(&quot;@#{name}_invalid&quot;)
+end
+</pre>
+<p>per creare il metodo <code>_invalid?</code>.</p>
+
+<p>E questo &egrave; quanto. Abbiamo creato con successo il nostro primo plugin Rails. Bench&egrave; sia piuttosto semplice, il principio &egrave; lo stesso a prescindere dalla complessit&agrave; del plugin che si deve creare.</p>

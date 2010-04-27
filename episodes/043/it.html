@@ -1,0 +1,85 @@
+<p>In questo episodio useremo RJS per aggiungere un po&rsquo; di funzionalit&agrave; AJAX al sito. RJS &egrave; il modo pi&ugrave; semplice per usare AJAX con Rails, specialmente se occorre aggiornare pi&ugrave; di un elemento nella pagina.</p>
+<p>Nella pagina dei prodotti del nostro sito, gli utenti possono aggiungere opinioni su un prodotto mediante una form. Quando viene fatto il submit della form, viene eseguita una richiesta HTTP POST al server remoto e la pagina viene ricaricata.</p>
+<div class="imageWrapper">
+  <img src="E043I01.png" width="823" height="744" alt="La nostra pagina dei prodotti che mostra le opinioni."/>
+  <p class="title">La nostra pagina dei prodotti che mostra le opinioni.</p>
+</div>
+<p>Dopo che la form &egrave; stata inviata cambiano diversi elementi nella pagina originaria: il testo che mostra il numero di opinioni &egrave; cambiato, l&rsquo;opinione &egrave; stata aggiunta alla lista, la form &egrave; stata resettata e c&rsquo;&egrave; un messaggio in cima alla pagina che ringrazia l&rsquo;utente per avere aggiunto l&rsquo;opinione. Tutto ci&ograve; dovr&agrave; essere aggiornato dal nostro template RJS dopo che avremo AJAXificato la form.</p>
+
+<h3>Modifiche alla vista</h3>
+<p>Prima di cominciare ad aggiornare il codice della vista, dobbiamo sincerarci che stiamo includendo prototype e gli altri file standard JavaScript. Per farlo, aggiungiamo questa linea alla sezione <code>&lt;head&gt;</code> del file di layout:</p>
+<pre class="ruby">&lt;%= javascript_include_tag :defaults %&gt;</pre>
+<p>Cominciamo ora a modificare il codice della vista. Ecco come appare ora, secondo una forma piuttosto standard per una vista Rails:</p>
+<pre class="ruby">
+&lt;% form_for [@product, @review] do |form| %&gt;
+&lt;ol class=&quot;formList&quot;&gt;
+  &lt;li&gt;&lt;%= form.label :name, &quot;Name:&quot; %&gt; &lt;%= form.text_field :name %&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;%= form.label :content, &quot;Review:&quot; %&gt; &lt;%= form.text_area :content, :rows =&gt; 5 %&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;%= submit_tag &quot;Add comment&quot; %&gt;&lt;/li&gt;
+&lt;/ol&gt;
+&lt;% end %&gt;
+</pre>
+<p>Per fare in modo che la form invii una richiesta AJAX &egrave; sufficiente sostituire <code>form_for</code> nella prima riga con <code>form_remote<b>_for</b></code>. Rails fornisce un numero di metodi che rendono i &lsquo;normali&rsquo; elementi di una form in elementi AJAX-enabled; per maggiori informazioni &egrave; disponibile una lista di tali metodi sul sito delle API di Rails<a href="#fn1"><sup>1</sup></a>.</p>
+<p>Dopo avere eseguito la modifica ed aggiornata la pagina, il tag di apertura della form avr&agrave; un attributo <code>onsubmit</code> che consentir&agrave; il submit asincrono della form stessa. Se il sito fosse utilizzato da qualcuno che non avesse il  JavaScript abilitato sul browser, la form continuerebbe a funzionare, ma alla stessa maniera in cui funzionava prima (cio&egrave; con una normale POST HTTP).</p>
+<pre class="terminal">
+&lt;form action=&quot;/products/1/reviews&quot; class=&quot;new_review&quot; id=&quot;new_review&quot; method=&quot;post&quot; 
+onsubmit=&quot;new Ajax.Request(&#x27;/products/1/reviews&#x27;, 
+{asynchronous:true, evalScripts:true, parameters:Form.serialize(this)}); 
+return false;&rdquo;&gt;
+</pre>
+
+<h3>Modifiche al controller</h3>
+<p>La form dell&rsquo;opinione viene inviata ad un action chiamata <code>create</code> nel controller delle opinioni. Questa action ha il compito di creare una nuova opinione, impostare una notifica flash e ridirigere indietro alla pagina dei prodotti:</p>
+<pre class="ruby">
+def create
+  @review = Review.new(params[:review])
+  @review.product_id = params[:product_id]
+  @review.save
+  flash[:notice] = &quot;Thanks for your review!&quot;
+  redirect_to product_path(params[:product_id])
+end
+</pre>
+<p>Il redirect non funzionerebbe con una richiesta AJAX, per cui modifichiamo il metodo per fare in modo che il controller risponda in maniera differente a seconda di quale effettiva richiesta gli arriva (HTTP oppure JavaScript). Il metodo <code>respond_to</code> ci permette di intervenire su questa cosa. Prende un blocco in cui mettiamo il codice per ogni formato possibile. Sostituiamo il  <code>redirect_to</code> nella action precedente con questo:</p>
+<pre class="ruby">
+respond_to do |format|
+  format.html { redirect_to product_path(params[:product_id]) }
+  format.js
+end
+</pre>
+<p>Ora, con questo codice, la redirect agir&agrave; ancora correttamente per le richieste che giungono alla action mediante HTTP, ma non ci sar&agrave; per quelle inoltrate mediante AJAX. Poich&egrave; non c&rsquo;&egrave; codice associato al blocco js, si ricadr&agrave; direttamente ad un template RJS.</p>
+
+<h3>Creazione di un template RJS</h3>
+<p>Il file di template va messo nella cartella <code>/app/views/reviews</code> e, poich&egrave; &egrave; eseguito dalla action <code>create</code>, dovr&agrave; chiamarsi <code>create.rjs</code>. Il file RJS produrr&agrave; il JavaScript e lo restituir&agrave; al client in risposta alla richiesta AJAX.</p>
+<p>La prima cosa che dobbiamo fare &egrave; aggiungere una nuova opinione alla lista. Le opinioni sono renderizzate sottoforma di lista ordinata per <code>id</code> di <code>review</code>. Ogni opinione &egrave; creata in un partial chiamato <code>_review.html.erb</code>. Il codice RJS per aggiungere la nuova opinione in fondo alla lista &egrave; il seguente:</p>
+<pre class="ruby">page.insert_html :bottom, :reviews, :partial =&gt; &#x27;review&#x27;, :object =&gt; @review</pre>
+<p>Il codice mostrato usa <code>insert_html</code> per aggiungere HTML alla pagina. Gli argomenti che prende indicano:</p>
+<ul style="list-style: inside disc;">
+  <li>Dove inserire l&rsquo;HTML (si pu&ograve; inserire <code>:before</code>, <code>:after</code>, <code>:top</code> o <code>:bottom</code>).</li>
+  <li>L&rsquo;<code>id</code> dell&rsquo;elemento che vogliamo modificare (in questo caso la nostra lista di opinioni,  &lsquo;reviews&rsquo;).</li>
+  <li>L&rsquo;HTML da renderizzare. Questa parte pu&ograve; essere semplicemente del testo, oppure, come nel nostro caso, un partial. Passiamo il nome del partial e l&rsquo;oggetto da passare a quest&rsquo;ultimo. Stiamo renderizzando una nuova opinione, per cui passiamo il partial <code>review</code> e il nuovo oggetto opinione creato<a href="#fn2"><sup>2</sup></a>.</li>
+</ul>
+<p>La nuova opinione sar&agrave; aggiunta alla lista al submit della form, ma il testo che mostra il numero di opinioni non sar&agrave; aggiornato. Aggiungiamo dell&rsquo;altro codice RJS per farlo. Questa volta sostituiremo dell&rsquo;HTML gi&agrave; esistente piuttosto che aggiungerne di nuovo, per cui useremo la <code>replace_html</code>:</p>
+<pre class="ruby">page.replace_html :reviews_count, pluralize(@review.product.reviews.size, &#x27;Review&#x27;)</pre>
+<p>Alla <code>replace_html</code> occorre fornire l&rsquo;<code>id</code> dell&rsquo;elemento da aggiornare e il nuovo contenuto. Passiamo un testo usando lo stesso metodo <code>pluralize</code> usato nel codice della vista. Non avendo visibilit&agrave; della variabile <code>@product</code> che abbiamo usato nel caso della vista, dobbiamo prenderci il prodotto associato all&rsquo;opinione e il numero di opinioni che ha.</p>
+<p>Vogliamo anche resettare la form una volta che una nuova opinione &egrave; stata aggiunta. La form ha per <code>id</code> "<code>new_review</code>" e possiamo usare l&rsquo;oggetto <code>page</code> per passare un metodo JavaScript ad essa nel seguente modo:</p>
+<pre class="ruby">page[:new_review].reset</pre>
+<p>Infine, dobbiamo mostrare un messaggio flash. Come abbiamo fatto per l&rsquo;elemento che mostra in numero di opinioni, possiamo di nuovo usare la <code>replace_html</code> per mostrare il messaggio:</p>
+<pre class="ruby">page.replace_html :notice, flash[:notice]</pre>
+
+<h3>Ultimo problema</h3>
+<p>La nostra form ora funziona come volevamo e le opinioni possono essere aggiunte senza la necessit&agrave; di fare una POST completa e ricaricare l&rsquo;intera pagina. C&rsquo;&egrave; ancora un piccolo problema da risolvere, comunque. Se si esegue un refresh della pagina a seguito di un inserimento, il messaggio flash rimarr&agrave; visibile, bench&egrave; scompaia ad un ulteriore refresh. Questo accade a causa del meccanismo in cui funziona la messaggistica flash: il messaggio si mantiene per una richiesta.</p>
+<p>Il modo per aggirare questo problemino consiste semplicemente nello scartare il flash subito dopo che lo si &egrave; passato al JavaScript per il rendering. E&rsquo; dunque sufficiente aggiungere un&rsquo;altra linea al nostro file RJS:</p>
+<pre class="ruby">flash.discard</pre>
+<p>Ora il messaggio flash non apparir&agrave; nuovamente a seguito di un refresh della pagina o di una navigazione in un&rsquo;altra, conseguente all&rsquo;aggiunta di un&rsquo;opinione.</p>
+<p>La nostra pagina si comporta ora esattamente come prima, ma senza la post back. Il file RJS finale appare cos&igrave;:</p>
+<pre class="ruby">
+page.insert_html :bottom, :reviews, :partial =&gt; &#x27;review&#x27;, :object =&gt; @review
+page.replace_html :reviews_count, pluralize(@review.product.reviews.size, &#x27;Review&#x27;)
+page[:new_review].reset
+page.replace_html :notice, flash[:notice]
+flash.discard
+</pre>
+<ol class="footnotes">
+  <li id="fn1"><a href="http://api.rubyonrails.org/classes/ActionView/Helpers/PrototypeHelper.html">http://api.rubyonrails.org/classes/ActionView/Helpers/PrototypeHelper.html</a></li>
+	<li id="fn2">In Rails 2.3 tutto ci&ograve; pu&ograve; essere abbreviato con <code>:partial =&gt; @review</code>.</li>
+</ol>

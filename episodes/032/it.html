@@ -1,0 +1,75 @@
+<div class="imageWrapper">
+  <img src="/system/photos/50/original/E032I01.png?1235812733" width="815" height="369" alt="La pagina di indice dei task."/>
+</div>
+<p>Sopra abbiamo un applicazione che mostra una lista di task. Cliccando sul link di modifica di un task si viene portati alla pagina di edit per quel task. La pagina di edit usa il metodo helper <a href="http://api.rubyonrails.org/classes/ActionView/Helpers/DateHelper.html#M001668"><code>datetime_select</code></a> per visualizzare i task come lista di menu a tendina.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/51/original/E032I02.png?1235812787" width="815" height="369" alt="La pagina di edit per un task."/>
+</div>
+
+<p>Cambiare cinque tendine non &egrave; propriamente il modo pi&ugrave; semplice per cambiare una data. Sarebbe pi&ugrave; semplice per gli utenti se potessero immettere la data e l&rsquo;ora direttamente in un unico campo di testo. La nostra apllicazione potrebbe poi interpretare ci&ograve; che &egrave; stato inserito e memorizzare correttamente il dato sul database.</p>
+
+<p>Sostituire le tendine con un campo di testo unico significa che avremo un field in maschera che non mappa direttamente un campo del database. Dobbiamo creare un attributo virtuale nel modello <code>Task</code> per gestire il nuovo campo. Prima di fare ci&ograve;, aggiorniamo il codice della vista e sostituiamo la nostra tendina con un campo di testo chiamato <code>due_at_string</code>.</p>
+<pre class="ruby">
+&lt;h1&gt;Edit Task&lt;/h1&gt;
+&lt;% form_for @task do |form| %&gt;
+&lt;ol class=&quot;formList&quot;&gt;
+  &lt;li&gt;
+    &lt;%= form.label :name, &quot;Name&quot; %&gt;
+    &lt;%= form.text_field :name %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= form.label :due_at_string, &quot;Due at&quot; %&gt;
+    &lt;%= form.text_field :due_at_string %&gt;
+  &lt;/li&gt;
+  &lt;li&gt;
+    &lt;%= submit_tag &quot;Edit task&quot; %&gt;
+  &lt;/li&gt;
+&lt;/ol&gt;
+&lt;% end %&gt;
+</pre>
+<p class="title">Il codice della vista di modifica con il nostro nuovo campo di testo.</p>
+<p>Ora che abbiamo aggiornato la form, dobbiamo creare i metodi getter e setter per l&rsquo;attributo virtuale nel modello.  Gli attributi virtuali sono stati trattati nell&rsquo;<a href="/episodes/16-attributi-virtuali">episodio 16</a>; date un&rsquo;occhiata a quell&rsquo;episodio se avete bisogno di alcune informazioni in merito.</p>
+<pre class="ruby">
+class Task &lt; ActiveRecord::Base
+  belongs_to :project
+  validates_presence_of :name
+
+  def due_at_string
+    due_at.to_s(:db)
+  end
+
+  def due_at_string=(due_at_str)
+    self.due_at = Time.parse(due_at_str)
+  end
+end
+</pre>
+<p>Il metodo getter prende la data di termine del task (<code>due_at</code>) dal database e restituisce una rappresentazione in formato stringa di questa. Il metodo setter avrebbe potuto essere un po&rsquo; pi&ugrave; ostico poich&egrave; deve accettare qualsiasi cosa abbia deciso di immettere l&rsquo;utnete e convertirlo in una data e un&rsquo;ora. Per fortuna, la classe <code>Time</code> fornisce un metodo di classe <a href="http://www.ruby-doc.org/core/classes/Time.html#"><code>parse</code></a> che prova a fare proprio questo lavoro di conversione da testo a data.</p>
+
+<p>Ricaridando la pagina vediamo ora che le tendine sono state rimpiazzate dal campo di testo che mostra la data di termine del task. Il metodo <code>Time.parse</code> &egrave; piuttosto ingegnoso nell&rsquo;interpretare il testo che gli passiamo, per cui potremmo tranquillamente inserire la stringa, per esempio, <code>March 1st at 8:00PM</code> e questi sarebbe in grado di convertirla.</p>
+
+<p>A volte, tuttavia, abbiamo bisogno di pi&ugrave; flessibilit&agrave; di quanta non ce ne possa fornire il metodo <code>Time.parse</code>. Il gem <a href="http://chronic.rubyforge.org/">Chronic</a>, che pu&ograve; essere installato con <code>sudo gem install chronic</code> &egrave; utile se abbiamo bisogno di poter accettare pi&ugrave; tipi di date e orari. Per usarlo, aggiungiamo semplicemente <code>require &#x27;chronic&#x27;</code> in testata alla classe <code>Task</code> e sostituiamo il <code>Time.parse</code> all&rsquo;interno del nostro metodo setter con <code>Chronic.parse</code>:</p>
+<pre class="ruby">
+  def due_at_string=(due_at_str)
+    self.due_at = Chronic.parse(due_at_str)
+  end
+</pre>
+<p>Uno dei vantaggi di Chronic &egrave; che pu&ograve; gestire le date relative, per cui potremmo passare &quot;tomorrow&quot;, &quot;Monday&quot; o persino &quot;next Tuesday at 8pm&quot; e questi sarebbe in grado di interpretarle correttamente.</p>
+
+<h3>Gestione delle eccezioni</h3>
+<p>Chronic restituisce <code>nil</code> se non &egrave; in grado di interpretare la stringa passatagli, che potremmo controllare, ma <code>Time.parse</code> invece solleva una eccezione <code>ArgumentError</code>. Ovviamente dobbiamo gestire ci&ograve;, per cui aggiungiamo un blocco <code>rescue</code> al metodo setter. Aggiungiamo anche una variabile di istanza alla classe, che sar&agrave; impostata a <code>true</code> se la data immessa avr&agrave; causato una eccezione e infine aggiungiamo un metodo <code>validate</code> alla classe, che aggiunga un errore all&rsquo;hash degli errori per il task se il nome passato non pu&ograve; essere interpretato.</p>
+<pre class="ruby">
+def due_at_string=(due_at_str)
+  self.due_at = Time.parse(due_at_str)
+rescue ArgumentError
+  @due_at_invalid = true
+end
+
+def validate
+  errors.add(:due_at, &quot;is invalid&quot;) if @due_at_invalid
+end
+</pre>  
+<p>Ora, se proviamo a passare una data non valida, l&rsquo;errore sar&agrave; catturato e aggiunto alla lista degli errori del modello. <code>Time.parse</code> sostituisce le eventuali parti mancanti o completamente invalide della data immessa con l&rsquo;equivalente parte di <code>Time.now</code>, in questo modo se passiamo un valore completamente sbagliato tipo <code>&quot;Hello, world!&quot;</code> la data di termine del task sar&agrave; impostata alla data odierna. Viene sollevata un&rsquo;eccezione solo se viene passata una data non valida tipo <code>&quot;32-12-2009&quot;</code>.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/52/original/E032I03.png?1235812834" width="808" height="484" alt="La pagina di edit mostra ora un errore se viene passata una data non valida."/>
+</div>
+<p>Ora conosciamo un modo decisamente migliore per inserire le date e gli orari in una applicazione Rails. Si che scegliamo di usare Chronic o i metodi di interpretazione degli orari built-in, possiamo gestire un ampio ventaglio di formati provenienti da input dell&rsquo;utente.</p>

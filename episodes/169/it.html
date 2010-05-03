@@ -1,0 +1,182 @@
+<p>L&rsquo;applicazione con cui lavoreremo in questo episodio &egrave; un forum per suonatori di piano. La pagina qui sotto &egrave; la home page e al momento ci sta mettendo un paio di secondi per caricarsi.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/137/original/E169I01.png" width="834" height="481" alt="La home page del nostro sito richiede un paio di secondi per aprirsi." />
+</div>
+
+<p>Anche se potrei fingere dicendovi che la pagina ci impiega cos&igrave; tanto a caricare in quanto ci sono logiche molto complesse che caricano un sacco di roba dietro le tende, la realt&agrave; &egrave; che in questo caso ho solo simulato il ritardo aggiungendo semplicemente una sleep 2 al metodo che serve la richiesta. Per lo scopo della dimostrazione non conta quale sia la causa reale del ritardo, faremo finta che sia un ritardo effettivo e non simulato, e poich&egrave; si tratta della home page, ci teniamo che sia anche molto rapida a caricarsi. Per migliorare i tempi di caricamento, faremo tutto il possibile per ottimizzare le performance di tale pagina.</p>
+
+<h3>Caching della pagina</h3>
+
+<p>Il modo pi&ugrave; efficace per migliorare la reattivit&agrave; di una pagina in Rails &egrave; quello di farne caching. (Il caching di una pagina &egrave; stato affrontato come argomento nell&rsquo;<a href="http://http://railscasts.com/episodes/89-cache-delle-pagine">episodio 89</a>). Attiviamo il caching della pagine e vediamo come andare avanti.</p>
+
+<p>Il caching &egrave; disabilitato per default nella modalit&agrave; di sviluppo, per cui dovremo aprire il file di configurazione <code>/config/environments/development.rb</code> e abilitarla, impostando <code>config.action_controller.perform_caching</code> a <code>true</code>. Fatto ci&ograve;, possiamo aggiungere il caching alla action <code>index</code> del nostro controller dei forum:</p>
+<pre class="ruby">
+class ForumsController &lt; ApplicationController
+  
+  before_filter :admin_required, :except =&gt; [:index, :show]
+  caches_page :index
+  
+  def index
+    @forums = Forum.all
+    sleep 2
+  end
+
+  # altri metodi omessi.
+  
+end
+</pre>
+
+<p>Ora dobbiamo riavviare il nostro server per fare in modo che le modifiche alla configurazione siano sentite, dopodich&egrave; possiamo ricaricare la nostra pagina. Dovrebbe metterci un paio di secondi per caricare la prima volta, ma caricher&agrave; praticamente subito ad ogni successivo aggiornamento dal momendo che la pagina viene fornita a partire dalla cache.</p>
+
+<p>Il caching funziona generando file di HTML statico nella directory <code>/public</code>. Quando una richiesta viene fatta ad un&rsquo;applicazione Rails, il server sotto cui l&rsquo;applicazione sta girando controlla per prima cosa se pu&ograve; servire la richiesta mediante le risorse statiche che ha a disposizione. Per esempio, per servire la richiesta per questa pagina, cercher&agrave; un file chiamato <code>/public/episodes/169-caching-delle-pagine-dinamico.html</code>. Se il server trova il file, lo restituisce e l&rsquo;applicazione Rails non verr&agrave; nemmeno a sapere che quella pagina &egrave; stata chiesta; se invece il web server non trova quel file, inoltra la richiesta a Rails affinch&egrave; la processi lui. A questo punto, se l&rsquo;azione richiesta ha il caching abilitato, allora Rails, dopo aver processato la richiesta, scriver&agrave; il file HTML nel posto opportuno sotto la cartella <code>/public</code>, in modo tale che alle richieste successive per la stessa pagina, il web server possa servire direttamente la risposta senza coinvolgere nuovamente Rails. (Fra parentesi, questo &egrave; il motivo per cui avete dovuto rimuovere la pagina statica <code>index.html</code> che era stata creata per default alla creazione dell&rsquo;applicazione, per fare in modo che come home page si vedesse la vostra pagina generata dalla action del controller. Funziona esattamente allo stesso modo in cui funziona qualsiasi altro file di cache e impedisce alla action root reale di essere processata).</p>
+
+<p>Le pagine salvate in cache, in quanto statiche, non possono avere contenuti dinamici, il che &egrave; un problema nel nostro caso in cui abbiamo contenuti che dipendono da chi sia l&rsquo;utente attualmente autenticato. Se facessimo cache di tutta la pagina cos&igrave; com&rsquo;&egrave; ora, chiunque visitasse tale pagina si vedrebbe autenticato come eifion.</p>
+<pre class="ruby">
+&lt;div id=&quot;user_nav&quot;&gt;
+  &lt;p&gt;Welcome &lt;strong&gt;eifion&lt;/strong&gt;! Not you? &lt;a href=&quot;/logout&quot;&gt;Logout&lt;/a&gt;&lt;/p&gt;
+&lt;/div&gt;
+</pre>
+<p>Anche se cliccassimo sul link di &ldquo;log out&rdquo;, risulteremmo comunque autenticati perch&egrave; la pagina di logout ridirige indietro alla home page dopo averci fatto uscire, che per&ograve; &egrave; in cache, per cui alla fine verremmo serviti con la medesima risorsa statica.</p>
+
+<p>Pare che ci sia un po&rsquo; troppo contenuto dinamico in questa pagina per permetterci di utilizzare il caching delle pagine. Potremmo per&ograve; provare ad usare il cosiddetto "fragment caching" per fare cache delle sole parti della pagina che mostrano la lista dei forum, ma anche qui c&rsquo;&egrave; contenuto dinamico, dal momento che i link di &ldquo;edit&rdquo; e di &ldquo;destroy&rdquo; per ogni forum devono essere mostrati ai soli utenti amministratori.</p> 
+
+<h3>Utilizzo del Javascript con il caching delle pagine</h3>
+
+<p>Anche se pu&ograve; sembrare che la nostra pagina non sia cacheabile, in realt&agrave; esiste un modo perch&egrave; lo sia. Possiamo rimuovere il contenuto dinamico dalla pagina, usare il caching della pagina per fare cache della struttura di pagina e poi aggiungere il contenuto dinamico mediante JavaScript.</p>
+
+<p>Prima di cominciare, disabiliteremo temporaneamente il caching e lo <code>sleep</code> sul nostro controller dei forum. Dovremo anche assicurarci di rimuovere la pagina statica eventualmente generata, altrimenti non vedremo nessuno dei cambiamenti che faremo:</p>
+<pre class="terminal">
+rm public/index.html
+</pre>
+<p>La prima parte della pagina che renderemo dinamica sono i link che permettono agli utenti amministratori di modificare o cancellare i forum ed il link <i>new forum</i> in fondo alla pagina. Il codice della vista &egrave; mostrato sotto con due parti della pagina che sono mostrati solo agli amministratori, racchiusi in un controllo if:</p>
+<pre class="ruby">
+&lt;% title &quot;Piano Forums&quot; %&gt;
+
+&lt;div id=&quot;forums&quot;&gt;
+  &lt;% for forum in @forums %&gt;
+    &lt;div class=&quot;forum&quot;&gt;
+      &lt;h2&gt;&lt;%= link_to h(forum.name), forum %&gt;&lt;/h2&gt;
+      &lt;p&gt;&lt;%= h forum.description %&gt;&lt;/p&gt;
+      &lt;% if admin? %&gt;
+        &lt;p class=&quot;admin&quot;&gt;
+          &lt;%= link_to &quot;Edit&quot;, edit_forum_path(forum) %&gt; |
+          &lt;%= link_to &quot;Destroy&quot;, forum, :confirm =&gt; &#x27;Are you sure?&#x27;, :method =&gt; :delete %&gt;
+        &lt;/p&gt;
+      &lt;% end %&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+&lt;/div&gt;
+
+&lt;% if admin? %&gt;
+  &lt;p class=&quot;admin&quot;&gt;&lt;%= link_to &quot;New Forum&quot;, new_forum_path %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p>Riumoviamo gli if e nascondiamo i link col CSS:</p>
+<pre class="ruby">
+&lt;p class=&quot;admin&quot; style=&quot;display:none;&quot;&gt;
+  &lt;%= link_to &quot;Edit&quot;, edit_forum_path(forum) %&gt; |
+  &lt;%= link_to &quot;Destroy&quot;, forum, :confirm =&gt; &#x27;Are you sure?&#x27;, :method =&gt; :delete %&gt;
+&lt;/p&gt;
+</pre>
+<pre class="ruby">
+&lt;p class=&quot;admin&quot; style=&quot;display:none;&quot;&gt;&lt;%= link_to &quot;New Forum&quot;, new_forum_path %&gt;&lt;/p&gt;
+</pre>
+<p>Se ora ricarichiamo la pagina, i link amministrativi sono nascosti:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/138/original/E169I02.png" width="810" height="496" alt="I link di modifica, cancellazione e creazione forum sono ora nascosti." />
+</div>
+
+<p>Ora usiamo JavaScript per fare in modo che i link ritornino ad essere visibili se l&rsquo;utente &egrave; un amministratore. In cima alla vista chiamiamo un metodo helper che aggiunge i riferimenti ai due file JavaScript alla sezione HEAD della pagina. (Questo metodo helper &egrave; parte dei <a href="http://github.com/ryanb/nifty-generations/tree/master">nifty layout generator</a> di Ryan Bates). Il primo file JavaScript &egrave; un riferimento alla <a href="http://jquery.com/">jQuery library</a>, anche se in realt&agrave; volendo, si pu&ograve; anche usare <a href="http://www.prototypejs.org/">Prototype</a>; il secondo riferimento &egrave; ad una action nell&rsquo;<code>UsersController</code>:</p> 
+<pre class="ruby">
+&lt;% javascript &#x27;jquery&#x27;, &#x27;/users/current&#x27; %&gt;
+</pre>
+<p>Al caricamento della pagina, il codice si sopra genera il seguente HTML:</p>
+<pre class="ruby">
+&lt;script src=&quot;/javascripts/jquery.js&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;/users/current.js&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+</pre>
+
+<p>La prima linea carica le librerie jQuery che dovremo scaricare ed aggiungere alla cartella <code>/public/javascripts</code> della nostra applicazione. La seconda riga chiama la action <code>show</code> del controller degli utenti, con <code>current</code> passato come id fittizio. Dobbiamo cambiare la action show per fare in modo che possa rispondere a richieste JavaScript.</p>
+
+<p>Il controller avr&agrave; bisogno di un metodo <code>show</code>, ma pu&ograve; essere lasciato vuoto:</p>
+<pre class="ruby">
+def show
+
+end
+</pre>
+<p>Poi abbiamo bisogno di un nuovo template di vista da usarsi in risposta alle richieste JavaScript. Nella cartella <code>/app/views/users</code> creiamo un file chiamato <code>show.js.erb</code> e mettiamogli il seguente codice dentro:</p>
+<pre class="javascript">
+$(document).ready(function () {
+  &lt;% if admin? %&gt;
+  $(&#x27;.admin&#x27;).show();
+  &lt;% end %&gt;
+});
+</pre>
+<p>Il codice sopra usa la funzione jQuery <code>$(document).ready()</code> per eseguire del JavaScript una volta che il DOM si &egrave; caricato completamente. Il codice sar&agrave; vuoto a meno che l&rsquo;utente non sia amministratore, ma se lo &egrave;, tutti gli elementi della pagina che hanno classe <code>admin</code> saranno mostrati.</p> 
+
+<h3>Aggiornare lo stato</h3>
+
+<p>Anche la parte di pagina che mostra lo stato dell&rsquo;utente deve essere generata dinamicamente, cos&igrave; come i messeggi flash mostrati al login e al logout. Entrambe queste tre parti della pagina si trovano nel file di layout dell&rsquo;applicazione:</p>
+<pre class="ruby">
+&lt;%- flash.each do |name, msg| -%&gt;
+  &lt;%= content_tag :div, msg, :id =&gt; &quot;flash_#{name}&quot; %&gt;
+&lt;%- end -%&gt;
+&lt;div id=&quot;user_status&quot;&gt;
+  &lt;% if current_user %&gt;
+    &lt;p&gt;Welcome &lt;strong&gt;&lt;%= current_user.username %&gt;&lt;/strong&gt;! Not you? &lt;%= link_to &quot;Logout&quot;, logout_path %&gt;&lt;/p&gt;
+  &lt;% else %&gt;
+    &lt;%= link_to &quot;Register&quot;, new_user_path %&gt;
+    &lt;%= link_to &quot;Log in&quot;, login_path %&gt;
+  &lt;% end %&gt;
+&lt;/div&gt;
+</pre>
+<p>Aggiornare queste tre parti della pagina con JavaScript sar&agrave; pi&ugrave; semplice se esse si trovano in un partial, per cui spostiamo il codice di sopra in un file partial nella cartella <code>/app/views/layouts/dynamic_header.html.erb</code>. Poi possiamo sostituire il codice precedente con un riferimento al nostro nuovo partial:</p>
+<pre class="ruby">
+&lt;%= render &#x27;layouts/dynamic_header&#x27; %&gt;
+</pre>
+<p>Ci&ograve; che dobbiamo fare ora &egrave; di rimuovere i contenuti del partial dalla nostra home page statica e cached, e aggiungerli mediante JavaScript. Per questo, dobbiamo inoltrare in messaggio al partial per dirgli di non visualizzare se stesso nella home page. Un modo piuttosto ingegnoso per farlo, consiste nel aggiungere una variabile di istanza al codice della vista della home page. Il layout &egrave; renderizzato dopo la vista, per cui la variabile sar&agrave; disponibile per il layout.</p>
+
+<p>In cima al file <code>/app/views/forums/index.html.erb</code> aggiungiamo una variabile chiamata hide_dynamic ed impostiamola al valore true:</p>
+<pre class="ruby">
+&lt;% title &quot;Piano Forums&quot; %&gt;
+&lt;% javascript &#x27;jquery&#x27;, &#x27;/users/current&#x27; %&gt;
+&lt;% @hide_dynamic = true %&gt;
+&lt;div id=&quot;forums&quot;&gt;
+&lt;!-- resto della pagina... --&gt;
+</pre>
+<p>Ora possiamo modificare la chiamata al layout <code>dynamic_header</code> per fare in modo che questo non sia renderizzato se <code>@hide_dynamic</code> &egrave; <code>true</code>:</p>
+<pre class="ruby">
+&lt;%= render :partial =&gt; &#x27;layouts/dynamic_header&#x27; unless @hide_dynamic %&gt;
+</pre>
+<p>Se ora aggiorniamo la pagina, vediamo che lo stato dell&rsquo;utente e il link di log out sono scomparsi. Modifichiamo il nostro JavaScript in modo tale che possano ricomparire:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/139/original/E169I03.png" width="825" height="630" alt="Lo stato dell&rsquo;utente non appare pi&ugrave;." />
+</div>
+
+<p>Dobbiamo cambiare la nostra funzione jQuery affinch&egrave; renderizzi il partial per mostrare lo stato dell&rsquo;utente corrente e tutti i messaggi flash. Basta aggiungere una linea al nostro codice jQuery:</p>
+<pre class="javascript">
+$(document).ready(function () {
+  $(&#x27;#container&#x27;).prepend(&#x27;&lt;%= escape_javascript render(&quot;layouts/dynamic_header&quot;) %&gt;&#x27;);
+  &lt;% if admin? %&gt;
+  $(&#x27;.admin&#x27;).show();
+  &lt;% end %&gt;
+});
+</pre>
+<p>Vogliamo aggiungere il partial come primo figlio del <code>div</code> con <code>id</code> <code>container</code>; per fare ci&ograve;, abbiamo usato la funzione jQuery <code>prepend()</code>. Questa funzione accetta una stringa di HTML per argomento, per cui le possiamo passare il partial renderizzato, racchiuso fra <code>escape_javascript</code> per essere sicuri che il contenuto del partial non generi errori JavaScript.</p>
+
+<p>Ora, al ricaricamento della pagina, il pannello di stato dell&rsquo;utente ricomparir&agrave;, in quanto sar&agrave; stato aggiunto dal JavaScript chiamato nella pagina HTML statica che &egrave; la stessa sia per gli utenti loggati, sia per quelli anonimi.</p>
+
+<h3>Riabilitare il caching</h3>
+
+<p>Ora che tutte le parti dinamiche della pagina sono aggiornate da codice JavaScript, possiamo riabilitare il page caching ed riaggiungere lo <code>sleep</code> per simulare la complessit&agrave; (in questo caso non presente realmente) della pagina.</p>
+
+<p>Al primo ricaricamento della pagina, ci vorranno un paio di secondi, ma ai successivi refresh, la pagina si caricher&agrave; pressoch&egrave; instantaneamente, essendo la pagina servita dalla cache. La differenza, ora, sta nel fatto che possiamo autenticarci e scollegarci e la pagina si aggiorner&agrave; per riflettere il nostro stato, ed ogni link amministrativo si vedr&agrave; o meno a seconda di come effettivamente ci aspettiamo che sia.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/140/original/E169I04.png" width="825" height="541" alt="Le parti dinamiche della pagina sono ora impostate mediante JavaScript." />
+</div>
+
+<p>Questo approccio non sar&agrave; efficiente come il completo caching della pagina, in quanto le parti JavaScript continuano ancora a tirare in ballo Rails, ma si dovrebbero notare aumenti di performance per file complessi, dal momento che la maggior parte della pagina viene servita dal web server come HTML statico.</p>

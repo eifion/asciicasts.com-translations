@@ -1,0 +1,189 @@
+<p>Negli ultimi due episodi vi abbiamo mostrato come configurare il vostro sistema per Rails 3 e come creare una nuova applicazione Rails 3. In questo episodio cominceremo a guardare ad alcune delle sue funzionalit&agrave;, partendo con ActiveRecord che fornisce una nuova interfaccia per eseguire query verso il database. Pratik Naik di recente ha affrontato in dettaglio questo argomento in <a href="http://m.onkey.org/2010/1/22/active-record-query-interface">un post sul suo blog</a>, che &egrave; consigliabile leggersi.</p> 
+
+<h3>Alcuni semplici esempi</h3>
+
+<p>Per cominciare, vi mostreremo un po&rsquo; di esempi di chiamate find mediante ActiveRecord eseguite alla vecchia maniera e le convertiremo nel nuovo formato di Rails 3. Come pretesto, useremo una applicazione Rails basilare che definisce due modelli: <code>Article</code> e <code>Comment</code> in relazione fra loro - <code>Article</code> <code>has_many :comments</code>.</p>  
+
+<p>La prima find che aggiorniamo restituisce i dieci articoli pubblicati pi&ugrave; di recente:</p>
+<pre class="ruby">
+Article.find(:all, :order =&gt; &quot;published_at desc&quot;, :limit =&gt; 10)
+</pre>
+<p>L&rsquo;approccio di base per convertire una query ActiveRecord al nuovo formato di Rails 3 consiste nell&rsquo;esaminare l&rsquo;hash delle opzioni che sono passate alla <code>find</code> e sostituirle con un metodo equivalente. Per cui, anzich&egrave; la find di sopra, useremo:</p>
+<pre class="ruby">
+Article.order(&quot;published_at desc&quot;).limit(10)
+</pre>
+<p>Come potete vedere la nuova sintassi &egrave; facile da convertire dal formato precedente, ma ha una sintassi pi&ugrave; pulita.</p>
+
+<p>Non sempre, come si vede nel prossimo esempio, il vecchio hash di opzioni si mappa esattamente in nuovi metodi:</p>
+<pre class="ruby">
+Article.find(:all, :conditions =&gt; [&quot;published_at &lt;= ?&quot;, Time.now], :include =&gt; :comments)
+</pre>
+<p>Ci sono solo due vere e proprie eccezioni alla regola generale di conversione e l&rsquo;esempio qui sopra le comprende entrambe. La find qui sopra recupera tutti gli articoli che hanno una data di pubblicazione anteriore alla data corrente, insieme ai commenti associati. In Rails 3 tutto ci&ograve; diventa:</p>
+<pre class="ruby">
+Article.where(&quot;published_at &lt;= ?&quot;, Time.now).includes(:comments)
+</pre>
+<p>Anzich&egrave; <code>:conditions</code>, ora usiamo il metodo <code>where</code>, passandogli gli stessi argomenti che avremmo passato come valori della chiave <code>:conditions</code>. Gli argomenti possono essere passati come array, ma &egrave; pi&ugrave; chiaro passarli separatamente. Per ottenere anche i record associati, <code>:include</code> &egrave; stata pluralizzata ed &egrave; divenuta il metodo <code>includes</code>. Tutte le altre opzioni che avremmo normalmente passato alla <code>find</code> diventano metodi con lo stesso nome che avevano le chiavi delle option precedenti.</p>
+
+<p>Il nostro ultimo esempio recupera l&rsquo;articolo pubblicato pi&ugrave; di recente:</p>
+<pre class="ruby">
+Article.find(:first, :order =&gt; &quot;published_at desc&quot;)
+</pre>
+<p>Usando Rails 3, la sintassi diventa:</p>
+<pre class="ruby">
+Article.order(&quot;published_at desc&quot;).first()
+</pre>
+<p>Si noti che non viene chiamata la <code>first</code> se non alla fine della catena di metodi.</p> 
+
+<p>Dal momento che stiamo recuperando con un ordine descrescente, potremmo riscrivere la linea precedente come:</p>
+<pre class="ruby">
+Article.order(&quot;published_at&quot;).last()
+</pre>
+<p>La query prodotta &egrave; la stessa, ma il codice &egrave; pi&ugrave; conciso.</p>
+
+<p>In Rails 3.0 possiamo decidere di usare sia la vecchia sintassi per le <code>find</code>, sia la nuova, ma da Rails 3.1 questa retrocompatibilit&agrave; comincier&agrave; ad essere deprecata e da Rails 3.2 sar&agrave; rimossa completamente. E&rsquo; bene dunque cominciare sin d&rsquo;ora a portare le vecchie find alla nuova sintassi per far s&igrave; che le vostre applicazioni migrino bene a Rails 3 anche nelle sue future versioni.</p>
+
+<p>A questo punto potreste chiedervi qual &egrave; lo scopo della nuova sintassi, dal momento che prima o poi render&agrave; non funzionanti molte applicazioni Rails oggi esistenti, una volta che per queste verr&agrave; aggiornato il framework. Ebbene, c&rsquo;&egrave; una ragione per questo cambiamento e risiede nella potenza del lazy loading (caricamento posticipato - ndt).</p> 
+
+<h3>Lazy Loading</h3>
+
+<p>Per spiegare il lazy loading, useremo la console della nostra applicazione. Se chiediamo al modello tutti gli articoli otteniamo un array come ci aspetteremmo, vedendo che ci sono tre articoli sul database.</p>
+<pre class="terminal">
+ruby-1.9.1-p378 &gt; Article.all =&gt; [#&lt;Article id: 1, name: &quot;It&#x27;s Ancient&quot;, published_at: nil, hidden: false, 
+created_at: &quot;2010-02-22 20:35:42&quot;, updated_at: &quot;2010-02-22 20:35:42&quot;&gt;, 
+#&lt;Article id: 2, name: &quot;Can&#x27;t See Me&quot;, published_at: nil, hidden: false, 
+created_at: &quot;2010-02-22 20:37:03&quot;, updated_at: &quot;2010-02-22 20:37:03&quot;&gt;, 
+#&lt;Article id: 3, name: &quot;To the Future!&quot;, published_at: nil, hidden: false, 
+created_at: &quot;2010-02-22 20:38:17&quot;, updated_at: &quot;2010-02-22 20:38:17&quot;&gt;]
+</pre> 
+<p>Se vogliamo avere tutti gli articoli in ordine alfabetico, possiamo usare il metodo order:</p>
+<pre class="terminal">
+ruby-1.9.1-p378 &gt; articles = Article.order(&quot;name&quot;)
+ =&gt; #&lt;ActiveRecord::Relation:0x00000101669b90 @table=#&lt;Arel::Table:0x000001023e9af8 
+@name=&quot;articles&quot;, @options={:engine=&gt;#&lt;Arel::Sql::Engine:0x000001023a15c8 @ar=ActiveRecord::Base,
+@adapter_name=&quot;SQLite&quot;&gt;}, @engine=#&lt;Arel::Sql::Engine:0x000001023a15c8 @ar=ActiveRecord::Base,
+@adapter_name=&quot;SQLite&quot;&gt;, &hellip;
+</pre> 
+
+<p>Anzich&egrave; essere restituita una lista di articoli, questa volta ci viene dato un oggetto <code>ActiveRecord::Relation</code>. Questo oggetto contiene le informazioni sulla nostra find, ma fino ad ora la query al database non &egrave; ancora stata fatta. Questo &egrave; ci&ograve; che si intende per lazy loading in questo contesto: i dati non sono caricati dal database fintanto che non devono necessariamente esserlo (perch&egrave; utilizzati). Se ora scorressimo i record con una <code>each</code> o prendessimo tutti o solo il primo degli articoli, allora, e solo allora, la query verrebbe eseguita effettivamente.</p>
+
+<pre class="terminal">
+ruby-1.9.1-p378 &gt; articles.first
+ =&gt; #&lt;Article id: 2, name: &quot;Can&#x27;t See Me&quot;, published_at: nil, hidden: false, 
+created_at: &quot;2010-02-22 20:37:03&quot;, updated_at: &quot;2010-02-22 20:37:03&quot;&gt;
+</pre> 
+<p>Ora vediamo come tutto ci&ograve; si applica alla nostra applicazione. Abbiamo generato uno scaffold per il modello dell&rsquo;articolo in modo tale da avere un controller per gli articoli con le solite sette action. Il codice della action <code>index</code> usa <code>Article.all</code> per recuperare immediatamente tutti gli articoli:</p>
+
+<pre class="codeFilePath">/app/controllers/articles_controller.rb</pre>
+<pre class="ruby">
+def index
+  @articles = Article.all
+
+  respond_to do |format|
+    format.html # index.html.erb
+    format.xml  { render :xml =&gt; @articles }
+  end
+end
+</pre>
+<p>Se usassimo qualunque delle opzioni della find sugli articoli, come l&rsquo;ordinamento per nome, verrebbe restituito un oggetto <code>ActiveRecord::Relation</code> e la query non verrebbe eseguita sul controller. Verrebbe invece fatta nel codice della vista, nel momento in cui si comincia ad iterare col ciclo each <code>Article</code>.</p>
+
+<pre class="codeFilePath">/app/views/articles/index.html.erb</pre>
+<pre class="ruby">
+&lt;% @articles.each do |article| %&gt;
+  &lt;tr&gt;
+    &lt;td&gt;&lt;%= article.name %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= article.published_at %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= article.hidden %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &#x27;Show&#x27;, article %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &#x27;Edit&#x27;, edit_article_path(article) %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &#x27;Destroy&#x27;, article, :confirm =&gt; &#x27;Are you sure?&#x27;, :method =&gt; :delete %&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+&lt;% end %&gt;
+</pre>
+<p>Se carichiamo la pagina index ora, gli articoli vengono mostrati in ordine alfabetico.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/329/original/E202I01.png" width="798" height="368" alt="La pagina index degli articoli generata mediante scaffold."/>
+</div>
+
+<p>La cosa carina di tutto ci&ograve; &egrave; che se state usando il fragment caching mediante il metodo <code>cache</code> nella vostra vista, ora funzioner&agrave; tutto meglio, dal momento che la query sul database non verrebbe eseguita se non necessario.</p>
+
+<p>La nuova sintassi per le query rende pi&ugrave; facile costruire condizioni di find. Diciamo che vogliamo filtrare gli articoli in modo tale che vengano mostrati solo quelli nascosti, se nella stringa di query nell&rsquo;URL &egrave; stato specificato <code>hidden=1</code>. Possiamo farlo cambiando la action <code>index</code>in questo modo:</p>
+<pre class="codeFilePath">/app/controllers/articles_controller.rb</pre>
+<pre class="ruby">
+def index
+  @articles = Article.order(&#x27;name&#x27;)
+
+  if params[:hidden]
+    @articles = @articles.where(:hidden =&gt;(params[:hidden] == &quot;1&quot;))
+  end
+
+  respond_to do |format|
+    format.html # index.html.erb
+    format.xml  { render :xml =&gt; @articles }
+  end
+end
+</pre>
+<p>Ora controlliamo se c&rsquo;&egrave; un parametro <code>hidden</code> fra quelli passati e se c&rsquo;&egrave; aggiungiamo il metodo <code>where</code> in coda alla find, che filtrer&agrave; sui soli articoli nascosti se tale parametro varr&agrave; <code>1</code>. Se aggiungiamo quel parametro all&rsquo;URL e ricarichiamo la pagina, vediamo effettivamente solo gli articoli nascosti:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/330/original/E202I02.png" width="796" height="280" alt="La visualizzazione dei soli articoli nascosti."/>
+</div>
+
+<p>Analogamente, se passiamo <code>0</code> come valore del parametro, vediamo solo gli articoli visibili.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/331/original/E202I03.png" width="796" height="280" alt="Ora sono mostrati solo gli articoli visibili."/>
+</div>
+
+<p>Essere in grado di concatenare fra loro metodi come questi &egrave; apre la strada alla possibilit&agrave; di poter costruire query molto pi&ugrave; complesse, poich&egrave; sappiamo che la query non sar&agrave; eseguita effettivamente fino a che i dati non saranno necessari.</p>
+
+<h3>Named Scope</h3>
+
+<p>Ora vi mostriamo alcuni cambiamenti sui named scopes introdotti da Rails 3. Sotto c&rsquo;&egrave; la nostra classe di modello <code>Article</code> con due named scope, uno per recuperare gli articoli visibili e uno per recuperare gli articoli che sono stati pubblicati:</p>
+<pre class="codeFilePath">/app/models/article.rb</pre>
+<pre class="ruby">
+class Article &lt; ActiveRecord::Base
+  named_scope :visible, :conditions =&gt; [&quot;hidden != ?&quot;, true]
+  named_scope :published, lambda { {:conditions =&gt; [&quot;published_at &lt;= ?&quot;, Time.zone.now]} }
+end
+</pre>
+<p>Questi named scope sono definiti alla maniera di Rails 2, ma in Rails 3 l&rsquo;approccio &egrave; leggermente differente. La prima differenza &egrave; che il metodo per definire un named scope non &egrave; pi&ugrave; <code>named_scope</code> ma solo <code>scope</code>. Poi non si passano pi&ugrave; le condizioni come hash, ma si usano, come per la find, dei metodi. Come abbiamo fatto con i nuovi metodi find, usiamo la <code>where</code> anzich&egrave; <code>:conditions</code>. Nella sintassi Rails 3 i named scope appariranno dunque cos&igrave;:</p>
+<pre class="codeFilePath">/app/models/article.rb</pre>
+<pre class="ruby">
+class Article &lt; ActiveRecord::Base
+  scope :visible, where(&quot;hidden != ?&quot;, true)
+  scope :published, lambda { where(&quot;published_at &lt;= ?&quot;, Time.zone.now) }
+end
+</pre>
+<p>Un&rsquo;altra nuova funzionalit&agrave; &egrave; la possibilit&agrave; di assemblare fra loro gli scope. Se vogliamo creare uno scope chiamato <code>recent</code> che restituisce gli articoli visibili recentemente pubblicati ordianti per data di pubblicazione, possiamo farlo riutilizzando i due scope che gi&agrave; abbiamo:</p>
+<pre class="ruby">
+scope :recent, visible.published.order(&quot;published_at desc&quot;)
+</pre>
+<p>Tutto ci&ograve; che abbiamo fatto nel nostro nuovo scope &egrave; stato di concatenare insieme i due scope che gi&agrave; avevamo e aggiungere un metodo <code>order</code>.</p>
+
+<p>Possiamo subito provare il nostro nuovo scope cos&igrave; fatto nella console. Se invochiamo <code>Article.recent</code> viene restituito un oggetto <code>ActiveRecord::NamedScope::Scope</code>. Questo oggetto si comporta in modo simile all&rsquo;oggetto <code>ActiveRecord::Relation</code> visto prima:</p>
+<pre class="terminal">
+ruby-1.9.1-p378 &gt; Article.recent
+ =&gt; #&lt;ActiveRecord::NamedScope::Scope:0x0000010318bd08 @table=#&lt;Arel::Table:0x00000102740ea8 
+ @name=&quot;articles&quot;, @options={:engine=&gt;#&lt;Arel::Sql::Engine:0x00000102651900 @ar=ActiveRecord::Base&gt;}, 
+ @engine=#&lt;Arel::Sql::Engine:0x00000102651900 @ar=ActiveRecord::Base&gt;&gt;, &hellip;
+</pre>
+<p>Se chiamiamo <code>all</code> sull&rsquo;oggetto <code>Scope</code>, vedremo restituiti gli articoli che fanno match:</p>
+<pre class="terminal">
+ruby-1.9.1-p378 &gt; Article.recent.all
+ =&gt; [#&lt;Article id: 1, name: &quot;It&#x27;s Ancient&quot;, published_at: &quot;2010-01-01&quot;, 
+ hidden: false, created_at: &quot;2010-02-22 20:35:42&quot;, updated_at: &quot;2010-02-22 23:00:16&quot;&gt;]
+</pre>
+
+<h3>Suggerimento finale</h3>
+
+<p>Chiudiamo questo episodio con un utile suggerimento. Se avete un oggetto <code>Relation</code> o <code>Scope</code> e volete vedere l&rsquo;SQL che verrebbe prodotto al lancio effettivo, potete chiamare sull&rsquo;oggetto il metodo <code>to_sql</code>:</p>
+<pre class="terminal">
+ruby-1.9.1-p378 &gt; Article.recent.to_sql
+ =&gt; &quot;SELECT     \&quot;articles\&quot;.* FROM       \&quot;articles\&quot; 
+ WHERE     (hidden != &#x27;t&#x27;) AND (published_at &lt;= &#x27;2010-02-22 22:47:12.023289&#x27;) 
+ ORDER BY  published_at desc&quot;
+</pre> 
+<p>Questo metodo mostra l&rsquo;SQL che ActiveRecord inoltrer&agrave; al database per ottenere gli articoli pubblicati di recente e non nascosti.</p>
+
+<p>con questo si chiude l&rsquo;episodio sull&rsquo;utilizzo delle query ActiveRecord in Rails 3. Ci sono molte altre interessanti aggiunte che renderanno il codice dei vostri controller Rails molto pi&ugrave; conciso ed espressivo. Tutto il tempo speso a giocare con queste nuove feature sar&agrave; presto ripagato.</p>

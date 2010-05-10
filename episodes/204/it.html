@@ -1,0 +1,140 @@
+<p>Nell&rsquo;episodio 27 [<a href="http://railscasts.com/episodes/27-cross-site-scripting">guardalo</a> in inglese, oppure <a href="http://it.asciicasts.com/episodes/27-cross-site-scripting">leggilo</a> in italiano] abbiamo trattato il cross-site scripting. E&rsquo; un argomento importante che ogni sviluppatore di applicazioni web dovrebbe comprendere a fondo. Uno dei punti deboli delle applicazioni web nei confronti degli attacchi XSS &egrave; quando si mostrano dei campi di input per l&rsquo;utente. E&rsquo; perci&ograve; importante fare l&rsquo;escape di tutto l&rsquo;input generato dall&rsquo;utente che viene mostrato e nelle applicazioni Rails ci&ograve; viene tipicamente svolto dal metodo <code>h</code>:</p>
+<pre class="ruby">
+&lt;%= h comment.content %&gt;
+</pre>
+<p class="title">L&rsquo;utilizzo del metodo h per fare l&rsquo;escape dell&rsquo;output.</p>
+
+<p>Comunque sia in Rails 3, viene fatto automaticamente l&rsquo;escape dell&rsquo;output, per cui non c&rsquo;&egrave; alcun bisogno di inserire a mano il metodo <code>h</code> nelle viste e in questo episodio vi mostreremo come Rails 3 gestisce l&rsquo;escaping dell&rsquo;output.</p>
+
+<p>Per dimostrare l&rsquo;escaping dell&rsquo;output useremo una semplice applicazione di blogging scritta in Rails 3. In questa applicazione, ci sono degli articoli e ogni articolo ha una serie di commenti associati. Per provare come il sistema di commento fa fronte ai tentativi di cross-site scripting, inseriamo <code>&lt;script&gt;alert(&#x27;I steal cookies!&#x27;)&lt;/script&gt;</code> in ogni campo nella form dei commenti e facciamo il submit del nostro commento malevolo.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/338/original/E204I01.png" width="815" height="527" alt="Immissione di un commento malefico."/>
+</div>
+
+<p>Aggiungendo il commento, ci rendiamo subito conto che da come compare nella pagina ricaricata, che Rails 3 ha automaticamente fatto l&rsquo;escape dei tag HTML presenti nei campi di input immessi per noi. Vediamo come fa a farlo.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/339/original/E204I02.png" width="815" height="331" alt="Escape automatico dei commenti HTML."/>
+</div>
+
+<p>Il codice che mostra ogni commento &egrave; contenuto in un partial e se diamo un&rsquo;occhiata al codice, noteremo che non c&egrave; alcun output che viene in effetti filtrato con il metodo <code>h</code>.</p>
+
+<p class="codeFilePath">/app/views/comments/_comment.html.erb</p>
+<pre class="ruby">
+&lt;div class=&quot;comment&quot;&gt;
+  &lt;strong&gt;&lt;%= link_to comment.name, comment.url %&gt;&lt;/strong&gt;
+  &lt;p&gt;&lt;%= comment.content %&gt;&lt;/p&gt;
+&lt;/div&gt;
+</pre>
+<p>In Rails 2, questo avrebbe significato che l&rsquo;alert inserito poc&rsquo;anzi sarebbe stato interpretato come Javascript e quindi mostrato, ma invece tutto l&rsquo;output del partial viene gestito correttamente e in modo sicuro da Rails 3, anche quando passa attraverso dei metodi helper come il <code>link_to</code>, per cui non c&rsquo;&egrave; pi&ugrave; alcun bisogno di usare il metodo h qui.</p>
+
+<p>Cosa accade, tuttavia, se stiamo migrando una applicazione gi&agrave; esistente da Rails 2, e abbiamo i nostri output filtrati con <code>h</code>? Possiamo verificarlo provando a fare l&rsquo;escape dell&rsquo;output nel partial di prima e ricaricando la pagina:</p>
+
+<p class="codeFilePath">/app/views/comments/_comment.html.erb</p>
+<pre class="ruby">
+&lt;div class=&quot;comment&quot;&gt;
+  &lt;strong&gt;&lt;%= link_to h(comment.name), comment.url %&gt;&lt;/strong&gt;
+  &lt;p&gt;&lt;%= h comment.content %&gt;&lt;/p&gt;
+&lt;/div&gt;
+</pre>
+<p>Al ricaricamento, vediamo come appaia tutto uguale a prima, e dunque come l&rsquo;output non sia stato filtrato due volte (come avremmo potuto attenderci). Rails &egrave; furbo in questo caso; anche se per sbaglio usiamo inutilmente il metodo <code>h</code>, l&rsquo;escape viene giustamente eseguito una volta sola.</p>
+
+<p>Si potrebbe pensare che il metodo h non faccia nulla in Rails 3, ma non &egrave; vero. Ha ancora una sua funzione, e pi&ugrave; tardi vi faremo vedere qual &egrave;. Ma prima, diamo un&rsquo;occhiata alle funzionalit&agrave; associate. While it&rsquo;s great to have the output escaped automatically there might be times when we want to display the raw content. If we trust the content that the user enters, say they&rsquo;re an administrative user, and we want to display exactly what they enter then we can use the new <code>raw</code> method to do that.</p>
+<pre class="ruby">
+&lt;div class=&quot;comment&quot;&gt;
+  &lt;strong&gt;&lt;%= link_to comment.name, comment.url %&gt;&lt;/strong&gt;
+  &lt;p&gt;&lt;%= raw comment.content %&gt;&lt;/p&gt;
+&lt;/div&gt;
+</pre>
+<p>If we reload the page now the JavaScript we entered in the comment field will be executed.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/340/original/E204I03.png" width="819" height="332" alt="Using the raw method means that the alert is shown." />
+</div>
+
+<p>So, in Rails 3 whenever we don&rsquo;t want content to be HTML escaped we can use the <code>raw</code> method. But how does it work? Rails 3 seems to be pretty clever about when to escape content and when not to. We&rsquo;ll show you now how that works.</p>
+
+<p>We&rsquo;ll demonstrate escaping in the console, which in Rails 3 we can invoke with the <code>rails c</code> command.</p>
+<pre class="terminal">
+$ rails c
+Loading development environment (Rails 3.0.0.beta)
+ruby-1.9.1-p378 &gt;
+</pre>
+<p>Rails 3 has a concept of HTML-safe strings. This means that we can check if any string is safe to output as HTML by calling the new method <code>html_safe?</code> on it.</p>
+<pre class="terminal">
+&gt; &quot;foo&quot;.html_safe?
+ =&gt; false 
+</pre>
+
+<p>We can mark a string as being HTML-safe by calling the <code>html_safe</code> method on it.</p>
+<pre class="terminal">
+&gt; safe = &quot;safe&quot;.html_safe
+ =&gt; &quot;safe&quot; 
+&gt; safe.html_safe?
+ =&gt; true 
+</pre> 
+<p>No actual escaping goes on here. All that happens is that a boolean property is set against a string to determine whether it should be escaped before being output.</p>
+
+<p>So how does this apply in our view template? Well, Rails looks at each piece of output and sees if it&rsquo;s marked as HTML-safe. If it&rsquo;s not then it will be automatically escaped when it is output to the view. If it is safe then it is passed through without being escaped. If we use the <code>h</code> method to escape a string it will perform the escaping and mark the string as HTML-safe. This means that Rails 3 will see that the string is safe and not escape it again.</p>
+
+<p>When the <code>raw</code> method is used on a string it will be marked as HTML-safe but not escaped, ensuring that the string&rsquo;s content is passed to the output without being changed.</p> 
+
+<p>This is an important thing to understand when you&rsquo;re using helper methods. We&rsquo;ll explain this by creating a helper method called <code>strong</code> that wraps whatever is passed to it in <code>&lt;strong&gt;</code> tags. We&rsquo;ll use it in our template like this:</p>
+
+<p class="codeFilePath">/app/views/comments/_comment.html.erb</p>
+<pre class="ruby">
+&lt;div class=&quot;comment&quot;&gt;
+  &lt;%= strong link_to(comment.name, comment.url) %&gt;
+  &lt;p&gt;&lt;%= raw comment.content %&gt;&lt;/p&gt;
+&lt;/div&gt;
+</pre>
+
+<p>We&rsquo;ll create the <code>strong</code> method in the <code>ApplicationHelper</code>:</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+module ApplicationHelper
+  def strong(content)
+    &quot;&lt;strong&gt;#{content}&lt;/strong&gt;&quot;
+  end
+end
+</pre>
+
+<p>When we reload the page, however, we&rsquo;ll see that this hasn&rsquo;t worked the way we wanted it to.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/341/original/E204I04.png" width="815" height="552" alt="The strong tag in our helper method is escaped." />
+</div>
+
+<p>Rails 3&rsquo;s automatic escaping has escaped the <code>&lt;strong&gt;</code> tag here and this is because our helper method doesn&rsquo;t create an HTML-safe string.</p>
+
+<p>There are two simple rules that need to be need to be followed when working with helper methods that return HTML. Firstly, we need to ensure that any strings returned are marked as HTML-safe.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+module ApplicationHelper
+  def strong(content)
+    &quot;&lt;strong&gt;#{content}&lt;/strong&gt;&quot;.html_safe
+  end
+end
+</pre>
+
+<p>This fixes the problem of the <code>&lt;strong&gt;</code> tag being escaped but by doing that the content between the tags will not be escaped. We can solve this by escaping the content with <code>h</code>:</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+module ApplicationHelper
+  def strong(content)
+    &quot;&lt;strong&gt;#{h(content)}&lt;/strong&gt;&quot;.html_safe
+  end
+end
+</pre>
+
+<p>So as long as we remember to escape all input with <code>h</code> and then mark the resulting string as  <code>html_safe</code> it will be rendered properly. If we reload our comments page now we&rsquo;ll see that the <code>&lt;strong&gt;</code> tag hasn&rsquo;t been escaped but that the content of the second comment, which includes the potentially dangerous JavaScript is escaped.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/342/original/E204I05.png" width="815" height="552" alt="The helper method is now escaped correctly." />
+</div>
+
+<p>That&rsquo;s it for this episode. The automatic escaping is a welcome addition to Rails 3&rsquo;s views and it removes the need to remember to escape every piece of output with <code>h</code>, this reducing the changes of your application being a victim of cross-site scripting.</p>

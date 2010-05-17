@@ -1,0 +1,221 @@
+<p>A volte c&rsquo;&egrave; bisogno di mostrare estratti di codice in una applicazione Rails e per rendere il codice mostrato pi&ugrave; leggibile, si pu&ograve; usare un evidenziatore di sintassi. Questo &egrave; ci&ograve; che sto facendo per quasi tutti gli episodi di questo sito, ma come faccio?</p>
+
+<p>Ci sono una serie di alternative disponibili per aggiungere la colorazione della sintassi alle applicazioni Rails. La prima scelta da fare &egrave; decidere se si user&agrave; Rails per fare la colorazione del codice lato server, piuttosto che lato client con del JavaScript. Ci sono una serie di librerie JavaScript disponibili per questa seconda opzione, ma non ci occuperemo di queste, in quanto non sono specifiche di Rails. Piuttosto vi mostreremo tre diverse utility per l&rsquo;evidenziazione del codice lato server, famore nel mondo Rails.</p>
+
+<h3>CodeRay</h3>
+
+<p>La prima, <a href="http://coderay.rubychan.de">CodeRay</a>. Pu&ograve; essere facilmente installata come gem, non ha dipendenze esterne ed &egrave; molto veloce. Comunque, &egrave; piuttosto limitato nelle funzionalit&agrave; e nel supporto ai differenti linguaggi. Se riesce a soddisfare i vostri requisiti, comunque, rappresenta un&rsquo;ottima soluzione. Lo vedremo pi&ugrave; da vicino pi&ugrave; avanti in questo episodio.</p>
+
+<h3>Ultraviolet</h3>
+
+<p>Un&rsquo;altra alternativa &egrave; <a href="http://ultraviolet.rubyforge.org">Ultraviolet</a>. Anche questo &egrave; distribuito come gem, ma a differenza del primo, ha un paio di dipendenze esterne, per cui potrebbe essere leggermente più ostico da installare. Ultraviolet &egrave; pi&ugrave; lento di CodeRay, ma di contro ha decisamente pi&ugrave; funzionalit&agrave;. Pu&ograve; avvalersi di file di sintassi Textmate e temi e perci&ograve; &egrave; potenzialmente in grado di trasformare molti pi&ugrave; linguaggi rispetto a CodeRay, oltre che essere pi&ugrave; flessibile rispetto al modo in cui gli snippet vengono mostrati.</p>
+
+<p>Se scegliete Ultraviolet, &egrave; bene dare un&rsquo;occhiata ad <a href="http://github.com/michaeledgar/harsh">Harsh</a>. Questo progetto &egrave; un plugin Rails che fornisce un pratico metodo helper per mostrare il codice evidenziato all&rsquo;interno delle viste, oltre che un po&rsquo; di task rake per installare temi e gestirli. Il file README presente in tale progetto contiene istruzioni utili per installare Ultraviolet.</p>
+
+<h3>Pygments</h3>
+
+<p>Una terza popolare scelta &egrave; <a href="http://pygments.org/">Pygments</a>. Questo progetto &egrave; diverso da CodeRay e Ultraviolent in quanto &egrave; in realt&agrave; una libreria Python, ma dal momento che fornisce un&rsquo;interfaccia da linea di comando, possiamo sfruttarla anche dalle nostre applicazioni Rails. Pygments &egrave; una libreria funzionalmente completa, ben supportata e usata in molti siti. Il rovescio della medaglia &egrave; che pu&ograve; rallentare parecchio se il parsing del codice coinvolge molte righe, per cui, nel caso la si usi, conviene ricorrere a tecniche di caching.</p>
+
+<p>Per semplificare l&rsquo;uso di Pygments con Rails, esiste un ottimo plugin chiamato <a href="http://github.com/simplabs/highlight">highlight</a>. Questo plugin fornisce un wrapper a Pygments che gli consente di essere invocato da semplici metodi helper direttamente all&rsquo;interno delle viste. Le note di highlight raccomandano che tutto l&rsquo;output generato sia mantenuto di cache, per mitigare i problemi di velocit&agrave; citati poc&rsquo;anzi. Per seguire il consiglio, tutto ci&ograve; che dobbiamo fare &egrave; racchiudere tutto l&rsquo;output in un blocco <code>cache</code> tipo questo:</p>
+<pre class="ruby">
+&lt;% cache do %&gt;
+  &lt;%= highlight(:ruby, &#x27;class Test; end&#x27;) -%&gt;
+&lt;% end %&gt;
+</pre>
+
+<h3>Benchmarking</h3>
+
+<p>Per cui, ora che abbiamo fatto una panoramica sui tre concorrenti, vediamo come si comportano in termini di velocit&agrave;, confrontandoli fra di loro. Un&rsquo;applicazione potrebbe dover generare parecchio codice decorato, per cui dobbiamo valutare bene se ricorrere al caching o meno dell&rsquo;output. Per confrontare ogni evidenziatore, useremo il seguente codice:</p>
+
+<pre class="ruby">
+require &#x27;rubygems&#x27;
+require &#x27;benchmark&#x27;
+require &#x27;coderay&#x27;
+require &#x27;uv&#x27;
+
+path = __FILE__
+content = File.read(__FILE__)
+
+# run it once to initialize
+CodeRay.scan(&quot;print &#x27;hello&#x27;&quot;,  &#x27;ruby&#x27;).div(:css =&gt; :class)
+Uv.parse(&quot;print &#x27;test&#x27;&quot;, &#x27;xhtml&#x27;, &#x27;ruby&#x27;, true, &#x27;amy&#x27;)
+
+Benchmark.bm(11) do |b|
+  b.report &#x27;coderay&#x27; do
+    50.times { CodeRay.scan(content, &#x27;ruby&#x27;).div(:css =&gt; :class) }
+  end
+  
+  b.report(&#x27;ultraviolet&#x27;) do
+    50.times { Uv.parse(content, &#x27;xhtml&#x27;, &#x27;ruby&#x27;, true, &#x27;amy&#x27;) }
+  end
+  
+  b.report(&#x27;pygments&#x27;) do
+    50.times { `pygmentize -f html &quot;#{path}&quot;` }
+  end
+end
+</pre>
+
+<p>Il programma di benchmark prende il contenuto del proprio stesso coidce sorgente e lo interpreta cinquanta volte con ogni libreria. Per Pygments usa il comando <code>pygmentize</code>. I risultati sono qui mostrati:</p>
+<pre class="terminal">
+$ ruby benchmark.rb 
+                 user     system      total        real
+coderay      0.310000   0.010000   0.320000 (  0.312954)
+ultraviolet  4.860000   0.020000   4.880000 (  4.886621)
+pygments     0.010000   0.120000  12.430000 ( 12.643173)
+</pre>
+
+<p>I risultati mostrano una po&rsquo; di differenze di performance fra ciascuna libreria. CodeRay &egrave; ovviamente la pi&ugrave; veloce, impiegandoci 0.3 secondi per 50 iterazioni. Ultraviolet ci mette pi&ugrave; di dieci volte tanto per svolgere lo stesso compito, mentre Pygments &egrave; stato ancora pi&ugrave; lento, impiegandoci dodici secondi a completare il test. Date simili differenze di prestazioni, &egrave; bene comunque considerare nella valutazione anche l&rsquo;aspetto delle funzionalit&agrave;. Se si adotta la tecnica del caching, fra l&rsquo;altro, l&rsquo;aspetto della rapidit&agrave; diventa meno significativo.</p>
+
+<h3>Usare CodeRay</h3>
+
+<p>Per il resto dell&rsquo;episodio vi mostreremo come usare CodeRay in una applicazione Rails. CodeRay &egrave; il pi&ugrave; semplice fra i tre da configurare e anche il pi&ugrave; veloce, per cui non c&rsquo;&egrave; necessit&agrave; di preoccuparsi del caching.</p>
+
+<p>Per illustrare CodeRay, useremo una semplice applicazione di blogging che potreste avere gi&agrave; visto in alcuni episodi precedenti. Lo useremo per aggiungere la possibilit&agrave; di avere l'evidenziazione della sintassi per il codice presente negli articoli.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/355/original/E207I01.png" width="817" height="464" alt="La nostra applicazione di blogging."/>
+</div>
+
+<p>Quando gli autori modificano un articolo, vorremmo che potessero di aggiungere estratti di codice fra tag <code>code</code>, tipo questo:</p>
+
+<pre class="ruby">
+&lt;code lang=&quot;ruby&quot;&gt;
+puts &quot;Hello, world!&quot;
+&lt;/code&gt;
+</pre>
+
+<p>Quando un pezzo di codice tipo questo compare all&rsquo;interno di un articolo, dovrebbe essere mostrato con un opportuna colorazione della sintassi.</p>
+
+<p>Per fare tutto ci&ograve; per prima cosa dobbiamo aggiungere un riferimento al gem CodeRay nel file <code>/config/environment.rb</code>. In questo caso stiamo lavorando con un&rsquo;applicazione Rails 2. Se fosse stata scritta con Rails 3, avremmo modificato il file Gemfile invece del file environment.rb.</p> 
+
+<p class="codeFilePath">/config/environment.rb</p>
+<pre class="ruby">
+Rails::Initializer.run do |config|
+  config.gem &quot;coderay&quot;
+  config.gem &quot;RedCloth&quot;
+end
+</pre>
+
+<p>Pi&ugrave; avanti faremo uso del Textile, cos&igrave; abbiamo anche aggiunto il gem di RedCloth qui. Esiste un gem che combina entrambi, ma in questo episodio abbiamo scelto di aggiungerli separatamente.</p>
+
+<p>In seguito, aggiorniamo la vista <code>show</code> del controller <code>ArticleController</code> in modo tale che usi CodeRay per interpretare il testo fra tag <code>code</code> ed evidenziarlo. Per farlo, possiamo racchiudere la linea di codice che mostra il contenuto dell&rsquo;articolo in un nuovo metodo helper chiamato <code>coderay</code>, in questo modo:</p>
+
+<p class="codeFilePath">/app/views/articles/show.html.erb</p>
+<pre class="ruby">
+&lt;% title @article.title %&gt;
+&lt;p class=&quot;author&quot;&gt;from &lt;%= @article.author %&gt;&lt;/p&gt;
+&lt;%= coderay(@article.content) %&gt;
+</pre>
+
+<p>Il metodo helper deve andare nel nostro file application_helper.rb:</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+# Methods added to this helper will be available to all templates in the application.
+module ApplicationHelper  
+  def coderay(text)
+    text.gsub(/\&lt;code( lang=&quot;(.+?)&quot;)?\&gt;(.+?)\&lt;\/code\&gt;/m) do
+      CodeRay.scan($3, $2).div(:css =&gt; :class)
+    end
+  end
+end
+</pre>
+
+<p>Il metodo &egrave; piuttosto semplice. Accetta in ingresso del testo semplice che potrebbe contenere le sezioni che vorremmo evidenziare e chiama la <code>gsub</code> su di esso, per trovare le sezioni che fanno match e sostituirle con quanto viene restituito dal blocco interno. L&rsquo;espressione regolare cerca il tag di apertura code con un attributo opzionale <code>lang</code>, e poi fa match con tutto ci&ograve; che si trova fra il tag code di apertura e quello di chiusura. Dentro al blocco viene chiamato il metodo <code>CodeRay.scan</code>. Questo metodo accetta del testo e un linguaggio come argomenti, per cui gli passiamo <code>$3</code> che rappresenta il gruppo di match dell&rsquo;espressione regolare che corrisponde al testo fra tag code, e <code>$2</code> che corrisponde al gruppo di match del contenuto dell&rsquo;attributo <code>lang</code>. Poi si chiama il <code>.div</code> sul risultato, per avere il tutto contenuto all&rsquo;interno di un elemento <code>div</code>. L&rsquo;opzione <code>:css =&gt; :class</code> indica a CodeRay che tipo di stile CSS applicare. CodeRay ha un numero di diverse opzioni che si possono usare per controllare la struttura e l&rsquo;aspetto dell&rsquo;output: ulteriori informazioni si possono trovare nella <a href="http://coderay.rubychan.de/doc/">documentazione</a>.</p>
+
+<p>Infine dobbiamo creare il foglio di stile per associare gli stili ad ogni classe di CodeRay. Per avere un tema che somigli a quello di Railscasts, Ryan Bates ha creato un foglio di stile che si pu&ograve; <a href="http://github.com/ryanb/railscasts-episodes/blob/master/episode-207/blog/public/stylesheets/coderay.css">scaricare da Github</a>. Prendiamo una copia di questo file e aggiungiamolo alla cartella /public/stylesheets della nostra applicazione:</p>
+
+<p class="codeFilePath">/public/stylesheets/coderay.css</p>
+<pre class="css">
+.CodeRay {
+&nbsp;&nbsp;background-color: #232323;
+&nbsp;&nbsp;border: 1px solid black;
+&nbsp;&nbsp;font-family: &#x27;Courier New&#x27;, &#x27;Terminal&#x27;, monospace;
+&nbsp;&nbsp;color: #E6E0DB;
+&nbsp;&nbsp;padding: 3px 5px;
+&nbsp;&nbsp;overflow: auto;
+&nbsp;&nbsp;font-size: 12px;
+&nbsp;&nbsp;margin: 12px 0;
+}
+.CodeRay pre {
+&nbsp;&nbsp;margin: 0px;
+&nbsp;&nbsp;padding: 0px;
+}
+&nbsp;
+.CodeRay .an { color:#E7BE69 }                      /* html attribute */
+.CodeRay .c  { color:#BC9358; font-style: italic; } /* comment */
+.CodeRay .ch { color:#509E4F }                      /* escaped character */
+.CodeRay .cl { color:#FFF }                         /* class */
+.CodeRay .co { color:#FFF }                         /* constant */
+.CodeRay .fl { color:#A4C260 }                      /* float */
+.CodeRay .fu { color:#FFC56D }                      /* function */
+.CodeRay .gv { color:#D0CFFE }                      /* global variable */
+.CodeRay .i  { color:#A4C260 }                      /* integer */
+.CodeRay .il { background:#151515 }                 /* inline code */
+.CodeRay .iv { color:#D0CFFE }                      /* instance variable */
+.CodeRay .pp { color:#E7BE69 }                      /* doctype */
+.CodeRay .r  { color:#CB7832 }                      /* keyword */
+.CodeRay .rx { color:#A4C260 }                      /* regex */
+.CodeRay .s  { color:#A4C260 }                      /* string */
+.CodeRay .sy { color:#6C9CBD }                      /* symbol */
+.CodeRay .ta { color:#E7BE69 }                      /* html tag */
+.CodeRay .pc { color:#6C9CBD }                      /* boolean */
+</pre>
+
+<p>C&rsquo;&egrave; una classe CSS per ogni tipo di elemento del codice sorgente e i colori si possono facilmente cambiare per adattarli a un qualsiasi aspetto si preferisca per la propria applicazione.</p>
+
+<p>Per fare applicare lo stile, lo dovremo aggiungere come riferimento nella sezione HEAD del file di layout dell&rsquo;applicazione:</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= stylesheet_link_tag &#x27;blog&#x27;, &#x27;coderay&#x27; %&gt;
+</pre>
+
+<p>Fatto tutto questo, possiamo modificare un articolo e, riguradando quanto inserito, ne dovremmo notare i contenuti di codice evidenziati.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/356/original/E207I02.png" width="815" height="420" alt="Gli snippet di codice sono ora evidenziati."/>
+</div>
+
+<h3>Usare Textile</h3>
+
+<p>L&rsquo;evidenziazione della sintassi &egrave; spesso usata con un semplice linguaggio di markup tipo Textile o Markdown. Per usare Textile nel nostro articolo, possiamo racchiudere il metodo <code>coderay</code> nella vista <code>show</code> in una chiamata a <code>textilize</code>:</p>
+
+<p class="codeFilePath">/app/views/articles/show.html.erb</p>
+<pre class="ruby">
+&lt;%= textilize(coderay(@article.content)) %&gt;
+</pre>
+
+<p>Non vogliamo che il codice restituito dal metodo <code>coderay</code> sia interpretato da RedCloth, per cui ci&ograve; che dobbiamo fare &egrave; modificare leggermente il metodo, racchiudendo il suo output in un elemento <code>notextile</code>, affinch&egrave; non venga interpretato:</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+def coderay(text)
+  text.gsub(/\&lt;code( lang=&quot;(.+?)&quot;)?\&gt;(.+?)\&lt;\/code\&gt;/m) do
+    content_tag(&quot;notextile&quot;, CodeRay.scan($3, $2).div(:css =&gt; :class))
+  end
+end
+</pre>
+
+<p>Se modifichiamo nuovamente l&rsquo;articolo e aggiungiamo un po&rsquo; di codice di markup tipo questo:</p>
+
+<pre class="terminal">
+The piano is a musical instrument played by means of a keyboard that produces sound by striking steel strings with felt hammers. The hammers immediately rebound allowing the strings to continue vibrating at their resonant frequency. These vibrations are transmitted through a bridge to a soundboard that amplifies them.
+
+ * item
+ * item 2
+
+&lt;code lang=&quot;ruby&quot;&gt;
+def hello
+  puts &#x27;Hello, world!&#x27;
+end
+&lt;/code&gt;
+</pre>
+
+<p>l&rsquo;articolo dovrebbe ora avere una lista non ordinata generata da Textile, oltre che il codice evidenziato:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/357/original/E207I03.png" width="838" height="471" alt="Ora anche il codice Textile &egrave; interpretato."/>
+</div>
+
+<p>E&rsquo; tutto per questo episodio sull&rsquo;evidenziazione del codice. CodeRay semplifica l&rsquo;aggiunta della decorazione del codice alle nostre applicazioni Rails e val bene darci un&rsquo;occhiata se avete bisogno di una simile funzionalit&agrave;.</p>

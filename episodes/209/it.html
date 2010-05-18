@@ -1,0 +1,239 @@
+<p>Abbiamo trattato di molte soluzioni per l&rsquo;autenticazione nel corso di questi episodi ed oggi ve ne mostriamo un&rsquo;altra. Questa di oggi si chiama &ldquo;<a href="http://github.com/plataformatec/devise">devise</a>&rdquo; e ha guadagnato i favori e la popolarit&agrave; fra la community Rails di recente. Devise &egrave; basato su <a href="http://github.com/hassox/warden">Warden</a>, una soluzione di autenticazione basata su Rack, e la usa dietro le quinte. Non dovrete conoscere nulla riguardo a Warden per seguire questo episodio dal momento che avremo a che fare direttamente con devise.</p>
+
+<p>Devise gestisce l&rsquo;autenticazione su tutto lo stack. Se conoscete gi&agrave; Authlogic, che &egrave; stato trattato nell&rsquo;episodio 160 [<a href="http://railscasts.com/episodes/160-authlogic">guardalo</a>, <a href="http://it.asciicasts.com/episodes/160-authlogic">leggilo</a>] saprete gi&agrave; che copre solo il livello di modello. A titolo di confronto, devise &egrave; un motore Rails e copre anche l&rsquo;autenticazione sui controller e sulle viste. Devise &egrave; modulare e al momento &egrave; formato da undici moduli, ciascuno dei quali fornisce un aspetto differente di autenticazione. Per esempio uno dei moduli, Rememberable, si ricorda l&rsquo;autenticazione dell&rsquo;utente memorizzata in un cookie mentre un&rsquo;altra, Recoverable, si occupa di resettare la password dell&rsquo;utente e di mandare le istruzioni per il reset via email. Questo approccio rende semplice la scelta di quali parti dell&rsquo;autenticazione si vogliono usare (e quali no) all&rsquo;interno della propria applicazione.</p> 
+
+<h3>Aggiungere l&rsquo;autenticazione ad una applicazione</h3>
+
+<p>Diamo un&rsquo;occhiata a ci&ograve; che serve per far funzionare devise in un&rsquo;applicazione. Di sotto &egrave; presente uno screenshot preso da una semplice applicazione di gestione progetti, scritta in Rails 3.0. Useremo devise per aggiungere un modello User ed un po&rsquo; di logica di autenticazione a questa applicazione.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/361/original/E209I01.png" width="801" height="319" alt="La nostra applicazione di gestione progetti."/>
+</div>
+
+<p>Devise funziona bene con Rails 3, ma si devono seguire alcune specifiche istruzioni durante l&rsquo;installazione per prendere la versione corretta. Per le applicazioni Rails 3, dovrebbe essere installata l&rsquo;ultima versione disponibile, attualmente la 1.1.rc1. Se invece si vuole usare devise con un&rsquo;applicazione Rails 2.3, allora si deve usare la versione 1.0.6, poich&egrave; la versione 1.1 non &egrave; retrocompatibile con Rails 2.</p>
+
+<p>Noi lavoreremo come detto con un&rsquo;applicazione Rails 3, per cui aggiungiamo un riferimento a devise nel Gemfile della nostra applicazione, assicurandoci di specificare la versione corretta:</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+gem &#x27;devise&#x27;, &#x27;1.1.rc1&#x27;
+</pre>
+
+<p>Una volta fatto ci&ograve;, lanciamo bundle per installare il gem e le sue dipendenze:</p>
+<pre class="terminal">
+bundle install
+</pre>
+<p>Il prossimo passo &egrave; lanciare il generatore di installazione:</p>
+<pre class="terminal">
+$ rails generate devise_install
+      create  config/initializers/devise.rb
+      create  config/locales/devise.en.yml
+
+===============================================================================
+
+Some setup you must do manually if you haven&#x27;t yet:
+
+  1. Setup default url options for your specific environment. Here is an
+     example of development environment:
+
+       config.action_mailer.default_url_options = { :host =&gt; &#x27;localhost:3000&#x27; }
+
+     This is a required Rails configuration. In production is must be the
+     actual host of your application
+
+  2. Ensure you have defined root_url to *something* in your config/routes.rb.
+     For example:
+
+       root :to =&gt; &quot;home#index&quot;
+
+===============================================================================
+</pre>
+
+<p>Questo comando genera una coppia di file, un initializer e un file i18n che contiene tutti i messaggi che devise pu&ograve; usare. Sotto quello, vengono elencati due passi da fare a mano. Il primo &egrave; di settare l&rsquo;opzione host per il mailer di applicazione, mentre il secondo indica che che &egrave; necessario aver specificato l&rsquo;instradamento di root. La nostra applicazione ha gi&agrave; questa seconda cosa impostata, per cui non dobbiamo fare altro che configurare il mailer. Lo possiamo fare copiando la linea dalle istruzioni mostrate sopra all&rsquo;interno del blocco nel file di ambiente di sviluppo:</p>
+
+<p class="codeFilePath">/config/environments/development.rb</p>
+<pre class="ruby">
+config.action_mailer.default_url_options = { :host =&gt; &#x27;localhost:3000&#x27; }
+</pre>
+
+<p>Questa linea di codice imposta l&rsquo;opzione <code>host</code> a <code>localhost</code>. Se l&rsquo;applicazione andr&agrave; in produzione, si dovrebbe impostare questo valore (mutatis mutandis) nel file di configurazione ambiente corrispondente all&rsquo;ambiente di produzione, ossia <code>production.rb</code>.</p>
+
+<h3>Creare un modello utente devise</h3>
+
+<p>Ci servir&agrave; un modello <code>User</code> per gestire l&rsquo;autenticazione e devise fornisce proprio un generatore per fare questo. Non &egrave; necessario usarlo, ma ci risparmia un po&rsquo; di passaggi di configurazione:</p> 
+
+<pre class="terminal">
+$ rails generate devise User
+      invoke  active_record
+      create    app/models/user.rb
+      invoke    test_unit
+      create      test/unit/user_test.rb
+      create      test/fixtures/users.yml
+      inject  app/models/user.rb
+      create  db/migrate/20100412200407_devise_create_users.rb
+       route  devise_for :users
+</pre> 
+
+<p>Questo generatore create un po&rsquo; di cose interessanti per noi: un file di modello, una migration e un instradamento <code>devise_for</code>. Ora li esamineremo uno per uno.</p>
+
+<p>Il modello generato appare cos&igrave;:</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  # Include default devise modules. Others available are:
+  # :token_authenticatable, :lockable, :timeoutable and :activatable
+  # :confirmable
+  devise :database_authenticatable, :registerable, 
+         :recoverable, :rememberable, :trackable, :validatable
+
+  # Setup accessible (or protected) attributes for your model
+  attr_accessible :email, :password, :password_confirmation
+end
+</pre>
+
+<p>Il modello <code>User</code> &egrave; grossomodo simile ad ogni altro modello ActiveRecord, ma ha in particolare una chiamata al metodo <code>devise</code>, ed &egrave, qui che la magia dell&rsquo;autenticazione avviene. Il metodo devise accetta come argumenti una lista di moduli che vogliamo supportare nella nostra applicazione: fra questi dovreste riconoscere <code>:rememberable</code> e <code>:recoverable</code> dal momento che li abbiamo citati poco fa. Possiamo facilemente aggiungere o rimuovere moduli da questa lista per personalizzare l&rsquo;autenticazione di devise per la necessit&agrave; della nostra applicazione. A questo scopo abbiamo rimosso <code>:confirmable</code> perch&egrave; non vogliamo che gli utenti debbano confermare la loro iscrizione via email.</p> 
+
+<p>Si noti che la classe <code>User</code> ha anche un metodo <code>attr_accessible</code> che elenca gli attributi che l&rsquo;utente pu&ograve; modificare mediante l&rsquo;interfaccia utente. Se abbiamo delle colonne personalizzate nel nostro modello, allora possiamo aggiungerle qui.</p>
+
+<p>Ora passiamo al file di migration:</p>
+
+<pre class="ruby">
+class DeviseCreateUsers &lt; ActiveRecord::Migration
+  def self.up
+    create_table(:users) do |t|
+      t.database_authenticatable :null =&gt; false
+      # t.confirmable
+      t.recoverable
+      t.rememberable
+      t.trackable
+      # t.lockable :lock_strategy =&gt; :failed_attempts, :unlock_strategy =&gt; :both
+
+      t.timestamps
+    end
+
+    add_index :users, :email,                :unique =&gt; true
+    # add_index :users, :confirmation_token,   :unique =&gt; true
+    add_index :users, :reset_password_token, :unique =&gt; true
+    # add_index :users, :unlock_token,         :unique =&gt; true
+  end
+
+  def self.down
+    drop_table :users
+  end
+end
+</pre>
+
+<p>Il file &egrave; piuttosto semplice da capire siccome c&rsquo;&egrave; una chiamata a un metodo separato sulla tabella per creare le colonne necessarie per ogni modulo. Dal momento che non vogliamo usare il modulo <code>confirmable</code>, abbiamo commentato il metodo omonimo. Dobbiamo anche rimuovere l&rsquo;indice relativo al token di conferma, perch&egrave; quella colonna non esister&agrave; nella tabella del nostro database.</p>
+
+<p>Ora che abbiamo opportunamente modificato il file di migrazione, per adattarlo ai moduli che vogliamo usare, possiamo effettivamente lanciare la migrazione:</p>
+
+<pre class="terminal">
+rake db:migrate
+</pre>
+
+<p>Infine abbiamo il route <code>devise_for</code> che &egrave; stato aggiunto al file degli instradamenti per noi. Se lanciamo <code>rake routes</code>, possiamo vedere gli instradamenti che questa linea di codice crea:</p>
+
+<pre class="terminal">
+    new_user_session   GET    /users/sign_in                 {:controller=&gt;&quot;devise/sessions&quot;, :action=&gt;&quot;new&quot;}
+          user_session POST   /users/sign_in                 {:controller=&gt;&quot;devise/sessions&quot;, :action=&gt;&quot;create&quot;}
+  destroy_user_session GET    /users/sign_out                {:controller=&gt;&quot;devise/sessions&quot;, :action=&gt;&quot;destroy&quot;}
+                       POST   /users/password(.:format)      {:controller=&gt;&quot;devise/passwords&quot;, :action=&gt;&quot;create&quot;}
+         user_password PUT    /users/password(.:format)      {:controller=&gt;&quot;devise/passwords&quot;, :action=&gt;&quot;update&quot;}
+     new_user_password GET    /users/password/new(.:format)  {:controller=&gt;&quot;devise/passwords&quot;, :action=&gt;&quot;new&quot;}
+    edit_user_password GET    /users/password/edit(.:format) {:controller=&gt;&quot;devise/passwords&quot;, :action=&gt;&quot;edit&quot;}
+                       POST   /users(.:format)               {:controller=&gt;&quot;devise/registrations&quot;, :action=&gt;&quot;create&quot;}
+                       PUT    /users(.:format)               {:controller=&gt;&quot;devise/registrations&quot;, :action=&gt;&quot;update&quot;}
+     user_registration DELETE /users(.:format)               {:controller=&gt;&quot;devise/registrations&quot;, :action=&gt;&quot;destroy&quot;}
+ new_user_registration GET    /users/sign_up(.:format)       {:controller=&gt;&quot;devise/registrations&quot;, :action=&gt;&quot;new&quot;}
+edit_user_registration GET    /users/edit(.:format)          {:controller=&gt;&quot;devise/registrations&quot;, :action=&gt;&quot;edit&quot;}
+</pre>
+
+<p>Anche se &egrave; un po&rsquo; difficile da leggere, possiamo vedere che ci sono molti instradamenti di autenticazione inclusi per il sign-in e il sign-out, il reset delle password, l&rsquo;autenticazione come nuovo utente ed il reset di un profilo. Questi instradamenti sono tutti personalizzabili se volessimo cambiarli.</p>
+
+<p>Possiamo ora accedere al nostro meccanismo di autenticazione mediante questi route. Se andiamo all&rsquo;URL <code>/users/sign_up</code> vediamo la form di autenticazione come nuovo utente:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/362/original/E209I02.png" width="801" height="478" alt="La maschera di autenticazione generata da devise."/>
+</div>
+
+<p>Se riempiamo la form e clicchiamo su &ldquo;Sign up&rdquo;, verremo registrati e autenticati. Una volta autenticati, possiamo scollegarci andando su <code>/users/sign_out</code>, ma provando nuovamente a rientrare, visitando <code>/users/sign_in</code> e riempiendo la form con lo username e la password forniti alla registrazione, vedremo un errore:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/363/original/E209I03.png" width="801" height="372" alt="L&rsquo;autenticazione lancia un errore su Rails 3 beta 2."/>
+</div>
+
+<p>Questo errore &egarve; causato da un&rsquo; anomalia di Rails 3.0 beta 2 e non dipende da devise. Se vedete questo errore, &egrave; comunque semplice ovviarlo. Nel file <code>/config/initializers/cookie_verification_secret.rb</code> c&rsquo;&egrave; una linea di codice che imposta la chiave segreta per verificare i cookie firmati.</p>
+
+<p class="codeFilePath">/config/initalizers/cookie_verification_secret.rb</p>
+<pre class="ruby">
+# Be sure to restart your server when you modify this file.
+
+# Your secret key for verifying the integrity of signed cookies.
+# If you change this key, all old signed cookies will become invalid!
+# Make sure the secret is at least 30 characters and all random, 
+# no regular words or you&#x27;ll be exposed to dictionary attacks.
+Rails.application.config.cookie_secret = &#x27;3b161f7668f938d1aeb73e1137964f8d5ebaf32b9173c2130ecb73b95b610702b77370640dce7e76700fb228f35f7865ab2a5ccd22d00563504a2ea9c3d8dffe&#x27;
+</pre>
+
+<p>Tutto quello che occorre fare &egrave; rimuovere questa linea da qua e metterla in <code>/config/application.rb</code>, rimuovendo la sezione <code>Rails.application</code> iniziale:</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby">
+require File.expand_path(&#x27;../boot&#x27;, __FILE__)
+require &#x27;rails/all&#x27;
+
+Bundler.require(:default, Rails.env) if defined?(Bundler)
+
+module ProjectManage
+  class Application &lt; Rails::Application
+    config.filter_parameters &lt;&lt; :password
+    config.cookie_secret = &#x27;3b161f7668f938d1aeb73e1137964f8d5ebaf32b9173c2130ecb73b95b610702b77370640dce7e76700fb228f35f7865ab2a5ccd22d00563504a2ea9c3d8dffe&#x27;
+  end
+end
+</pre>
+
+<p>Dovremo riavviare il server per vedere le modifiche fatte, ma una volta fatto ci&ograve;, dovremmo essere in grado di accedere correttamente.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/364/original/E209I04.png" width="800" height="355" alt="Autenticati con successo."/>
+</div>
+
+<p>Ora che abbiamo imbastito un sistema di autenticazione completamente funzionante, possiamo cominciare a migliorarlo. Sarebbe carino se avessimo un link in cima alla pagina che ci ricordasse se siamo o meno autenticati nel sistema, e uno che ci permettesse di autenticarci od uscire a seconda del nostro stato.</p>
+
+<p>Possiamo realizzare tutto ci&ograve; modificando il file di layout dell&rsquo;applicazione in modo tale che i link siano visibili in ogni pagina. Subito prima del codice che mostra i messaggi flash, aggiungiamo le seguenti linee:</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;div id=&quot;user_nav&quot;&gt;
+  &lt;% if user_signed_in? %&gt;
+    Signed in as &lt;%= current_user.email %&gt;. Not you?
+    &lt;%= link_to &quot;Sign out&quot;, destroy_user_session_path %&gt;
+  &lt;% else %&gt;
+    &lt;%= link_to &quot;Sign up&quot;, new_user_registration_path %&gt; or
+    &lt;%= link_to &quot;Sign in&quot;, new_user_session_path %&gt;
+  &lt;% end %&gt;
+&lt;/div&gt;
+</pre>
+
+<p>nel codice abbiamo un <code>if</code>/<code>else</code> statement, in modo tale da mostrare un messaggio diverso a seconda che la persona che sta visitando il sito sia autenticata su di esso o meno. Possiamo capire se lo &egrave;, chiamando il metodo <code>user_signed_in?</code>, che viene fornito da devise e che restituisce <code>true</code> se l&rsquo;utente corrente &egrave; autenticato. Se c&rsquo;&egrave; un utente correntemente autenticato, mostriamo l&rsquo;indirizzo email con cui questo si &egrave; autenticato e un link per uscire. Possiamo mostrare l&rsquo;indirizzo email chiamando <code>current_user</code> per avere un riferimento all&rsquo;oggetto <code>User</code> dell&rsquo;utente corrente e mostrarne la propriet&agrave; email. Per ottenere il corretto percorso per il link di disconnessione, possiamo riguardare i route generati prima con rake routes. Fra questi, c&rsquo;&egrave; il <code>destroy_user_session</code>, che mappa l&rsquo;URL relativo <code>/users/sign_out</code>, per cui possiamo usare <code>destroy_user_session_path</code> per generare l&rsquo;URL corretto per il nostro link.</p> 
+
+<p>In modo analogo possiamo usare il <code>new_user_registration_path</code> ed il <code>new_user_session_path</code> per creare i link per la registrazione e l&rsquo;autenticazione. Con questi a posto, possiamo ricaricare la pagina e vedere le informazioni utente in testata:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/365/original/E209I05.png" width="800" height="355" alt="I dettagli dell&rsquo;utente sono ora mostrati in cima ad ogni pagina."/>
+</div>
+
+<p>Se clicchiamo sul link di &ldquo;sign out&rdquo;, vedremo comparire i link &ldquo;Sign up&rdquo; e &ldquo;Sign in&rdquo; invece:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/366/original/E209I06.png" width="800" height="371" alt="Links to sign in or sign up are now shown when the user isn't logged in."/>
+</div>
+
+<p>Come potete vedere, &egrave; piuttosto semplice mettere su un intero sistema di autenticazione da zero usando devise. Con un minimo sforzo abbiamo le funzionalit&agrave; di registrazione di nuovi utenti, e quelle per permettere loro di autenticarsi e disconnettersi. Ci sono anche altre parti che non abbiamo trattato in questo episodio, come per esempio la pagina di reset della password. Se abbiamo mantenuto il modello confirmable, allora devise avr&agrave; creato per noi una form e ci avr&agrave; generato anche la logica correlata.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/367/original/E209I07.png" width="800" height="371" alt="La pagina di reset della password."/>
+</div>
+
+<p>Anche se &egrave; fantastico poter avere pressoch&egrave; gratis tutte queste form di gestione delle credenziali create per noi, &egrave; probabile che vogliamo personalizzarle per adattarle all&rsquo;aspetto della nostra applicazione. Per fortuna devise rende semplice anche questo aspetto, che tratteremo nel prossimo episodio.</p>

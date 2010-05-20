@@ -1,0 +1,190 @@
+<p>Contiunuiamo il nostro viaggio alla scoperta delle nuove funzionalit&agrave; di Rails 3 in questo episodio, concentrandoci sul routing. Rails 3 ha una nuova API per definire le regole di routing ed alcune nuove funzionalit&agrave;. Per mostrarvi come funzionano, creiamo una nuova applicazione chiamata detour e definiamo alcuni instradamenti per quest&rsquo;ultima:</p>
+
+<pre class="terminal">
+rails detour
+</pre>
+
+<p>Creata l&rsquo;applicazione, diamo un&rsquo;occhiata al file <code>config/routes.rb</code>. Il file generato contiene un po&rsquo; di documentazione e alcuni esempi di nuove API: non fa male darci uno sguardo. Ora cambieremo il contenuto di default con un esempio di alcuni vecchi instradamenti stile Rails 2 per vedere come cambiano in Rails 3:</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Detour::Application.routes.draw do |map|
+  map.resources :products, :member =&gt; { :detailed =&gt; :get }
+
+  map.resources :forums, :collection =&gt; { :sortable =&gt; :get, :sort =&gt; :put } do |forums|
+    forums.resources :topics
+  end
+
+  map.root :controller =&gt; &quot;home&quot;, :action =&gt; &quot;index&quot;
+
+  map.about &quot;/about&quot;, :controller =&gt; &quot;info&quot;, :action =&gt; &quot;about&quot;
+end
+</pre>
+<p class="title">Gli instradamenti vecchio stile che stiamo per convertire.</p>
+
+<p>Partiamo dal primo instradamento:</p>
+<pre class="ruby">
+map.resources :products, :member = { :detailed =&gt; :get }
+</pre>
+<p>Questo instradamento ha una risorsa <code>products</code> e una action specifica <code>member</code> chiamata <code>detailed</code> che viene invocata mediante una richiesta GET.</p>
+
+<p>Il primo cambiamento da notare nel meccanismo di routing di Rails 3 &egrave; che non trattiamo pi&ugrave; con l&rsquo;oggetto <code>map</code>, ma piuttosto chiamiamo direttamente <code>resources</code> nel blocco <code>routes.draw</code>. Le azioni <code>:member</code> e <code>:collection</code> dentro a resources sono definite dentro un blocco. Il route pu&ograve; perci&ograve; essere riscritto in questo modo:</p>
+<pre class="ruby">
+resources :products do
+  get :detailed, :on =&gt; :member
+end
+</pre>
+<p>Ora guardiamo un instradamento pi&ugrave; complicato:</p>
+<pre class="ruby">
+map.resources :forums, :collection =&gt; { :sortable =&gt; :get, :sort =&gt; :put } do |forums|
+  forums.resources :topics
+end
+</pre>
+<p>In questo route abbiamo una risorsa forum con due utleriori elementi collezioni e una risorsa innestata topics. Con la nuova API questo instradamento pu&ograve; essere scritto cos&igrave;:</p>
+<pre class="ruby">
+resources :forums do
+  collection do
+    get :sortable
+    put :sort
+  end
+  resources :topics
+end
+</pre>
+<p>Ancora, usiamo <code>resources</code> anzich&egrave; <code>map.resources</code> e passiamo un blocco. Abbiamo due azioni collection nel route. Bench&egrave; potremmo definire quelle allo stesso modo in cui abbiamo fatto con la azione detailed nel primo route, facendo uso dell&rsquo;argomento <code>:on</code>, in questo caso definiremo un blocco <code>collection</code> (i membri possono essere trattati allo stesso modo che in un blocco <code>member</code>) e ogni instradamento definito dentro la blocco agir&agrave; sulla collezione di forum. Nel nostro blocco abbiamo definito due nuove action: sortable come richiesta di tipo GET e sort come richiesta di tipo PUT.</p>
+
+<p>Per la risorsa innestata topics, chiamiamo nuovamente solo <code>resources</code>, innestando la risorsa topics dentro a forums.</p>
+
+<p>Il prossimo route che vediamo &egrave; un route che definisce il controller e l&rsquo;action a cui deve puntare l&rsquo;URL di root:</p>
+<pre class="ruby">
+map.root :controller =&gt; &quot;home&quot;, :action =&gt; &quot;index&quot;
+</pre>
+<p>Qui chiamiamo semplicemente <code>root</code> e usiamo un argomento <code>:to</code> a cui passiamo una stringa che contiene il nome del controller e dell&rsquo;action separati dal carattere #.</p>
+<pre class="ruby">
+root :to =&gt; &quot;home#index&quot;
+</pre>
+<p>Questa possibilit&agrave; di specificare sia il controller, sia la action in un&rsquo;unica stringa &egrave; una nuova feature di Rails 3. Possiamo fare qualcosa di simile per un instradamento con nome:</p>
+<pre class="ruby">
+map.about &quot;/about&quot;, :controller =&gt; &quot;info&quot;, :action =&gt; &quot;about&quot;
+</pre>
+<p>Con l&rsquo;API di Rails 3 tutto ci&ograve; pu&ograve; essere riscritto come:</p>
+<pre class="ruby">
+match &quot;/about&quot; =&gt; &quot;info#about&quot;, :as =&gt; :about
+</pre>
+<p>Senza l&rsquo;argomento <code>:as</code> l&rsquo;instradamento di sopra sarebbe stato solo un instradamento generico. L&rsquo;aggiunta di <code>:as</code> lo rende un instradamento con nome, in modo tale che in seguito si possano usare riferimenti ad URL del tipo <code>about_path</code> o <code>about_url</code>.</p>
+
+<h3>Nuove funzionalit&agrave;</h3>
+
+<p>Come si pu&ograve; vedere dagli esempi sopra, non &egrave; difficile convertire gli instradamenti dalla vecchia API alla nuova, ma ci&ograve; che rende realmente interessante la nuova API di routing sono le nuove funzionalit&agrave; che mette a disposizione e che vedremo ora nel resto dell&rsquo;episodio.</p>
+
+<h4>Parametri opzionali</h4>
+
+<p>I parametri opzionali erano gi&agrave; supportati dalle precedenti versioni di Rails, ma la sintassi era un po&rsquo; scomoda. Vediamo cosa &egrave; cambiato invece in Rails 3.</p> 
+
+<p>Sar&agrave; pi&ugrave; semplice dimostrare l&rsquo;utilizzo dei parametri opzionali se la nostra applicazione ha un controller, per cui creiamone uno. Creiamo un <code>info</code> controller con una action <code>about</code>. Si noti che in Rails 3 possiamo usare <code>rails g</code> come scorciatoia per il comando <code>rails generate</code>:</p>
+<pre class="terminal">
+rails g controller info about
+</pre>
+<p>Possiamo avviare il server con un altro nuovo shortcut:</p>
+<pre class="terminal">
+rails s
+</pre>
+<p>Ora, se visitiamo <a href="http://localhost:3000/about">http://localhost:3000/about</a> vedremo la action <code>info#about</code> come &egrave; stato imposto dall&rsquo;instradamento che abbiamo scritto poc&rsquo;anzi.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/332/original/E203I01.png" width="797" height="280" alt="La action about."/>
+</div>
+
+<p>Una volta sistemato questo, vogliamo ora fornire una versione PDF per questa action, ma se visitiamo l&rsquo;URL <a href="http://localhost:3000/about.pdf">http://localhost:3000/about.pdf</a> otteniamo un errore di routing poich&egrave; la nostra applicazione non sa come risolvere questo instradamento.</p>
+
+<p>Nel file di route possiamo cambiare l&rsquo;instradamento di <code>about</code> per accettare un parametro di formato, aggiungendo un <code>.</code> e un <code>:format</code>:</p>
+<pre class="ruby">
+match &quot;/about.:format&quot; =&gt; &quot;info#about&quot;, :as =&gt; :about
+</pre>
+<p>Se ricarichiamo la vista PDF ora, il route sar&agrave; risolto, ma avremo un errore per mancanza di template, in quanto la nostra applicazione non sa come renderizzare quella action come PDF.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/333/original/E203I02.png" width="797" height="280" alt="L&rsquo;instradamento PDF &egrave; ora risolto."/>
+</div>
+
+<p>Sembra che abbiamo risolto il problema, ma il formato che abbiamo appena aggiunto alle regole di routing non &egrave; opzionale, per cui quando torniamo indietro alla vista di default per quella pagina, otteniamo un errore di routing. Fortunatamente &egrave; facile rendere una parte del route opzionale: tutto ci&ograve; che occorre &egrave; racchiudere la parte opzionale fra parentesi, in questo modo:</p>
+<pre class="ruby">
+match &quot;/about(.:format)&quot; =&gt; &quot;info#about&quot;, :as =&gt; :about
+</pre>
+<p>Ora possiamo visitare sia <a href="http://localhost:3000/about">http://localhost:3000/about</a>, sia <a href="http://localhost:3000/about.pdf">http://localhost:3000/about.pdf</a> senza vedere errori di routing.</p>
+
+<p>Ora vi mostreremo come usare parametri opzionali pi&ugrave; complessi. Ipotizziamo che la nostra applicazione abbia un certo numero di articoli di blog che vorremmo filtrare specificando un anno con un mese opzionale (o mese e giorno) nell&rsquo;URL.</p>
+
+<p>Possiamo fare ci&ograve; definendo un instradamento tipo questo, dirigendo ogni instradamento che fa match alla nostra action <code>info#about</code>. Si noti come sia possibile innestare le parentesi quando si creano parametri opzionali:</p>
+
+<pre class="ruby">
+match &quot;/:year(/:month(/:day))&quot; =&gt; &quot;info#about&quot;
+</pre>
+<p>Nel codice della vista aggiungiamo un po&rsquo; di codice di debug in modo tale da poter vedere quali parametri vengano passati:</p>
+<p class="codeFilePath">/app/views/info/about.html.erb</p>
+<pre class="ruby">
+&lt;h1&gt;Info#about&lt;/h1&gt;
+&lt;p&gt;Find me in app/views/info/about.html.erb&lt;/p&gt;
+&lt;%= debug params %&gt;
+</pre>
+<p>Ora, se indichiamo un anno nell&rsquo;URL, sar&agrave; passato alla action about e analogamente, se specifichiamo un anno, un mese e un giorno, tutti e tre i parametri verranno passati.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/334/original/E203I03.png" width="798" height="280" alt="I parametri di data sono passati al route."/>
+</div>
+
+<p>Questo instradamento &egrave; comunque abbastanza generico e se volessimo visitare, per esempio, <a href="http://localhost:3000/foo/bar">http://localhost:3000/foo/bar</a>, anche questo URL sarebbe servito dalla action about, anche se noi in realt&agrave; vorremmo che solo i parametri che sembrino date siano passati a tale action. Possiamo vare ci&ograve; che vorremmo con i vincoli.</p> 
+
+<h4>Vincoli</h4>
+
+<p>I vincoli sono disponibili gi&agrave; da Rails 2, conosciuti col nome di requirements. Possiamo passare un opzione <code>:constraints</code> al nostro route con un hash di valori ed i vincoli che ciascun valore dovrebbe rispettare. Vincoliamo dunque il route in modo tale che faccia match solo se il parametro anno &egrave; di quattro numeri ed il mese e il giorno sono di due numeri:</p>
+<pre class="ruby">
+match &quot;/:year(/:month(/:day))&quot; =&gt; &quot;info#about&quot;, :constraints =&gt; { :year =&gt; /\d{4}/, :month =&gt; /\d{2}/, :day =&gt; /\d{2}/ }
+</pre>
+<p>Con questo vincolo, quando visitiamo il percorso <code>/foo/bar</code>, ora otterremo un errore di routing, dal momento che, come volevamo, il percorso specificato non fa pi&ugrave; match con i vincoli sulle date.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/335/original/E203I04.png" width="798" height="280" alt="L&rsquo;instradamento ora non fa match se non con i parametri di tipo data."/>
+</div>
+
+<p>Tutto ci&ograve; che abbiamo fatto fino ad ora con i vincoli era possibile farlo anche in Rails 2 con i requirements, ma con i vincoli di Rails 3 possiamo in relat&agrave; fare molto di pi&ugrave;. Per esempio, possiamo usare un parametro <code>user_agent</code> per restringere il route solo a determinati browser, in questo caso Firefox:</p>
+<pre class="ruby">
+match &quot;/secret&quot; =&gt; &quot;info#about&quot;, :constraints =&gt; { :user_agent =&gt; /Firefox/ }
+</pre>
+<p>Se visitiamo <a href="http:/localhost:3000/secret">http:/localhost:3000/secret</a> da Safari, Chrome o Opera, vedremo un errore di routing, ma se lo visitiamo da Firefox, o fingiamo con un altro browser di essere Firefox (modificando di fatto lo user-agent nell&rsquo;head della richiesta HTTP), allora lo user agent passato dal browser far&agrave; match col vincolo e la pagina verr&agrave; mostrata:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/336/original/E203I05.png" width="973" height="287" alt="L&rsquo;instradamento sar&agrave; risolto solo se visto da Firefox"/>
+</div>
+
+<p>Potremmo anche aggiungere un vincolo per qualcosa di un po&rsquo; pi&ugrave; utile, per esempio l&rsquo;host:</p>
+<pre class="ruby">
+match &quot;/secret&quot; =&gt; &quot;info#about&quot;, :constraints =&gt; { :host =&gt; /localhost/ }
+</pre>
+<p>Questo vincolo significa che possiamo visitare <a href="http://localhost:3000/secret">http://localhost:3000/secret</a> e vedere la pagina, ma otteniamo un errore di routing se proviamo a visitare la pagina usando l&rsquo;indirizzo IP anzich&egrave; localhost( <a href="http://127.0.0.1/secret">http://127.0.0.1/secret</a> ) nonostante che entrambi siano logicamente equivalenti. Questo trucco pu&ograve; essere utilizzato per restringere determinati instradamenti solo a specifici sottodomini. Al momento il modo per fare ci&ograve; &egrave; un po&rsquo; scomodo, ma in una prossima versione di Rails saremo in grado di passare una opzione <code>:subdomain</code> per definire questo genere di vincoli.</p>
+
+<p>Se abbiamo un numero di instradamenti che devono fare match con un certo vincolo, potremmo ritrovarci con un po&rsquo; di duplicazioni di codice nel file di route. Si pu&ograve; ovviare al problema, in questi casi, usando il metodo constraints e inserendo in un blocco gli instradamenti che devono fare match:</p>
+<pre class="ruby">
+constraints :host =&gt; /localhost/ do
+  match &quot;/secret&quot; =&gt; &quot;info#about&quot;
+  match &quot;/topsecret&quot; =&gt; &quot;info#about&quot;
+end
+</pre>
+<p>Ci sono molte altre cose che si possono fare con l&rsquo;opzione constraint, ma non esauriremo tutte le potenzialit&agrave; del comando qui.</p>
+
+<h3>Instradamenti con Rack</h3>
+
+<p>C&rsquo;&egrave; molto di pi&ugrave; sul routing in Rails 3 di quanto non abbiamo il tempo di far vedere in questo episodio, ma ci ritorneremo su negli episodi futuri. Un&rsquo;ultima funzionalit&agrave; a cui diamo uno sguardo &egrave; il modo in cui il routing di Rails 3 si concilia con Rack. Normalmente passiamo un controller e il nome di una action ad un route, ma possiamo anche passare una applicazione Rack. Per dimostrarlo, creiamo un instradamento che punti ad una semplice applicazione Rack.</p>
+<pre class="ruby">
+match &quot;/hello&quot; =&gt; proc { |env| [200, {}, &quot;Hello Rack!&quot;] }
+</pre>
+<p>Se non conoscete Rack, guardatevi <a href="http://asciicasts.com/episodes/151-rack-middleware">l&rsquo;episodio 151</a>. Tutto ci&ograve; che stiamo facendo qui, &egrave; semplicemente di passare un codice di ritorno, un hash (vuoto) di headers e un semplice body.</p>
+
+<p>Visitando <code>/hello</code> dal browser ora, vediamo &ldquo;Hello Rack!&rdquo;, che significa che la nostra applicazione Rack sta funzionando e generando la risposta. Questo apre la strada ad una enorme potenzialit&agrave; e flessibilit&agrave; del modo in cui si definiscono gli instradamenti e li si inoltrano verso applicazioni differenti. E&rsquo;ora semplice l&rsquo;instradamento verso una applicazione Sinatra, per esempio.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/337/original/E203I06.png" width="799" height="280" alt="La risposta viene mostrata dalla applicazione Rack."/>
+</div>
+
+<p>Le nuove funzionalit&agrave; di routing di Rails 3 forniscono una serie di interessanti possibilit&agrave;. Anche se qui abbiamo fornito solo uno sguardo panoramico del potenziale, torneremo pi&ugrave; in dettaglio sui singoli argomenti negli episodi futuri.</p>
+
+<p>Per maggior documentazione sul routing di Rails 3, date un&rsquo;occhiata al <a href="http://yehudakatz.com/2009/12/26/the-rails-3-router-rack-it-up/">blog di Yehuda Katz</a> e alle <a href="http://guides.rails.info/routing.html">RailsGuides</a>.</p>

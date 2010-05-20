@@ -1,0 +1,279 @@
+<p>ActionMailer &egrave; cambiato significativamente in Rails 3.0. Ora espone una nuova API e usa il gem <a href="http://lindsaar.net/2010/1/23/mail-gem-version-2-released">Mail</a> anzich&egrave; il gem TMail ed &egrave; diventato molto pi&ugrave; carino da usare. In questo episodio vi mostreremo come usarlo per inviare email dalla vostra applicazione Rails.</p>
+
+<p>Lo faremo su una nuova applicazione Rails 3 chiamata <code>mailit</code>.</p>
+<pre class="terminal">
+rails mailit
+</pre>
+
+<p>Dopodich&egrave; generiamo uno scaffold per un modello <code>User</code> con un attributo <code>name</code> e uno <code>email</code> adatto a fare da modello ad una semplice pagina di registrazione utente:</p>
+<pre class="terminal">
+rails g scaffold user name:string email:string
+</pre>
+
+<p>Infine lanciamo le migrations sul database:</p>
+
+<pre class="terminal">
+rake db:migrate
+</pre>
+
+<p>Il codice generato include una pagina per creare gli utenti. Vogliamo creare un nuovo utente e poi mandargli una email di conferma al submit della pagina:</p>
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/348/original/E206I01.png" width="796" height="315" alt="La form di registrazione utente."/>
+</div>
+
+<p>La prima cosa che facciamo &egrave; creare un file di inizializzazione chiamato <code>setup_mail.rb</code> e ci mettiamo dentro un po&rsquo; di opzioni di configurazione. ActionMailer user&agrave; sendmail se tale servizio &egrave; configurato sull&rsquo;host di deploy dell&rsquo;applicazione, ma in alternativa possiamo specificare impostazioni SMTP nell&rsquo;inizializzatore.</p>  
+
+<p class="codeFilePath">/config/initializers/setup_mail.rb</p>
+<pre class="ruby">
+ActionMailer::Base.smtp_settings = {
+  :address              =&gt; &quot;smtp.gmail.com&quot;,
+  :port                 =&gt; 587,
+  :domain               =&gt; &quot;asciicasts.com&quot;,
+  :user_name            =&gt; &quot;asciicasts&quot;,
+  :password             =&gt; &quot;secret&quot;,
+  :authentication       =&gt; &quot;plain&quot;,
+  :enable_starttls_auto =&gt; true
+}
+</pre>
+
+<p>Probabilmente vorrete utilizzare una configurazione diversa in produzione, ma per ora che siamo in sviluppo questo approccio &egrave; sufficiente. Ovviamente dovrete cambiare il valore delle opzioni <code>domain</code>, <code>user_name</code> e <code>password</code> per adattarle al vostro account Gmail.</p> 
+
+<p>Ora che abbiamo completato la configurazione, possiamo generare un nuovo mailer col seguente comando:</p>
+
+<pre class="terminal">
+rails g mailer user_mailer
+</pre>
+
+<p>Questo crea un nuovo file chiamato <code>user_mailer.rb</code> nella cartella <code>/app/mailers</code> della nostra applicazione. La prima versioni di Rails mettevano le classi mailer nella cartella <code>/app/models</code>, ma in Rails 3 si &egrave; deciso di promuoverle ad una cartella tutta per loro. Mailer in Rails 3 si comporta come i controller e ne condividono un sacco di codice dietro le quinte.</p>
+
+<p>Il codice di default nella classe UserMailer appare cos&igrave;:</p>
+
+<p class="codeFilePath">/app/mailers/user_mailer.rb</p>
+<pre class="ruby">
+class UserMailer &lt; ActionMailer::Base
+  default :from =&gt; &quot;from@example.com&quot;
+end
+</pre>
+
+<p>Rimuoviamo per ora la linea di <code>default</code> da questa classe, ma a breve spiegheremo a cosa serve tale riga.</p>
+
+<p>Come avremmo fatto in un&rsquo;applicazione Rails 2, aggiungiamo un metodo a questa classe per ogni tipo di email che prevediamo di mandare, in questo caso solo uno, che chiameremo <code>registration_confirmation</code>:</p>
+
+<p class="codeFilePath">/app/mailers/user_mailer.rb</p>
+<pre class="ruby">
+class UserMailer &lt; ActionMailer::Base
+  def registration_confirmation(user)
+    mail(:to =&gt; user.email, :subject =&gt; &quot;Registered&quot;, :from =&gt; &quot;eifion@asciicasts.com&quot;)
+  end
+end
+</pre>
+
+<p>Passiamo al nostro metodo <code>registration_confirmation</code> un oggetto <code>User</code> e tutto ci&ograve; di cui ha bisogno il metodo per fare la sua chiamata &egrave; semplicemente il metodo <code>mail</code>, invocato con un hash di argomenti tipo il <code>:to</code>, il <code>:from</code> e il <code>:subject</code>.</p> 
+
+<p>Se dovessimo avere pi&ugrave; di un metodo nella nostra classe, e ci dovesse essere una condivisione di tali opzioni, chiaramente le estrarremmo al di fuori dei singoli metodi per posizionarle all&rsquo;interno di un metodo, il <code>default</code> di prima che abbiamo cancellato. Se, per esempio, le email dovessero avere sempre lo stesso mittente, allora metteremmo l&rsquo;opzione :from nel default, ottenendo:</p>
+
+<p class="codeFilePath">/app/mailers/user_mailer.rb</p>
+<pre class="ruby">
+class UserMailer &lt; ActionMailer::Base
+  default :from =&gt; &quot;eifion@asciicasts.com&quot;
+
+  def registration_confirmation(user)
+    mail(:to =&gt; user.email, :subject =&gt; &quot;Registered&quot;)
+  end
+end
+</pre>
+
+<p>Qualunque opzione specificabile per il metodo <code>mail</code> pu&ograve; essere estratta nel metodo <code>default</code> se va condivisa con pi&ugrave; metodi di invio email.</p>
+
+<p>Cos&igrave; come per i controller classici, i metodi presenti all&rsquo;interno di una classe che specializza ActionMailer, che sono associati a messaggi e-mail, devono avere un file di vista associato. Il file di vista per la nostra e-mail di registrazione va nella cartella <code>/app/views/user_mailer</code>. Dal momento che manderemo e-mail con contenuto di testo semplice (non HTML), chiameremo il file <code>registration_confirmation.text.erb</code>. Qualsiasi cosa vi inseriamo all&rsquo;interno, apparir&agrave; nel body dalla e-mail:</p>
+
+<p class="codeFilePath">/app/views/user_mailer/registration_confirmation.text.erb</p>
+<pre class="erb">
+Grazie per esserti registrato!
+</pre>  
+
+<p>Ora dobbiamo scrivere il codice che consegni l&rsquo;e-mail alla creazione di un nuovo utente. Taluni amano usare un <a href="http://api.rubyonrails.org/classes/ActiveRecord/Observer.html">Model Observer</a> per fare ci&ograve;, ma noi terremo il codice a livello di controller. La ragione per cui faremo cos&igrave; &egrave; che se facessimo uso di un observer e creassimo un nuovo oggetto <code>User</code> dalla console Rails per fare alcune prove, le e-mail sarebbero mandate in background anche in quel caso, il che &egrave; un qualcosa che non vorremmo, visto che stiamo solo testando il modello. Noi vogliamo che le e-mail vengano inviate solo quando gli utenti stanno interagendo con l&rsquo;applicazione stessa, nel qual caso stanno passando attraverso metodi del controller.</p>
+
+<p>Per cui, detto ci&ograve;, scriviamo il codice responsabile dell&rsquo;invio della e-mail all&rsquo;interno dell&rsquo;action <code>create</code> nello <code>UsersController</code>. E&rsquo; sufficiente chiamare il metodo <code>registration_confirmation</code> che abbiamo appena scritto, passandogli l&rsquo;utente appena creato e poi chiamando il metodo <code>deliver</code> sul valore di ritorno:</p>
+
+<p class="codeFilePath">/app/controllers/users_controller.rb</p>
+<pre class="ruby">
+def create
+  @user = User.new(params[:user])
+
+  respond_to do |format|
+    if @user.save
+      UserMailer.registration_confirmation(@user).deliver
+      format.html { redirect_to(@user, :notice =&gt; &#x27;User was successfully created.&#x27;) }
+      format.xml  { render :xml =&gt; @user, :status =&gt; :created, :location =&gt; @user }
+    else
+      format.html { render :action =&gt; &quot;new&quot; }
+      format.xml  { render :xml =&gt; @user.errors, :status =&gt; :unprocessable_entity }
+    end
+  end
+end
+</pre>
+
+<p>Tutto ci&ograve; differisce da quanto si sarebbe fatto in Rails 2, dove avremmo chiamato unicamente il metodo <code>deliver_registration_confirmation</code>. Ora abbiamo un metodo che restituisce un oggetto di tipo messaggio e-mail, su cui si deve invocare il metodo di istanza <code>deliver</code> per inviarlo effettivamente. In questo modo &egrave; possibile preparare un messaggio e-mail per poterlo eventualmente inviare in un secondo momento.</p>
+
+<p>Ora possiamo provare il tutto registrando un nuovo utente; al submit della form dovrebbe essere mandata una e-mail:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/349/original/E206I02.png" width="798" height="340" alt="L&rsquo; e-mail di registrazione mandata dall&rsquo;applicazione."/>
+</div>
+
+<p>Funziona. La nostra e-mail &egrave; stata inviata.</p> 
+
+<p>E se volessimo personalizzare l&rsquo;e-mail in modo da mostrare anche il nome dell&rsquo;utente appena creato nel messaggio inviato? Per fare questa cosa, dobbiamo passare l&rsquo;oggetto user appena creato alla vista. Fare questa cosa in Rails 3 &egrave; facile, dal momento che gli oggetti ActionMailer si comportano come controller, per cui qualsiasi variabile di istanza creata all&rsquo;interno di un metodo viene resa disponibile alla rispettiva vista. Tutto quello che dobbiamo fare &egrave; dunque di creare una variabile di istanza per l&rsquo;utente che &egrave; passato al metodo <code>registration_confirmation</code>, dopodich&egrave; potremo usare quell&rsquo;oggetto nella vista:</p>
+
+<p class="codeFilePath">/app/mailers/user_mailer.rb</p>
+<pre class="ruby">
+def registration_confirmation(user)
+  @user = user
+  mail(:to =&gt; user.email, :subject =&gt; &quot;Registered&quot;)
+end
+</pre>
+
+<p>La chiamata al metodo <code>mail</code> deve essere in fondo al metodo, poich&egrave; restituir&agrave; il messaggio e-mail, per cui la variabile di istanza deve essere definita prima.</p>
+
+<p>Ora che abbiamo definito la variabile di istanza sul mailer, possiamo usarla dalla vista per aggiungere l&rsquo;informazione che volevamo al messaggio di e-mail:</p>
+
+<p class="codeFilePath">/app/views/user_mailer/registration_confirmation.text.erb</p>
+<pre class="erb">
+&lt;%= @user.name %&gt;,
+
+Grazie per esserti registrato!
+</pre>
+
+<p>All&rsquo;atto della registrazione, ora, il nome dell&rsquo;utente creato verr&agrave; mostrato nel corpo dell&rsquo;e-mail.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/350/original/E206I03.png" width="797" height="340" alt="Il nome utente &egrave; ora incluso nel testo della e-mail."/>
+</div>
+
+<p>Se volessimo inserire un collegamento nell&rsquo;e-mail in modo tale da permettere al destinatario della stessa di modificare il proprio profilo potremmo fare cos&igrave;. I named route sono disponibili nella vista, per cui potremmo scrivere qualcosa del genere:</p>
+
+<pre class="erb">
+Modifica il porfilo: &lt;%= edit_user_url(@user) %&gt;
+</pre>
+
+<p>Tuttavia non funzionerebbe. Dobbiamo fornire un po&rsquo; pi&ugrave; di informazioni, definendo un&rsquo;opzione <code>:host</code> contenente il nome di dominio dell&rsquo;applicazione.</p>
+
+<p class="codeFilePath">/app/views/user_mailer/registration_confirmation.text.erb</p>
+<pre class="erb">
+&lt;%= @user.name %&gt;,
+
+Grazie per esserti registrato!
+
+Modifica il profilo: &lt;%= edit_user_url(@user, :host =&gt; &quot;localhost:3000&quot;) %&gt;
+</pre>
+
+<p>La ragione per cui si rende necessaria questa opzione extra &egrave; che i mailer sono completamente disaccoppiati dalla request corrente. Questa &egrave; stata una decisione di progetto presa per fare in modo che i mailer potessero essere spediti attraverso altri mezzi che al limite risiedano al di fuori della richiesta corrente nel controller.</p> 
+
+<p>Sarebbe bello se non dovessimo fare questo lavoro per ogni link di ogni e-mail ed in effetti possiamo evitare tutto ci&ograve; impostando il valore dell&rsquo;host nel file di inizializzazione che abbiamo creato in precedenza:</p>
+
+<p class="codeFilePath">/config/initializers/setup_mail.rb</p>
+<pre class="ruby">
+ActionMailer::Base.smtp_settings = {
+  :address              =&gt; &quot;smtp.gmail.com&quot;,
+  :port                 =&gt; 587,
+  :domain               =&gt; &quot;asciicasts.com&quot;,
+  :user_name            =&gt; &quot;asciicasts&quot;,
+  :password             =&gt; &quot;secret&quot;,
+  :authentication       =&gt; &quot;plain&quot;,
+  :enable_starttls_auto =&gt; true
+}
+
+ActionMailer::Base.default_url_options[:host] = &quot;localhost:3000&quot;
+</pre>
+
+<p>Possiamo specificare qualsiasi opzione che vogliamo in questo punto, come un hash, ma per ora impostiamo solo l&rsquo;host. Quando riproviamo a registrare un nuovo utente al sito, ora nella e-mail vediamo il link con l&rsquo;URL corretto:</p>
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/351/original/E206I04.png" width="797" height="340" alt="L&rsquo;e-mail di registrazione ora ha un link funzionante che punta alla pagina del profilo dell&rsquo;utente creato."/>
+</div>
+ 
+<h3>E-Mail multipart e allegati</h3>
+
+<p>Anche il processo di invio di e-mail multipart &egrave; stato decisamente semplificato in Rails 3. Ora &egrave; sufficiente infatti creare una nuova vista per gestire la parte di HTML dell&rsquo;e-mail, lo stesso nome della vista testuale, a meno del suffisso html, quindi in questo caso <code>registration_confirmation.html.erb</code>. In questo file mettiamo una vesione rapida e blanda di HTML della vista dell&rsquo;e-mail testuale:</p>
+
+<p class="codeFilePath">/app/views/user_mailer/registration_confirmation.html.erb</p>
+<pre class="erb">
+&lt;p&gt;&lt;%= @user.name %&gt;,&lt;/p&gt;
+
+&lt;p&gt;Grazie per esserti registrato!&lt;/p&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;Modifica il profilo&quot;, edit_user_url(@user, :host =&gt; &quot;localhost:3000&quot;) %&gt;&lt;/p&gt;
+</pre>
+
+<p>L&rsquo;e-mail ora ha un collegamento al suo interno, se la guardiamo da un client in grado di mostrare e-mail in formato HTML. Entrambe le parti sono mandate, in modo tale che le applicazioni che non sono in grado di gestire le e-mail HTML possano mostrare la versione testuale.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/352/original/E206I05.png" width="797" height="340" alt="L&rsquo;e-mail &egrave; mostrata come HTML."/>
+</div>
+
+<p>Aggiungere un allegato &egrave; altrettanto semplice. Tutto quello che occorre fare &egrave; aggiungere una nuova chiamata al metodo attachments, passando il nome dell&rsquo;allegato e leggendo il file al suo interno:</p>
+
+<p class="codeFilePath">/app/mailers/user_mailer.rb</p>
+<pre class="ruby">
+def registration_confirmation(user)
+  @user = user
+  attachments[&quot;rails.png&quot;] = File.read(&quot;#{Rails.root}/public/images/rails.png&quot;)
+  mail(:to =&gt; &quot;#{user.name} &lt;#{user.email}&gt;&quot;, :subject =&gt; &quot;Registered&quot;)
+end
+</pre>
+
+<p>Riprovando il processo di registrazione nuovo utente ora, l&rsquo;e-mail che riceveremo avr&agrave; un file <code>rails.png</code> in allegato. Si noti anche che abbiamo cambiato l&rsquo;opzione <code>:to</code> nel metodo mail per includere il nome dell&rsquo;utente:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/353/original/E206I06.png" width="765" height="340" alt="Aggiunta di un allegato."/>
+</div>
+
+<p>Come avete potuto constatare dagli esempi sopra, &egrave; facile creare e-mail anche piuttosto complicate con poco codice, grazie alla nuova API ActionMailer. Le opzioni di default sono ragionevoli, il che aiuta, ma se avrete bisogno di maggior controllo sulle cose tipo l&rsquo;encoding e robe simili, vi &egrave; permesso cambiare tutto.</p>
+
+<h3>Interceptors</h3>
+
+<p>Concludiamo l&rsquo;episodio mostrandovi una tecnica per intercettare i messaggi e-mail prima che vengano consegnati. Un buon uso di questa tecnica &egrave; quello di cambiare il modo in cui le e-mail vengono gestite in fase di sviluppo, in modo tale che non vengano inviate effettivamente agli utenti creati, ma piuttosto al vostro account.</p>
+
+<p>Questa &egrave; una funzionalit&agrave; che solo recentemente &egrave; stata aggiunta al gem Mail, per cui dovremo aggiornarci all&rsquo;ultima versione di tale gem (che sia almeno la 2.1.3) per sfruttarla. Per ottenere la versione corretta, possiamo modificare il Gemfile della nostra applicazione aggiungendo un riferimento al suddetto gem, con la seguente linea di codice:</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+gem &quot;mail&quot;, &quot;2.1.3&quot;
+</pre>
+
+<p>Dopodich&egrave; lanciamo <code>bundle install</code> per installare la versione aggiornata.</p>
+
+<p>La prossima cosa da fare &egrave; creare la classe interceptor. Questa classe pu&ograve; finire sotto la cartella <code>/lib</code>e la chiameremo <code>development_mail_interceptor.rb</code>:</p>
+
+<p class="codeFilePath">/lib/development_mail_interceptor.rb</p>
+<pre class="ruby">
+class DevelopmentMailInterceptor
+  def self.delivering_email(message)
+    message.subject = &quot;[#{message.to}] #{message.subject}&quot;
+    message.to = &quot;eifion@asciicasts.com&quot;
+  end
+end
+</pre>
+
+<p>Il metodo di classe <code>delivering_email</code> prende il messaggio e-mail che sta per essere inviato e cambia l&rsquo;oggetto in modo tale che la persona per cui l&rsquo;e-mail era originariamente intesa finisca nell&rsquo;oggetto. Il campo <code>to</code> &egrave; poi cambiato in modo che l&rsquo;e-mail sia mandata a <code>eifion@asciicasts.com</code>.</p>
+
+<p>Poi dobbiamo registare l&rsquo;interceptor nel nostro file di inizializzazione, aggiungendo la seguente linea:</p>
+
+<p class="codeFilePath">/config/initializers/setup_mail.rb</p>
+<pre class="ruby">
+Mail.register_interceptor(DevelopmentMailInterceptor) if Rails.env.development?
+</pre>
+
+<p>Questo codice chiamer&agrave; il metodo <code>delivering_email</code> della nostra classe interceptor se la nostra applicazione si trova in modalit&agrave; di sviluppo. Dalla prossima versione beta di Rails 3.0, con una versione aggiornata del gem Mail, si potr&agrave; sostituire la chiamata a <code>Mail.register_interceptor</code> con una a <code>ActionMailer::Base.register_interceptor</code>.</p> 
+
+<p>Creando ora un nuovo utente l&rsquo;e-mail di registrazione viene mandata a <code>eifion@asciicasts.com</code>, indipendentemente da chi sia realmente il destinatario ed il destinatario originale apparir&agrave; nella riga di oggetto.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/354/original/E206I07.png" width="765" height="340" alt="In modalit&agrave; sviluppo, l&rsquo;e-mail viene ora mandata a noi, anzich&egrave; al destinatario a cui dovrebbe realmente essere mandata in produzione."/>
+</div>
+
+<p>Questo &egrave; un gran modo di controllare che il sistema di invio email funzioni, in fase di sviluppo, senza rischiare di inviare inavvertitamente e-mail a persone esterne.</p>
+
+<p>Con questo argomento si chiude l&rsquo;episodio. Spero lo abbiate trovato utile. La nuova API di ActionMailer rende molto pi&ugrave; semplice l&rsquo;invio di e-mail da applicazioni Rails.</p>

@@ -1,0 +1,192 @@
+<p>This episode will cover advanced queries in Rails 3. In episode 202 [<a href="http://railscasts.com/episodes/202-active-record-queries-in-rails-3">watch</a>, <a href="http://asciicasts.com/episodes/202-active-record-queries-in-rails-3">read</a>] we covered the additions to ActiveRecord queries in Rails 3; here we&rsquo;ll carry on from there and show you some more advanced tips.</p>
+
+<h3>Using Class Methods Instead of Scopes</h3>
+
+<p>The application that we&rsquo;ll be using in this application has two models: <code>Product</code> and <code>Category</code> with a product belonging to a category. The product model has two named scopes: <code>discontinued</code>, which returns all of the products for which discontinued is true and price, which returns the products that are cheaper than a given price argument.</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+  scope :discontinued, where(:discontinued =&gt; true)
+  scope :cheaper_than, lambda { |price| where(&quot;price &lt; ?&quot;, price) }
+end
+</pre>
+
+<p>In the second named scope we&rsquo;re using a lambda. If you ever use one of these in a named scope you might consider using a class method instead especially if you&rsquo;re passing in a large number of parameters or if the content of the scope is complex. Ours is fairly simple but we&rsquo;ll turn it into a class method anyway.</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+  scope :discontinued, where(:discontinued =&gt; true)
+  
+  def self.cheaper_than(price)
+    where(&quot;price &lt; ?&quot;, price)
+  end
+end
+</pre>
+
+<p>The class method will behave in the same way as the scope did. We could do this in Rails 2 as well but it behaves much better in Rails 3. We can even reuse this method in another named scope. If we want to create a scope called <code>cheap</code> that returns the products that cost less than five pounds we can write it like this:</p>
+
+<p class="codeFilePath">/app/models/products.rb</p>
+<pre class="ruby">
+scope :cheap, cheaper_than(5)
+</pre>
+
+<p>There&rsquo;s a potential trap here though. If we use a class method in a scope we need to define the scope in the class after the class method has been defined which means that the scope will need to be placed lower down in the class than is usual.</p>
+
+<p>Using the Rails console we can see the SQL that the scope generates.</p>
+
+<pre class="terminal">
+ruby-1.8.7-p249 &gt; Product.cheap.to_sql
+ =&gt; &quot;SELECT    \&quot;products\&quot;.* FROM      \&quot;products\&quot; WHERE    (price &lt; 5)&quot;
+</pre> 
+
+<p>If we just call the scope we&rsquo;ll see the list of cheap products.</p>
+
+<pre class="terminal">
+&gt;Product.cheap
+ =&gt; [#&lt;Product id: 1, name: &quot;Top&quot;, price: 4.99, discontinued: nil, category_id: 3, created_at: &quot;2010-05-24 21:01:59&quot;, updated_at: &quot;2010-05-24 21:01:59&quot;&gt;, #&lt;Product id: 2, name: &quot;Milk&quot;, price: 2.99, discontinued: nil, category_id: 2, created_at: &quot;2010-05-24 21:02:38&quot;, updated_at: &quot;2010-05-24 21:02:38&quot;&gt;]
+</pre>
+
+<h3>Associations</h3>
+
+<p>While we&rsquo;re in the console we&rsquo;ll show you another trick, one that involves using scopes through associations. As we mentioned before in our application a product belongs to a category. This means that we can use <code>joins</code> to return a SQL query that performs an inner join on the products and categories tables.</p>
+<pre class="terminal">
+ruby-1.8.7-p249 &gt; Category.joins(:products).to_sql
+ =&gt; &quot;SELECT     \&quot;categories\&quot;.* FROM       \&quot;categories\&quot; INNER JOIN \&quot;products\&quot; ON \&quot;products\&quot;.\&quot;category_id\&quot; = \&quot;categories\&quot;.\&quot;id\&quot;&quot;
+</pre> 
+
+<p>We want to find all of the categories that have products that match a certain scope, say all of the categories that have at least one product costing less than five pounds. There are two methods we can use to do this. We could use <code>merge</code> like this:</p>
+
+<pre class="terminal">
+&gt; Category.joins(:products).merge(Product.cheap)
+ =&gt; [#&lt;Category id: 3, name: &quot;Games&quot;, created_at: &quot;2010-05-24 21:00:57&quot;, updated_at: &quot;2010-05-25 18:30:18&quot;&gt;, #&lt;Category id: 2, name: &quot;Groceries&quot;, created_at: &quot;2010-05-24 21:00:50&quot;, updated_at: &quot;2010-05-25 18:30:39&quot;&gt;]
+</pre> 
+
+<p>Alternatively we can use an ampersand which is an alias to the same thing and so will return the same results.</p>
+
+<pre class="terminal">
+&gt; Category.joins(:products) &amp; Product.cheap
+ =&gt; [#&lt;Category id: 3, name: &quot;Games&quot;, created_at: &quot;2010-05-24 21:00:57&quot;, updated_at: &quot;2010-05-25 18:30:18&quot;&gt;, #&lt;Category id: 2, name: &quot;Groceries&quot;, created_at: &quot;2010-05-24 21:00:50&quot;, updated_at: &quot;2010-05-25 18:30:39&quot;&gt;]
+</pre> 
+
+<p>Using these methods we can join any other queries even if they&rsquo;re not in the same models enabling us to find all of the categories that have products that cost less than five pounds. If we call <code>to_sql</code> on the joined queries we&rsquo;ll see than an inner join has been used and the WHERE clause from the named scope added to the end of the statement.</p>
+
+<pre class="terminal">
+&gt; (Category.joins(:products) &amp; Product.cheap).to_sql
+ =&gt; &quot;SELECT     \&quot;categories\&quot;.* FROM       \&quot;categories\&quot; INNER JOIN \&quot;products\&quot; ON \&quot;products\&quot;.\&quot;category_id\&quot; = \&quot;categories\&quot;.\&quot;id\&quot; WHERE     (price &lt; 5)&quot;
+</pre> 
+ 
+<p>This can be a powerful technique when used inside a named scope definition. We can use it, for example, to create a scope in the <code>Category</code> model that finds the categories that have cheap products.</p>
+
+<p class="codeFilePath">/app/models/category.rb</p>
+<pre class="ruby">
+class Category &lt; ActiveRecord::Base
+  has_many :products
+  scope :with_cheap_products, joins(:products) &amp; Product.cheap
+end
+</pre>
+
+<p>This new named scope will return the same categories as the joined query we wrote earlier.</p>
+
+<pre class="terminal">
+&gt; Category.with_cheap_products
+ =&gt; [#&lt;Category id: 3, name: &quot;Games&quot;, created_at: &quot;2010-05-24 21:00:57&quot;, updated_at: &quot;2010-05-25 18:30:18&quot;&gt;, #&lt;Category id: 2, name: &quot;Groceries&quot;, created_at: &quot;2010-05-24 21:00:50&quot;, updated_at: &quot;2010-05-25 18:30:39&quot;&gt;]
+</pre> 
+
+<p>One thing that we need to be aware of when dealing with conditions across associations is the table name. If we look at the SQL that is created when we call the named scope we can see that there is no qualifying table name in the WHERE clause.</p>
+
+<pre class="terminal">
+&gt; Category.with_cheap_products.to_sql
+ =&gt; &quot;SELECT     \&quot;categories\&quot;.* FROM       \&quot;categories\&quot; INNER JOIN \&quot;products\&quot; ON \&quot;products\&quot;.\&quot;category_id\&quot; = \&quot;categories\&quot;.\&quot;id\&quot; WHERE     (price &lt; 5)&quot;
+</pre> 
+
+<p>This could be a problem if both tables had a column called price as we&rsquo;d have an ambiguous column name in the SQL query. We can remove this ambiguity by explicitly defining the table name in the <code>Product</code> model.</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+def self.cheaper_than(price) 
+  where(&quot;products.price &lt; ?&quot;, price)
+end
+</pre>
+
+<p>Now there is no danger of the column name being ambiguous when it is used. You should always specify the table name when you use SQL strings in find conditions. If you&rsquo;re using a hash, however, such as in the scope then there&rsquo;s no need to worry about the table name as Rails will automatically put one in.</p>
+
+<h3>Building Records Through Named Scopes</h3>
+
+<p>The next thing we&rsquo;ll show you is how to build records with named scopes. We have a named scope on our <code>Product</code> model called discontinued that finds all of the discontinued products.</p>
+
+<pre class="terminal">
+&gt; Product.discontinued
+ =&gt; [#&lt;Product id: 3, name: &quot;Some DVD&quot;, price: 13.49, discontinued: true, category_id: 1, created_at: &quot;2010-05-25 19:45:05&quot;, updated_at: &quot;2010-05-25 19:45:05&quot;&gt;]
+</pre> 
+
+<p>As the named scope uses a hash we can call the <code>build</code> method on it to build a new product with its <code>discontinued</code> attribute already set to true.</p>
+
+<pre class="terminal">
+&gt; p = Product.discontinued.build
+ =&gt; #&lt;Product id: nil, name: nil, price: nil, discontinued: true, category_id: nil, created_at: nil, updated_at: nil&gt;
+</pre> 
+
+<p>The new product will be discontinued because this attribute is part of the <code>where</code> condition. This works in a similar way to an association in that when you call build on the association it automatically sets the foreign key that&rsquo;s associated with that record. Here though we&rsquo;re just assigning the attributes that are in the <code>where</code> condition. This is a handy thing to know if you need to build records that match a named scope.</p>
+
+<h3>Arel</h3>
+
+<p>We&rsquo;ll finish off this episode by introducing <a href="http://github.com/rails/arel">Arel</a>. Arel drives ActiveRecord queries under the bonnet. You probably won&rsquo;t need to interact with it very often but if helps if you have an understanding of how it works and understand what it is capable of in case you ever need to use it.</p>
+
+<p>To access Arel directly in Rails 3 you can access an <code>arel_table</code> so we&rsquo;ll get the <code>arel_table</code> for the Product model in the console and assign it to a variable.</p>
+
+<pre class="terminal">
+&gt; t = Product.arel_table
+</pre>
+
+<p>This is a representation of the products table. We can access the columns in the table like this:</p>
+
+<pre class="terminal">
+&gt;t[:price]
+ =&gt; &lt;Attribute price&gt;
+</pre> 
+
+<p>We can call methods on an attribute to perform find conditions. For example, if we want to find all of the products that cost &pound;2.99 we can run</p>
+
+<pre class="terminal">
+&gt; t[:price].eq(2.99)
+ =&gt; #&lt;Arel::Predicates::Equality:0x1040dd9f0 @operand1=&lt;Attribute price&gt;, @operand2=2.99&gt;
+</pre> 
+
+<p>This returns a predicate which is basically the find condition. There are other methods we can call too, such as <code>matches</code> which will perform a LIKE query. As with other queries we can call <code>to_sql</code> to see the SQL that this query will generate.</p>
+
+<pre class="terminal">
+&gt; t[:name].matches(&#x27;%lore&#x27;).to_sql
+ =&gt; &quot;\&quot;products\&quot;.\&quot;name\&quot; LIKE &#x27;%lore&#x27;&quot;
+</pre> 
+
+<p>We can use the or method to string predicates together so we can find the products that cost &pound;2.99 and have a name ending in &lsquo;lore&rsquo;.</p>
+
+<pre class="terminal">
+t[:price].eq(2.99).or(t[:name].matches(&#x27;%lore&#x27;))
+</pre>
+
+<p>This will return a combined predicate and we can look at the SQL query by calling <code>to_sql</code> as before.</p>
+
+<pre class="terminal">
+&gt; t[:price].eq(2.99).or(t[:name].matches(&#x27;%lore&#x27;)).to_sql
+ =&gt; &quot;(\&quot;products\&quot;.\&quot;price\&quot; = 2.99 OR \&quot;products\&quot;.\&quot;name\&quot; LIKE &#x27;%lore&#x27;)&quot;
+</pre> 
+
+<p>We can pass predicates as arguments to an ActiveRecord <code>where</code> call. This means that we can pass the predicate we&rsquo;ve created to <code>Product.where</code> to return all of the products whose price is &pound;2.99 or whose name ends in &lsquo;lore&rsquo;.</p>
+
+<pre class="terminal">
+&gt;   Product.where(t[:price].eq(2.99).or(t[:name].matches(&#x27;%lore&#x27;)))
+ =&gt; [#&lt;Product id: 2, name: &quot;Milk&quot;, price: 2.99, discontinued: nil, category_id: 2, created_at: &quot;2010-05-24 21:02:38&quot;, updated_at: &quot;2010-05-24 21:02:38&quot;&gt;, #&lt;Product id: 4, name: &quot;Knight Lore&quot;, price: 2.99, discontinued: nil, category_id: nil, created_at: &quot;2010-05-26 19:36:02&quot;, updated_at: &quot;2010-05-26 19:36:02&quot;&gt;]
+</pre>
+
+<p>We&rsquo;ve only scratched the surface here; Arel is capable of a lot more and ActiveRecord only reveals a little of it. There are a number of plugins now available that take the power of Arel and put it into a more convenient interface such as <a href="http://metautonomo.us/projects/metawhere/">MetaWhere</a>. This allows you to access Arel methods such as <code>matches</code> and <code>eq</code> inside the conditions hash like this:</p>
+
+<pre class="ruby">
+Product.where(:price.eq =&gt; 2.99, :name.matches =&gt; &#x27;%lore&#x27;)
+</pre>
+
+<p>This gives you a lot more flexibility in how the conditions hash is defined and is well worth taking a look at if you need to perform more complex queries on your models.</p>

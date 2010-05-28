@@ -1,0 +1,227 @@
+<p>L&rsquo;episodio di questa settimana &egrave; un po&rsquo; diverso dal solito. E&rsquo; un esercizio di refactoring che ci consentir&agrave; di scoprire una simpatica tecnica Ruby che chiameremo Dynamic Delegator.</p>
+
+<p>Per mostrarvi il tutto, ci avvarremo di una semplice applicazione di negozio on-line che ha un modello <code>Product</code> con associato un <code>ProductsController</code>. La action del controller <code>index</code> permette che la lista di prodotti sia filtrata per nome o per prezzo. Fornendo uno o pi&ugrave; parametri fra <code>name</code>, <code>price_lt</code> e <code>price_gt</code> alla stringa di query, possiamo cercare prodotti che corrispondano a tali criteri di ricerca, per trovare, ad esempio, i soli prodotti il cui nome contenga &ldquo;video&rdquo; e che costino pi&ugrave; di &pound;50:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/377/original/E212I01.png" width="800" height="315" alt="Filtering the list of products."/>
+</div>
+
+<p>Prima di iniziare il il refactoring della action index, diamo un&rsquo;occhiata a ci&ograve; che fa attualmente:</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; ApplicationController
+  def index
+    @products = Product.scoped
+    @products = @products.where(&quot;name like ?&quot;, &quot;%&quot; + params[:name] + &quot;%&quot;) if params[:name]
+    @products = @products.where(&quot;price &gt;= ?&quot;, params[:price_gt]) if params[:price_gt]
+    @products = @products.where(&quot;price &lt;= ?&quot;, params[:price_lt]) if params[:price_lt]
+  end
+
+  # Altre action
+end
+</pre>
+
+<p>Si tratta di un&rsquo;applicazione Rails 3, dunque si usa il metodo <code>where</code> per aggiungere condizioni alla query se &egrave; stato passato il parametro corrispondente. Prima di fare ci&ograve;, tuttavia, usiamo <code>Product.scoped</code> per ottenere l&rsquo;insieme di tutti i prodotti. Potreste non conoscere ancora questo metodo, ma essenzialmente &egrave; un ulteriore modo per dire <code>Product.all</code>. La differenza rispetto al primo &egrave; che il metodo <code>all</code> determina istantaneamente una query sul database, restituendo un array di prodotti. Siccome non vogliamo intraprendere una chiamata al database fintanto che non abbiamo applicato i nostri filtri, allora usiamo il metodo <code>scoped</code> al posto di <code>all</code>, che ci permette di aggiungere condizioni alla query prima che questa sia eseguita.</p> 
+
+<p>Ora pensiamo al refactoring dell&rsquo;action. Il primo passo che faremo sar&agrave; di rimuovere parte della logica dal controller, dal momento che quello non &egrave; il posto pi&ugrave; indicato per quel genere di codice. In qualunque linguaggio object-orientated, se siete nella situazione in cui un oggetto di un certo tipo sta chiamando molti metodi su un altro oggetto di un altro tipo, probabilmente significa che dovreste spostare tutte quelle chiamate e quella logica all&rsquo;interno di un metodo dell&rsquo;altro oggetto. In questo caso,nella action index della classe di <code>ProductController</code>, stiamo chiamando ben quattro metodi della classe di modello <code>Product</code> per creare la nostra query e ci&ograve; ci suggerisce che questo codice debba appartenere al modello stesso piuttosto che al controller.</p>
+
+<p>Sostituiamo dunque il codice all&rsquo;interno della action <code>index</code> con una chiamata al nuovo metodo di classe nel modello <code>Product</code> chiamato <code>search</code>, a cui passiamo un hash <code>params</code> in modo che quest&rsquo;ultimo sappia su cosa deve essere fatta la query.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; ApplicationController
+  def index
+    @products = Product.search(params)
+  end
+
+  # Altre actions
+end
+</pre>
+
+<p>Poi definiamo il metodo in questione nella classe <code>Product</code>. Il metodo deve essere di classe, per cui lo definiamo come <code>self.search</code>. Il codice nel metodo sar&agrave; lo stesso che avevamo prima all&rsquo;interno del controller, ma con una variabile locale (products) che sostituisce la variabile di istanza che avevamo prima: questa variabile &egrave; restituita alla fine del metodo:</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+  
+  def self.search(params)
+    products = scoped
+    products = products.where(&quot;name like ?&quot;, &quot;%&quot; + params[:name] + &quot;%&quot;) if params[:name]
+    products = products.where(&quot;price &gt;= ?&quot;, params[:price_gt]) if params[:price_gt]
+    products = products.where(&quot;price &lt;= ?&quot;, params[:price_lt]) if params[:price_lt]    
+    products
+  end 
+
+end
+</pre>
+
+<p>Se ora ricarichiamo la pagina, vedremo che funziona tutto esattamente come prima.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/377/original/E212I01.png" width="800" height="315" alt="La pagina funziona ancora."/>
+</div>
+
+<p>Naturalmente, ricaricando la pagina abbiamo solo constatato che le modifiche al codice funzionano per quegli specifici parametri; &egrave; solo in scenari di sviluppo Test-Driven che si pu&ograve; veramente avere una riprova effettiva del corretto funzionamento della pagina post-refactoring. Ricaricare la pagina diventa rapidamente piuttosto tedioso e non controlla comunque ogni ramo del codice dal momento che la query di ricerca &egrave; costruita in modo diverso a seconda dei parametri che vengono passati. E&rsquo; una buona idea, specialmente quando si fa del refactoring sul codice, quella di mettere su un sistema di test per assicurarsi di non introdurre regressioni con le modifiche.</p>
+
+<p>Spostare questo codice nel modello presenta l&rsquo;ulteriore beneficio di rendere pi&ugrave; semplice anche il test, dal momento che dovremmo solo scrivere un test unitario sulla classe di modello, anzich&egrave; un test completo sull&rsquo;intero stack.</p>
+
+<h3>Introduzione al Dynamic Delegator</h3>
+
+<p>Abbiamo un po&rsquo; rivisto il codice spostando la logica di ricerca nel modello ed ora andremo oltre, togliendo la necessit&agrave; di reimpostare la variabile <code>products</code> ogni volta che aggiungiamo una condizione di ricerca. E&rsquo; un pattern ricorrente quando si tratta con le opzioni di ricerca e se ne vedete molti nella vostra applicazione, potreste considerare la tecnica che vi stiamo per mostrare, che abbiamo chiamato dynamic delegator.</p>
+
+<p>Piuttosto che spiegare come funziona un dynamic delegator, ve lo mostreremo usandone uno per il refactoring del nostro codice di ricerca. Cominciamo creando la classe del dynamic delegator nella cartella <code>/lib</code> della nostra applicazione:</p>
+
+<p class="codeFilePath">/lib/dynamic_delegator.rb</p>
+<pre class="ruby">
+class DynamicDelegator
+  def initialize(target)
+    @target = target
+  end  
+  
+  def method_missing(*args, &amp;block)
+    @target.send(*args, &amp;block)
+  end
+end
+</pre>
+
+<p>La classe <code>DynamicDelegator</code> accetta un argomento nel suo costruttore, un oggetto target, e imposta una variabile di istanza a quell&rsquo;oggetto. Fa anche l&rsquo;override del metodo <code><a href="http://ruby-doc.org/core/classes/Kernel.html#M005925">method_missing</a></code>, in modo tale che qualsiasi chiamata a questo oggetto che non sia supportata sia catturata e passata all&rsquo;oggetto insieme allo stesso blocco e argomenti.</p>
+
+<p>Possiamo pensare al nostro <code>DynamicDelegator</code> come ad un oggetto proxy che passa ogni chiamata al proprio oggetto target: questo significa che possiamo usarlo ovunque vogliamo al posto dell&rsquo;oggetto target. Se lo creiamo su un certo oggetto target, si comporter&agrave; come se fosse quel tipo di oggetto. Ci&ograve; significa che possiamo sostituire l&rsquo;oggetto <code>scoped</code> nel nostro metodo di ricerca di <code>Product</code> con un nuovo <code>DynamicDelegator</code> che prenda quell&rsquo;oggetto come argomento:</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+  
+  def self.search(params)
+    products = DynamicDelegator(scoped)
+    products = products.where(&quot;name like ?&quot;, &quot;%&quot; + params[:name] + &quot;%&quot;) if params[:name]
+    products = products.where(&quot;price &gt;= ?&quot;, params[:price_gt]) if params[:price_gt]
+    products = products.where(&quot;price &lt;= ?&quot;, params[:price_lt]) if params[:price_lt]    
+    products
+  end 
+
+end
+</pre>
+
+<p>Possiamo verificare che tutto ci&ograve; funzione, ricaricando nuovamente la pagina: dovremmo vedere lo stesso insieme di risultati.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/377/original/E212I01.png" width="800" height="315" alt="La pagina continua a funzionare."/>
+</div>
+
+<p>Ha funzionato, ma a questo punto vi starete probabilmente domandando quale sia il vantaggio nell&rsquo;usare un <code>DynamicDelegator</code> al posto dell&rsquo;oggetto originale <code>scoped</code>. Il vantaggio del delegator &egrave; che possiamo fare qualsiasi cosa vogliamo all&rsquo;interno del metodo <code>method_missing</code>. Anzich&egrave; delegare sempre passivamente la stessa cosa all&rsquo;oggetto target, possiamo modificare il nostro target e renderlo pi&ugrave; dinamico.</p>
+
+<p>Per esempio, vogliamo catturare il risultato della chiamata al metodo <code>method_missing</code> e, se restituisce un oggetto della stessa classe del target, impostare il target stesso come il risultato:</p>
+
+<p class="codeFilePath">/lib/dynamic_delegator.rb</p>
+<pre class="ruby">
+class DynamicDelegator
+  def initialize(target)
+    @target = target
+  end  
+  
+  def method_missing(*args, &amp;block)
+    result = @target.send(*args, &amp;block)
+    @target = result if result.kind_of? @target.class
+    result
+  end
+end
+</pre>
+
+<p>Ora possiamo rimuovere il codice che resetta la variabile <code>products</code> in ogni linea del metodo <code>search</code> nel modello <code>Product</code>:</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+  
+  def self.search(params)
+    products = DynamicDelegator.new(scoped)
+    products.where(&quot;name like ?&quot;, &quot;%&quot; + params[:name] + &quot;%&quot;) if params[:name]
+    products.where(&quot;price &gt;= ?&quot;, params[:price_gt]) if params[:price_gt]
+    products.where(&quot;price &lt;= ?&quot;, params[:price_lt]) if params[:price_lt]    
+    products
+  end 
+
+end
+</pre>
+
+<p>Possiamo farlo perch&egrave; la chiamata alla where restituir&agrave; lo stesso tipo di oggetto dello <code>scoped</code> e in questo modo il target verr&agrave; sostituito ogni volta. Ricarichiamo di nuovo la pagina e vediamo se funziona ancora tutto:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/378/original/E212I02.png" width="800" height="315" alt="Il dynamic delegator restituisce se stesso anzich&egrave; il suo oggetto target."/>
+</div>
+
+<p>Non funziona pi&ugrave;, e la ragione &egrave; che non stiamo delegando esattamente tutti i metodo dell&rsquo;oggetto target. In questo caso la fonte dei problemi &egrave; il metodo <code>class</code>: possiamo usare la console per mostrare il perch&egrave;. Se chiamiamo <code>Product.search</code> con un hash vuoto e chiamiamo <code>class</code> sul risultato, vedremo che questo &egrave; di tipo <code>DynamicDelegator</code>:</p>
+
+<pre class="terminal">
+ruby-head &gt; Product.search({}).class
+ =&gt; DynamicDelegator
+</pre>
+
+<p>Ci&ograve; indica che il nostro dynamic delegator non sta delegando tutto all&rsquo;oggetto target dal momento che ha alcuni metodi gi&agrave; definiti di per s&egrave;. Il motivo per cui ce li ha, &egrave; dovuto semplicemente al fatto che la classa <code>DynamicDelegator</code> li eredita da <code>Object</code> e <code>Object</code> ha molti metodi definiti al suo interno, incluso <code>class</code>:</p>
+
+<pre class="terminal">
+ruby-head &gt; Object.instance_methods.count
+ =&gt; 108 
+ruby-head &gt; Object.instance_methods.grep /class/
+ =&gt; [:subclasses_of, :class_eval, :class, :singleton_class]
+</pre>
+
+<p>Se abbiamo bisogno di una classe pi&ugrave; semplice da cui derivare, da Ruby 1.9 esiste un&rsquo;altra classe che possiamo usare, chiamata BasicObject, che ha definiti molti meno metodi:</p>
+
+<pre class="terminal">
+ruby-head &gt; BasicObject.instance_methods
+ =&gt; [:==, :equal?, :!, :!=, :instance_eval, :instance_exec, :__send__]
+</pre> 
+
+<p>Questo tipo di classe serve meglio a fare da base per un oggetto delegator o un proxy che si basano sul <code>method_missing</code> per ridefinire il comportamento dei metodi. Possiamo cambiare il <code>DynamicDelegator</code> per estendere da <code>BasicObject</code> in modo tale che il metodo <code>class</code> non sia ereditato (perch&egrave; non definito nell&rsquo;ancestor) e di conseguenza la chiamata a tale metodo sia ricondotta alla gestione mediante <code>method_missing</code> e quindi delegata effettivamente al target object:</p>
+
+<p class="codeFilePath">/lib/dynamic_delegator.rb</p>
+<pre class="ruby">
+class DynamicDelegator &lt; BasicObject
+  def initialize(target)
+    @target = target
+  end  
+  
+  def method_missing(*args, &amp;block)
+    result = @target.send(*args, &amp;block)
+    @target = result if result.kind_of? @target.class
+    result
+  end
+end
+</pre>
+
+<p>Se ora ricarichiamo la pagina, funzioner&agrave; nuovamente tutto.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/377/original/E212I01.png" width="800" height="315" alt="La pagina funziona nuovamente."/>
+</div>
+
+<p>C&rsquo;&egrave; un altro po&rsquo; di refactoring che potremmo considerare di fare nella classe di modello <code>Product</code>. Il <code>DynamicDelegator</code> non esprime le proprie intenzioni in modo molto chiaro, per cui potremmo scrivere un metodo nella classe <code>Product</code>, chiamato <code>scope_builder</code> e creare l&igrave; il <code>DynamicDelegator</code>:</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+  
+  def self.search(params)
+    products = scope_builder
+    products.where(&quot;name like ?&quot;, &quot;%&quot; + params[:name] + &quot;%&quot;) if params[:name]
+    products.where(&quot;price &gt;= ?&quot;, params[:price_gt]) if params[:price_gt]
+    products.where(&quot;price &lt;= ?&quot;, params[:price_lt]) if params[:price_lt]    
+    products
+  end 
+  
+  def self.scope_builder
+    DynamicDelegator.new(scoped)
+  end
+
+end
+</pre>
+
+<p>Ora &egrave; pi&ugrave; chiaro capire che stiamo trattando con uno scope che abbiamo costruito dinamicamente. Se usiamo questa tecnica su pi&ugrave; modelli di record, allora potremmo fattorizzare questo metodo <code>scope_builder</code> in <code>ActiveRecord::Base</code>, in modo tale da averlo disponibile su tutti i modelli. Quest&rsquo;ultima cosa la potremmo realizzare propriamente in un initializer.</p>
+

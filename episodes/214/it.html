@@ -1,0 +1,262 @@
+<p>L&rsquo; A/B testing, anche noto come split testing, &egrave; un grand metodo per testare versioni alternative di un&rsquo;applicazione e capire quali di queste sia la pi&ugrave; efficace. Di sotto &egrave; riportata la maschera di registrazione di una applicazione. In cima alla form c&rsquo;&egrave; un paragrafo che spiega ci&ograve; che l&rsquo;utente deve fare. Vogliamo determinare quanto sia efficace questo paragrafo nella persuasione degli utenti a registrarsi e possiamo farlo creando un A/B test.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/386/original/E214I01.png" width="808" height="495" alt="La pagina di registrazione della nostra applicazione."/>
+</div>
+
+<p>Il modo in cui tutto ci&ograve; funziona &egrave; il seguente: ogni utente che visita la pagina vedr&agrave; o meno il parametro in cima alla pagina: possiamo usare l&rsquo;A/B testing per determinare quale opzione porta ai migliori risultati. Per fare ci&ograve; abbiamo bisogno di un evento che, quando scatta, marchi l&rsquo;opzione come vincente. In questo caso, l&rsquo;evento sar&agrave; sollevato alla compilazione e conseguente submit della form.</p>
+
+<h3>Scegliere lo strumento di test opportuno</h3>
+
+<p>Ci sono una serie di diversi strumenti per l&rsquo;A/B testing disponibili. Uno che potremmo usare &egrave; il <a href="http://www.google.com/websiteoptimizer/b/index.html">Website Optimizer</a>di Google. Non &egrave; specifico di Rails, pu&ograve; essere usato con qualunque applicazione web, persino con siti web statici. Questo tool ci consente di fornire diversi URL per il sito o usare del JavaScript per tracciare le conversioni per voi. E&rsquo; una soluzione carina, ma se volete testare un&rsquo;applicazione Rails, allora potreste voler usare qualcosa che magari si integri anche nell&rsquo;applicazione stessa e che gestisca da s&egrave; il tracciamento dei comportamenti degli utenti.</p>
+
+<p>Una delle soluzioni pi&ugrave; popolari specifiche per Rails &egrave; <a href="http://vanity.labnotes.org/">Vanity</a>. Questo strumento fornisce risultati meravigliosi ed &egrave; anche piuttosto completo a livello di funzionalit&agrave;. Non lo tratteremo in questo episodio, ma lo faremo probabilmente in uno dei prossimi. Pu&ograve; risultare un po&rsquo; ostico da configurare, in quanto richiede un database <a href="http://code.google.com/p/redis/">Redis</a> per ragioni di performance, ma vale la pena darci un&rsquo;occhiata per vedere se fa al caso vostro.</p>
+
+<p>Il plugin che invece useremo in questo episodio &egrave; <a href="http://www.bingocardcreator.com/abingo/">A/Bingo</a>. Ha un buon DSL per la definizione degli esperimenti ed &egrave; semplice da mettere su. L&rsquo;applicazione su cui eseguiremo i test &egrave; scritta in Rails 2, per cui possiamo installare questo plugin eseguendo:</p>
+
+<pre class="terminal">
+	script/plugin install git://git.bingocardcreator.com/abingo.git
+</pre>
+
+<p>dalla cartella della nostra applicazione. Quando termina l&rsquo;esecuzione, dovremo generare una migrazione con:</p>
+
+<pre class="terminal">
+  script/generate abingo_migration
+</pre>
+
+<p>e poi applicarla con:</p>
+
+<pre class="terminal">
+	rake db:migrate
+</pre>
+
+<p>Questa migrazione generer&agrave; due nuove tabelle sul database: <code>experiments</code> e <code>alternatives</code> ed &egrave; in queste tabelle che verranno memorizzati i risultati dei nostri test.</p>
+
+<p>In un ambiente di produzione &egrave; meglio configurare il caching di A/Bingo, ma in questo contesto possiamo saltare questa configurazione, visto che siamo in sviluppo.</p>
+
+<h3>Scrivere il primo test</h3>
+
+<p>Ora che abbiamo installato A/Bingo, possiamo scrivere il primo test. Vogliamo mostrare o meno il paragrafo in cima alla form di registrazione in modo tale che si veda per alcuni utenti, mentre per altri resti nascosto. Possiamo farlo usando il metodo <code>ab_test</code>:</p>
+
+<p class="codeFilePath">/app/views/users/new.html.erb</p>
+<pre class="ruby">
+&lt;% title (&quot;Sign up&quot;) %&gt;
+
+&lt;% if ab_test &quot;signup_intro&quot; %&gt;
+&lt;p&gt;Complete the form below to create a new user account. You will then be able 
+to create projects and tasks, and mark them as complete when finishing them.&lt;/p&gt;
+&lt;% end %&gt;
+&lt;p&gt;Already have an account? &lt;%= link_to &quot;Log in&quot;, new_user_session_path %&gt;.&lt;/p&gt;
+
+&lt;% form_for @user do |form| %&gt;
+ &lt;!-- form omitted --&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Il primo argomento passato al metodo <code>ab_test</code> &egrave; il nome del test, che in questo caso &egrave; &ldquo;signup-intro&rdquo;. Se non forniamo ulteriori argomenti, questo metodo restituir&agrave; in modo casuale <code>true</code> o <code>false</code> ai vari utenti che via via chiederanno la pagina, di conseguenza il paragrafo sar&agrave; mostrato o nascosto a second di chi carica la pagina.</p> 
+
+<p>Poi aggiungiamo un trigger di evento in modo tale che possiamo tracciare i risultati. Vogliamo che l&rsquo;evento sia tracciato quando l&rsquo;utente viene salvato con successo. Per questa ragione, modifichiamo la action <code>create</code> sul controller <code>UsersController</code>:</p>
+
+<p class="codeFilePath">/app/controllers/users_controller.rb</p>
+<pre class="ruby">
+def create
+  @user = User.new(params[:user])
+  if @user.save
+    bingo! &quot;signup_intro&quot;
+    session[:user_id] = @user.id
+    flash[:notice] = &quot;Thank you for signing up. You are now logged in.&quot;
+    redirect_to root_url
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end
+</pre>
+
+<p>Nell&rsquo;action <code>create</code> tutto ci&ograve; che dobbiamo fare &egrave; chiamare il metodo <code>bingo!</code> e passargli il nome del test quando l&rsquo;utente viene correttamente salvato.</p>
+
+<p>Se ricarichiamo la pagina di registrazione ora, potremo vedere che per noi <code>ab_test</code> ha restituito <code>false</code>, per cui non vediamo il paragrafo in cima alla pagina. Possiamo provare a ricaricare la pagina nuovamente, ma il paragrafo continuer&agrave; ad essere nascosto, dal momento che la nostra identit&agrave; viene ricordata (come, ve lo faremo vedere fra poco).</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/387/original/E214I02.png" width="808" height="495" alt="Il paragrafo in cima alla pagina non &egrave; mostrato quando ci registriamo."/>
+</div>
+
+<p>Se completiamo la compilazione della form e facciamo il submit, ci registreremo con successo e per questo scateneremo un evento.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/388/original/E214I03.png" width="808" height="280" alt="L&rsquo;evento sar&agrave; lanciato ora che ci siamo registrati."/>
+</div>
+
+
+<h3>Vedere i risultati</h3>
+
+<p>Al momento &egrave; difficile vedere i risultati del test, ma possiamo comunque farlo creando un controller per vederli. Per fare ci&ograve;, generiamo un controller che chiamiamo <code>abingo_dashboard</code>:</p>
+
+<pre class="terminal">
+	script/generate controller abingo_dashboard
+</pre>
+
+<p>Dentro a questo controller dobbiamo includere il module dashboard di A/Bingo:</p>
+
+<p class="codeFilePath">/app/controllers/abingo_dashboard_controller.rb</p>
+<pre class="ruby">
+class AbingoDashboardController &lt; ApplicationController
+  # TODO aggiungere logica di autorizzazione.
+  include Abingo::Controller::Dashboard
+end
+</pre>
+
+<p>Ovviamente, se questa applicazione andasse in produzione, non vorremmo che chiunque potesse vedere la dashboard, per cui dovremmo implementare un qualche meccanismo di autorizzazione sul controller. Per ora comunque lasciamo solo un commento per ricordarcelo in futuro.</p>
+
+<p>Dobbiamo anche aggiungere un nuovo instradamento in modo che possiamo accedere alla dashboard.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+	map.abingo_dashboard &quot;/abingo/:action/:id&quot;, :controller =&gt; :abingo_dashboard
+</pre>
+
+<p>Sistemato tutto ci&ograve;, possiamo andare all&rsquo;indirizzo <a href="http://localhost:3000/abingo">http://localhost:3000/abingo</a> e vedremo la dashboard:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/389/original/E214I04.png" width="823" height="433" alt="La pagina di dashboard di A/Bingo."/>
+</div>
+
+<p>Al momento non ci sono stili applicati alla dashboard, ma &egrave; abbastanza semplice cambiare il template della vista e darle uno stile per venire incontro all&rsquo;aspetto del resto dell&rsquo;applicazione. Con lo stile di default possiamo gi&agrave; vedere i resultati degli esperimenti,  per cui non c&rsquo;&egrave; bisogno di occuparsi degli stili per ora. Dando uno sguardo ai risultati, possiamo vedere che c&rsquo;&egrave; un esperimento con un partecipante (si tratta della mia visita alla pagina di registrazione) ed una conversione che &egrave; avvenuta quando ho fatto correttamente il submit dei dati della form. Il paragrafo in cima alla form non era visibile all&rsquo;atto della registrazione, per cui il participante e la conversione sono mostrati fra i risultati false (f).</p>
+
+<h3>Riconoscere gli utenti</h3>
+
+<p>Se rivisitassimo la form di registrazione nuovamente, continueremmo a non vedere il paragrafo sopra alla form, fintanto che A/Bingo sapr&agrave; che la nostra identit&agrave; &egrave; costante. Dobbiamo istruirlo per gestire le identit&agrave; utente e dargli un modo per distinguere un utente da un altro. Tutto ci&ograve; viene fatto dentro l&rsquo;application controller scrivendo un <code>before_filter</code>:</p>
+
+<p class="codeFilePath">/app/controllers/application_controller.rb</p>
+<pre class="ruby">
+# Filters added to this controller apply to all controllers in the application.
+# Likewise, all the methods added will be available for all controllers.
+
+class ApplicationController &lt; ActionController::Base
+  helper :all # include all helpers, all the time
+  protect_from_forgery # See ActionController::RequestForgeryProtection for details
+  before_filter :set_abingo_identity
+
+  private
+  def set_abingo_identity
+    session[:abingo_identity] ||= rand(10 ** 10)
+    Abingo.identity = session[:abingo_identity]
+  end
+end
+</pre>
+
+<p>Nell&rsquo;application controller abbiamo aggiunto un before filter chiamato <code>set_abingo_identity</code> e nel metodo  <code>set_abingo_identity</code> c&rsquo;&egrave; il codice che determina l&rsquo;identit&agrave; di ogni utente. Il metodo controlla per prima cosa l&rsquo;esistenza di una variabile di sessione chiamata <code>abingo_identity</code> e se non ne trova una, la crea con un valore numerico casuale. Ci&ograve; significa che, fintanto che gli utenti mantengono attive le loro sessioni, saranno sempre trattati allo stesso modo da A/Bingo e vedranno sempre la maschera come l&rsquo;hanno vista la prima volta.</p>
+
+<p>Se avessimo l&rsquo;autenticazione nella nostra applicazione, vorremmo che la dipendenza fosse rispetto all&rsquo;utenza piuttosto che alla sessione. Possiamo cambiare il metodo <code>set_abingo_identity</code> in modo che usi l&rsquo;id univoco di utente se l&rsquo;utente corrente &egrave; autenticato, ricadendo nella gestione basata su sessione per i soli utenti anonimi:</p>
+
+<p class="codeFilePath">/app/controllers/application_controller.rb</p>
+<pre class="ruby">
+def set_abingo_identity
+  if current_user
+    Abingo.identity = current_user.id
+  else
+    session[:abingo_identity] ||= rand(10 ** 10)
+    Abingo.identity = session[:abingo_identity]
+  end
+end
+</pre>      
+
+<p>Possiamo anche controllare per vedere se il sito &egrave; stato visitato da un web crawler o un bot e dare a ciascun bot la stessa identit&agrave;, in modo tale che i risultati non siano falsati da questi visitatori non umani:</p>
+
+<p class="codeFilePath">/app/controllers/application_controller.rb</p>
+<pre class="ruby">
+def set_abingo_identity
+  if request.user_agent =~ /\b(Baidu|Gigabot|Googlebot|libwww-perl|lwp-trivial|msnbot|SiteUptime|Slurp|WordPress|ZIBB|ZyBorg)\b/i
+     Abingo.identity = &quot;robot&quot;
+   elsif current_user
+     Abingo.identity = current_user.id
+   else
+     session[:abingo_identity] ||= rand(10 ** 10)
+     Abingo.identity = session[:abingo_identity]
+   end
+end
+</pre>
+
+<p>Identifichiamo i crawler e i bot confrontandone il loro user agent contro una lista di nomi noti corrispondenti a questo genere di navigatori e se riscontriamo un match impostiamo l&rsquo;identit&agrave; a &ldquo;robot&rdquo;. In questo modo tutti i bot che visitano la pagina saranno considerati come un unico utente.</p>
+
+<p>Mentre scrivevo questa applicazione, ho visitato la pagina di registrazione con una serie di differenti identit&agrave; portando a termine la registrazione un paio di volte. Questo mio comportamento &egrave; ora riflesso nella dashboard di A/Bingo. Ci sono ora infatti otto partecipanti, due dei quali che hanno visto il paragrafo nella pagina di registrazione e sei che non l&rsquo;hanno visto:</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/390/original/E214I05.png" width="823" height="545" alt="Ora sono visualizzati pi&ugrave; risultati."/>
+</div>
+
+<h3>Test pi&ugrave; complessi</h3>
+
+<p>Concludiamo l&rsquo;episodio mostrandovi come fornire pi&ugrave; alternative per singolo test. Il test <code>signup_into</code> &egrave; un semplice test booleano, ma se volessimo fornire pi&ugrave; di due diverse alternative, per esempio mostrando una serie di devrsi titoli di pagina, potremmo fare anche questo.</p>
+
+<p>Vale la pena ricordarsi che avere test multipli su una singola pagina pu&ograve; incasinare i risultati, dal momento che questi possono derivare da quelle opzioni che vengono mostrate pi&ugrave; frequentemente. Per un&rsquo;applicazione di produzione tutto ci&ograve; &egrave; importante, ma dal momento che questa &egrave; solo un&rsquo;applicazione di esempio, in realt&agrave; non conta molto.</p>
+
+<p>Per creare un test con opzioni multiple, possiamo chiamare la <code>ab_test</code> con due argomenti, il secondo dei quali &egrave; un array delle diverse opzioni che vogliamo testare. Nello specifico, vogliamo testare tre diversi titoli di pagina. Possiamo cambiare la pagina per mostrarne uno dei tre, usando:</p>
+
+<p class="codeFilePath">/app/views/users/new.html.erb</p>
+<pre class="ruby">
+&lt;% title ab_test(&quot;signup_title&quot;, [&quot;Sign up&quot;, &quot;Registration&quot;, &quot;Free Sign up&quot;]) %&gt;
+</pre>
+
+<p>Messo a posto ci&ograve;, ogni utente che visiter&agrave; la pagina vedr&agrave; a caso uno di questi tre titoli. Questo &egrave; sufficientemente accettabile per qualcosa di semplice come il titolo di una pagina, ma se volessimo usare gli stessi valori casuali pi&ugrave; di una volta sulla pagina, lo potremmo fare utilizzando il metodo <code>ab_test</code> con un blocco:</p>
+
+<p class="codeFilePath">/app/views/users/new.html.erb</p>
+<pre class="ruby">
+&lt;% ab_test(&quot;signup_title&quot;, [&quot;Sign up&quot;, &quot;Registration&quot;, &quot;Free Sign up&quot;]) do |signup_title| %&gt;
+&lt;% title signup_title %&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Provando questo codice, potreste vedere un errore che dice &ldquo;can&rsquo;t modify frozen array&rdquo; nel caso in cui non si stia usando l&rsquo;ultima versione di A/Bingo. Ryan Bates ha reso disponibile una patch per questo problema che sembra sia stata inclusa direttamente nel codice sorgente del progetto, per cui se vedete questo errore, provate a fare l&rsquo;upgrade del plugin e a riprovare.</p>
+
+<p>Visitando ora la pagina di registrazione, vedremo uno dei titoli relativi ad una delle tre opzioni e la pagina mostrer&agrave; o meno il paragrafo in testata. C&rsquo;&egrave; ancora una cosa da sistemare, tuttavia. Anche se abbiamo configurato i test nella vista, non ne stiamo registrando i successi sul controller. Lo possiamo fare semplicemente aggiungendo un&rsquo;altra chiamata a <code>bingo!</code> nella action create:</p>
+
+<p class="codeFilePath">/app/controllers/users_controller.rb</p>
+<pre class="ruby">
+def create
+  @user = User.new(params[:user])
+  if @user.save
+    bingo! &quot;signup_intro&quot;
+    bingo! &quot;signup_title&quot;
+    session[:user_id] = @user.id
+    flash[:notice] = &quot;Thank you for signing up. You are now logged in.&quot;
+    redirect_to root_url
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end
+</pre>      
+
+<p>Se abbiamo molti test in una determinata action, tutto ci&ograve; pu&ograve;, diventare poco manutenibile. Piuttosto, dunque, potremmo fare una sola chiamata a <code>bingo!</code>, col nome di una conversione e usare il nome di tale conversione come argomento extra da passare al metodo <code>ab_test</code> nella vista.</p>
+
+<p>Per cui, possiamo sostituire nel controller le due invocazioni a bingo! con una sola:</p>
+
+<p class="codeFilePath">/app/controllers/users_controller.rb</p>
+<pre class="ruby">
+def create
+  @user = User.new(params[:user])
+  if @user.save
+    bingo! &quot;signup&quot;
+    session[:user_id] = @user.id
+    flash[:notice] = &quot;Thank you for signing up. You are now logged in.&quot;
+    redirect_to root_url
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end
+</pre>
+
+<p>Mentre nella vista possiamo passare il nome della conversione come parte di un hash di argomenti:</p>
+
+<p class="codeFilePath">/app/views/users/new.html.erb</p>
+<pre class="ruby">
+&lt;% ab_test(&quot;signup_title&quot;, [&quot;Sign up&quot;, &quot;Registration&quot;, &quot;Free Sign up&quot;], :conversion =&gt; &quot;signup&quot;) do |signup_title| %&gt;
+  &lt;% title signup_title %&gt;
+&lt;% end %&gt;
+
+&lt;% if ab_test &quot;signup_intro&quot;, nil, :conversion =&gt; &quot;signup&quot; %&gt;
+&lt;!-- resto della vista --&gt;
+</pre>
+
+<p>Si noti che, dal momento che il secondo test &egrave; un semplice booleano, gli abbiamo passato <code>nil</code> come secondo argomento.</p>
+
+<p>E&rsquo; tutto per questo episodio. L&rsquo;A/B testing fornisce un ottimo metodo per sperimentare versioni diverse di maschere in un&rsquo;applicazione web e tracciare il tasso di successo dei risultati. Vi esorto a provarlo nelle vostre applicazioni, o usando Google Website Optimizer o Vanity o A/Bingo.</p>

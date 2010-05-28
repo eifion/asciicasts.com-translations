@@ -1,0 +1,274 @@
+<p>In questo episodio daremo un&rsquo;occhiata alle nuove aggiunte ai meccanismi di validazione di Rails 3. Prima di farlo, comunque, aggiorneremo Rails alla versione beta pi&ugrave; recente, la beta 3.</p>
+
+<h3>Aggiornare Rails 3</h3>
+
+<p>Possiamo installare questa nuova versione allo stesso modo in cui abbiamo installato le versioni precedenti, lanciando:</p>
+
+<pre class="terminal">
+gem install rails --pre
+</pre>
+
+<p>Dopo aver installato la nuova beta, potreste avere un po&rsquo; di difficolt&agrave; a lanciare il comando <code>rails</code> e vedere messaggi di errore tipo questi:</p>
+
+<pre class="terminal">
+$ rails store
+/Users/eifion/.rvm/gems/ruby-head/gems/rails-3.0.0.beta3/bin/rails:1:in `require&#x27;: no such file to load -- rails/cli (LoadError)
+	from /Users/eifion/.rvm/gems/ruby-head/gems/rails-3.0.0.beta3/bin/rails:1:in `&lt;top (required)&gt;&#x27;
+	from /Users/eifion/.rvm/gems/ruby-head/bin/rails:19:in `load&#x27;
+	from /Users/eifion/.rvm/gems/ruby-head/bin/rails:19:in `&lt;main&gt;&#x27;
+</pre>
+
+<p>Questo tipo di errore &egrave; causato da errori di retro-compatibilit&agrave; con la precedente versione beta. Per sistemare questa cosa, possiamo lanciare:</p>
+<pre class="terminal">
+rails cleanup
+</pre>
+<p>che rimuover&agrave; le versioni pi&ugrave; vecchie dei gem installati. Ora potete lanciare il comando <code>rails</code> senza problemi e creare l&rsquo;applicazione che useremo per questo episodio:</p>
+<pre class="terminal">
+rails store
+</pre>
+
+<h3>Le nuove funzionalit&agrave;</h3>
+
+<p>Ora che abbiamo un&rsquo;applicazione Rails funzionante, possiamo cominciare a guardare alcune nuove funzionalit&agrave; dei meccanismi di validazione. Cominciamo generando uno scaffold per il modello <code>User</code> con due attributi: un name e un indirizzo email:</p>
+
+<pre class="terminal">
+rails g scaffold user name:string email:string
+</pre>
+
+<p>Poi migriamo il database al solito modo:</p>
+
+<pre class="terminal">
+rake db:migrate
+</pre>
+
+<p>Se diamo un&rsquo;occhiata al partial della form generato dallo scaffold, vedremo il codice che mostra gli errori di validazione inline:</p>
+
+<p class="codeFilePath">/app/views/users/_form.html.erb</p>
+<pre class="ruby">
+&lt;%= form_for(@user) do |f| %&gt;
+  &lt;% if @user.errors.any? %&gt;
+  &lt;div id=&quot;errorExplanation&quot;&gt;
+    &lt;h2&gt;&lt;%= pluralize(@user.errors.count, &quot;error&quot;) %&gt; prohibited this user from being saved:&lt;/h2&gt;
+    &lt;ul&gt;
+    &lt;% @user.errors.full_messages.each do |msg| %&gt;
+      &lt;li&gt;&lt;%= msg %&gt;&lt;/li&gt;
+    &lt;% end %&gt;
+    &lt;/ul&gt;
+  &lt;/div&gt;
+  &lt;% end %&gt;
+
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= f.label :email %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :email %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;actions&quot;&gt;
+    &lt;%= f.submit %&gt;
+  &lt;/div&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Tutto ci&ograve; &egrave; diverso dal codice per mostrare dei messaggi di errore che ci potremmo aspettare di vedere normalmente: &ehrave; piuttosto verboso per una vista. La ragione &egrave; che nell&rsquo;ultima versione il metodo helper <code>error_messages_for</code> non &egrave; pi&ugrave; disponibile e neppure:</p>
+
+<pre class="ruby">
+&lt;%= f.error_messages %&gt;
+</pre>
+
+<p>Questi metodi sono stati estratti e messi in un plugin chiamato <a href="http://github.com/rails/dynamic_form">dynamic_form</a>. Installando questo plugin, riavremo i metodi e potremo proseguire senza preoccupazioni come prima. Tuttavia, ci sono delle ragioni per cui questi metodi sono stati resi disponibili come plugin anzich&egrave; come framework standard, per cui non &egrave;, consigliabile farlo.</p>
+
+<p>La ragione per cui si &egrave; deciso di rimuovere del framework i messaggi di errore &egrave; che la visualizzazione di tali messaggi ha spesso bisogno di essere personalizzata, e farlo attraverso i vecchi metodi era un po&rsquo; scomodo e poco flessibile rispetto ad avere i messaggi di errore inline come HTML come &egrave; ora. Avere a che fare direttamente con l&rsquo;HTML all&rsquo;interno delle viste significa che possiamo cambiare la visualizzazione dei messaggi di errore nel come vogliamo.</p>
+
+<p>Naturalmente il rovescio della medaglia di avere i messaggi di errore inline su ogni form di ogni modello &egrave; che si tendono a generare duplicazioni nel codice. Per ridurle, possiamo estrarre il codice dell&rsquo; errore in un partial. Per fare in modo di poter usare tale partial su diversi modelli, lo mettiamo in una cartella <code>shared</code> e lo chiamiamo <code>_error_messages.html.erb</code>, passandogli l&rsquo;oggetto della questione (target), nel nostro caso il nostro user:</p>
+
+<p class="codeFilePath">/app/views/users/_form.html.erb</p>
+<pre class="ruby">
+&lt;%= form_for(@user) do |f| %&gt;
+  &lt;%= render &quot;shared/error_messages&quot;, :target =&gt; @user %&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= f.label :email %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :email %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;actions&quot;&gt;
+    &lt;%= f.submit %&gt;
+  &lt;/div&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Nel nuovo partial incolliamo il codice tagliato via dalla form, cambiando la variabile <code>@user</code> in <code>target</code>, in modo che il riferimento all&rsquo;oggetto sia parametrico rispetto a quanto passato al metodo. Cambiamo anche il messaggio di errore per renderlo pi&ugrave; generico:</p>
+
+<p class="codeFilePath">/app/views/shared/_error_messages.html.erb</p>
+<pre class="ruby">
+&lt;% if target.errors.any? %&gt;
+&lt;div id=&quot;errorExplanation&quot;&gt;
+  &lt;h2&gt;&lt;%= pluralize(target.errors.count, &quot;error&quot;) %&gt; prohibited this record from being saved:&lt;/h2&gt;
+  &lt;ul&gt;
+  &lt;% target.errors.full_messages.each do |msg| %&gt;
+    &lt;li&gt;&lt;%= msg %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+  &lt;/ul&gt;
+&lt;/div&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Possiamo testare il nuovo partial aggiungendo la validazione all&rsquo;attributo <code>email</code> del nostro modello <code>User</code>:</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  validates_presence_of :email
+end
+</pre>
+
+<p>Se andiamo ora alla form di inserimento di un nuovo utente e facciamo il submit senza inserire il campo email, vedremo al solito gli errori di validazione:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/374/original/E211I01.png" width="803" height="412" alt="Il messaggio di errore proveniente dal nostro partial."/>
+</div>
+
+<p>Dunque, &egrave; piuttosto semplice spostare il codice dei messaggi di errore in un partial e mantenere il tutto flessibile. Se vogliamo invece usare i vecchi metodi helper, possiamo usare una tecnica simile a quella usata da Ryan Bates nel suo <a href="http://github.com/ryanb/nifty-generators">Nifty Generators</a>. Questo plugin ha un module <a href="http://github.com/ryanb/nifty-generators/blob/master/lib/generators/nifty/layout/templates/error_messages_helper.rb"><code>ErrorMessagesHelper</code></a> che include un metodo <code>error_messages_for</code> e un metodo <code>error_messages</code> per i costruttori delle form. Sono versioni ridotte degli stessi metodi un tempo forniti direttamente da Rails e sono semplici da personalizzare secondo le necessit&agrave;, per cui se volete usarli, potete aggiungere questo metodo helper all&rsquo;applicazione.</p>
+
+<h3>Introspezione sulle validazioni</h3>
+
+<p>Un&rsquo;altra nuova funzionalit&agrave; di Rails 3 &egrave; la possibilit&agrave; di introspezione sui validatori. La possiamo utilizzare, per esempio, se volessimo mettere un asterisco vicino ad ogni campo della form che &egrave; obbligatorio. Un tempo, per fare la stessa cosa, avremmo dovuto installare un plugin esterno per poter determinare quali validazioni erano state disposte per il modello sotteso alla form (nel nostro caso il modello User), ma ora che tutto ci&ograve; &egrave; incluso in Rails, &egrave; molto pi&ugrave; facile aggiungere un indicatore ad ogni campo.</p>
+
+<p>Possiamo illustrare la cosa facilmente da console. Possiamo chiamare <code>validators</code> su di un modello, per ottenere un array delle validazioni che si applicano a quel modello:</p>
+
+<pre class="terminal">
+ruby-head &gt; User.validators
+ =&gt; [#&lt;ActiveModel::Validations::PresenceValidator:0x00000100badfc8 @attributes=[:email], @options={}&gt;]
+</pre> 
+
+<p>Abbiamo solamente una validazione sul nostro modello User, per cui il metodo ci restituir&agrave; solo quell&rsquo;unico validatore che, dal momento che la validazione &egrave; una <code>validates_presence_of</code>, sar&agrave; di tipo <code>PresenceValidator</code>.</p>
+
+<p>Possiamo ottenere i validatori per un campo specifico, anzich&egrave; tutti, usando il metodo <code>validators_on</code>:</p>
+
+<pre class="terminal">
+ruby-head &gt; User.validators_on(:email)
+ =&gt; [#&lt;ActiveModel::Validations::PresenceValidator:0x00000100badfc8 @attributes=[:email], @options={}&gt;]
+</pre> 
+
+<p>Quest&rsquo;ultimo restituir&agrave; un validatore come quello che agisce sull&rsquo;attributo <code>email</code>. Se chiamiamo il metodo sull&rsquo;attributo name, che non ha validatori, allora verr&agrave; restituito un array vuoto:</p>
+
+<pre class="terminal">
+ruby-head &gt; User.validators_on(:name)
+ =&gt; []
+</pre> 
+
+<p>Idealmente vorremmo eseguire questo controllo nel costruttore della form per fare in modo che l&rsquo;asterisco sia aggiunto in automatico nel modo pi&ugrave; efficiente, ma tutto ci&ograve; andrebbe oltre agli obiettivi di questo episodio, per cui aggiungeremo un metodo helper personalizzato che chiameremo <code>mark_required</code>. Questo metodo accetter&agrave; due parametri: un modello e un attributo per quel modello. Per l&rsquo;attributo <code>email</code> del nostro modello <code>User</code>, questo metodo sar&agrave; invocato cos&igrave;:</p>
+
+<pre class="ruby">
+&lt;%= mark_required(@user, :email) %&gt;
+</pre>
+
+<p>Creiamo il metodo <code>mark_required</code> nell&rsquo;<code>ApplicationHelper</code>:</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+module ApplicationHelper
+  def mark_required(object, attribute)
+    &quot;*&quot; if object.class.validators_on(attribute).map(&amp;:class).include? ActiveModel::Validations::PresenceValidator
+  end
+end
+</pre>
+
+<p>Il metodo restituisce una stringa contenente un asterisco se il validatore dell&rsquo;attributo del modello include un <code>PresenceValidator</code>. Ora che abbiamo creato questo metodo, possiamo usarlo con ogni campo della nostra form:</p>
+
+<p class="codeFilePath">/app/views/users/_form.html.erb</p>
+<pre class="ruby">
+&lt;%= form_for(@user) do |f| %&gt;
+  &lt;%= render &quot;shared/error_messages&quot;, :target =&gt; @user %&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= f.label :name %&gt;&lt;%= mark_required(@user, :name) %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= f.label :email %&gt;&lt;%= mark_required(@user, :email) %&gt;&lt;br /&gt; 
+    &lt;%= f.text_field :email %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;actions&quot;&gt;
+    &lt;%= f.submit %&gt;
+  &lt;/div&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Come abbiamo detto poco fa, questo non &egrave; il modo migliore per ottenere il nostro scopo in generale, dal momento che ci costringe ad aggiungere manualmente una chiamata al metodo su ogni campo, ma estendere <code>FormBuilder</code> per gestire questa cosa non dovrebbe essere troppo complicato.</p>
+
+<p>Se ricarichiamo la pagina con la form di registrazione del nuovo utente, ora troveremo un asterisco a fianco del campo <code>email</code>, ma non in prossimit&agrave; di quello relativo alla property <code>name</code>:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/375/original/E211I02.png" width="804" height="283" alt="I campi obbligatori ora sono mostrati con un asterisco."/>
+</div>
+
+<h3>Validazioni a livello di modello</h3>
+
+<p>Fino ad ora abbiamo trattato solo di validazioni a livello di viste, ma esistono alcune eccellenti aggiunte al meccanismo di validazione anche per il livello di modello. Per ulteriori dettagli in merito, vale la pena di leggersi l&rsquo;<a href="http://lindsaar.net/2010/1/31/validates_rails_3_awesome_is_true">articolo sul blog di Mikel Lindsaar</a>. Un&rsquo;importante differenza &egrave; che le validazioni sono state spostate fuori dalla classe ActiveRecord, nella nuova classe <a href="http://github.com/rails/rails/tree/master/activemodel">ActiveModel</a>. Questo rende pi&ugrave; semplice l&rsquo;aggiunta di validazioni ad oggetti che non sono di tipo ActiveRecord ed &egrave; un qualcosa che esamineremo pi&ugrave; in dettaglio nei futuri episodi.</p>
+
+<p>Ci&ograve; su cui ci focalizzeremo oggi &egrave; il come rendere le validazioni nel nostro modello <code>User</code> pi&ugrave; efficienti. Abbiamo aggiunto un paio di validazioni al modello, che ora appare cos&igrave;:</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  validates_presence_of :email
+  validates_uniqueness_of :email
+  validates_format_of :email, :with =&gt; /^[\w\d]+$/ :on =&gt; :create, :message =&gt; &quot;is invalid&quot;
+end
+</pre>
+
+<p>In Rails 3 &egrave; possibile chiamare un metodo <code>validates</code> e passargli un hash di attributi per definire le validazioni, anzich&egrave; definire ciascuna validazione in modo singolo:</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  validates :email, 
+            :presence =&gt; true, 
+            :uniqueness =&gt; true, 
+            :format =&gt; { :with =&gt; /^([^@\s]+)@((?:[-a-z0-9]+\.)+[a-z]{2,})$/i }
+end
+</pre>
+
+<p>Nel modello <code>User</code> stiamo ancora una volta validando che il campo abbia un valore e che quel valore sia unico. Per la validazione del formato ci sono una serie di opzioni che possiamo passare, per cui usiamo un hash secondario per definirle.</p>
+
+<p>Possiamo fornire un qualsiasi numero di validazioni per un determinato attributo con un singolo comando. Anche se utile, potrebbe divenire fonte di confusione se ci sono molte validazioni da fare su un campo, comunque per la maggior parte dei casi funziona in modo molto utile.</p>
+
+<h3>Scrivere un validatore personalizzato</h3>
+
+<p>Diamo un&rsquo;occhiata ora a come possiamo rendere l&rsquo;opzione <code>:format</code> pi&ugrave; concisa e pulirla un po&rsquo;. Capita spesso di voler validare indirizzi email ed avere la stessa lunga espressione regolare in ogni validatore &egrave; piuttosto bruttino e introduce duplicazioni nel codice. Possiamo estrarre queste logica in un validatore separato, creando una nuova classe nella cartella <code>/lib</code> della nostra applicazione. Chiameremo il file <code>email_format_validator.rb</code>:</p>
+
+<p class="codeFilePath">/lib/email_format_validator.rb</p>
+<pre class="ruby">
+class EmailFormatValidator &lt; ActiveModel::EachValidator
+  def validate_each(object, attribute, value)
+    unless value =~ /^([^@\s]+)@((?:[-a-z0-9]+\.)+[a-z]{2,})$/i
+      object.errors[attribute] &lt;&lt; (options[:message] || &quot;is not formatted properly&quot;)
+    end
+  end
+end
+</pre>
+
+<p>La classe <code>EmailFormatValidator</code> eredita da <code>ActiveModel::EachValidator</code>. Dobbiamo definire un metodo nella classe, il <code>validate_each</code>, che accetti tre parametri chiamati, rispettivamente, <code>object</code>, <code>attribute</code> e <code>value</code>. Il metodo poi deve controllare che il valore (value) faccia match con l&rsquo;espressione regolare che abbiamo usato per validare l&rsquo;indirizzo email di prima, e in caso contrario, aggiunga l&rsquo;attributo all&rsquo;insieme degli errori (<code>errors</code>) dell&rsquo;oggetto.</p>
+
+<p>Possiamo usare questa tecnica per definire qualsiasi tipo di validazione vogliamo. Per esempio, nel post del blog citato poco fa, si usa un insieme molto pi&ugrave; complesso di validazioni per controllare il campo email. Ora che abbiamo a disposizione il nostro validatore personalizzato, possiamo aggiornare la classe di modello User per usarlo:</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  validates :email, :presence =&gt; true, :uniqueness =&gt; true, :email_format =&gt; true
+end
+</pre>
+
+<p>Avere una chiave <code>email_format</code> nell&rsquo;hash <code>validates</code> significa che il validatore cercher&agrave; una classe chiamata <code>email_format_validator</code> e le passer&agrave; il controllo per la validazione.</p>
+
+<p>Se proviamo ora a creare un nuovo utente, inserendo un indirizzo email non valido, vedremo il messaggio di errore atteso:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/376/original/E211I03.png" width="802" height="405" alt="La nostra classe di validazione personalizzata ci mostra un errore."/>
+</div>
+
+<p>L&rsquo;essere in grado di creare validatori personalizzati come questo, ci permette di ripulire i validatori sulle classi di modello e rende pi&ugrave; semplice la rimozione di duplicazioni fra i validatori.</p>

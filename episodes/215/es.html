@@ -1,0 +1,196 @@
+<p>En este episodio trataremos el uso de consultas avanzadas con Rails 3.  En el episodio 202 [<a href="http://railscasts.com/episodes/202-active-record-queries-in-rails-3">verlo</a>, <a href="http://es.asciicasts.com/episodes/202-consultas-activerecord-en-rails-3">leerlo</a>] vimos las novedadades de ActiveRecord en Rails 3; en esta ocasi&oacute;n continuaremos a partir de ah&iacute; y veremos algunos usos m&aacute;s avanzados.</p>
+
+<h3>Uso de m&eacute;todos de clase en lugar de &aacute;mbitos</h3>
+
+<p>En la aplicaci&oacute;n de ejemplo que vamos a usar tenemos dos modelos: <code>Product</code> y <code>Category</code>,  donde un producto pertenece a una categor&iacute;a.  El modelo de producto tiene dos &aacute;mbitos con nombre: <code>discontinued</code>, que devuelve todos aquellos productos cuyo atributo <code>discontinued</code> tiene el valor <code>true</code>, y <code>price</code>, que devuelve todos los productos cuyo precio es inferior a un argumento dado.</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+  scope :discontinued, where(:discontinued =&gt; true)
+  scope :cheaper_than, lambda { |price| where(&quot;price &lt; ?&quot;, price) }
+end
+</pre>
+
+<p>En el segundo &aacute;mbito estamos usando una funci&oacute;n lambda.  Si algunas vez tenemos que usar una de estas en un &aacute;mbito con nombre deber&iacute;amos considerar utilizar en su lugar un m&eacute;todo de clase, sobre todo si estamos pasando un gran n&uacute;mero de par&aacute;metros o si el contenido del &aacute;mbito es complejo.   Nuestro caso es muy sencillo pero de todas formas lo vamos a poner como m&eacute;todo de clase:</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+  scope :discontinued, where(:discontinued =&gt; true)
+  
+  def self.cheaper_than(price)
+    where(&quot;price &lt; ?&quot;, price)
+  end
+end
+</pre>
+
+<p>El comportamiento del m&eacute;todo de clase ser&aacute; exactamente el mismo que el del &aacute;mbito.  Esto tambi&eacute;n se pod&iacute;a hacer tambi&eacute;n con Rails 2, pero el comportamiento en Rails 3 es mucho mejor, incluso podemos reutilizar este m&eacute;todo en otro &aacute;mbito.  Por ejemplo si queremos crear un &aacute;mbito llamado <code>cheap</code> que devuelva los productos cuyo precio sea inferior a 5&euro; podemos escribirlo as&iacute;:</p>
+
+<p class="codeFilePath">/app/models/products.rb</p>
+<pre class="ruby">
+scope :cheap, cheaper_than(5)
+</pre>
+
+<p>Hay que tener, sin embargo, cuidado con una trampa.  Si usamos un m&eacute;todo de clase en un &aacute;mbito tenemos que declarar el &aacute;mbito despu&eacute;s de que se haya definido el m&eacute;todo de clase lo que quiere decir que tendremos que poner el &aacute;mbito un poco m&aacute;s abajo de lo que es habitual en el fichero de la clase.</p>
+
+<p>Podemos ver la consulta SQL que genera nuestro &aacute;mbito con la consola de Rails.</p>
+
+
+<pre class="terminal">
+ruby-1.8.7-p249 &gt; Product.cheap.to_sql
+ =&gt; &quot;SELECT    \&quot;products\&quot;.* FROM      \&quot;products\&quot; WHERE    (price &lt; 5)&quot;
+</pre> 
+
+<p>Si aplicamos el &aacute;mbito veremos el listado de productos baratos.</p>
+
+<pre class="terminal">
+&gt;Product.cheap
+ =&gt; [#&lt;Product id: 1, name: &quot;Top&quot;, price: 4.99, discontinued: nil, category_id: 3, created_at: &quot;2010-05-24 21:01:59&quot;, updated_at: &quot;2010-05-24 21:01:59&quot;&gt;, #&lt;Product id: 2, name: &quot;Milk&quot;, price: 2.99, discontinued: nil, category_id: 2, created_at: &quot;2010-05-24 21:02:38&quot;, updated_at: &quot;2010-05-24 21:02:38&quot;&gt;]
+</pre>
+
+<h3>Asociaciones</h3>
+
+<p>Aprovechando que estamos en la consola veamos otro truco que tiene que ver con el uso de &aacute;mbitos sobre asociaciones.  Antes dec&iacute;amos que en nuestra aplicaci&oacute;n un producto pertenece a una categor&iacute;a.  Esto quiere decir que podemos usar <code>joins</code> para devolver una consulta SQL que devuelve un <em>inner join</em> sobre la tabla de productos y categor&iacute;as.</p>
+
+<pre class="terminal">
+ruby-1.8.7-p249 &gt; Category.joins(:products).to_sql
+ =&gt; &quot;SELECT     \&quot;categories\&quot;.* FROM       \&quot;categories\&quot; INNER JOIN \&quot;products\&quot; ON \&quot;products\&quot;.\&quot;category_id\&quot; = \&quot;categories\&quot;.\&quot;id\&quot;&quot;
+</pre> 
+
+<p>Queremos encontrar todas las categor&iacute;as con poductos que pertenecen a un cierto &aacute;mbito, por ejemplo todas las categor&iacute;as que contienen productos que cuestan menos de cinco euros.  Podemos emplear dos m&eacute;todos distintos para hacerlo.  El primero ser&iacute;a usar <code>merge</code> de esta manera:</p>
+
+<pre class="terminal">
+&gt; Category.joins(:products).merge(Product.cheap)
+ =&gt; [#&lt;Category id: 3, name: &quot;Games&quot;, created_at: &quot;2010-05-24 21:00:57&quot;, updated_at: &quot;2010-05-25 18:30:18&quot;&gt;, #&lt;Category id: 2, name: &quot;Groceries&quot;, created_at: &quot;2010-05-24 21:00:50&quot;, updated_at: &quot;2010-05-25 18:30:39&quot;&gt;]
+</pre> 
+
+<p>O podr&iacute;amos utilizar el s&iacute;mbolo <code>&amp;</code> que es un alias de lo mismo y por tanto devolver&aacute; los mismos resultados:</p>
+
+<pre class="terminal">
+&gt; Category.joins(:products) &amp; Product.cheap
+ =&gt; [#&lt;Category id: 3, name: &quot;Games&quot;, created_at: &quot;2010-05-24 21:00:57&quot;, updated_at: &quot;2010-05-25 18:30:18&quot;&gt;, #&lt;Category id: 2, name: &quot;Groceries&quot;, created_at: &quot;2010-05-24 21:00:50&quot;, updated_at: &quot;2010-05-25 18:30:39&quot;&gt;]
+</pre> 
+
+<p>Con estos m&eacute;todos podemos encadenar otras consultas incluso aunque no sean sobre los mismo modelos, y esto es lo que nos permitir&aacute; encontrar las categor&iacute;as con productos que cuestan menos de cinco euros.  Si llamamos  <code>to_sql</code> en las consultas veremos que se ha hecho un <em>inner join</em> y se ha a&ntilde;adido  al final la cl&aacute;sula <code>WHERE</code> del &aacute;mbito.</p>
+
+<pre class="terminal">
+&gt; (Category.joins(:products) &amp; Product.cheap).to_sql
+ =&gt; &quot;SELECT     \&quot;categories\&quot;.* FROM       \&quot;categories\&quot; INNER JOIN \&quot;products\&quot; ON \&quot;products\&quot;.\&quot;category_id\&quot; = \&quot;categories\&quot;.\&quot;id\&quot; WHERE     (price &lt; 5)&quot;
+</pre> 
+
+<p>Esta t&eacute;cnica es bastante potente si se utiliza para definir un &aacute;mbito.  Podemos usarla, por ejemplo, para crear un &aacute;mbito en el modelo <code>Category</code> que encuentre las categor&iacute;as que tengan productos baratos.</p>
+
+<p class="codeFilePath">/app/models/category.rb</p>
+<pre class="ruby">
+class Category &lt; ActiveRecord::Base
+  has_many :products
+  scope :with_cheap_products, joins(:products) &amp; Product.cheap
+end
+</pre>
+
+<p>Este nuevo &aacute;mbito devolver&aacute; las mismas categor&iacute;as que la consulta que escribimos anteriormente.</p>
+
+<pre class="terminal">
+&gt; Category.with_cheap_products
+ =&gt; [#&lt;Category id: 3, name: &quot;Games&quot;, created_at: &quot;2010-05-24 21:00:57&quot;, updated_at: &quot;2010-05-25 18:30:18&quot;&gt;, #&lt;Category id: 2, name: &quot;Groceries&quot;, created_at: &quot;2010-05-24 21:00:50&quot;, updated_at: &quot;2010-05-25 18:30:39&quot;&gt;]
+</pre> 
+
+<p>Cuando trabajemos con estas condiciones que cubren diferentes asociaciones hay que tener en cuenta el nombre de la tabla.  Si examinamos el SQL generado al llamar al &aacute;mbito veremos que no hay un nombre de tabla en la cl&aacute;usula <code>WHERE</code>.</p>
+
+<pre class="terminal">
+&gt; Category.with_cheap_products.to_sql
+ =&gt; &quot;SELECT     \&quot;categories\&quot;.* FROM       \&quot;categories\&quot; INNER JOIN \&quot;products\&quot; ON \&quot;products\&quot;.\&quot;category_id\&quot; = \&quot;categories\&quot;.\&quot;id\&quot; WHERE     (price &lt; 5)&quot;
+</pre> 
+
+<p>Esto podr&iacute;a ser un problema si ambas tablas tienen una columna llamada <code>price</code> porque en tal caso la consulta SQL ser&iacute;a ambigua.  Podemos eliminar esta ambiguedad definiendo expl&iacute;citamente el nombre de la tabla en el modelo <code>Product</code>.</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+def self.cheaper_than(price) 
+  where(&quot;products.price &lt; ?&quot;, price)
+end
+</pre>
+
+<p>Con esto ya no hay peligro de que el nombre de la columna sea ambiguo.  Siempre hay que especificar el nombre de las tablas cuando se construyen cadenas SQL en las condiciones de una consulta.  Si estamos usando un <em>hash</em> (como en el &aacute;mbito) entonces no hay que preocuparse de la tabla porque Rails autom&aacute;ticamente lo pone.</p>
+
+<h3>Construcci&oacute;n de registros a trav&eacute;s de &aacute;mbitos</h3>
+
+<p>Lo siguiente que veremos es c&oacute;mo crear registros con &aacute;mbitos.  Tenemos un &aacute;mbito definido sobre nuestro modelo <code>Product</code> llamado <code>discontinued</code> que encuentra todos los productos descatalogados.</p>
+
+<pre class="terminal">
+&gt; Product.discontinued
+ =&gt; [#&lt;Product id: 3, name: &quot;Some DVD&quot;, price: 13.49, discontinued: true, category_id: 1, created_at: &quot;2010-05-25 19:45:05&quot;, updated_at: &quot;2010-05-25 19:45:05&quot;&gt;]
+</pre> 
+
+<p>Como el &aacute;mbito utiliza un <em>hash</em> podemos invocar el m&eacute;todo <code>build</code> sobre &eacute;l para construir un nuevo producto, que tendr&aacute; el atributo <code>discontinued</code> puesto a <code>true</code>.</p>
+
+
+<pre class="terminal">
+&gt; p = Product.discontinued.build
+ =&gt; #&lt;Product id: nil, name: nil, price: nil, discontinued: true, category_id: nil, created_at: nil, updated_at: nil&gt;
+</pre> 
+
+<p>Esto es as&iacute; porque el atributo <code>discontinued</code> forma parte de la condici&oacute;n <code>where</code>, funcionando de forma parecida a una asociaci&oacute;n en el sentido de que si se invoca <code>build</code> sobre una asociaci&oacute;n autom&aacute;ticamente se pone la clave for&aacute;nea que est&aacute; asociada con dicho registro.  En nuestro caso estamos tan s&oacute;lo asignando valores a atributos que aparecen en la condici&oacute;n <code>where</code>.  Es algo muy &uacute;til a tener en cuenta si necesitamos crear registros que cumplan un cierto &aacute;mbito.</p>
+
+<h3>Arel</h3>
+
+<p>Como colof&oacute;n a este episodio presentaremos  <a href="http://github.com/rails/arel">Arel</a>.  Arel se encarga de generar las consultas de ActiveRecord, ser&aacute; poco frecuente que tengamos que interactuar directamente con Arel pero es bueno tener un conocimiento de c&oacute;mo funciona y qu&eacute; puede hacer en caso de que nos haga falta.</p>
+
+<p>Para trabajar con Arel directamente en Rails 3 se puede acceder a la <code>arel_table</code> de un modelo.  Vamos a recuperar la tabla de Arel para el modelo de producto en la consola y se la asignaremos a una varialbe.</p>
+
+<pre class="terminal">
+&gt; t = Product.arel_table
+</pre>
+
+<p>Se trata de una representaci&oacute;n de la tabla de productos.  Podemos acceder a las columnas de la tabla as&iacute;:</p>
+
+
+<pre class="terminal">
+&gt;t[:price]
+ =&gt; &lt;Attribute price&gt;
+</pre> 
+
+<p>Y sobre este objeto vamos a invocar m&eacute;todos sobre un atributo para obtener condiciones de b&uacute;squeda.  Por ejemplo, si queremos encontrar todos los productos que cuestan 2.99&euro; podemos ejecutar</p>
+
+<pre class="terminal">
+&gt; t[:price].eq(2.99)
+ =&gt; #&lt;Arel::Predicates::Equality:0x1040dd9f0 @operand1=&lt;Attribute price&gt;, @operand2=2.99&gt;
+</pre> 
+
+<p>Esto devuelve un predicado (que b&aacute;sicamente es la condici&oacute;n de b&uacute;squeda)  Existen tambi&eacute;n otros m&eacute;todos que podr&iacute;amos llamar, como por ejemplo <code>matches</code> que ejecutar&aacute; una consulta <code>LIKE</code>.A  Al igual que con otras consultas podemos ejecutar  <code>to_sql</code> para examinar la sentencia SQL que generar&aacute; esta consulta.</p>
+
+<pre class="terminal">
+&gt; t[:name].matches(&#x27;%lore&#x27;).to_sql
+ =&gt; &quot;\&quot;products\&quot;.\&quot;name\&quot; LIKE &#x27;%lore&#x27;&quot;
+</pre> 
+
+<p>Podemos usar el m&eacute;todo <code>or</code> para encadenar predicados, por ejemplo para encontrar los productos que cuestan 2.99&euro; y cuyo nombre termina en &lsquo;lore&rsquo;.</p>
+
+<pre class="terminal">
+t[:price].eq(2.99).or(t[:name].matches(&#x27;%lore&#x27;))
+</pre>
+
+<p>Esto devolver&aacute; un predicado combinado, y podemos ver la consulta SQL al igual que antes invocando <code>to_sql</code>.</p>
+
+<pre class="terminal">
+&gt; t[:price].eq(2.99).or(t[:name].matches(&#x27;%lore&#x27;)).to_sql
+ =&gt; &quot;(\&quot;products\&quot;.\&quot;price\&quot; = 2.99 OR \&quot;products\&quot;.\&quot;name\&quot; LIKE &#x27;%lore&#x27;)&quot;
+</pre> 
+
+<p>Podemos pasar estos predicados como argumentos al m&eacute;todo <code>where</code> de ActiveRecord.  Esto significa que podemos pasar el predicado que acabamos de crear a <code>Product.where</code> para recuperar todos los productos cuyo precio sea de 2.99&euro; o cuyo nombre termine en &lsquo;lore&rsquo;.</p>
+
+<pre class="terminal">
+&gt;   Product.where(t[:price].eq(2.99).or(t[:name].matches(&#x27;%lore&#x27;)))
+ =&gt; [#&lt;Product id: 2, name: &quot;Milk&quot;, price: 2.99, discontinued: nil, category_id: 2, created_at: &quot;2010-05-24 21:02:38&quot;, updated_at: &quot;2010-05-24 21:02:38&quot;&gt;, #&lt;Product id: 4, name: &quot;Knight Lore&quot;, price: 2.99, discontinued: nil, category_id: nil, created_at: &quot;2010-05-26 19:36:02&quot;, updated_at: &quot;2010-05-26 19:36:02&quot;&gt;]
+</pre>
+
+<p>Tan s&oacute;lo hemos ara&ntilde;ado la superficie que nos revela ActiveRecord de Arel, que es capaz de mucho m&aacute;s.  Hay varios <em>plugins</em> disponibles que aprovechan la potencia de Arel y le dan una nterfaz m&aacute;s conveniente como  <a href="http://metautonomo.us/projects/metawhere/">MetaWhere</a> con el cual podemos acceder a m&eacute;todos de Arel como  <code>matches</code> y <code>eq</code> dentro del <em>hash</em> de condiciones as&iacute;:</p>
+
+<pre class="ruby">
+Product.where(:price.eq =&gt; 2.99, :name.matches =&gt; &#x27;%lore&#x27;)
+</pre>
+
+<p>Esto nos da mucha m&aacute;s flexibilidad a la hora de definir el <em>hash</em> de condiciones, y merece la pena tenerlo en cuenta si vamos a necesitar hacer consultas m&aacute;s complejas sobre nuestros modelos.</p>

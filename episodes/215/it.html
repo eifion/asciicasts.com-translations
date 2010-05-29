@@ -1,0 +1,192 @@
+<p>Questo episodio tratter&agrave; le query avanzate di Rails 3. Nell&rsquo;episodio 202 [<a href="http://railscasts.com/episodes/202-active-record-queries-in-rails-3">guardalo</a>, <a href="http://it.asciicasts.com/episodes/203-routing-in-rails-3">leggilo</a>] abbiamo parlato delle novit&agrave; alle query di ActiveRecord di Rails 3; oggi proseguiremo il discorso da l&igrave; e mostreremo alcune altre feature avanzate.</p>
+
+<h3>Utilizzo dei metodi di classe al posto degli scope</h3>
+
+<p>L&rsquo;applicazione che useremo ha due modelli: <code>Product</code> e <code>Category</code> con il prodotto che appartiene ad una categoria. Il modello prodotto ha due named scope: <code>discontinued</code>, che restituisce tutti i prodotti per i quali il valore del campo discontinued &egrave; true e price, che restituisce i prodotti pi&ugrave; economici del prezzo passato come argomento:</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+  scope :discontinued, where(:discontinued =&gt; true)
+  scope :cheaper_than, lambda { |price| where(&quot;price &lt; ?&quot;, price) }
+end
+</pre>
+
+<p>Nel secondo named scope si usa un lambda. Se non ne avete mai usato uno di questi in un named scope, potreste valutare piuttosto l&rsquo;uso di un metodo di classe, specialmente se state passando un consistente numero di parametri o se il contenuto dello scope &egrave; complesso. Il nostro invece &egrave; piuttosto semplice, ma lo cambiamo ugualmente con un metodo di classe:</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+class Product &lt; ActiveRecord::Base
+  belongs_to :category
+  scope :discontinued, where(:discontinued =&gt; true)
+  
+  def self.cheaper_than(price)
+    where(&quot;price &lt; ?&quot;, price)
+  end
+end
+</pre>
+
+<p>Il metodo di classe si comporter&agrave; alla stessa maniera dello scope. Possiamo fare la stessa cosa anche in Rails 2, ma si comporta molto meglio in Rails 3. Possiamo perfino riusare questo metodo in un altro named scope. Se vogliamo creare uno scope chiamato <code>cheap</code> che restituisce i prodotti che costano meno di cinque euro, possiamo scrivere:</p>
+
+<p class="codeFilePath">/app/models/products.rb</p>
+<pre class="ruby">
+scope :cheap, cheaper_than(5)
+</pre>
+
+<p>Tuttavia potenzialmente ci pu&ograve; essere un&rsquo;insidia in tutto ci&ograve;. Se usiamo un metodo di classe in uno scope, dobbiamo definire tale scope, all&rsquo;interno della classe, dopo che &egrave; stato definito il metodo di classe, il che significa che lo scope dovr&agrave; essere messo pi&ugrave; in basso nella classe rispetto al solito.</p>
+
+<p>Usando la console Rails, possiamo vedere l&rsquo;SQL generato dallo scope:</p>
+
+<pre class="terminal">
+ruby-1.8.7-p249 &gt; Product.cheap.to_sql
+ =&gt; &quot;SELECT    \&quot;products\&quot;.* FROM      \&quot;products\&quot; WHERE    (price &lt; 5)&quot;
+</pre> 
+
+<p>Se chiamiamo semplicemente lo scope, vedremo la lista dei prodotti pi&ugrave; economici:</p>
+
+<pre class="terminal">
+&gt;Product.cheap
+ =&gt; [#&lt;Product id: 1, name: &quot;Top&quot;, price: 4.99, discontinued: nil, category_id: 3, created_at: &quot;2010-05-24 21:01:59&quot;, updated_at: &quot;2010-05-24 21:01:59&quot;&gt;, #&lt;Product id: 2, name: &quot;Milk&quot;, price: 2.99, discontinued: nil, category_id: 2, created_at: &quot;2010-05-24 21:02:38&quot;, updated_at: &quot;2010-05-24 21:02:38&quot;&gt;]
+</pre>
+
+<h3>Associazioni</h3>
+
+<p>Finch&egrave; siamo in console, vi mostriamo un altro trucco, che coinvolge l&rsquo;utilizzo degli scope mediante le associazioni. Come abbiamo citato in precedenza, nella nostra applicazione un prodotto appartiene ad una categoria. Ci&ograve; significa che possiamo usare il metodo <code>joins</code> per ottenere una query SQL che esegua una inner join fra le tabelle prodotti e categorie:</p>
+<pre class="terminal">
+ruby-1.8.7-p249 &gt; Category.joins(:products).to_sql
+ =&gt; &quot;SELECT     \&quot;categories\&quot;.* FROM       \&quot;categories\&quot; INNER JOIN \&quot;products\&quot; ON \&quot;products\&quot;.\&quot;category_id\&quot; = \&quot;categories\&quot;.\&quot;id\&quot;&quot;
+</pre> 
+
+<p>Vogliamo trovare tutte le categorie che hanno un prodotto che faccia match con un certo scope; tanto per fissare le idee, vogliamo trovare tutte le categorie che hanno almeno un prodotto che costi meno di cinque euro. Ci sono due metodi che possiamo usare a questo scopo. Possiamo usare il metodo <code>merge</code> in questa maniera:</p>
+
+<pre class="terminal">
+&gt; Category.joins(:products).merge(Product.cheap)
+ =&gt; [#&lt;Category id: 3, name: &quot;Games&quot;, created_at: &quot;2010-05-24 21:00:57&quot;, updated_at: &quot;2010-05-25 18:30:18&quot;&gt;, #&lt;Category id: 2, name: &quot;Groceries&quot;, created_at: &quot;2010-05-24 21:00:50&quot;, updated_at: &quot;2010-05-25 18:30:39&quot;&gt;]
+</pre> 
+
+<p>Oppure in alternativa possiamo usare una e commerciale che &egrave; un alias alla stessa cosa, per cui restituir&agrave; lo stesso risultato:</p>
+
+<pre class="terminal">
+&gt; Category.joins(:products) &amp; Product.cheap
+ =&gt; [#&lt;Category id: 3, name: &quot;Games&quot;, created_at: &quot;2010-05-24 21:00:57&quot;, updated_at: &quot;2010-05-25 18:30:18&quot;&gt;, #&lt;Category id: 2, name: &quot;Groceries&quot;, created_at: &quot;2010-05-24 21:00:50&quot;, updated_at: &quot;2010-05-25 18:30:39&quot;&gt;]
+</pre> 
+
+<p>Usando questi metodi, possiamo mettere in join qualsiasi altra query, anche se non si trova sullo stesso modello, consentendoci di trovare tutte le categorie che hanno dei prodotti che costano meno di cinque euro. Se invochiamo la <code>to_sql</code> sulle query in join vedremo che &egrave; stata usata la inner join e che la clausola di WHERE del named scope &egrave; stata aggiunta in fondo all&rsquo;istruzione:</p>
+
+<pre class="terminal">
+&gt; (Category.joins(:products) &amp; Product.cheap).to_sql
+ =&gt; &quot;SELECT     \&quot;categories\&quot;.* FROM       \&quot;categories\&quot; INNER JOIN \&quot;products\&quot; ON \&quot;products\&quot;.\&quot;category_id\&quot; = \&quot;categories\&quot;.\&quot;id\&quot; WHERE     (price &lt; 5)&quot;
+</pre> 
+ 
+<p>Questa pu&ograve; rivelarsi una tecnica potente, allorch&egrave; usata all&rsquo;interno della definizione di un named scope. La possiamo usare, per esempio, per creare uno scope nel modello <code>Category</code>, che trovi le categorie aventi prodotti economici:</p>
+
+<p class="codeFilePath">/app/models/category.rb</p>
+<pre class="ruby">
+class Category &lt; ActiveRecord::Base
+  has_many :products
+  scope :with_cheap_products, joins(:products) &amp; Product.cheap
+end
+</pre>
+
+<p>Questo nuovo named scope restituir&agrave; le stesse categorie della query in join che abbiamo scritto poco fa:</p>
+
+<pre class="terminal">
+&gt; Category.with_cheap_products
+ =&gt; [#&lt;Category id: 3, name: &quot;Games&quot;, created_at: &quot;2010-05-24 21:00:57&quot;, updated_at: &quot;2010-05-25 18:30:18&quot;&gt;, #&lt;Category id: 2, name: &quot;Groceries&quot;, created_at: &quot;2010-05-24 21:00:50&quot;, updated_at: &quot;2010-05-25 18:30:39&quot;&gt;]
+</pre> 
+
+<p>Una cosa di cui stare attenti quando si tratta con condizioni fra associazioni &egrave; il nome delle tabelle. Se diamo un&rsquo;occhiata all&rsquo;SQL prodotto alla chiamata del named scope, possiamo vedere che non c&rsquo;&egrave; alcun nome di tabella che qualifichi il campo nella clausola di WHERE:</p>
+
+<pre class="terminal">
+&gt; Category.with_cheap_products.to_sql
+ =&gt; &quot;SELECT     \&quot;categories\&quot;.* FROM       \&quot;categories\&quot; INNER JOIN \&quot;products\&quot; ON \&quot;products\&quot;.\&quot;category_id\&quot; = \&quot;categories\&quot;.\&quot;id\&quot; WHERE     (price &lt; 5)&quot;
+</pre> 
+
+<p>Questa cosa sarebbe un problema se entrambe le tabelle avessero una colonna chiamata price, perch&egrave; si creerebbe un&rsquo;ambiguit&agrave; sul nome della colonna nella query SQL. Si pu&ograve; superare questa ambiguit&agrave; definendo esplicitamente il nome della tabella nel modello <code>Product</code>:</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+def self.cheaper_than(price) 
+  where(&quot;products.price &lt; ?&quot;, price)
+end
+</pre>
+
+<p>Ora non c&rsquo;&egrave; pi&ugrave; alcun pericolo di ambiguit&agrave; sul nome della colonna. Dovreste sempre specificare il nome della tabella quando usate stringhe SQL nelle condizioni di find. Comunque, se state usando un hash, come negli scope, non c&rsquo;&egrave; bisogno di preoccuparsi del nome della tabella, dal momento che Rails lo aggiunge in automatico per noi.</p>
+
+<h3>Costruire record mediante named scope</h3>
+
+<p>La prossima cosa che vi mostriamo &egrave; il modo di costruire record usando i named scope. Abbiamo un named scope definito nella nostra classe di modello <code>Product</code>, chiamato discontinued, che trova tutti i prodotti dismessi:</p>
+
+<pre class="terminal">
+&gt; Product.discontinued
+ =&gt; [#&lt;Product id: 3, name: &quot;Some DVD&quot;, price: 13.49, discontinued: true, category_id: 1, created_at: &quot;2010-05-25 19:45:05&quot;, updated_at: &quot;2010-05-25 19:45:05&quot;&gt;]
+</pre> 
+
+<p>Poich&egrave; il named scope usa un hash, possiamo chiamare il metodo <code>build</code> questo per costruire un nuovo prodotto con l&rsquo;attributo <code>discontinued</code> gi&agrave; impostato a true:</p>
+
+<pre class="terminal">
+&gt; p = Product.discontinued.build
+ =&gt; #&lt;Product id: nil, name: nil, price: nil, discontinued: true, category_id: nil, created_at: nil, updated_at: nil&gt;
+</pre> 
+
+<p>Il nuovo prodotto cos&igrave; creato risulter&agrave; gi&agrave; dismesso in quanto questo attributo fa parte della condizione di <code>where</code>. Tutto ci&ograve; funziona in maniera simile ad una associazione, in quanto quando si chiama il metodo build sull&rsquo;associazione, automaticamente viene impostata la foreign key associata a quel record. In questo caso, tuttavia, stiamo pi&ugrave; semplicemente assegnando il valore agli attributi che sono inclusi nella condizione di <code>where</code>. Questa &egrave; una cosa utile da sapere se si ha la necessit&agrave; di creare dei record che rispettino un determinato named scope.</p>
+
+<h3>Arel</h3>
+
+<p>Concludiamo questo episodio presentando <a href="http://github.com/rails/arel">Arel</a>. Arel gestisce le query ActiveRecord dietro le quinte. Probabilmente non avrete molto spesso il bisogno di interfacciarvi direttamente con questo livello, ma &egrave; utile capire come il tutto funzioni e comprendere ci&ograve; di cui questo framework &egrave; capace, nel caso in cui ci sia mai il bisogno di doverlo usare direttamente.</p>
+
+<p>Per accedere direttamente ad Arel in Rails 3, si pu&ograve; richiedere al modello una <code>arel_table</code>, per cui prendiamo l&rsquo;<code>arel_table</code> per il modello Product dalla console e assegnamola ad una variabile:</p>
+
+<pre class="terminal">
+&gt; t = Product.arel_table
+</pre>
+
+<p>Questo oggetto &egrave; una rappresentazione della tabella dei prodotti. Possiamo avere accesso alle colonne nella tabella in questo modo:</p>
+
+<pre class="terminal">
+&gt;t[:price]
+ =&gt; &lt;Attribute price&gt;
+</pre> 
+
+<p>Possiamo chiamare metodi sugli attributi per eseguire delle condizioni di find. Per esempio, se vogliamo trovare tutti i prodotti che costano 2.99 euro, possiamo lanciare:</p>
+
+<pre class="terminal">
+&gt; t[:price].eq(2.99)
+ =&gt; #&lt;Arel::Predicates::Equality:0x1040dd9f0 @operand1=&lt;Attribute price&gt;, @operand2=2.99&gt;
+</pre> 
+
+<p>Questa istruzione restituisce un predicato che fondamentalmente &egrave; la condizione di find. Ci sono anche altri metodi che possiamo chiamare, come il metodo <code>matches</code>, che esegue una query di tipo LIKE. Come per le altre query, possiamo invocare il <code>to_sql</code> per vedere l&rsquo;effettivo codice SQL prodotto dalla query.</p>
+
+<pre class="terminal">
+&gt; t[:name].matches(&#x27;%lore&#x27;).to_sql
+ =&gt; &quot;\&quot;products\&quot;.\&quot;name\&quot; LIKE &#x27;%lore&#x27;&quot;
+</pre> 
+
+<p>Possiamo usare il metodo <code>or</code> per concatenare i predicati, per cui, per esempio, possiamo cercare i prodotti che costano 2.99 euro o che hanno un nome che termina per &lsquo;lore&rsquo;:</p>
+
+<pre class="terminal">
+t[:price].eq(2.99).or(t[:name].matches(&#x27;%lore&#x27;))
+</pre>
+
+<p>Questa istruzione restituir&agrave; una combinazione dei due predicati: possiamo vedere l&rsquo;SQL prodotto chiamando <code>to_sql</code> come abbiamo fatto anche prima:</p>
+
+<pre class="terminal">
+&gt; t[:price].eq(2.99).or(t[:name].matches(&#x27;%lore&#x27;)).to_sql
+ =&gt; &quot;(\&quot;products\&quot;.\&quot;price\&quot; = 2.99 OR \&quot;products\&quot;.\&quot;name\&quot; LIKE &#x27;%lore&#x27;)&quot;
+</pre> 
+
+<p>Possiamo passare i predicati come argomenti al metodo <code>where</code> di un oggetto ActiveRecord. Ci&ograve; significa che possiamo passare il predicato che abbiamo creato alla chiamata <code>Product.where</code> al fine di restituire tutti i prodotti il cui prezzo sia 2.99 euro, o il cui nome termini per &lsquo;lore&rsquo;:</p>
+
+<pre class="terminal">
+&gt;   Product.where(t[:price].eq(2.99).or(t[:name].matches(&#x27;%lore&#x27;)))
+ =&gt; [#&lt;Product id: 2, name: &quot;Milk&quot;, price: 2.99, discontinued: nil, category_id: 2, created_at: &quot;2010-05-24 21:02:38&quot;, updated_at: &quot;2010-05-24 21:02:38&quot;&gt;, #&lt;Product id: 4, name: &quot;Knight Lore&quot;, price: 2.99, discontinued: nil, category_id: nil, created_at: &quot;2010-05-26 19:36:02&quot;, updated_at: &quot;2010-05-26 19:36:02&quot;&gt;]
+</pre>
+
+<p>Abbiamo solo dato uno sguardo rapido ad Arel in queste poche righe; Arel &egrave; in grado di fare molte pi&ugrave; cose e ActiveRecord espone solo una piccola parte di queste. Ci sono una serie di plugin che sfruttano tutta la potenza di Arel e la rendono disonibile in una interfaccia pi&ugrave; semplice, come ad esempio <a href="http://metautonomo.us/projects/metawhere/">MetaWhere</a>. Questo plugin da accesso ai metodi di Arel come il <code>matches</code> e l&rsquo;<code>eq</code>  dall&rsquo;interno dell&rsquo;hash delle condizioni, in questo modo:</p>
+
+<pre class="ruby">
+Product.where(:price.eq =&gt; 2.99, :name.matches =&gt; &#x27;%lore&#x27;)
+</pre>
+
+<p>Questo vi da molta pi&ugrave; flessibilit&agrave; sulla definizione dell&rsquo;hash delle condizioni e vale la pena darci un&rsquo;occhiata se avete la necessit&agrave; di eseguire query pi&ugrave; complesse sui vostri modelli.</p>

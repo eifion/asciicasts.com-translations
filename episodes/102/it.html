@@ -1,0 +1,218 @@
+<p>In questo episodio ...</p>
+
+<p>L&rsquo;applicazione usata in questo contesto sar&agrave; un negozio virtuale. Qui sotto &egrave; riportata una pagina elenco prodotti di un&rsquo;applicazione di e-commerce. Ciascun prodotto appartiene ad una categoria.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/75/original/E134I01.png" width="811" height="353" alt="La pagina di elenco prodotti della nostra applicazione."/>
+</div>
+
+<p>Dando un occhiata al codice, vediamo la relazione che lega prodotti e categorie:</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+	class Product &lt; ActiveRecord::Base
+		belongs_to :category
+	end
+</pre>
+
+<p>In presenza di questo genere di relazioni, &egrave; comune l&rsquo;utilizzo in maschera di elementi di input di tipo &quot;MENU&quot; per definire l&rsquo;associazione, in questo caso tra il prodotto e la sua categoria:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/75/original/E134I01.png" width="811" height="353" alt="La pagina di modifica del prodotto con la classica tendina per la scelta della categoria."/>
+</div>
+
+<p>Tuttavia a volte l&rsquo;uso di simili tendine pu&ograve; diventare piuttosto scomodo, soprattutto in presenza di molti record. Sarebbe bello poter avere una sorta di menu dinamico, che viene popolato in base al contenuto di un campo di testo a cui la tendina &egrave; legata, e che si autocompleti. Se per esempio cominciassimo a scrivere nel campo di testo &quot;A&quot;, vedremmo nella tendina tutte e sole le categorie che iniziano per tale lettera. Se infine non esistesse la categoria scritta, sarebbe utile che questo componente la creasse per noi. Vediamo come fare tutto ci&ograve;.</p>
+
+<p>Partiamo innanzitutto dal partial della form di inserimento di un nuovo prodotto:</p>
+
+<p class="codeFilePath">/app/views/products/_form.html.erb</p>
+<pre class="ruby">
+&lt;%= error_messages_for :product %&gt;
+&lt;% form_for @product do |f| %&gt;
+	&lt;p&gt;
+		&lt;%= f.label :name %&gt;
+		&lt;%= f.text_field :name %&gt;
+	&lt;/p&gt;
+	&lt;p&gt;
+		&lt;%= f.label :category_id %&gt;
+		&lt;%= f.collection_select :category_id, Category.find(:all), :id, :name %&gt;		
+	&lt;/p&gt;
+	&lt;p&gt;&lt;%= f.submit "Submit" %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Come si vede, la scelta della categoria &egarve; demandata ad una collection_select, ma noi vogliamo sostituirla con un text_field. Per prima cosa, preoccupiamoci di inserire il text_field, poi ci occuperemo dell&rsquo;autocompletamento.</p>
+
+<p class="codeFilePath">/app/views/products/_form.html.erb</p>
+<pre class="ruby">
+&lt;%= error_messages_for :product %&gt;
+&lt;% form_for @product do |f| %&gt;
+	&lt;p&gt;
+		&lt;%= f.label :name %&gt;
+		&lt;%= f.text_field :name %&gt;
+	&lt;/p&gt;
+	&lt;p&gt;
+		&lt;%= f.label :category_name %&gt;
+		&lt;%= f.text_field :category_name %&gt;		
+	&lt;/p&gt;
+	&lt;p&gt;&lt;%= f.submit "Submit" %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Se proviamo a cambiare tout court il menu a tendina con un text_field, ci imbattiamo in un primo problema, in quanto il nome della categoria non &egrave; legato al modello di prodotto, a cui la form fa riferimento, ma ad un suo dettaglio:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/77/original/E134I03.png" width="808" height="492" alt="Errore se usiamo direttamente il category_name come se fosse una normale propriet&agrave; del modello."/>
+</div>
+
+<p>Non &egrave; un problema insormontabile: possiamo usare un attributo virtuale, trattato gi&agrave; nell&rsquo;episodio 16 [<a href="http://railscasts.com/episodes/16-virtual-attributes">guardalo</a>, <a href="http://it.asciicasts.com/episodes/16-attributi-virtuali">leggilo</a>], per ovviare la cosa.
+Tutto ci&ograve; che dobbiamo fare &egrave; inserire i metodo accessor per il nome della categoria nella classe di modello <code>Product</code>:</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+	class Product &lt; ActiveRecord::Base
+		belongs_to :category
+		
+		def category_name
+			category.name if category
+		end
+
+		def category_name=(name)
+			self.category = Category.find_by_name(name) unless name.blank?
+		end
+	end
+</pre>
+
+<p>Se ora riproviamo a ricaricare la pagina, dovremmo avere superato l&rsquo;errore di prima:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/77/original/E134I03.png" width="808" height="492" alt="La pagina di inserimento di un prodotto con il campo categoria come campo di testo."/>
+</div>
+
+<p>Se ora inseriamo i dati nella form, indicando nel campo di categoria il nome di una categoria esistente, il salvataggio avverr&agrave; correttamente. Possiamo per&ograve; rendere il tutto pi&ugrave, interessante, sostituendo la <code>find_by</code> con una <code>find_or_create_by</code>, in modo tale che, se la categoria non esistesse, fosse creata e associata contestualmente:</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">
+	class Product &lt; ActiveRecord::Base
+		belongs_to :category
+		
+		def category_name
+			category.name if category
+		end
+
+		def category_name=(name)
+			self.category = Category.find_or_create_by_name(name) unless name.blank?
+		end
+	end
+</pre>
+
+<p>Con questa modifica, se la categoria immessa non dovesse esistere, riusciremmo comunque ad inserire il prodotto in quanto tale nuova categoria verrebbe creata al volo e associata al nuovo prodotto.
+Cerchiamo ora di entrare nel nocciolo dell&rsquo;episodio, per vedere come realizzare la tendina dinamica di selezione della categoria.</p>
+
+<h3>Aggiungere il completamento automatico</h3>
+<p>Vediamo ora come aggiungere la funzionalit&agrave; di completamento automatico al campo categoria della form vista poc&rsquo;anzi.</p>
+<p>Per aggiungere questa funzionalit&agrave;, si pu&ograve; usare la funzione di autocompletamento, che a partire da Rails 2 &egrave; stata estratta in un plugin chiamato <a href="http://github.com/rails/auto_complete">auto_complete</a>: installiamolo dunque:</p>
+
+<pre class="terminal">
+	~/rails/store$ script/plugin install auto_complete<sup><a href="#fn1">1</a></sup>
+</pre>
+
+<p>Una volta installato il plugin, occorre sincerarsi che nel file di layout dell&rsquo;applicazione siano incluse le risorse javascript di default:</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+"http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"&gt;
+&lt;html&gt;
+  &lt;head&gt;
+	...
+	&lt;%= javascript_include_tag :defaults %&gt;
+	...
+  &lt;/head&gt;
+  &lt;body&gt;
+  	...
+  &lt;/body&gt;
+&lt;html&gt;	
+</pre>
+
+<p>Ci&ograve; permetter&agrave; il caricamento dei JavaScript che si occuperanno effettivamente di creare e gestire la tendina dinamica in maschera.
+Torniamo ora al partial della form di inserimento nuovi prodotti. Per abilitare l&rsquo;autocompletamento sul campo di categoria, dobbiamo modificare come mostrato qui sotto il partial:</p>
+
+<p class="codeFilePath">/app/views/products/_form.html.erb</p>
+<pre class="ruby">
+&lt;%= error_messages_for :product %&gt;
+&lt;% form_for @product do |f| %&gt;
+	&lt;p&gt;
+		&lt;%= f.label :name %&gt;
+		&lt;%= f.text_field :name %&gt;
+	&lt;/p&gt;
+	&lt;p&gt;
+		&lt;%= f.label :category_name %&gt;
+		&lt;%= text_field_with_auto_complete :product, :category_name %&gt;		
+	&lt;/p&gt;
+	&lt;p&gt;&lt;%= f.submit "Submit" %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Al metodo helper <code>text_field_with_auto_complete</code> che si occuper&agrave; di mostrare un campo di testo con autocompletamento dei valori digitati, passiamo due parametri: <code>:product</code> e <code>:category_name</code>.
+Il primo parametro indica l&rsquo;oggetto a cui sar&agrave; associato il record scelto, mentre il secondo indica l&rsquo;attributo che vogliamo autocompletare.</p>
+<p>Se proviamo per&ograve; a modificare un prodotto dopo aver fatto queste modifiche, ci ritroveremo un errore:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/77/original/E134I03.png" width="808" height="492" alt="L&rsquo;errore indicante l&rsquo;assenza della action auto_complete_for_product_category_name."/>
+</div>
+
+<p>Ci&ograve, che non torna a Rails &egrave; sostanzialmente il fatto che si aspetta di trovare una action sul controller che gestisca l&rsquo;autocompletamento, chiamata <code>auto_complete_for_product_category_name</code>, che non trova, dal momento che in effetti non l&rsquo;abbiamo ancora creata.</p>
+<p>Proviamo a crearne una, nel controller dei prodotti, come faremmo normalmente:</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+  class ProductsController < ApplicationController
+  	auto_complete_for :product, :category_name
+	...
+  end
+</pre>
+
+<p>Questo approccio, tuttavia, non funzionerebbe per due ragioni. La prima &egrave; che l&rsquo;attributo category_name non corrisponde ad alcuna colonna nella tabella dei prodotti, in quanto si tratta di un attributo virtuale.
+Inoltre, questo controller &egrave; RESTful, e l&rsquo;action generata da questo metodo non si concilia molto bene con l&rsquo;approccio REST. Per questi due importanti motivi non useremo questo approccio classico. Allora come possiamo fare per usare AJAX in un contesto RESTful?</p>
+<p>Per rispondere a questa domanda che frequentemente mi viene posta, occorre chiedersi a cosa serve in questo contesto AJAX. A noi occorre solo per recuperare un insieme di nomi di categorie e restituirle alla maschera. Tutto ci&ograve; dunque non ha nulla a che fare con i modelli gestiti dal controller ProductsController.</p>
+<p>Il controller che invece &egrave; pi&ugrave; indicato per questo compito &egrave; piuttosto il <code>CategoriesController</code>, nello specifico la sua action <code>index</code>, in quanto vogliamo restituire nomi di categorie che corrispondano al testo che abbiamo inserito:</p>
+
+<p class="codeFilePath">/app/controllers/categories_controller.rb</p>
+<pre class="ruby">
+  class CategoriesController < ApplicationController
+  	def index
+	  @categories = Category.find(:all, :condition => ['name LIKE ?', "%#{params[:search]}%"])
+	end
+  end
+</pre>
+
+<p>Come si pu&ograve; vedere, questa action recupera esattamente le categorie a seconda del criterio che vorremmo usare.
+Ora non ci resta che fare in modo che questa action risponda alle richieste JavaScript. Per fare ci&ograve;, &egrave; sufficiente creare un nuovo template denominato <code>index.js.erb</code> nella sottocartella <code>app/views/products/</code> della nostra applicazione e definirla in questo modo:</p>
+
+<p class="codeFilePath">/app/views/products/index.js.erb</p>
+<pre class="ruby">
+  &lt;%= auto_complete_result @categories, :name %&gt;
+</pre>
+
+<p>All&rsquo;interno del template abbiamo usato il metodo helper <code>auto_complete_result</code> fornitoci dal plugin, passando come argomenti l&rsquo;array di modelli ed il nome della property da autocompletare.
+Questo metodo crea automaticamente per noi una lista HTML con i nomi delle categorie che fanno match col filtro immesso. Proviamo a vedere se ora funziona: visitiamo <code><a href="http://localhost:3000/categories.js">http://localhost:3000/categories.js</a></code>.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/77/original/E134I03.png" width="808" height="492" alt="La lista delle categorie senza filtro."/>
+</div>
+<p>La lista mostrata &egrave; priva di filtri: proviamo ad aggiungerne uno. Inseriamo in coda all&rsquo;URL il parametro in GET <code>?search=games</code> e vediamo che lista ci viene restituita:</p>
+<div class="imageWrapper">
+  <img src="/system/photos/77/original/E134I03.png" width="808" height="492" alt="La lista delle categorie filtrata."/>
+</div>
+<p>La lista viene correttamente filtrata, per cui abbiamo verificato che il lato server JavaScript funziona. Proviamo ora ad associare questa action al campo categoria per far mostrare la lista dinamica delle categorie:</p>
+<div class="imageWrapper">
+  <img src="/system/photos/77/original/E134I03.png" width="808" height="492" alt="Le modifiche alla vista per associare il campo categoria alla action JavaScript."/>
+</div>
+<p>Abbiamo aggiunto due hash di opzione al comando <code>text_field_with_auto_complete</code>: il primo contiene le opzioni proprie dell&rsquo;elemento HTML di input associato al campo, come ad esempio la <code>size</code>, mentre invece la seconda mappa di opzioni &egrave; relativa al Javascript di autocompletamento. In questa seconda mappa abbiamo specificato l&rsquo;URL che volevamo usare (<code>formatted_categories_path(:js)</code>) e il tipo di richiesta. In questo caso abbiamo indicato come metodo HTTP una <code>get</code>, dal momento che di default Rails userebbe una POST: non vogliamo infatti creare una nuova categoria, bens&igrave; recuperarne una.</p>
+
+
+<h3>Note</h3>
+<ol class="footnotes">
+  <li id="fn1">Se si &egrave; in un&rsquo;applicazione Rails 3, l&rsquo;installazione avviene invece con il comando:<br> 
+<code>rails plugin install git://github.com/rails/auto_complete.git</code>.</li>
+</ol>

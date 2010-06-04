@@ -1,0 +1,218 @@
+<p>Nell&rsquo;episodio 33 [ <a href="http://railscasts.com/episodes/33-making-a-plugin">guradalo</a>, <a href="http://it.asciicasts.com/episodes/33-fare-un-plugin">leggilo</a> ], abbiamo visto come fare un plugin per Rails. Una pi&ugrave; popoleare alternativa per estendere le funzionalit&agrave; di Rails &egrave; quella di creare un gem, ed &egrave; quanto vedremo in questo episodio.</p>
+<p>Poniamo di voler poter generare un token unico per un modello ActiveRecord. Dato un modello con una colonna <code>token</code>, per esempio il modello <code>Recipe</code> di sotto, vogliamo poter chiamare un metodo di classe chiamato <code>uniquify</code> che imposti una callback di <code>before_create</code> in modo tale che alla creazione di una nuova ricetta, automaticamente si generi un token casuale e sia garantita l&rsquo;unicit&agrave; di quel token sul database:</p>
+
+<pre class="ruby">
+class Recipe &lt; ActiveRecord::Base
+  uniquify :token
+end
+</pre>
+
+<h3>Creiamo un Gem</h3>
+<p>Ruby gems can be made from scratch, but this involves a lot of work. An easier way is to use another gem to help create ours. There are several of these including <a href="http://seattlerb.rubyforge.org/hoe/">hoe</a>, <a href="http://newgem.rubyforge.org">newgem</a>, <a href="http://github.com/TwP/bones/tree/master">bones</a>, <a href="http://github.com/dcrec1/gemhub/tree/master">gemhub</a> and <a href="http://github.com/fauna/echoe/tree/master">echoe</a>. Most of them provide generators that will create the necessary files so that all we have to do is fill in the details. For the purposes of this episode we&rsquo;re going to create the files manually and then use the echoe gem to package our gem.</p>
+
+<p>Before we start writing our gem we&rsquo;ll need to install echoe. This is installed in the same way as any other gem.</p>
+<pre class="terminal">
+sudo gem install echoe
+</pre>
+<p>That&rsquo;s all we need to enable us to begin writing our gem. We&rsquo;ll start by creating a directory for it which will contain another directory called <code>lib</code>.</p>
+<pre class="terminal">
+mkdir -p uniquify/lib
+</pre>
+<p>Our gem will contain three files. We&rsquo;ll use a README file (in rdoc format so that it renders correctly on GitHub) and we&rsquo;ll also need a Rakefile and finally the Ruby file that will have the actual code in it. We can create these with <code>touch</code>.</p>
+<pre class="terminal">
+cd uniquify
+touch README.rdoc Rakefile lib/uniquify.rb
+</pre>
+<p>We&rsquo;ll look at the Rakefile first. This is where we define our gem.</p>
+<pre class="ruby">
+require &#x27;rubygems&#x27;
+require &#x27;rake&#x27;
+require &#x27;echoe&#x27;
+
+Echoe.new(&#x27;uniquify&#x27;, &#x27;0.1.0&#x27;) do |p|
+  p.description     = &quot;Generate a unique token with ActiveRecord&quot;
+  p.url             = &quot;http://github.com/eifion/uniquify&quot;
+  p.author          = &quot;Eifion Bedford&quot;
+  p.email           = &quot;eifion@asciicasts.com&quot;
+  p.ignore_pattern  = [&quot;tmp/*&quot;, &quot;script/*&quot;]
+  p.development_dependencies = []
+end
+
+Dir[&quot;#{File.dirname(__FILE__)}/tasks/*.rake&quot;].sort.each { |ext| load ext }
+</pre>
+<p>In the Rakefile we&rsquo;re using echoe to define the gem, passing in a name and a version number. In echoe&rsquo;s block we define a number of parameters for the gem.  The <code>ignore_pattern</code> defines the patterns for the files we don&rsquo;t want included in the gem. We don&rsquo;t have <code>tmp</code> and <code>script</code> directories in our gem, but we&rsquo;ve included them as an example. We&rsquo;ve set the <code>development_dependencies</code> to an empty array as by default echoe includes itself as a development dependency. Normally this isn&rsquo;t a problem, but it can cause issues with older versions of RubyGems.</p> 
+<p>Finally we check in a <code>tasks</code> directory for any <code>.rake</code> files so that they can be loaded.</p>
+
+<h3>The Uniquify Code</h3>
+
+<p>We can now implement the gem&rsquo;s functionality.</p>
+<pre class="ruby">
+module Uniquify
+  def self.included(base)
+    base.extend ClassMethods
+  end
+
+  def ensure_unique(name)
+    begin
+      self[name] = yield
+    end while self.class.exists?(name =&gt; self[name])
+  end
+
+  module ClassMethods
+
+    def uniquify(*args, &amp;block)
+      options = { :length =&gt; 8, :chars =&gt; (&#x27;a&#x27;..&#x27;z&#x27;).to_a + (&#x27;A&#x27;..&#x27;Z&#x27;).to_a + (&#x27;0&#x27;..&#x27;9&#x27;).to_a }
+      options.merge!(args.pop) if args.last.kind_of? Hash
+      args.each do |name|
+        before_create do |record|
+          if block
+            record.ensure_unique(name, &amp;block)
+          else
+            record.ensure_unique(name) do
+              Array.new(options[:length]) { options[:chars].to_a[rand(options[:chars].to_a.size)] }.join
+            end
+          end
+        end
+      end
+    end
+
+  end
+end
+
+class ActiveRecord::Base
+  include Uniquify
+end
+</pre>
+<p>It&rsquo;s conventional to put a gem&rsquo;s code into a module with the same name as the gem, so we&rsquo;ve put ours into a module called <code>Uniquify</code>. When our gem is included into ActiveRecord it will add the <code>uniquify</code> method defined in the <code>ClassMethods</code> module. This method has a <code>before_create</code> callback which generates our unique token. Finally we include the <code>Uniquify</code> module in ActiveRecord.</p>
+
+<p>Now that the code&rsquo;s written we&rsquo;ll need some documentation, too. This belongs in the README.rdoc file we created earlier.</p>
+<pre class="terminal">
+= Uniquify
+
+Rails gem for generating a unique token in an Active Record model.
+
+(rest of file omitted).
+</pre>
+
+<p>That&rsquo;s all we need to create a Ruby gem. The only gem-specific part of the project is in the Rakefile, in the few lines of code related to echoe.</p>
+
+<h3>Testing</h3>
+
+<p>Now that we&rsquo;ve written our gem how do we go about testing and publishing it? The answer is to use various rake tasks. As we&rsquo;re using echoe the first task we want to run is <code>rake manifest</code>.</p>
+<pre class="terminal">
+$ rake manifest
+(in /Users/eifion/rails/uniquify)
+Cleaning
+Building Manifest
++ Manifest
++ README.rdoc
++ Rakefile
++ lib/uniquify.rb
+</pre>
+<p>This creates a Manifest file that stores a list of the files that will be in our gem. Next we can run <code>rake install</code> to install the gem on our local machine. Once it&rsquo;s installed it will appear in the list of gems on our machine like any other installed gem. We can then include it in a Rails application and test that it works as we expect.</p>
+<pre class="terminal">
+$ gem list uniquify
+
+*** LOCAL GEMS ***
+
+uniquify (0.1.0) 
+</pre>
+
+<h3>Publishing</h3>
+
+<p>Once we know that our gem is working correctly we can publish it, either to RubyForge or GitHub. There are a number of rake tasks that will help us with this. If we have a RubyForge account set up we can run</p>
+<pre class="terminal">
+rake release
+</pre>
+<p>to build the gem and upload it to RubyForge. We can then follow this with</p>
+<pre class="terminal">
+rake publish_docs
+</pre>
+<p>to build and upload the documentation.</p>
+
+<p>The steps are slightly different if we want to publish to GitHub. First we need to create a new Github repository.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/197/original/E135I01.png" width="866" height="693" alt="Creating a new repository on Github."/>
+</div>
+
+<p>Next we need to turn our gem&rsquo;s directory into a git repository, which we can do by running</p>
+<pre class="terminal">
+git init
+</pre>
+<p>There are some directories and files we don&rsquo;t want to upload so we&rsquo;ll create a <code>.gitignore</code> file to define these.  We want to ignore the <code>pkg</code> and <code>doc</code> directories and the Manifest file as these are generated by echoe, so our <code>.gitignore</code> file will look like this:</p>
+<pre class="terminal">
+pkg
+doc
+Manifest
+</pre>
+<p>We can now add our files to the repository and make our first commit.</p>
+<pre class="terminal">
+$ git add .
+$ git commit -m &quot;Initial import&quot;
+[master (root-commit) cbfe307] Initial import
+ 4 files changed, 57 insertions(+), 0 deletions(-)
+ create mode 100644 .gitignore
+ create mode 100644 README.rdoc
+ create mode 100644 Rakefile
+ create mode 100644 lib/uniquify.rb
+</pre>
+<p>That done we can add our remote repository and push the files to it.</p>
+<pre class="terminal">
+$ git remote add origin git@github.com:eifion/uniquify.git
+$ git push origin master
+</pre>
+<p>Our project is now on Github but there are a couple of things we need to do to turn our project into a gem. The first is to edit the project settings and click the RubyGem checkbox.</p>
+<div class="imageWrapper">
+  <img src="/system/photos/198/original/E135I02.png" width="827" height="606" alt="Marking our repository as a gem."/>
+</div>
+
+<p>We&rsquo;ll also need to create a gemspec file. As we&rsquo;re using echoe this is easy, we just need to run a rake task.</p>
+<pre class="terminal">
+$ rake build_gemspec
+(in /Users/eifion/rails/uniquify)
+Gemspec generated
+</pre>
+<p>Note that the <code>build_gemspec</code> task won&rsquo;t appear in the list of available tasks when you run <code>rake -T</code>, but it is a valid task. If we look in our directory now we&rsquo;ll see the gemspec file.</p>
+<pre class="terminal">
+$ ls
+Manifest        Rakefile        pkg
+README.rdoc     lib             uniquify.gemspec
+</pre>
+<p>To finish we&rsquo;ll need to upload the gemspec file to Github.</p>
+<pre class="terminal">
+$ git add .
+$ git commit -m &quot;Adding gemspec file&quot;
+[master edfcc2f] Adding gemspec file
+ 1 files changed, 30 insertions(+), 0 deletions(-)
+ create mode 100644 uniquify.gemspec
+$ git push
+Counting objects: 4, done.
+Delta compression using up to 2 threads.
+Compressing objects: 100% (3/3), done.
+Writing objects: 100% (3/3), 818 bytes, done.
+Total 3 (delta 1), reused 0 (delta 0)
+To git@github.com:eifion/uniquify.git
+   cbfe307..edfcc2f  master -&gt; master
+</pre> 
+<p>Our project is now considered a gem on Github and we just have to wait a short while for it to build the gem.</p>
+<p>That&rsquo;s pretty much all we need to do to create a basic gem. As we develop the gem we&rsquo;ll want to expand on this and add files as necessary. A good practice is to add a CHANGELOG file to keep track of the gem&rsquo;s changes as we release new versions.</p>
+<p>Releasing a new version of our gem is easy. All we need to do is change the version in our Rakefile then run</p>
+<pre class="terminal">
+rake manifest
+</pre>
+<p>followed by</p>
+<pre class="terminal">
+rake build_gemspec
+</pre>
+<p>We can then upload our new version to Github.</p>
+
+<h3>A Final Tip</h3>
+<p>We&rsquo;ll wrap this episode up with a tip. If we want our gem to work as a plugin too we can do that by adding an <code>init.rb</code> file. All we need to do in the file is require our gem, using the name of the file in the lib directory.</p>
+<pre class="terminal">
+require &#x27;uniquify&#x27;
+</pre>
+<p>This will load the file when it&rsquo;s inserted into a Rails project as a plugin. Once the file has been pushed to your repository we can run</p>
+<pre class="terminal">
+script/plugin install git://github.com/eifion/uniquify.git
+</pre>
+<p>to install Uniquify as a plugin instead of a gem.</p>

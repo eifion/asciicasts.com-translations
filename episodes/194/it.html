@@ -1,0 +1,295 @@
+<p><a href="http://www.mongodb.org/display/DOCS/Home">MongoDB</a> &egrave; un database basato su documenti che lavora in maniera diversa rispetto ai database relazionali tradizionali, tipo MySQL, in quanto &egrave; privo di schema. Questo episodio tratter&agrave; l&rsquo;introduzione dell&rsquo;uso di MongoDB con il gem <a href="http://mongomapper.com">MongoMapper</a> per creare una semplice applicazione Rails. Molti sviluppatori Rails hanno sentito parlare di MongoDB per la prima volta dopo la pubblicazione di un post da parte di John Nunemaker sul suo eccellente blog <a href="http://railstips.org/2009/12/18/why-i-think-mongo-is-to-databases-what-rails-was-to-frameworks">RailsTips</a>, in cui vengono mostrate sette funzionalit&agrave; di MongoMapper e MongoDB a confronto con i tradizionali database relazionali. Vale la pena leggerselo se pensate di poter essere interessati all&rsquo;uso di MongoDB.</p> 
+
+<p>Una delle funzionalit&agrave; menzionate nel blog ed una di quelle che rende interessante MongoDB &egrave; che non c&rsquo;&egrave; bisogno di usare le migrazioni dal momento che essenzialmente si tratta di un database privo di schema. Ogni riga &egrave; il proprio documento che pu&ograve; avere il proprio insieme di attributi differenti da altre righe nel database. Poich&egrave; non c&rsquo;&egrave; uno schema fisso, possiamo definirne uno al volo, se vogliamo.</p>
+
+<h3>Installare MongoDB e MongoWrapper</h3>
+
+<p>Per creare la nostra applicazione, prima dobbiamo installare MongoDB. I pacchetti di installazione per le varie piattaforme si possono trovare nella pagina di <a href="http://www.mongodb.org/display/DOCS/Downloads">download</a> del sito MongoDB. Se state usando OS X c&rsquo;&egrave; un <a href="http://www.shiftcommathree.com/articles/how-to-install-mongodb-on-os-x">grande articolo</a> su come installare e configurare MongoDB sul sito di Chris Kampmeier. Questo articolo include un pratico file <code>plist</code> che vi permetter&agrave; di creare un LaunchDemon in modo che MongoDB parta automaticamente all&rsquo;avvio. L&rsquo;articolo fa riferimento ad una vecchia versione di MongoDB, per cui assicuratevi di installare piuttosto l&rsquo;ultima versione (la 1.4.3 al momento della stesura dell&rsquo;episodio). Un volta installato e configurato MongoDB, potete visitare <a href="http://localhost:28017/">http://localhost:28017/</a> per vedere se funziona tutto come dovrebbe:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/275/original/E194I01.png" width="789" height="385" alt="Verifica del funzionamento di MongoDB."/>
+</div>
+
+<h3>Creazione di una applicazione Rails con MongoDB</h3>
+
+<p>Ora che abbiamo installato e funzionante MongoDB, possiamo iniziare a creare l&rsquo;applicazione Rails che lavorer&agrave; con tale database. Creiamo una nuova applicazione Rails da zero per questo episodio, chiamandola <code>todo</code>:</p>
+
+<pre class="terminal">
+rails todo
+</pre>
+
+<p>Useremo il gem MongoMapper per permettere alla nostra applicazione di interfacciarsi con MongoDB. Per fare questo, dobbiamo aggiungere la seguente linea nel blocco di config del file <code>/config/environment.rb</code>:</p>
+
+<p class="codeFilePath">/config/environment.rb</p>
+<pre class="ruby">
+config.gem &quot;mongo_mapper&quot;
+</pre>
+
+<p>Dobbiamo anche impostare alcune altre configurazioni che usando un file di inizializzazione. Nella cartella <code>/config/initializers</code> creiamo un nuovo file che chiameremo <code>mongo_config.rb</code>. In questo file dobbiamo solo aggiungere una linea per dire a MongoMapper quale database usare.</p> 
+
+<p class="codeFilePath">/config/initializers/mongo_config.rb</p>
+<pre class="ruby">
+MongoMapper.database = &quot;todo-#{Rails.env}&quot;
+</pre>
+
+<p>Passando l&rsquo;ambiente corrente come parte del nome del database, creiamo diversi database per i nostri tre ambienti di sviluppo, test e produzione. Se spostassimo in produzione questa applicazione dovremmo fare di pi&ugrave; per l&rsquo;autenticazione e robe simili, ma per lo scopo di questo episodio ci&ograve; che abbiamo &egrave; pi&ugrave; che sufficiente.</p>
+
+<p>Il passo finale dell&rsquo;impostazione della nostra applicazione &egrave; di lanciare il seguente comando per assicurarci che il gem di MongoMapper sia installato:</p>
+
+<pre class="terminal">
+sudo rake gems:install
+</pre>
+
+<h3>Costruiamo la nostra applicazione</h3>
+
+<p>Ora possiamo partire a costruire la nostra applicazione. Si tratta di una semplice applicazione di todo list che avr&agrave; un modello <code>Project</code> e in cui un <code>Project</code> avr&agrave; diversi Task. Per rendere pi&ugrave; semplice la scrittura dell&rsquo;applicazione, useremo i <a href="http://github.com/ryanb/nifty-generators">Nifty Generator</a> di Ryan Bates, anche se occorre notare che se ne potrebbe fare anche a meno.</p>
+
+<p>La prima cosa che facciamo &egrave; di creare un layout per la nostra applicazione:</p>
+
+<pre class="terminal">
+script/generate nifty_layout
+</pre>
+
+<p>Poi generiamo il modello <code>Project</code> e uno scaffold associato. <code>Project</code> avr&agrave; un solo campo, <code>name</code>, e dal momento che non stiamo generando un normale modello ActiveRecord, con uno schema associato, passiamo <code>--skip-migration</code> al comando del generatore, in modo che non siano generati i file di migrazione:</p>
+
+<pre class="terminal">
+script/generate nifty_scaffold project name:string --skip-migration
+</pre>
+
+<p>Questo comando generer&agrave; un file di modello, il controller e le viste per noi. Il modello <code>Project</code> generato sar&agrave; un ActiveRecord, per cui dovremo cambiarlo per far s&igrave; che lavori con MongoMapper:</p>
+
+<p class="codeFilePath">/app/models/project.rb</p>
+<pre class="ruby">
+class Project &lt; ActiveRecord::Base
+  attr_accessible :name
+end
+</pre>
+<p class="title">Il codice generato per il modello <code>Project</code>.</p>
+
+<p>Tutto ci&ograve; che dobbiamo fare qui e di rimuovere la discendenza da <code>ActiveRecord::Base</code> e includere <code>MongoMapper::Document</code>.</p>
+
+<p>Per definire gli attributi del modello usiamo un metodo <code>key</code>. Gli passiamo il nome dell&rsquo;attributo, in questo caso <code>:name</code>, e anche un tipo che dovrebbe corrispondere ad una classe Ruby. Per il nostro attributo <code>:name</code> sar&agrave; <code>String</code>. Il nostro modello ora appare cos&igrave;:</p>
+
+<p class="codeFilePath">/app/models/project.rb</p>
+<pre class="ruby">
+class Project
+  include MongoMapper::Document
+
+  key :name, String
+end
+</pre>
+
+<p>Con le modifiche fatte al modello possiamo ora lanciare la nostra applicazione e usarla per creare, aggiornare e mostrare un elenco dei progetti come faremmo in una normale applicazione basata su di un database relazionale e ActiveRecord, con la sola differenza che dietro le quinte ci sono invece MongoMapper e MongoDB.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/276/original/E194I02.png" width="801" height="347" alt="La creazione di un nuovo progetto."/>
+</div>
+
+<p>In termini di sue interfacce, MongoMapper lavora analogamente ad ActiveRecord. Possiamo eseguire delle find e delle create, update e destroy di record, esattamente come faremmo normalmente. Supporta perfino le validazioni allo stesso modo di ActiveRecord, per cui possiamo aggiungere:</p>
+
+<p class="codeFilePath">/app/models/project.rb</p>
+<pre class="ruby">
+validates_presence_of :name
+</pre>
+
+<p>al nostro modello Project e non potremo pi&ugrave; creare un nuovo progetto privo di nome. Con MongoMapper c&rsquo;&egrave; un modo migliore per aggiungere le validazioni, spostandole inline rispetto alla dichiarazione del campo. Per rendere l&rsquo;attributo name obbligatorio, ad esempio, potremmo aggiungere un <code>:required =&gt; true</code> ai parametri del metodo key:</p>
+
+<p class="codeFilePath">/app/models/project.rb</p>
+<pre class="ruby">
+class Project
+  include MongoMapper::Document
+
+  key :name, String, :required =&gt; true
+end
+</pre>
+<p class="title">Aggiunta della validazione al modello <code>Project</code>.</p>
+
+<h3>Aggiungiamo ulteriori attributi</h3>
+
+<p>Poich&egrave; MongoDB &egrave; un database privo di schema, possiamo modificare o aggiungere attributi in modo semplice in un modello, senza la necessit&agrave; di lanciare alcuna migrazione. Se volessimo aggiungere un attributo <code>priority</code> al nostro modello <code>Project</code>, potremmo farlo semplicemente dichiarandolo nel modello:</p>
+
+<p class="codeFilePath">/app/models/project.rb</p>
+<pre class="ruby">
+class Project
+  include MongoMapper::Document
+
+  key :name, String, :required =&gt; true
+  key :priority, Integer
+end
+</pre>
+
+<p>Possiamo interagire con questo nuovo attributo esattamente come faremmo con un normale attributo ActiveRecord. Per cui, nella form partial del  <code>Project</code>, possiamo aggiungere una tendina che ci permetta di scegliere una priorit&agrave; all&rsquo;atto della creazione o dell&rsquo;aggiornamento di un progetto:</p>
+
+<p class="codeFilePath">/app/views/projects/_form.html.erb</p>
+<pre class="ruby">
+&lt;% form_for @project do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :priority %&gt;&lt;br /&gt;
+    &lt;%= f.select :priority, [1,2,3,4,5] %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Poi possiamo cambiare la vista <code>show</code> per far mostrare la priorit&agrave; di un progetto:</p>
+
+<p class="codeFilePath">/app/views/projects/show.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;Project&quot; %&gt;
+&lt;p&gt;
+  &lt;strong&gt;Name:&lt;/strong&gt;
+  &lt;%=h @project.name %&gt;
+&lt;/p&gt;
+&lt;p&gt;
+  &lt;strong&gt;Priority:&lt;/strong&gt;
+  &lt;%=h @project.priority %&gt;
+&lt;/p&gt;
+&lt;p&gt;
+  &lt;%= link_to &quot;Edit&quot;, edit_project_path(@project) %&gt; |
+  &lt;%= link_to &quot;Destroy&quot;, @project, :confirm =&gt; &#x27;Are you sure?&#x27;, :method =&gt; :delete %&gt; |
+  &lt;%= link_to &quot;View All&quot;, projects_path %&gt;
+&lt;/p&gt;
+</pre>
+
+<p>Quando visitiamo la pagina di un nuovo progetto, ora vediamo la tendina di selezione della priorit&agrave; e quando creiamo effettivamente il progetto, la sua priorit&agrave; ci verr&agrave; mostrata.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/277/original/E194I03.png" width="800" height="398" alt="Il nostro nuovo progetto ha una priorit&agrave;"/>
+</div>
+
+<p>Poich&egrave; abbiamo creato un progetto prima di aggiungere il campo <code>priority</code>, potreste domandarvi quale priorit&agrave; venga assegnata a quest&rsquo;ultimo. Se controlliamo, vedremo che il campo in questione &egrave; vuoto. Dal momento che un valore per il campo priority di quel record non esiste sul database MongoDB, avr&agrave; un valore <code>nil</code>:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/278/original/E194I04.png" width="801" height="308" alt="Il primo progetto ha una priorit&agrave; non specificata."/>
+</div>
+
+<h3>Associazioni</h3>
+
+<p>Nella nostra applicazione di Todo, vorremmo anche avere un modello <code>Task</code>; ciascun progetto <code>Project</code> dovr&agrave; avere diversi <code>Task</code>. Generiamo lo scaffolding per questo nuovo modello come abbiamo fatto prima per il modello <code>Project</code>. Si noti che il <code>project_id</code> &egrave; una stringa, mentre di solito siamo abituati ad avere chiavi intere:</p>
+
+<pre class="terminal">
+script/generate nifty_scaffold task project_id:string name:string completed:boolean --skip-migration
+</pre>
+
+<p>Cos&igrave; come fatto per il modello <code>Project</code>, dobbiamo modificare la classe di modello per farla funzionare con MongoMapper, sostituendo le parti di codice specifiche di ActiveRecord:</p>
+
+<p class="codeFilePath">/app/models/Task.rb</p>
+<pre class="ruby">
+class Task
+  include MongoMapper::Document
+  
+  key :project_id, ObjectId
+  key :name, String
+  key :completed, Boolean
+  
+  belongs_to :project
+end
+</pre>
+
+<p>Di nuovo, abbiamo incluso <code>MongoMapper::Document</code>, rimosso la specializzazione di ActiveRecord::Base e usato il metodo <code>key</code> per definire gli attributi di modello. Vi sareste potuti aspettare che <code>project_id</code> fosse di tipo <code>Integer</code>, ma MongoDB usa <code>ObjectId</code> per memorizzare gli id.</p>
+
+<p>Definiamo la relazione del <code>Task</code> con Project come faremmo anche con ActiveRecord, usando il metodo <code>belongs_to</code>. Nel <code>Project</code> potreste aspettarvi di usare <code>has_many :tasks</code>, ma per MongoWrapper si usa in questo caso <code>many</code>:</p>
+
+<p class="codeFilePath">/app/models/project.rb</p>
+<pre class="ruby">
+class Project
+  include MongoMapper::Document
+
+  key :name, String, :required =&gt; true
+  key :priority, Integer
+  
+  many :tasks
+end
+</pre>
+
+<p>Ora possiamo lanciare l&rsquo;applicazione e usare il controller e le viste generati dallo scaffold per creare nuovi task. Inserire un id del progetto sul nuovo task sar&agrave; complicato, tuttavia, poich&egrave; lo scaffold ha generato un text box per il campo <code>project_id</code>. Tutto ci&ograve; a causa del fatto che lo abbiamo definito come campo di tipo stringa quando abbiamo creato lo scaffold. Modifichiamo la vista in modo che usi una tendina in grado di farci scegliere un progetto fra quelli gi&agrave; esistenti. Esattamente come avremmo fatto con una form ActiveRecord, possiamo usare la <code>collection_select</code> per creare una tendina che elenchi tutti i progetti:</p>
+
+<p class="codeFilePath">/app/views/tasks/_form.html.erb</p>
+<pre class="ruby">
+&lt;% form_for @task do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :project_id %&gt;&lt;br /&gt;
+    &lt;%= f.collection_select :project_id, Project.all, :id, :name %&gt;
+  &lt;/p&gt;
+  &lt;!-- Resto della form... --&gt;
+</pre>
+
+<p>Ora abbiamo un modo semplice per scegliere un progetto all&rsquo;atto della creazione di nuovi task.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/279/original/E194I05.png" width="801" height="433" alt="Utilizzo della collection_select per creare una tendina come avremmo fatto anche con ActiveRecord."/>
+</div>
+
+<p>Dopoe che abbiamo creato un nuovo task, saremo riportati alla pagina di quel task che ci mostrer&agrave; l&rsquo;id del progetto a cui quel task &egrave; stato associato. Sarebbe meglio se potessimo mostrare il nome del progetto, piuttosto. Lo possiamo fare sostituendo  <code>@task.project_id</code> nella vista show del task con <code>@task.project.name</code>:</p>
+
+<p class="codeFilePath">/app/views/tasks/show.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;Task&quot; %&gt;
+
+&lt;p&gt;
+  &lt;strong&gt;Project:&lt;/strong&gt;
+  &lt;%=h @task.project.name %&gt;
+&lt;/p&gt;
+&lt;!-- Resto della form --&gt;
+</pre>
+
+<p>La form ora mostrer&agrave; il nome del progetto associato al task, proprio come se fosse una form basata su ActiveRecord:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/280/original/E194I06.png" width="801" height="350" alt="Possiamo vedere gli attributi del modello associato proprio come in ActiveRecord."/>
+</div>
+
+<h3>Find in MongoDB</h3>
+
+<p>Concludiamo l&rsquo;episodio mostrandovi un po&rsquo; di tecniche per il recupero mediante find di modelli Mongo da console. In un certo senso si comporta in modo molto simile ad ActiveRecord. Per esempio, possiamo recuperare tutti i progetti con <code>Project.all</code>:</p>
+
+<pre class="terminal">
+&gt;&gt; Project.all
+=&gt; [#&lt;Project name: &quot;Yardwork&quot;, _id: 4b39d8c9a175750357000001, priority: nil&gt;, #&lt;Project name: &quot;Housework&quot;, _id: 4b39fbd1a175750357000002, priority: 3&gt;]
+</pre>
+
+<p>Possiamo anche recuparare un progetto per <code>id</code>&hellip;</p>
+
+<pre class="terminal">
+&gt;&gt; Project.find(&#x27;4b39d8c9a175750357000001&#x27;)
+=&gt; #&lt;Project name: &quot;Yardwork&quot;, _id: 4b39d8c9a175750357000001, priority: nil&gt;
+</pre>
+
+<p>&hellip;o fornire delle options al metodo all per recuperare i record un determinato ordine:</p>
+<pre class="terminal">
+&gt;&gt; Project.all(:order =&gt; &quot;name DESC&quot;)
+=&gt; [#&lt;Project name: &quot;Yardwork&quot;, _id: 4b39d8c9a175750357000001, priority: nil&gt;, #&lt;Project name: &quot;Housework&quot;, _id: 4b39fbd1a175750357000002, priority: 3&gt;]
+</pre>
+
+<p>Come con ActiveRecord, possiamo passare delle condizioni al <code>find</code>. In questo si distingue da ActiveRecord, in quanto le condizioni sono passate inline, per cui, ad esempio, troveremmo tutti i progetti con priorit&agrave; pari a 3 con:</p>
+
+<pre class="terminal">
+&gt;&gt; Project.all(:priority =&gt; 3)
+=&gt; [#&lt;Project name: &quot;Housework&quot;, _id: 4b39fbd1a175750357000002, priority: 3&gt;]
+</pre>
+
+<p>Che succede con condizioni pi&ugrave; complesse? Poich&egrave; Mongo non si fonda su SQL, non possiamo semplicemente passare una stringa SQL nelle condizioni. Per&ograve; ha il proprio linguaggio per la creazione di condizioni pi&ugrave; complesse. MongoMapper fornisce un metodo comodo per superare questa cosa, fornendo un metodo per ogni simbolo. Per esempio, per ottenere tutti i progetti cha hanno una priorit&agrave; di due o pi&ugrave;, possiamo scrivere:</p>
+
+<pre class="terminal">
+&gt;&gt; Project.all(:priority.gte =&gt; 2)
+=&gt; [#&lt;Project name: &quot;Housework&quot;, _id: 4b39fbd1a175750357000002, priority: 3&gt;]
+</pre>
+
+<p>Possiamo anche usare la <code>in</code>, passandogli un array di valori da recuperare. Ad esempio, per ottenere i progetti con priorit&agrave; pari a 2 o 3:</p>
+
+<pre class="terminal">
+&gt;&gt; Project.all(:priority.in =&gt; [2,3])
+=&gt; [#&lt;Project name: &quot;Housework&quot;, _id: 4b39fbd1a175750357000002, priority: 3&gt;]
+</pre>
+
+<p>Per ora la documentazione &egrave; un po&rsquo; sparsa fra le condizioni di find, ma potrete scoprire di pi&ugrave; in merito leggendo l&rsquo;appropriato <a href="http://github.com/jnunemaker/mongomapper/blob/1831798fe3b8b2aea398435a4b1ea6f29f1a63c5/test/test_finder_options.rb">file di test su Github</a>.</p>
+
+<p>Questo &egrave, tutto per questo episodio. Abbiamo solo trattato le basi di MongoDB e MongoMapper, per cui siete invitati ad approfondire autonomamente se volete saperne di pi&ugrave;. Esiste una <a href="http://groups.google.com/group/mongodb-user">mailing list</a> a cui potete unirvi e potete anche <a href="http://twitter.com/mongodb">seguire MongoDB su Twitter</a>.</p>
+
+<p>La vera domanda che dovete porvi &egrave; se dobbiate preferire MongoDB ad un database relazionale tradizionale. Spetta solo a voi decidere se pensiate che MongoDB e MongoWrapper siano adatti al vostro progetto Rails, ma siete incoraggiati comunque a provare un po&rsquo; MongoDB per vedere se potrebbe essere un buon candidato per i vostri progetti. Alla lunga, pare che i database documentali giocheranno un grosso ruolo nella costruzione di applicazioni Rails.</p>

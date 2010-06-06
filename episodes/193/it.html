@@ -1,0 +1,136 @@
+<p>Una delle domande pi&ugrave; frequenti che mi vengono poste &egrave; come creare una form in un&rsquo;applicazione Rails senza che ci sia necessariamente una tabella sul database relativa al modello. Daremo risposta a questa domanda proprio in questo episodio e per farlo, useremo l&rsquo;applicazione di blogging che abbiamo usato in un paio di episodi precedenti.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/271/original/E193I01.png" width="815" height="400" alt="La nostra applicazione blog."/>
+</div>
+
+<p>Ci&ograve; che vogliamo fare &egrave; aggiungere un collegamento &ldquo;Share this article&rdquo; su ogni pagina di articolo. Questo link porter&agrave; l&rsquo;utente in una form su cui si potranno inserire le informazioni per poter inviare l&rsquo;articolo via email. Non vogliamo mantenere queste informazioni, ma usarle solo per inviare in quel momento l&rsquo;email. Quindi, come creiamo una form e un modello privi di corrispondente tabella sul database?</p>
+
+<p>L&rsquo;approccio che seguiremo sar&agrave; quello di creare un normale modello con una tabella di database associata e poi eseguire le modifiche all&rsquo;applicazione per rimuovere la tabella. Cominciamo generando uno scaffold, usando il <a href="http://github.com/ryanb/nifty-generators">nifty scaffold generator</a> di Ryan Bates.</p>
+
+<p>Dobbiamo creare un nuovo modello dal momento che vogliamo fare il submit di una form e creare una nuova risorsa. Chiamiamo il nuovo modello Recommendation, dal momento che inviando dei dettagli di un articolo via email a qualcuno, stiamo fornendo una sorta di suggerimento a quel qualcuno. Il modello  Recommendation avr&agrave; i campi necessari a contenere l&rsquo;email del mittente e quella del destinatario, l&rsquo;id dell&rsquo;articolo che si sta suggerendo e un campo di testo per un messaggio. Il controller relativo dovr&agrave; avere le action new e create. Possiamo generare lo scaffold con:</p>
+
+<pre class="terminal">
+script/generate nifty_scaffold recommendation from_email:string to_email:string article_id:integer message:text new create
+</pre>
+
+<p>Poi dobbiamo migrare il database per creare la tabella, anche se in realt&agrave; alla fine non vorremo pi&ugrave; avere questa tabella (faremo il rollback di questa migrazione pi&ugrave; tardi):</p>
+
+<pre class="terminal">
+rake db:migrate
+</pre>
+
+<p>Ora che abbiamo il modello e un controller, creiamo un link alla action <code>new</code> nel <code>RecommendationController</code>, passandogli l&rsquo;<code>id</code> dell&rsquo;articolo che verr&agrave; suggerito:</p>
+
+<pre class="terminal">
+&lt;p&gt;
+  &lt;%= link_to &quot;Share this article&quot;, new_recommendation_path(:article_id =&gt; @article.id) %&gt;
+  &lt;%= link_to &quot;Back to Articles&quot;, articles_path %&gt;
+&lt;/p&gt;
+</pre>
+<p class="title">L&rsquo;aggiunta del link di suggerimento a <code>/app/views/articles/show.html.erb</code></p>
+
+<p>Si noti che c&rsquo;&egrave; bisogno di passare l&rsquo;id dell&rsquo;articolo dal link al nuovo  <code>Recommendation</code> in modo che non si perda il riferimento.</p>
+
+<p>Adesso spostiamoci sulla vista generata dallo scaffold e cambiamola per rimuovere il campo <code>article_id</code> e la sua etichetta e sostituiamola con un campo nascosto che mantenga l&rsquo;<code>article_id</code>:</p>
+
+<pre class="ruby">
+&lt;% title &quot;New Recommendation&quot; %&gt;
+&lt;% form_for @recommendation do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= f.hidden_field :article_id %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :from_email %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :from_email %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :to_email %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :to_email %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :message %&gt;&lt;br /&gt;
+    &lt;%= f.text_area :message %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+&lt;p&gt;&lt;%= link_to &quot;Back to List&quot;, recommendations_path %&gt;&lt;/p&gt;
+</pre>
+<p class="title">Modifiche alla <code>/app/views/recommendations/new.html.erb</code></p> 
+
+<p>Quando ricarichiamo la pagina dell&rsquo;articolo ora, sar&agrave; visibile il link &ldquo;Share this article&rdquo; e quando gli clicchiamo sopra, vedremo la nuova form:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/272/original/E193I02.png" width="800" height="478" alt="La nuova form di invio consiglio."/>
+</div>
+
+<p>Se riempissimo la form e la inviassimo creeremmo un nuovo record nella tabella recommendations sul database, ma noi non vogliamo tutto ci&ograve;. Vorremmo solamente inviare l&rsquo;email e basta. Nelle applicazioni Rails l&rsquo;action <code>create</code> &egrave; tipicamente usata per salvare un nuovo modello sul database, ma non c&rsquo;&egrave; nulla che ci costringa a farlo. Potremmo piuttosto verificare solamente che i dati sul nuovo modello <code>Recommendation</code> siano validi:</p>
+
+<pre class="ruby">
+def create
+  @recommendation = Recommendation.new(params[:recommendation])
+  if @recommendation.valid?
+    flash[:notice] = &quot;Successfully created recommendation.&quot;
+    redirect_to @recommendation
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end
+</pre>
+
+<p>Ora possiamo fare il roll-back dell&rsquo;ultima migrazione per eliminare la tabella recommendations e vedere se la nostra form funziona ugualmente senza di essa. Rimuoviamo anche il file di migrazione:</p>
+
+<pre class="terminal">
+rm db/migrate/*_recommendations.rb
+</pre>
+
+<p>Senza la tabella sul database otteniamo un errore al ricaricamento della form. L&rsquo; applicazione si lamenta, guardacaso, perch&egrave; non trova la tabella recommendations. Questo dipende dal fatto che ActiveRecord assume che ogni modello abbia una tabella associata.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/273/original/E193I03.png" width="800" height="478" alt="L&rsquo;eccezione sollevata dopo che abbiamo rimosso la tabella."/>
+</div>
+
+<p>Dunque, come possiamo fare per creare un modello che non abbia una tabella associata sul database?Ci sono diverse soluzioni potenziali, incluso l&rsquo;utilizzo di vari plugin, ma noi seguiremo il metodo descritto in un <a href="http://codetunes.com/2008/07/20/tableless-models-in-rails/">post del blog Code Tunes</a>. Quest&rsquo;ultimo mostra una tecnica che prevede la ridefinizione di un paio di metodi in un modello ActiveRecord e la definizione manuale delle colonne nel file del modello, piuttosto che nella tabella del database. Nel nostro modello <code>Recommendation</code> ridefiniamo dunque i due metodi e poi usiamo il metodo di classe <code>column</code> per definire le colonne in un modo simile a come sono definite in un file di migrazione:</p>
+
+<pre class="ruby">
+class Recommendation &lt; ActiveRecord::Base
+  def self.columns() @columns ||= []; end
+ 
+  def self.column(name, sql_type = nil, default = nil, null = true)
+    columns &lt;&lt; ActiveRecord::ConnectionAdapters::Column.new(name.to_s, default, sql_type.to_s, null)
+  end
+  
+  column :from_email, :string
+  column :to_email, :string
+  column :article_id, :string
+  column :message, :text  
+end
+</pre>
+<p class="title">Definizione delle colonne nel <code>/app/models/recommendation.rb</code></p>
+
+<p>Al ricaricamento della pagina di nuovo suggerimento, ora vediamo nuovamente la form anzich&egrave; l&rsquo;errore, ma le colonne ora sono definite direttamente nella classe del modello anzich&egrave; essere recuperate dalla corrispettiva tabella sul database.</p>
+
+<p>Potreste domandarvi perch&egrave; la classe <code>Recommendation</code> erediti ancora da <code>ActiveRecord::Base</code>, dal momento che non stiamo usando pi&ugrave; il database per questo modello. We could quite easily create a model class that isn&rsquo;t based on ActiveRecord and have it work as Rails is quite decoupled from ActiveRecord, but there are advantages to keeping our model class inheriting from ActiveRecord. For one thing it means we can use its other features such as validations. We can then validate the format of the email addresses and the length of the message using ActiveRecord validations in the model.</p>
+
+<pre class="ruby">
+validates_format_of :from_email, :to_email, :with =&gt; /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+validates_length_of :message, :maximum =&gt; 500
+</pre>
+<p class="title">Aggiunta delle validazioni a <code>/app/models/recommendation.rb</code></p>
+
+<p>With these validations added we&rsquo;ll see the same Rails error messages we&rsquo;d see if we had a normal database-backed model if we submit the form with invalid email addresses.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/274/original/E193I04.png" width="797" height="364" alt="The validation errors are shown when the email addresses are invalid."/>
+</div>
+
+<p>Another reason to keep our tableless model inheriting from ActiveRecord is that we can still make use of associations. <code>Recommendation</code> has an <code>article_id</code> as one of its fields and so we can still use</p>
+<pre class="ruby">
+belongs_to :article
+</pre>
+<p>in the model so that we can still fetch the related <code>Article</code> object whenever we need it.</p>
+
+<p>We now have an ActiveRecord model that behaves much like any other but which doesn&rsquo;t rely on a database backend as its columns are defined manually in Ruby. If we do accidentally call a method that hits the database and requires a database table we&rsquo;ll see the same exception raised that we saw earlier saying that the table doesn&rsquo;t exist and can work around it.</p>
+
+<p>The one part of the application that remains to be done is the code that sends an email when the recommendation form has been fillled in correctly. We won&rsquo;t write that now as its out of the scope of this episode but if you want to know how it&rsquo;s done take a look at <a href="http://railscasts.com/episodes/61-sending-email">episode 61</a> which covers this topic.</p>
+
+<p>While being able to create tableless models is a useful technique you should ask yourself whether you really don&rsquo;t want to store records in the database. It&rsquo;s so easy to store user-submitted data like this in a database table that there has to be a good reason not to do so even if you don&rsquo;t have any immediate use for it. If nothing else it serves as a backup if our emailing system fails.</p>

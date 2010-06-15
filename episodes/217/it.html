@@ -1,0 +1,557 @@
+<p>Una form multistep, anche nota come wizard, &egrave; una form molto grande suddivisa in pi&ugrave; pagine in sequenza che l&rsquo;utente pu&ograve; navigare per completare l&rsquo;inserimento dei dati. Non tutti amano questo tipo di approccio, alcuni preferiscono far vedere un&rsquo;unica immensa form suddividendo piuttosto i dati fra pi&ugrave; risorse e modelli. Esistono in ogni modo alcuni casi in cui il wizard rappresenta il miglior approccio, per esempio il caso di un sito per la dichiarazione dei redditi online, che richiede molti dati all&rsquo;utente e che prevede molte ramificazioni a seconda dei dati immessi e che perci&ograve; rende sensato l&rsquo;utilizzo di una form multistep.</p>
+
+<p>Una form multistep ben fatta ricorda i dati inseriti fra i vari passi, permettendo agli utenti di andare avanti e indietro fra le pagine senza perdere nessuna delle informazioni inserite. Se il vostro obiettivo &egrave; semplicemente quello di suddividere una form grande per renderla pi&ugrave; semplice agli occhi dell&rsquo;utente, potreste considerare anche il solo utilizzo di JavaScript e CSS per mostrare e nascondere le varie parti della form quando vengono premuti i pulsanti &ldquo;previous&rdquo; e &ldquo;next&rdquo;. Un <a href="http://developer.apple.com/internet/webcontent/examples/wizard.html">esempio di questo approccio</a> lo si pu&ograve; ritrovare nell&rsquo;Apple&rsquo;s developer site. Se avete bisogno di qualcosa di pi&ugrave; e orientato al lato server, allora dovrete passare necessariamente da Rails stesso e in questo episodio vi mostreremo come farlo.</p>
+
+<h3>Una form multistep di ordine</h3>
+
+<p>Per spiegare come comporre una form multistep, aggiungeremo un processo di checkout all&rsquo;applicazione negozio online. Gli utenti dovranno per prima cosa inserire le loro informazioni di spedizione e poi quelle relative al pagamento ed infine, al terzo passo, dovranno vedere un riassunto del loro ordine in cui potranno dare conferma definitiva dei dati e dell&rsquo;ordine stesso.</p>
+
+<p>Non abbiamo ancora un modello per l&rsquo;ordine e nemmeno un controller, per cui usiamo uno dei <a href="http://github.com/ryanb/nifty-generators">nifty generator</a> di Ryan Bates per creare uno scaffold per la form degli ordini. Si noti come, essendo questa applicazione gi&agrave; stata scritta con Rails 2, si debba usare il comando <code>script/generate</code>. Un modello di ordine vero e proprio dovrebbe avere molti attibuti, ma per i nostri scopi semplifichiamo, dandogliene solamente due. Creiamo anche le action <code>index</code>, <code>show</code> e <code>new</code> per il controller:</p>
+
+<pre class="terminal">
+$ script/generate nifty_scaffold order shipping_name:string billing_name:string index show new
+</pre>
+
+<p>Poi dobbiamo migrare il database per creare le nuove tabelle sul database:</p>
+
+<pre class="terminal">
+$ rake db:migrate
+</pre>
+
+<p>La form dell&rsquo;ordine, cos&igrave; come &egrave; stata generata dallo scaffold, ha tutti i campi insiemesu un unica pagina, per cui la prima cosa che dobbiamo fare &egrave; suddividere l&rsquo;inserimento dei dati su pi&ugrave; passaggi:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/391/original/E217I01.png" width="800" height="387" alt="La form di inserimento di un nuovo ordine generata dallo scaffold."/>
+</div>
+
+<p>Il codice per la form del nuovo ordine ha tutti i campi riuniti insieme. Per cominciare a realizzare il nostro wizard, spostiamo ciascuno dei tre elementi paragrafo e i campi della form che questi racchiudono in partial distinti:</p>
+
+<p class="codeFilePath">/app/views/orders/new.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;New Order&quot; %&gt;
+
+&lt;% form_for @order do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :shipping_name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :shipping_name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :billing_name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :billing_name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;Back to List&quot;, orders_path %&gt;&lt;/p&gt;
+</pre>
+
+<p>Prima di fare ci&ograve;, tuttavia, aggiungiamo un&rsquo;intestazione a ciascuna sezione e modifichiamo la sezione finale in modo tale che mostri un riassunto dell&rsquo;ordine:</p>
+
+<p class="codeFilePath">/app/views/orders/new.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;New Order&quot; %&gt;
+
+&lt;% form_for @order do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;h2&gt;Shipping Information&lt;/h2&gt;
+  &lt;p&gt;
+    &lt;%= f.label :shipping_name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :shipping_name %&gt;
+  &lt;/p&gt;
+  &lt;h2&gt;Billing Information&lt;/h2&gt;
+  &lt;p&gt;
+    &lt;%= f.label :billing_name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :billing_name %&gt;
+  &lt;/p&gt;
+  &lt;h2&gt;Confirm Information&lt;/h2&gt;
+  &lt;p&gt;
+    &lt;strong&gt;Shipping Name:&lt;/strong&gt;
+    &lt;%= h @order.shipping_name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;strong&gt;Billing Name:&lt;/strong&gt;
+    &lt;%= h @order.billing_name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;Back to List&quot;, orders_path %&gt;&lt;/p&gt;
+</pre>
+
+<p>Una volta fatto questo, possiamo spostare ogni sezione in un proprio partial. Creiamo tre nuovi partial chiamati <code>shipping_step</code>, <code>billing_step</code> e <code>confirmation_step</code> e copiamo le rispettive parti della form all&rsquo;interno di essi. Dopo aver fatto ci&ograve;, la nostra form di nuovi ordini dovrebbe apparire cos&igrave;:</p>
+
+<p class="codeFilePath">/app/views/orders/new.html.erb</p>
+<pre class="terminal">
+&lt;% title &quot;New Order&quot; %&gt;
+
+&lt;% form_for @order do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= render &#x27;shipping_step&#x27;, :f =&gt; f %&gt;
+  &lt;%= render &#x27;billing_step&#x27;, :f =&gt; f %&gt;
+  &lt;%= render &#x27;confirmation_step&#x27;, :f =&gt; f %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;Back to List&quot;, orders_path %&gt;&lt;/p&gt;
+</pre>
+
+<p>e i tre partial dovrebbero essere cos&igrave; fatti:</p>
+
+<p class="codeFilePath">/app/views/orders/_billing_step.html.erb</p>
+<pre class="ruby">
+&lt;h2&gt;Billing Information&lt;/h2&gt;
+&lt;p&gt;
+  &lt;%= f.label :billing_name %&gt;&lt;br /&gt;
+  &lt;%= f.text_field :billing_name %&gt;
+&lt;/p&gt;
+</pre>
+
+<p class="codeFilePath">/app/views/orders/_shipping_step.html.erb</p>
+<pre class="ruby">
+&lt;h2&gt;Shipping Information&lt;/h2&gt;
+&lt;p&gt;
+  &lt;%= f.label :shipping_name %&gt;&lt;br /&gt;
+  &lt;%= f.text_field :shipping_name %&gt;
+&lt;/p&gt;
+</pre>
+
+<p class="codeFilePath">/app/views/orders/confirmation_step.html.erb</p>
+<pre class="ruby">
+&lt;h2&gt;Confirm Information&lt;/h2&gt;
+&lt;p&gt;
+  &lt;strong&gt;Shipping Name:&lt;/strong&gt;
+  &lt;%= h @order.shipping_name %&gt;
+&lt;/p&gt;
+&lt;p&gt;
+  &lt;strong&gt;Billing Name:&lt;/strong&gt;
+  &lt;%= h @order.billing_name %&gt;
+&lt;/p&gt;
+</pre>
+
+<p>Dobbiamo modificare anche la classe di modello <code>Order</code> in modo tale che sia consapevole dell&rsquo;esistenza dei tre passaggi e possa riconoscere quale fra questi sia il corrente. Potremmo usare il plugin state machine per questo scopo, ma dal momento che questo esempio &egrave; piuttosto semplice, scriveremo il codice da zero.</p>
+
+<p>Il modello <code>Order</code> dovr&agrave; sapere quali sono i vari passi e l&rsquo;ordine in cui si devono susseguire, per cui scriviamo un nuovo metodo <code>steps</code> per restituire una lista di passi. La nostra lista sar&agrave; un semplice array, ma per form pi&ugrave; complesse questo metodo pu&ograve; facilmente essere reso pi&ugrave; dinamico e gestire i casi in cui la lista di passi dipenda dallo storico delle scelte gi&agrave; fatte nei passi precedenti.</p>
+
+<p>Per ottenere ed impostare il passo corrente per un ordine, creiamo un writer chiamato <code>current_step</code> e un metodo accessor corrispondente che restituir&agrave; il passo corrente nel caso in cui sia stato impostato, o altrimenti il primo passo. Fatte queste modifiche, il modello <code>Order</code> dovrebbe apparire cos&igrave;:</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+class Order &lt; ActiveRecord::Base
+  attr_accessible :shipping_name, :billing_name
+  attr_writer :current_step
+  
+  def current_step
+    @current_step || steps.first
+  end
+  
+  def steps
+    %w[shipping billing confirmation]
+  end
+end
+</pre>
+
+<p>Ora che il modello <code>Order</code> a che passo corrisponde il passo corrente, possiamo usare questa informazione per cambiare dinamicamente il partial da renderizzare, modificando leggermente la form del nuovo ordine, in modo che mostri solo il passo corrente:</p>
+
+<p class="codeFilePath">/app/views/orders/new.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;New Order&quot; %&gt;
+
+&lt;% form_for @order do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= render &quot;#{@order.current_step}_step&quot;, :f =&gt; f %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;Back to List&quot;, orders_path %&gt;&lt;/p&gt;
+</pre>
+
+<p>Al ricaricamento della pagina con la form del nuovo ordine, ora vedremo mostrata solo la sezione relativa al primo passaggio:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/392/original/E217I02.png" width="800" height="373" alt="La form del nuovo ordine mostra ora solo il primo passo."/>
+</div>
+
+<h3>Muoversi fra i vari passi</h3>
+
+<p>Se clicchiamo il pulsante di submit sulla form, verr&agrave; chiamata la action <code>create</code> sul controller e verr&agrave; creato un nuovo ordine, ma questo non &egrave; ci&ograve; che vogliamo che accada. Vorremmo piuttosto che venisse mostrata la pagina col passo successivo al corrente: modifichiamo dunque la action sul controller per riflettere il comportamento desiderato.</p>
+
+<p>Ci sono una serie di modi per approcciarsi al problema specifico. Potremmo creare una action separata per ogni passo; potremmo usare semplicemente la action <code>create</code> per il passo iniziale e le action <code>edit</code> e <code>update</code> per gli altri passi, che vorrebbe dire che abbiamo un modello parzialmente completato sul database, oppure potremmo rimanere nelle action <code>new</code> e <code>create</code> e salvare i dettagli inseriti fino ad ora in sessione. Ci sono una serie di caveat a quest&rsquo;utlimo approccio che verranno citati di volta in volta man mano che emergeranno, mostrandone le alternative.</p>
+
+<p>La cosa pi&ugrave; semplice che possiamo fare &egrave; modificare la action <code>create</code>. Il primo passo che faremo sar&agrave; cambiarla in modo tale che non salvi l&rsquo;ordine, ma che piuttosto mostri il prossimo passo della form.</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def create
+  @order = Order.new(params[:order])
+  @order.next_step
+  render &#x27;new&#x27;
+end
+</pre>
+
+<p>Sul controller, come si vede, chiamiamo il metodo <code>next_step</code> della classe <code>Order</code> che abbiamo scritto nella classe di modello:</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+def next_step
+  self.current_step = steps[steps.index(current_step)+1]
+end
+</pre>
+
+<p>Ora verremo portati dalla maschera del primo passo a quella del secondo al click del pulsante di submit sulla form, ma al successivo click rimarremo sul secondo passo. Ciograve; a causa del fatto che non stiamo salvando lo stato relativo al passo corrente quando facciamo il submit della form. Nell&rsquo;action <code>create</code> dobbiamo impostare il passo corrente sul modello <code>Order</code> e poi salvare tale valore. Possiamo fare tutto questo recuperando il passo corrente dalla sessione, muovendoci al passo successivo e poi salvando quest&rsquo;ultimo nuovo passo in sessione:</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def create
+  @order = Order.new(params[:order])
+  @order.current_step = session[:order_step]
+  @order.next_step
+  session[:order_step] = @order.current_step
+  render &#x27;new&#x27;
+end
+</pre>
+
+<p>Se proviamo ora la form, si potr&agrave; navigare in avanti da una pagina alla successiva come volevamo, ma si ritorna nuovamente alla prima pagina al submit dell&rsquo;ultima. Quest&rsquo;ultima cosa non riflette esattamente ci&ograve; che avevamo in mente per l&rsquo;ultimo passo, ma sistemeremo la cosa pi&ugrave; tardi.</p>
+
+<p>Prima per&ograve;, implementiamo il modo per tornare indietro nei passi precedenti. Al momento la form ci permette di spostarci in avanti, ma non possiamo tornare indietro e fare delle modifiche ai campi che abbiamo gi&agrave; compilato. Aggiungiamo un altro pulsante alla form per fare questo:</p>
+
+<p class="codeFilePath">/app/views/orders/new.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;New Order&quot; %&gt;
+
+&lt;% form_for @order do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= render &quot;#{@order.current_step}_step&quot;, :f =&gt; f %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Continue&quot; %&gt;&lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Back&quot;, :name =&gt; &quot;previous_button&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;Back to List&quot;, orders_path %&gt;&lt;/p&gt;
+</pre>
+
+<p>Si noti che abbiamo dato al pulsate "Back" un attributo denominato <code>name</code>, in modo tale che si possa capire quale pulsante &egrave; stato utilizzato per fare il submit della form. Ora possiamo cambiare il controller per farlo andare coerentemente, a seconda di quale pulsante &egrave; stato premuto:</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def create
+  @order = Order.new(params[:order])
+  @order.current_step = session[:order_step]
+  if params[:back_button]
+    @order.previous_step
+  else
+    @order.next_step
+  end
+  session[:order_step] = @order.current_step
+  render &#x27;new&#x27;
+end
+</pre>
+
+<p>Affinch&egrave; tutto questo funzioni, dobbiamo aggiungere un metodo <code>previous_step</code> alla classe di modello <code>Order</code> che sia simile al metodo <code>next_step</code> scritto poco fa:</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+def previous_step
+  self.current_step = steps[steps.index(current_step)-1]
+end
+</pre>
+
+<p>Ora ci sono entrambi i pulsanti nella form per permettere di spostarsi avanti e indietro fra i vari passi del wizard:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/393/original/E217I03.png" width="800" height="410" alt="La form ora ha i pulsanti per spostarsi avanti e indietro."/>
+</div>
+
+<p>Non ha senso tuttavia che ci sia un pulsante per andare indietro anche sulla prima pagina, per cui imponiamo che venga nascosto se l&rsquo;ordine &egrave; al primo passo:</p>
+
+<p class="codeFilePath">/app/views/orders/new.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;New Order&quot; %&gt;
+
+&lt;% form_for @order do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= render &quot;#{@order.current_step}_step&quot;, :f =&gt; f %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Continue&quot; %&gt;&lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Back&quot;, :name =&gt; &quot;previous_button&quot; unless @order.first_step? %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;Back to List&quot;, orders_path %&gt;&lt;/p&gt;
+</pre>
+
+<p>e ovviamente aggiungiamo il metodo <code>first_step?</code> che viene riferito nel partial alla classe di modello <code>Order</code>:</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+def first_step?
+  current_step == steps.first
+end
+</pre>
+
+<p>Quando ricarichiamo la form ora, non vedremo il pulsante per andare indietro sulla prima pagina:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/394/original/E217I04.png" width="800" height="375" alt="Il primo passo non ha pi&ugrave; il pulsante 'Back'"/>
+</div>
+
+<h3>Fare in modo che i campi ricordino i propri valori</h3>
+
+<p>Ora possiamo andare indietro e avanti fra le pagine della form, ma se inseriamo un valore in uno dei campi, questo non viene ricordato se si ritorna su tale passo pi&ugrave; tardi. Possiamo risolvere questo problema usando nuovamente la sessione. Sebbene non sia raccomandabile memorizzare oggetti complessi in variabili di sessione, per oggetti semplici come hash o array pu&ograve; andare.</p> 
+
+<p>Il primo passo per fare ci&ograve; &egrave; creare una nuova variabile di sessione nella action <code>new</code> chiamata <code>order_params</code> e impostarne il valore ad un hash vuoto a meno che non abbia gi&agrave; un valore:</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def new
+  session[:order_params] ||= {}
+  @order = Order.new
+end
+</pre>
+
+<p>Nell&rsquo;action <code>create</code> raggruppiamo i valori dei parametri dell&rsquo;ordine con i valori della variabile di sessione. Si noti che usiamo una deep merge nel caso ci siano valori innestati fra i parametri dell&rsquo;ordine mentre faremo un semplice merge se esistono parametri di ordine. Possiamo creare un nuovo oggetto <code>Order</code> da questo hash di merge:</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def create
+  session[:order_params].deep_merge!(params[:order]) if params[:order]
+  @order = Order.new(session[:order_params])
+  @order.current_step = session[:order_step]
+  if params[:back_button]
+    @order.previous_step
+  else
+    @order.next_step
+  end
+  session[:order_step] = @order.current_step
+  render &#x27;new&#x27;
+end
+</pre>
+
+<p>Ora, al riempimento dei dati in form, vedremo i valori immessi nel passo finale, dato che sono stati salvati fra i vari passi:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/395/original/E217I05.png" width="804" height="419" alt="Il passo conclusivo della form che mostra le informazioni salvate."/>
+</div>
+
+<p>C&rsquo;&egrave; ancora un piccolo problema, comunque. Se ci spostiamo dalla form mentre &egrave; solo parzialmente compilata e subito dopo ritorniamo indietro, le informazioni inserite ed il passo sono persi. Possiamo risolvere questa cosa copiando le due linee che recuperano le informazioni sull&rsquo;ordine e sul passo corrente dalla variabile di sessione che abbiamo scritto per la action create nella action new:</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def new
+  session[:order_params] ||= {}
+  @order = Order.new(session[:order_params])
+  @order.current_step = session[:order_step]
+end
+</pre>
+
+<p>Sistemato questo codice, ora possiamo ritornare alla form ed ogni dato inserito sar&agrave; ancora l&agrave;. Non solo, ma saremo anche ricondotti all&rsquo;ultimo passo in cui eravamo arrivati.</p>
+
+<h3>Salvataggio di un ordine</h3>
+
+<p>Ora renderemo completamente funzionante la form, consentendole di salvare l&rsquo;ordine al termine dell&rsquo;ultimo passo. Possiamo fare ci&ograve;, cambiando il controller in modo tale che salvi l&rsquo;ordine solo se il passo corrente &egrave; l&rsquo;ultimo e se il pulsante premuto per il submit non &egrave; quello per ritornare alla pagina precedente. Dobbiamo anche cambiare il comportamento del rendering in modo che se l&rsquo;ordine viene correttamente salvato, l&rsquo;applicazione alla action show per tale ordine e mostri un messaggio flash:</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+class OrdersController &lt; ApplicationController
+  def index
+    @orders = Order.all
+  end
+  
+  def show
+    @order = Order.find(params[:id])
+  end
+  
+  def new
+    session[:order_params] ||= {}
+    @order = Order.new(session[:order_params])
+    @order.current_step = session[:order_step]
+  end
+  
+  def create
+    session[:order_params].deep_merge!(params[:order]) if params[:order]
+    @order = Order.new(session[:order_params])
+    @order.current_step = session[:order_step]
+    if params[:back_button]
+      @order.previous_step
+    elsif @order.last_step?
+      @order.save
+    else
+      @order.next_step
+    end
+    session[:order_step] = @order.current_step
+    
+    if @order.new_record?
+      render &#x27;new&#x27;
+    else
+      flash[:notice] = &quot;Order saved.&quot;
+      redirect_to @order
+    end
+  end
+end
+</pre>
+
+<p>Per fare funzionare il tutto, dobbiamo anche aggiungere il metodo <code>last_step</code> al modello <code>Order</code>:</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+def last_step?
+  current_step == steps.last
+end
+</pre>
+
+<p>Quando andiamo nella form di inserimento di un nuovo ordine, ora, e compiliamo tutte le informazioni per tutti i passi e salviamo, l&rsquo;ordine verr&agrave; salvato e saremo ridiretti alla pagina di dettaglio di tale ordine:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/396/original/E217I06.png" width="801" height="343" alt="L&rsquo;ordine &egrave; stato salvato."/>
+</div>
+
+<p>Non abbiamo ancora finito, per&ograve;. Se proviamo a creare un nuovo ordine, la form andr&agrave; direttamente all&rsquo;ultimo passo e vedremo il dettaglio dell&rsquo;ordine precedente. Dobbiamo cambiare nuovamente il controller in modo tale che le informazioni dell&rsquo;ordine siano cancellate dalla sessione una volta che l&rsquo;ordine &egrave; stato salvato correttamente. Possiamo fare ci&ograve; svuotando le informazioni di sessione una volta salvato l&rsquo;ordine, impostando entrambe le variabili di sessione, <code>order_step</code> e <code>order_params</code>, a <code>nil</code>:</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def create
+  session[:order_params].deep_merge!(params[:order]) if params[:order]
+  @order = Order.new(session[:order_params])
+  @order.current_step = session[:order_step]
+  if params[:back_button]
+    @order.previous_step
+  elsif @order.last_step?
+    @order.save
+  else
+    @order.next_step
+  end
+  session[:order_step] = @order.current_step
+    
+  if @order.new_record?
+    render &#x27;new&#x27;
+  else
+    session[:order_step] = session[:order_params] = nil
+    flash[:notice] = &quot;Order saved.&quot;
+    redirect_to @order
+  end
+end
+</pre>
+
+<h3>Aggiungere la validazione</h3>
+
+<p>L&rsquo;ultima cosa che trattiamo &egrave; come gestire le validazioni nella form. Imponiamo una validazione per il modello <code>Order</code> per gli attributi <code>shipping_name</code> e <code>billing_name</code>:</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+validates_presence_of :shipping_name
+validates_presence_of :billing_name
+</pre>
+
+<p>Vorremmo che l&rsquo;errore di validazione comparisse solo nel passo opportuno. Aggiungiamo, per questa ragione, una condizione <code>if</code> ai validatori:</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+validates_presence_of :shipping_name, :if =&gt; lambda { |o| o.current_step == &quot;shipping&quot; }
+validates_presence_of :billing_name, :if =&gt; lambda { |o| o.current_step == &quot;billing&quot; }
+</pre>  
+
+<p>Vogliamo che la form transiti al passo successivo (o precedente) se l&rsquo;ordine &egrave; valido, per cui dobbiamo cambiare di nuovo la action <code>create</code> sul controller in modo che controlli che l&rsquo;ordine sia valido. Per fare ci&ograve;, racchiudiamo il codice che cambia il passo e salva il record in un blocco <code>if</code>:</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def create
+  session[:order_params].deep_merge!(params[:order]) if params[:order]
+  @order = Order.new(session[:order_params])
+  @order.current_step = session[:order_step]
+  if @order.valid?
+    if params[:back_button]
+      @order.previous_step
+    elsif @order.last_step?
+      @order.save
+    else
+      @order.next_step
+    end
+    session[:order_step] = @order.current_step
+  end
+  if @order.new_record?
+    render &#x27;new&#x27;
+  else
+    session[:order_step] = session[:order_params] = nil
+    flash[:notice] = &quot;Order saved.&quot;
+    redirect_to @order
+  end
+end
+</pre>
+
+<p>Se proviamo ora a creare un nuovo ordine e proviamo a fare il submit, nel primo passo vedremo l&rsquo;errore di validazione per il campo shipping, ma non per il billing:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/397/original/E217I07.png" width="800" height="500" alt="Viene mostrato solo l&rsquo;errore per il passo shipping."/>
+</div>
+
+<p>Analogamente, se andiamo avanti fino al passo della fatturazione e proviamo a lasciare il campo vuoto e a fare il submit, vedremo solo l&rsquo;errore per tale passo:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/398/original/E217I08.png" width="800" height="536" alt="Analogamente a prima, nel passo di fatturazione viene mostrato il solo errore per il campo billing non compilato."/>
+</div>
+
+<p>Possiamo ripulire un po&rsquo; la validazione, spostando le espressioni lambda nei metodi denominati <code>shipping?</code> e <code>billing?</code>, cos&igrave;:</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+class Order &lt; ActiveRecord::Base
+  attr_accessible :shipping_name, :billing_name
+  attr_writer :current_step
+
+  validates_presence_of :shipping_name, :if =&gt; :shipping?
+  validates_presence_of :billing_name, :if =&gt; :billing?
+
+  # other methods omittted.
+    
+  def shipping?
+    current_step == &quot;shipping&quot;
+  end
+  
+  def billing?
+    current_step == &quot;billing&quot;
+  end
+end
+</pre>
+
+<p>E&rsquo;anche utile avere un metodo che validi tutti i passi in un colpo solo. Per fare ci&ograve;, possiamo scrivere un metodo <code>all_valid?</code> che iteri su ogni passo e controlli che sia valido:</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+def all_valid?
+  steps.all? do |step|
+    self.current_step = step
+    valid?
+  end
+end
+</pre>
+
+<p>In questo modo, se mai facessimo delle modifiche alle validazioni o al modo in cui funzionano i passi, potremmo essere tranquilli del fatto che nessun passo &egrave; stato invalidato nel processo. Possiamo usare questo nuovo metodo nel controller per assicurarci che l&rsquo;ordine sia salvato solo se tutti i passi sono validi:</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def create
+  session[:order_params].deep_merge!(params[:order]) if params[:order]
+  @order = Order.new(session[:order_params])
+  @order.current_step = session[:order_step]
+  if @order.valid?
+    if params[:back_button]
+      @order.previous_step
+    elsif @order.last_step?
+      @order.save if @order.all_valid?
+    else
+      @order.next_step
+    end
+    session[:order_step] = @order.current_step
+  end
+  if @order.new_record?
+    render &#x27;new&#x27;
+  else
+    session[:order_step] = session[:order_params] = nil
+    flash[:notice] = &quot;Order saved.&quot;
+    redirect_to @order
+  end
+end
+</pre>
+
+<p>L&rsquo;aspetto pratico del metodo <code>all_valid?</code> &egrave; che cambia il passo su cui si trova in modo che se uno dei passi non &egrave; valido, quello diventi anche il passo corrente, in modo tale che all&rsquo;utente sia mostrato il primo passo non valido.</p>
+
+<p>E&rsquo; tutto per questo episodio sulle form multipasso. Una cosa da tenere a mente &egrave; che stiamo salvando i parametri dell&rsquo;ordine in sessione, il che significa che se un utente apre pi&ugrave; finestre o tab del browser, le stesse informazioni saranno condivise fra tali finestre. Se si vuole che pi&ugrave; tab o finestre di un medesimo browser siano trattati in modo indipendente, allora potreste voler salvare i parametri dell&rsquo;ordine sul database e salvare prima il modello dell&rsquo;ordine, usando la action update per salvare le informazioni aggiuntive provenienti dai vari passi. In alternativa, i parametri potrebbero essere salvati in campi nascosti della form.</p>
+
+<p>Infine, un rapido sguardo alla action create evidenzia che &egrave; diventata pi&ugrave; corposa e complessa di quello che dovrebbe essere. Anche se per gli scopi della lezione questo pu&ograve; anche andare, se questa tecnica fosse applicata in produzione, necessiterebbe di un po&rsquo; di ulteriore refactoring di pulizia.</p>

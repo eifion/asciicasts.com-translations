@@ -1,32 +1,37 @@
-<p>A few episodes ago <a href="http://asciicasts.com/episodes/188-declarative-authorization">we covered Declarive Authorization</a>. While it is an excellent authorization plugin for Rails it can be a little heavy for simpler sites. After writing the <a href="http://railscasts.com/episodes/188-declarative-authorization">Railscast on Declarative Authorization</a> Ryan Bates looked for an alternative solution and, failing to find one that suited his needs, decided to write his own, <a href="http://github.com/ryanb/cancan">CanCan</a>. CanCan is a simple authorization plugin and Ryan has tried to keep everything as simple as he could when writing it. Let&rsquo;s dive in and take a look at it.</p>
+<p>Un po' di episodi fa <a href="http://asciicasts.com/episodes/188-declarative-authorization">abbiamo trattato Declarive Authorization</a>. Anche se si tratta di un ottimo plugin per l&rsquo;autorizzazione in applicazioni Rails, potrebbe rivelarsi un po&rsquo; troppo pesante per i siti pi&ugrave, semplici. Dopo avere scritto il <a href="http://railscasts.com/episodes/188-declarative-authorization">Railscast su Declarative Authorization</a>, Ryan Bates ha cercato una soluzione alternativa per lo stesso problema e, non trovandone una che soddisfasse le sue aspettative, ha deciso di scriverne una per conto suo, <a href="http://github.com/ryanb/cancan">CanCan</a>. CanCan &egrave; un semplice plugin per l&rsquo;autorizzazione in cui Ryan ha cercato di mantenere ogni cosa il pi&ugrave; semplice possibile mentre la scriveva. Diamogli un&rsquo;occhiata.</p>
 
-<p>In this episode we&rsquo;ll be working with the same basic blog application that we used in the Declarative Authorization episode. The application has a number of articles, each of which belongs to a user and each article can have many comments associated with it.</p>
-
-<div class="imageWrapper">
-  <img src="/system/photos/264/original/E192I01.png" width="815" height="606" alt="The article page in our application."/>
-</div>
-
-<p>Notice in the screenshot above that although there is no logged-in user the links to edit and destroy articles and comments are visible. We want to use authorization to restrict access to what each user can do. We already have authentication in our application so that users can sign up and log in and we&rsquo;ve used Authlogic to do this, although any authentication solution will work.</p>
-
-<p>On the sign-in page we have a number of checkboxes to allow a user to select the roles they want to be a member of. An admin will be allowed to do everything; a moderator can edit anyone&rsquo;s comments and an author can create articles and update the articles they have written. Users who don&rsquo;t belong to any role can create comments and update those comments.</p>
+<p>In questo episodio lavoreremo con la solita semplice applicazione di blogging usata anche nell&rsquo;episodio relativo a Declarative Authorization. L&rsquo;applicazione ha una serie di articoli, ciascuno dei quali appartiene ad un utente e ciascun articolo pu&ograve; avere molti commenti associati ad esso.</p>
 
 <div class="imageWrapper">
-  <img src="/system/photos/265/original/E192I02.png" width="800" height="510" alt="The signup page showing the roles checkboxes."/>
+  <img src="/system/photos/264/original/E192I01.png" width="815" height="606" alt="La pagina dell&rsquo;articolo nella nostra applicazione."/>
 </div>
 
-<h3>Installing CanCan</h3>
+<p>Nello screenshot di sopra si noti che, anche se non c&rsquo;&egrave; alcun utente autenticato, i link alla modifica e alla cancellazione degli articoli e dei commenti sono visibili. Vogliamo usare l&rsquo;autorizzazione per gestire ci&ograve; che ciascun utente ha il diritto di compiere sul sito. Abbiamo gi&agrave; un meccanismo di autenticazione nella nostra applicazione, che permette agli utenti di registrarsi e accedere al sito ed abbiamo a suo tempo usato Authlogic per realizzare queste logiche, anche se alla fine una qualunque soluzione per l&rsquo;autenticazione andrebbe bene.</p>
 
-<p>CanCan is supplied as a gem. To add it to our application we need to add the following line in the <code>Rails::Initializer.run</code> block of our <code>/config/environment.rb</code> file.</p>
+<p>Nella pagina di registrazione, abbiamo una serie di checkbox per permettere ad un utente di scegliere il ruolo al quale questi vogliono essere associati. Ad un amministratore sar&agrave; permesso tutto, ad un moderatore la sola modifica dei commenti di chiunque e ad un autore la creazione di articoli e l&rsquo;aggiornamento dei proprio. Gli utenti che non appartengono ad alcun ruolo possono solamente creare nuovi commenti e modificare quelli scritti da loro:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/265/original/E192I02.png" width="800" height="510" alt="La pagina di registrazione che mostra i checkbox dei ruoli."/>
+</div>
+
+<h3>Installazione di CanCan</h3>
+
+<p>CanCan &egrave; distribuito come gem. Per aggiungerlo alla nostra applicazione dobbiamo aggiungere la seguente linea nel blocco <code>Rails::Initializer.run</code> del nostro file <code>/config/environment.rb</code>:</p>
+
 <pre class="ruby">
 config.gem &quot;cancan&quot;
 </pre>
-<p>We can then make sure that the gem is installed by running</p>
+
+<p>Possiamo assicurarci che il gem sia installato, lanciando:</p>
+
 <pre class="terminal">sudo rake gems:install</pre>
-<p>If you installed an earlier version of CanCan you&rsquo;ll need to make sure that you&rsquo;ve upgraded to the latest version as there are some features that are only available since version 1.0.0.</p> 
 
-<h3>Using CanCan</h3>
+<p>Se avete gi&agrave; installato CanCan in precedenza, dovete sincerarvi di essere aggiornati all&rsquo;ultima versione, dal momento che ci sono alcune nuove funzionalit&agrave; disponibili solo a partire dalla versione 1.0.0.</p> 
 
-<p>To use CanCan we need to create a new class called <code>Ability</code>, which we&rsquo;ll place in our <code>/app/models</code> directory. The class needs to include the <code>CanCan::Ability</code> module and also an <code>initialize</code> method that takes a user object as a parameter and it&rsquo;s in this method that we&rsquo;ll define the abilities for each type of user.</p>
+<h3>Utilizzo di CanCan</h3>
+
+<p>Per usare CanCan dobbiamo creare una nuova classe chiamata <code>Ability</code>, che metteremo nella cartella <code>/app/models</code>. La classe deve includere il module <code>CanCan::Ability</code> oltre che un metodo <code>initialize</code> che prende un oggetto user come parametro. E&rsquo; proprio in questo metodo che definiamo i diritti per ogni tipo di utente:</p>
+
 <pre class="ruby">
 class Ability
   include CanCan::Ability
@@ -36,7 +41,9 @@ class Ability
   end
 end
 </pre>
-<p>The abilities are defined with the three-letter method can which is at the heart of CanCan. This method takes two parameters: the first is the action that we want to perform and the second is the model class that the action applies to. Alternatively, to apply an action to all models we can pass <code>:all</code>. If we want all users to just be able to read all models we can do this:</p>
+
+<p>I diritti sono definiti attraverso il metodo a tre lettere che &egrave; il cuore di CanCan. Questo metodo accetta due parametri: il primo &egrave; la action che vogliamo eseguire ed il secondo &egrave; la classe di modello a cui si applica la action. In alternativa, per applicare una action a tutti i modelli, possiamo passare <code>:all</code>. Se vogliamo che tutti gli utenti possano solamente leggere tutti i modelli, possiamo scrivere questo:</p>
+
 <pre class="ruby">
 class Ability
   include CanCan::Ability
@@ -46,6 +53,7 @@ class Ability
   end
 end
 </pre>
+
 <p>As our authorization stands no one can edit or delete articles or comments but there are still links to the <code>edit</code> and <code>destroy</code> actions on each article&rsquo;s page. In the view code for the article&rsquo;s <code>show</code> action we can use <code>can?</code> (note the question mark) to determine whether the current user is authorized to perform the action that each link links to. While the <code>can</code> method defines the abilities, <code>can?</code> is a boolean method that determines whether the current user has that ability. Like <code>can</code>, <code>can?</code> takes two parameters, an action and a model, in this case an <code>Article</code>. We&rsquo;ll use <code>can?</code> in the  show view so that the edit and destroy links are hidden unless the current user has the appropriate ability. To do this  we&rsquo;ll wrap the articles links in <code>if</code> statements so that they&rsquo;re only shown if the current user can perform the appropriate action on an article.</p>
 <pre class="ruby">
 &lt;p&gt;

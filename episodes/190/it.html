@@ -1,0 +1,173 @@
+<p>Nell&rsquo;episodio 173 [<a href="http://railscasts.com/episodes/173-screen-scraping-with-scrapi">guardalo</a>, <a href="http://asciicasts.com/episodes/173-screen-scraping-with-scrapi">leggilo</a>] abbiamo trattato lo screen-scraping con la libreria ScrAPI. Lo screen-scraping &egrave; un argomento piuttosto popolare ed esistono svariati plugin e gem che ne rendono semplice la pratica, per cui in questo episodio riprenderemo l&rsquo;argomento, ma questa volta usando strumenti diversi. Finito di leggere questo episodio, vi invito a rileggere e confrontare l&rsquo;altro per capire meglio le differenze fra i due approcci e scegliere quello che preferite.</p>
+<p>Come abbiamo fatto la volta scorsa, partiamo da una applicazione che ha una lista di prodotti privi di prezzo: vogliamo recuperare i prezzi per tali prodotti da un altro sito, in questo caso <a href="http://www.walmart.com/">walmart.com</a>.</p>
+
+<div class="imageWrapper">
+    <img src="/system/photos/252/original/E190I01.png" width="808" height="342" alt="La lista di prodotti sul nostro sito."/>
+</div>
+
+<p>Se cerchiamo un prodotto sul sito di Walmart, veniamo ricondotti ad una pagina che mostra una lista di prodotti corrispondenti al criterio di ricerca immesso, insieme ai loro prezzi. Possiamo utilizzare questa pagina per recuperare i prezzi che ci servono per il nostro sito.</p>
+
+<div class="imageWrapper">
+    <img src="/system/photos/253/original/E190I02.png" width="797" height="523" alt="La pagina dei risultati per la ricerca con chiave &ldquo;Batman&rdquo;."/>
+    <p class="title">La pagina dei risultati per la ricerca con chiave &ldquo;Batman&rdquo;</p>
+</div>
+
+<p>Come gi&agrave; detto nello scorso episodio sullo screen-scraping, &egrave; molto importante assicurarsi di avere i diritti per estrarre i dati dal sito che intendete usare. Alcuni siti proibiscono esplicitamente tecniche simili nei loro confronti, per cui dovete sempre controllare che possiate prendere delle informazioni da un sito prima di farlo. Se il sito fornisce dei feeds RSS oppure una API che gi&agrave; consente il recupero di informazioni da esso, in tal caso &egrave; sempre meglio passare da tali canali per ottenere le stesse informazioni. Siccome nessuna di queste soluzioni alternative e preferibili &egrave; disponibile sul sito di Walmart, dobbiamo ricorrere allo screen-scraping.</p>
+
+<h3>Installare Nokogiri</h3>
+<p>La volta scorsa abbiamo utilizzato una libreria chiamata ScrAPI per avere un supporto all&rsquo;estrazione dei dati da altri siti. Questa volta useremo <a href="http://nokogiri.org">Nokogiri</a>, che &egrave; in grado di interpretare documenti HTML e XML ed estrarre dei contenuti da essi. Nokogiri &egrave; veloce e l&rsquo;interfaccia &egrave; diversa da quella di ScrAPI, in quanto lavora pi&ugrave; a basso livello e direttamente sul documento HTML, anzich&egrave; mascherare tutto con un DSL.</p>
+<p>Se state scrivendo la vostra applicazione Rails su di un Mac con Snow Leopard, l&rsquo;installazione di Nokogiri dovrebbe essere rapida quanto lanciare:</p>
+
+<pre class="terminal">
+sudo gem install nokogiri
+</pre>
+
+<p>Se state invece usando una versione meno recente di OS X o addirittura un sistema operativo differente, allora probabilmente dovrete installare prima di tutto manualmente la libreria <code>libxml2</code> e poi indicare la sua posizione all&rsquo;installazione del gem Nokogiri. Per esempio, se avete installato libxml2 sotto <code>/usr/local</code>, allora il comando per l&rsquo;installazione di Nokogiri dovrebbe essere:</p>
+
+<pre class="terminal">
+sudo gem install nokogiri -- --with-xml2-include=/usr/local/include/libxml2 --with-xml2-lib=/usr/local/lib
+</pre>
+
+<p>Se avete bisogno di ulteriore supporto all&rsquo;installazione di Nokogiri, potete dare un&rsquo;occhiata al <a href="http://nokogiri.org/tutorials/installing_nokogiri.html">tutorial di installazione</a>, dove ci sono istruzioni dettagliate sulla installazione per OS X, Linux e Windows.</p>
+
+<h3>Cominciamo a lavorare con Nokogiri</h3>
+<p>Ora che abbiamo installato Nokogiri, possiamo cominciare ad usarlo. Nokogiri &egrave; in grado di sfruttare sia i selettori XPath, sia quelli CSS3, il che lo rende particolarmente adatto ad estrarre dati da pagine HTML.</p>
+<p>Cominceremo a provare Nokogiri con uno script Ruby prima di portarlo all&rsquo;interno della nostra applicazione Rails. Usando l&rsquo;URL dei risultati della ricerca per la parola chiave &ldquo;Batman&rdquo; sul sito di Walmart, proviamo ad estrarre il titolo della pagina.</p>
+
+<pre class="ruby">
+require &#x27;rubygems&#x27;
+require &#x27;nokogiri&#x27;
+require &#x27;open-uri&#x27;
+
+url = &quot;http://www.walmart.com/search/search-ng.do?search_constraint=0&amp;ic=48_0&amp;search_query=Batman&amp;Find.x=0&amp;Find.y=0&amp;Find=Find&quot;
+doc = Nokogiri::HTML(open(url))
+puts doc.at_css(&quot;title&quot;).text
+</pre>
+
+<p>Oltre al gem <code>nokogiri</code>, abbiamo bisogno di <code>open-uri</code>, affinch&egrave; ci sia possibile estrarre i contenuti da un URL facilmente. Poi creiamo un nuovo documento HTML Nokogiri, passandogli i contenuti della pagina coi risultati della ricerca. Su questo documento Nokogiri possiamo invocare il metodo <code>at_css</code>, passandogli il selettore CSS <code>&quot;title&quot;</code> per recuperare i contenuti dell&rsquo;elemento <code>&lt;title&gt;</code>. Il metodo <code>at_css</code> restituir&agrave; il primo elemento che fa match col selettore, sul quale potremo invocare il metodo <code>.text</code> per estrarne il contenuto testuale. Infine usiamo <code>puts</code> per stampare a console il testo cos&igrave; recuperato.</p>
+<p>Lanciando lo script, dovremmo vedere il contenuto del titolo della pagina:</p>
+
+<pre class="terminal">
+Search results for Batman - Walmart
+</pre>
+
+<p>Proviamo ora qualcosa di pi&ugrave; complicato: recuperare il nome e il prezzo di ogni prodotto dalla pagina dei risultati della ricerca. La prima cosa da decidere &egrave; il selettore CSS che faccia match con le parti significative della pagina. Nello scorso episodio sullo screen-scraping abbiamo usato un plugin di Firefox per farlo, ma questa volta utilizzeremo un bookmarklet chiamato <a href="http://www.selectorgadget.com">SelectorGadget</a>. Per usarlo, &egrave; sufficiente trascinare il link dalla home page del sito dentro alla barra dei segnalibri del nostro browser. Essendo un bookmarklet, quindi semplice JavaScript, SelectorGadget funzioner&agrave; sia su Safari, sia su Firefox.</p>
+<p>Dunque, ritornando alla pagina dei risultati della ricerca, vogliamo trovare il selettore CSS che faccia match con il titolo di ciascun elemento. Se clicchiamo sul primo titolo presente nella pagina, verr&agrave; mostrato il selettore che fa match con tale elemento. Se facciamo lo scroll della pagina, ogni altro elemento che fa match col selettore verr&agrave; mostrato. Il selettore che abbiamo ora, <code>.prodLink</code>, fa match con ciascun titolo nella pagina, che &egrave; esattamente ci&ograve; che ci aspettiamo, per cui abbiamo gi&agrave; trovato quello che cercavamo.</p>
+
+<div class="imageWrapper">
+    <img src="/system/photos/254/original/E190I03.png" width="796" height="550" alt="Utilizzo di SelectorGadget per recuperare il selettore CSS per i titoli."/>
+</div>
+
+<p>Ora proviamo a cercare un selettore che faccia match con i prezzi di ogni prodotto . Questo &egrave; un po&rsquo; meno semplice. Se scegliamo uno dei prezzi in cima alla pagina, notiamo come non tutti gli elementi di prezzo verranno selezionati. Scegliendo uno fra i prezzi non selezionati, tutti i prezzi saranno selezionati, ma non solo quelli. Cliccando sugli elementi che non vogliamo per deselezionarli, alla fine ci rimangono proprio solo i prezzi e possiamo quindi copiare  il selettore identificato per noi da SelectorGadget, che &egrave; <code>.PriceXLBold, .PriceCompare .BodyS</code>.</p>
+
+<div class="imageWrapper">
+    <img src="/system/photos/255/original/E190I04.png" width="796" height="548" alt="Il recupero del selettore per i prezzi."/>
+</div>
+
+<p>L&rsquo;ultimo selettore che ci manca &egrave; quello che fa match con ciascun elemento nella lista. Se clicchiamo sul primo, ci viene dato un selettore che fa match solo con lui. Una volta che scegliamo il secondo elemento, otteniamo un selettore, <code>.item</code>, che fa match con tutti gli elementi della pagina.</p>
+<p>Ora che abbiamo i selettori CSS di cui avevamo bisogno, possiamo usarli nel nostro script per estrarre le informazioni dalla pagina. Modifichiamo dunque lo script in questo modo:</p>
+
+<pre class="ruby">
+require &#x27;rubygems&#x27;
+require &#x27;nokogiri&#x27;
+require &#x27;open-uri&#x27;
+
+url = &quot;http://www.walmart.com/search/search-ng.do?search_constraint=0&amp;ic=48_0&amp;search_query=Batman&amp;Find.x=0&amp;Find.y=0&amp;Find=Find&quot;
+doc = Nokogiri::HTML(open(url))
+doc.css(&quot;.item&quot;).each do |item|
+  puts item.at_css(&quot;.prodLink&quot;).text
+end
+</pre>
+
+<p>Quello che stiamo facendo ora &egrave; di usare il selettore <code>.item</code> per iterare fra ciascun elemento ed estrarne il titolo col selettore <code>.prodLink</code>. Se lanciamo lo script nuovamente, vedremo elencati i titoli di ogni elemento:</p>
+
+<pre class="ruby">
+$ ruby test.rb
+Batman
+Batman: No Man&#x27;s Land
+Batman: No Man&#x27;s Land - Vol 03
+Batman: No Man&#x27;s Land - Vol 02
+Fisher-Price Batman Lights and Sounds Trike
+Batman: Arkham Asylum (PS3)
+LEGO Batman (DS)
+LEGO Batman (Wii)
+DC Universe Batman / Superman / Catwoman / Lex Luthor / Two-Face Figures
+Batman Begins (Blu-ray) (Widescreen)
+LEGO Batman (Xbox 360)
+</pre>
+
+<p>Naturalmente, vogliamo anche il prezzo di ciascun elemento, per cui dobbiamo modificare di nuovo il nostro script:</p>
+
+<pre class="ruby">
+require &#x27;rubygems&#x27;
+require &#x27;nokogiri&#x27;
+require &#x27;open-uri&#x27;
+
+url = &quot;http://www.walmart.com/search/search-ng.do?search_constraint=0&amp;ic=48_0&amp;search_query=Batman&amp;Find.x=0&amp;Find.y=0&amp;Find=Find&quot;
+doc = Nokogiri::HTML(open(url))
+doc.css(&quot;.item&quot;).each do |item|
+  text = item.at_css(&quot;.prodLink&quot;).text
+  price = item.at_css(&quot;.PriceXLBold, .PriceCompare .BodyS&quot;).text[/\$[0-9\.]+/]
+  puts &quot;#{text} - #{price}&quot;
+end
+</pre>
+
+<p>Otteniamo il titolo come prima, poi usiamo il selettore CSS che ci fornisce SelectorGadget per recuperare il prezzo di ciascun prodotto. L&rsquo;elemento che contiene il prezzo ha anche un po&rsquo; di testo al suo interno, per esempio &ldquo;Our price: $6.99&rdquo; per cui dobbiamo usare un&rsquo;espressione regolare che faccia match col simbolo del dollaro e con ciascun numero o punto decimale dopo tale simbolo. Lanciando lo script nuovamente, vedremo il titolo ed il prezzo di ciascun elemento presente in pagina:</p>
+
+<pre class="ruby">
+$ ruby test.rb
+Batman - $6.86
+Batman: No Man&#x27;s Land - $11.50
+Batman: No Man&#x27;s Land - Vol 03 - $11.50
+Batman: No Man&#x27;s Land - Vol 02 - $9.50
+Fisher-Price Batman Lights and Sounds Trike - $43.21
+Batman: Arkham Asylum (PS3) - $59.82
+LEGO Batman (DS) - $19.82
+LEGO Batman (Wii) - $19.82
+DC Universe Batman / Superman / Catwoman / Lex Luthor / Two-Face Figures - $44.00
+Batman Begins (Blu-ray) (Widescreen) - $11.32
+LEGO Batman (Xbox 360) - $19.82
+</pre>
+
+<p>Come potremmo fare per estrarre anche l&rsquo;URL di ciascun elemento? Ebbene, l&rsquo;elemento che contiene il titolo del prodotto &egrave; un elemento ancora e il suo attributo <code>href</code> contiene proprio l&rsquo;URL per quell&rsquo;elemento, per cui tutto ci&ograve; che dobbiamo fare &egrave; estrarre il valore di quell&rsquo;attributo. Lo possiamo fare col seguente codice:</p>
+
+<pre class="ruby">
+item.at_css(&quot;.prodLink&quot;)[:href]
+</pre>
+
+<h3>Mettiamo tutto assieme</h3>
+<p>Ora che abbiamo usato Nokogiri per estrarre dati da una pagina web, possiamo usare quanto abbiamo gi&agrave; scritto all&rsquo;interno della nostra applicazione Rails per ottenere il prezzo di ciascun prodotto. Possiamo farlo mediante un task Rake, per cui nella cartella <code>/lib/tasks</code> dell&rsquo;applicazione creiamo un nuovo file denominato <code>product_prices.rake</code> per contenere il task.</p>
+
+<p>Il codice nel task Rake sar&agrave; simile al codice dello script Ruby che abbiamo scritto poc&rsquo;anzi. Dopo aver dato una breve descrizione al nostro task, ne definiamo il comportamento. Il task comincia lanciando il task <code>:environment</code> per caricare l&rsquo;ambiente Rails. Poi trova tutti i prodotti sul database che non hanno un prezzo e itera su di essi.</p>
+<p>Per ciascun prodotto, vogliamo ottenere l&rsquo;URL di ricerca appropriato. Per fare ci&ograve;, dobbiamo per prima cosa fare l&rsquo;escape del nome del prodotto al fine di renderlo sicuro all&rsquo;interno di un URL; per fare questo, possiamo usare <code>CGI::Escape</code>. Una volta costruito l&rsquo;URL, possiamo aprirlo con Nokogiri e usare il selettore CSS del nostro script Ruby per estrarre il prezzo. C&rsquo;&egrave; una piccola modifica all&rsquo;espressione regolare, affinch&egrave; non includa pi&ugrave; il simbolo della valuta. Una volta ottenuto il prezzo, possiamo aggiornare il prodotto:</p>
+
+<pre class="ruby">
+desc &quot;Fetch product prices&quot;
+task :fetch_prices =&gt; :environment do
+  require &#x27;nokogiri&#x27;
+  require &#x27;open-uri&#x27;  
+  Product.find_all_by_price(nil).each do |product|
+    escaped_product_name = CGI.escape(product.name)
+    url = &quot;http://www.walmart.com/search/search-ng.do?search_constraint=0&amp;ic=48_0&amp;search_query=#{escaped_product_name}&amp;Find.x=0&amp;Find.y=0&amp;Find=Find&quot;
+    doc = Nokogiri::HTML(open(url))
+    price = doc.at_css(&quot;.PriceXLBold, .PriceCompare .BodyS&quot;).text[/[0-9\.]+/]
+    product.update_attribute(:price, price)
+  end
+end
+</pre>
+
+<p>Se ora lanciamo il task rake:</p>
+
+<pre class="terminal">
+rake fetch_prices
+</pre>
+
+<p>esegue senza errori, per cui torniamo alla nostra pagina dei prodotti e vediamo che &egrave; successo:</p>
+
+<div class="imageWrapper">
+    <img src="/system/photos/256/original/E190I05.png" width="808" height="548" alt="I prodotti ora hanno tutti il loro prezzo."/>
+</div>
+
+<p>Ora tutti i prodotti hanno il loro prezzo in base a quanto dichiarato dal sito di Walmart.</p>
+
+<p>Con Nokogiri e SelectorGadget abbiamo estratto informazioni con successo da un altro sito web. Insieme rappresentano una potente accoppiata di strumenti utili allo screen-scraping. Ma come potremmo fare se volessimo interagire di pi&ugrave; col sito web esterno, per dire, autenticandoci prima di estrarre i dati? Per questo scopo, potremmo usare <a href="http://mechanize.rubyforge.org/mechanize/">Mechanize</a>, che verr&agrave; trattato nel prossimo episodio.</p>

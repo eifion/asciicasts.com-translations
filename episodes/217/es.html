@@ -1,0 +1,562 @@
+<p>Un formulario multipaso, tambi&eacute;n conocido como <em>wizard</em> o asistente, es un formulario que debido a su tama&ntilde;o ha sido dividido en una serie de p&aacute;ginas o pantallas por las cuales los usuarios deben navegar hasta completarlo.   Este enfoque tiene sus detractores: hay quien prefiere mostrar el formulario completo o quienes prefieren dividir dicho formulario en diferentes recursos y modelos.  Pero hay casos en los que son la mejor soluci&oacute;n, por ejemplo un formulario de declaraci&oacute;n de impuestos que necesita que el usuario introduzca muchos datos y donde el camino de pasos a seguir no es lineal sino que depende de los datos introducidos.</p>
+
+<p>Un formulario multipaso debe recordar los datos introducidos de un paso a otro de forma que si el usuario se mueve adelante y atr&aacute;s a lo largo de sus p&aacute;ginas no deber&iacute;a perder la informaci&oacute;n que ha introducido.  Si tan s&oacute;lo queremos separar un formulario largo para simplificar la interfaz de usuario podr&iacute;amos usar una combinaci&oacute;n de JavaScript y CSS para mostrar y ocultar las diferentes partes del formulario seg&uacute;n se pulsen los botones &ldquo;anterior&rdquo; y &ldquo;siguiente&rdquo;. En el sitio de desarrolladores de Apple se puede encontrar <a href="http://developer.apple.com/internet/webcontent/examples/wizard.html">un ejemplo de esto</a> .  Si nos hace falta algo m&aacute;s din&aacute;mico y orientado al servidor no nos quedar&aacute; m&aacute;s remedio que pasar por Rails.  En este episodio veremos c&oacute;mo se hace.</p>
+
+<h3>Un formulario de pedido multipaso</h3>
+
+<p>Como demostraci&oacute;n de formulario multipaso vamos a a&ntilde;adir un proceso de compra a una aplicaci&oacute;n de tienda. Los usuarios rellenar&aacute;n primero los datos de env&iacute;o, luego la direcci&oacute;n de facturaci&oacute;n y por &uacute;ltimo, en el tercer paso, ver&aacute;n un resumen del pedido para su confirmaci&oacute;n.</p>
+
+<p>Como no tenemos todav&iacute;a un modelo para el pedido ni su controlador usaremos uno de los <a href="http://github.com/ryanb/nifty-generators">nifty generators</a> de Ryan Bates para crear un andamiaje para el formulario del pedido.  N&oacute;tese que esta aplicaci&oacute;n est&aacute; escrita con Rails 2, por lo que usaremos  <code>script/generate</code>.   Para los prop&oacute;sitos de nuestro ejemplo, el pedido tendr&aacute; dos datos (en el mundo real un modelo para un pedido tendr&iacute;a muchos m&aacute;s atributos).  Tambi&eacute;n crearemos las acciones  <code>index</code>, <code>show</code> y <code>new</code> de este controlador.</p>
+
+<pre class="terminal">
+$ script/generate nifty_scaffold order shipping_name:string billing_name:string index show new
+</pre>
+
+<p>A continuaci&oacute;n migraremos la base de datos para crear la nueva tabla.</p>
+
+
+<pre class="terminal">
+$ rake db:migrate
+</pre>
+
+<p>El formulario de pedido que se generar&aacute; tendr&aacute; todos los campos amontonados en una s&oacute;la p&aacute;gina, por lo que lo primero que tenemos que hacer es separarlo en m&uacute;ltiples pasos.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/391/original/E217I01.png" width="800" height="387" alt="The scaffold-generated new order form."/>
+</div>
+
+<p>Empezaremos moviendo cada uno de los tres elementos de p&aacute;rrafo y sus campos de formulario en sus propios parciales.</p>
+
+<p class="codeFilePath">/app/views/orders/new.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;New Order&quot; %&gt;
+
+&lt;% form_for @order do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :shipping_name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :shipping_name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :billing_name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :billing_name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;Back to List&quot;, orders_path %&gt;&lt;/p&gt;
+</pre>
+
+<p>Antes de hacerlo tendremos que a&ntilde;adir una cabecera a cada secci&oacute;n y modificar la secci&oacute;n final para que muestre un resumen del pedido.</p>
+
+<p class="codeFilePath">/app/views/orders/new.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;New Order&quot; %&gt;
+
+&lt;% form_for @order do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;h2&gt;Shipping Information&lt;/h2&gt;
+  &lt;p&gt;
+    &lt;%= f.label :shipping_name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :shipping_name %&gt;
+  &lt;/p&gt;
+  &lt;h2&gt;Billing Information&lt;/h2&gt;
+  &lt;p&gt;
+    &lt;%= f.label :billing_name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :billing_name %&gt;
+  &lt;/p&gt;
+  &lt;h2&gt;Confirm Information&lt;/h2&gt;
+  &lt;p&gt;
+    &lt;strong&gt;Shipping Name:&lt;/strong&gt;
+    &lt;%= h @order.shipping_name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;strong&gt;Billing Name:&lt;/strong&gt;
+    &lt;%= h @order.billing_name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;Back to List&quot;, orders_path %&gt;&lt;/p&gt;
+</pre>
+
+<p>Con esto podemos empezar a mover cada seccion a su propio parcial.  Crearemos tres nuevos parciales llamados <code>shipping_step</code>, <code>billing_step</code> y <code>confirmation_step</code>, copiando lo que haga falta del formulario.  Despu&eacute;s de esto nuestro formulario de nuevo pedido tendr&aacute; este aspecto:</p>
+
+<p class="codeFilePath">/app/views/orders/new.html.erb</p>
+<pre class="terminal">
+&lt;% title &quot;New Order&quot; %&gt;
+
+&lt;% form_for @order do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= render &#x27;shipping_step&#x27;, :f =&gt; f %&gt;
+  &lt;%= render &#x27;billing_step&#x27;, :f =&gt; f %&gt;
+  &lt;%= render &#x27;confirmation_step&#x27;, :f =&gt; f %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;Back to List&quot;, orders_path %&gt;&lt;/p&gt;
+</pre>
+
+<p>Y los tres parciales ser&aacute;n as&iacute;:</p>
+
+
+<p class="codeFilePath">/app/views/orders/_billing_step.html.erb</p>
+<pre class="ruby">
+&lt;h2&gt;Billing Information&lt;/h2&gt;
+&lt;p&gt;
+  &lt;%= f.label :billing_name %&gt;&lt;br /&gt;
+  &lt;%= f.text_field :billing_name %&gt;
+&lt;/p&gt;
+</pre>
+
+<p class="codeFilePath">/app/views/orders/_shipping_step.html.erb</p>
+<pre class="ruby">
+&lt;h2&gt;Shipping Information&lt;/h2&gt;
+&lt;p&gt;
+  &lt;%= f.label :shipping_name %&gt;&lt;br /&gt;
+  &lt;%= f.text_field :shipping_name %&gt;
+&lt;/p&gt;
+</pre>
+
+<p class="codeFilePath">/app/views/orders/confirmation_step.html.erb</p>
+<pre class="ruby">
+&lt;h2&gt;Confirm Information&lt;/h2&gt;
+&lt;p&gt;
+  &lt;strong&gt;Shipping Name:&lt;/strong&gt;
+  &lt;%= h @order.shipping_name %&gt;
+&lt;/p&gt;
+&lt;p&gt;
+  &lt;strong&gt;Billing Name:&lt;/strong&gt;
+  &lt;%= h @order.billing_name %&gt;
+&lt;/p&gt;
+</pre>
+
+<p>Tambi&eacute;n tendremos qie modificar el modelo <code>Order</code> para que sepa acerca de cada uno de los pasos y pueda identificar cu&aacute;l es el paso actual.   Una posibilidad ser&iacute;a utilizar un <em>plugin</em> de m&aacute;quina de estados, pero dado que este ejemplo es muy sencillo podemos escribir el c&oacute;digo desde cero.</p>
+
+<p>El modelo <code>Order</code> tendr&aacute; que saber cu&aacute;les son los pasos y el orden en que deber&iacute;an aparecer, para eso escribiremos un m&eacute;otod <code>steps</code> que devolver&aacute; la lista de pasos.  Esta lista no ser&aacute; m&aacute;s que un  <em>array</em> pero en el caso de formularios m&aacute;s complejos podr&iacute;amos hacer que este m&eacute;todo fuese m&aacute;s din&aacute;mico y controlase casos en los que la lista de pasos cambiase dependiendo de alg&uacute;n dato.</p>
+
+<p>Para obtener y cambiar el paso actual de un pedido crearemos un m&eacute;todo de escritura llamado <code>current_step</code> y su correspondiente m&eacute;todo de acceso que devolver&aacute; el paso actual (o el primero si es que hemos empezado).  Tras estos cambios, el modelo <code>Order</code> tiene lo siguiente:</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+class Order &lt; ActiveRecord::Base
+  attr_accessible :shipping_name, :billing_name
+  attr_writer :current_step
+  
+  def current_step
+    @current_step || steps.first
+  end
+  
+  def steps
+    %w[shipping billing confirmation]
+  end
+end
+</pre>
+
+<p>Ahora que sabemos en qu&eacute; paso estamos, podemos utilizar dicha informaci&oacute;n para cambiar el parcial que se muestra modificando el formulario de nuevo pedido:</p>
+
+<p class="codeFilePath">/app/views/orders/new.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;New Order&quot; %&gt;
+
+&lt;% form_for @order do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= render &quot;#{@order.current_step}_step&quot;, :f =&gt; f %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;Back to List&quot;, orders_path %&gt;&lt;/p&gt;
+</pre>
+
+<p>Si ahora recargamos el formulario veremos que se muestra tan s&oacute;lo el primer paso.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/392/original/E217I02.png" width="800" height="373" alt="The order form now only shows the first step."/>
+</div>
+
+<h3>Movimiento por los pasos</h3>
+
+<p>Si ahora pulsamos el bot&oacute;n de env&iacute;o el formulario invocar&aacute; la acci&oacute;n <code>create</code>, creando un nuevo pedido.  No queremos que sea esto lo que ocurra sino que se muestre el siguente paso del formulario, as&iacute; que tenemos que cambiar el comportamiento del controlador.</p>
+
+<p>Podemos enfocar este problema de distintas maneras.  Por ejemplo podr&iacute;amos crear una acci&oacute;n separada para cada uno de los pasos y utilizar  <code>create</code>  para el paso inicial y las acciones <code>edit</code> y <code>update</code> para los otros pasos, lo que significar&iacute;a que tendr&iacute;amos en la base de datos un modelo a medio completar o podr&iacute;amos usar solo las acciones <code>new</code> y <code>create</code>, guardando los datos de entrada del usuario en la sesi&oacute;n.  Esta t&eacute;cnica no est&aacute; libre de problemas, los veremos (y sus alternativas) poco a poco.</p>
+
+<p>La soluci&oacute;n m&aacute;s sencilla parasar&iacute;a por modificar la acci&oacute;n <code>create</code>.  Lo primero que haremos ser&aacute; cambiarlo de forma que no guarde el pedido sino que en su lugar muestre el primer paso del formulario.</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def create
+  @order = Order.new(params[:order])
+  @order.next_step
+  render &#x27;new&#x27;
+end
+</pre>
+
+<p>En el controlador, invocaremos el m&eacute;todo <code>next_step</code> sobre <code>Order</code>:</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+def next_step
+  self.current_step = steps[steps.index(current_step)+1]
+end
+</pre>
+
+<p>Cuando ahora pulsemos el bot&oacute;n de env&iacute;o iremos del primer al segundo paso pero si volvemos a pulsar en el bot&oacute;n permaneceremos en el segundo paso, porque no estamos guardando el paso en el que estamos cuando se env&iacute;a el formulario.  En la acci&oacute;n <code>create</code> tenemos que establecer el paso actual en el modelo <code>Order</code> y luego guardar ese valor.  Esto lo haremos recuperando el paso actual de la sesi&oacute;n, pasando al siguiente y guardando el valor de nuevo en la sesi&oacute;n.</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def create
+  @order = Order.new(params[:order])
+  @order.current_step = session[:order_step]
+  @order.next_step
+  session[:order_step] = @order.current_step
+  render &#x27;new&#x27;
+end
+</pre>
+
+<p>Si ahora volvemos al formulario veremos que recorre las p&aacute;gina como deber&iacute;a y vuelve al primer paso cuando se pulsa el bot&oacute;n en el &uacute;ltimo paso, lo que no es precisamente lo que queremos pero ya lo corregiremos m&aacute;s adelante.</p>
+
+<p>Antes de eso vamos a implementar la forma de volver al paso anterior.  Ahora mismo podemos movernos hacia adelante pero no hacia atr&aacute;s, para hacer cambios en los campos que ya hemos completado.  Vamos a a&ntilde;adirle otro bot&oacute;n al formulario para poder hacerlo.</p>
+
+<p class="codeFilePath">/app/views/orders/new.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;New Order&quot; %&gt;
+
+&lt;% form_for @order do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= render &quot;#{@order.current_step}_step&quot;, :f =&gt; f %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Continue&quot; %&gt;&lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Back&quot;, :name =&gt; &quot;previous_button&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;Back to List&quot;, orders_path %&gt;&lt;/p&gt;
+</pre>
+
+<p>N&oacute;tese que al bot&oacute;n para volver atr&aacute;s le hemos dato un atributo <code>name</code> para poder determinar qu&eacute; bot&oacute;n se ha pulsado cuando se env&iacute;e el formulario.  Ya podemos modificar el controlador para que se comporte adecuadamente seg&uacute;n el bot&oacute;n que se haya pulsado.</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def create
+  @order = Order.new(params[:order])
+  @order.current_step = session[:order_step]
+  if params[:back_button]
+    @order.previous_step
+  else
+    @order.next_step
+  end
+  session[:order_step] = @order.current_step
+  render &#x27;new&#x27;
+end
+</pre>
+
+<p>Para que esto funcione necesitamos un m&eacute;todo <code>previous_step</code> en el modelo <code>Order</code> que ser&aacute; muy parecido al m&eacute;todo <code>next_step</code> que escribimos antes.</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+def previous_step
+  self.current_step = steps[steps.index(current_step)-1]
+end
+</pre>
+
+<p>Con estos botones ya podemos movernos a lo largo de todos los pasos en ambas direcciones.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/393/original/E217I03.png" width="800" height="410" alt="The form now has buttons for moving forwards and backwards."/>
+</div>
+
+<p>Como no tiene sentido tener un bot&oacute;n para volver atr&aacute;s en la primera pantalla tendremos que ocultarlo si la orden est&aacute; en el primer paso.</p>
+
+<p class="codeFilePath">/app/views/orders/new.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;New Order&quot; %&gt;
+
+&lt;% form_for @order do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= render &quot;#{@order.current_step}_step&quot;, :f =&gt; f %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Continue&quot; %&gt;&lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Back&quot;, :name =&gt; &quot;previous_button&quot; unless @order.first_step? %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;Back to List&quot;, orders_path %&gt;&lt;/p&gt;
+</pre>
+
+<p>Para esto tenemos que a&ntilde;adirle al modelo <code>Order</code> el m&eacute;todo <code>first_step?</code>.</p>
+
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+def first_step?
+  current_step == steps.first
+end
+</pre>
+
+<p>Si ahora recargamos el formulario veremos que en el primer paso ya no aparece el bot&oacute;n para volver atr&aacute;s.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/394/original/E217I04.png" width="800" height="375" alt="The first step no longer has a back button"/>
+</div>
+
+<h3>C&oacute;mo hacer que los campos recuerden sus valores</h3>
+
+<p>Ya podemos movernos por los pasos de nuestro formulario pero si introducimos un valor en uno de los campos y abandonamos dicho paso el valor no ser&aacute; recuperado si posteriormente regresamos al paso.  Nuevamente, podemos resolver este problema utilizando la sesi&oacute;n.  Si bien no es recomendable guardar objetos complejos en variables de sesi&oacute;n, s&iacute; que podemos hacerlo con objetos sencillos como <em>hashes</em> y listas.</p>
+
+<p>El primer paso es crear una nueva variable de sesi&oacute;n en la acci&oacute;n <code>new</code> llamada <code>order_params</code> y darle un valor vac&iacute;o a no ser que ya exista.</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def new
+  session[:order_params] ||= {}
+  @order = Order.new
+end
+</pre>
+
+<p>En la acci&oacute;n <code>create</code> mezclamos los valores de los par&aacute;metros del pedido con los valores que tiene la variable de sesi&oacute;n.  N&oacute;tese que estamos efectuando una copia en profundidad (<em>deep merge</em>) por si hay valores anidados en los par&aacute;metros, y adem&aacute;s s&oacute;lo lo haremos si existen dichos par&aacute;metros A partir de este <em>hash</em> combinado ya podemos crear nuestro objeto <code>Order</code>.</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def create
+  session[:order_params].deep_merge!(params[:order]) if params[:order]
+  @order = Order.new(session[:order_params])
+  @order.current_step = session[:order_step]
+  if params[:back_button]
+    @order.previous_step
+  else
+    @order.next_step
+  end
+  session[:order_step] = @order.current_step
+  render &#x27;new&#x27;
+end
+</pre>
+
+<p>Si ahora rellenamos el formulario veremos los valores que introducimos en el paso final, lo que muestra que se han guardado.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/395/original/E217I05.png" width="804" height="419" alt="The final step of the form showing the saved information."/>
+</div>
+
+<p>Todav&iacute;a nos queda un peque&ntilde;o problema. Si cambiamos de paso mientras el formulario est&aacute; a medio rellenar  luego volvemos la informaci&oacute;n que hab&iacute;amos introducido se perder&aacute;.  Esto se puede resolver copiando a la acci&oacute;n <code>new</code> las dos l&iacute;neas de la acci&oacute;n <code>create</code> que recuperan la informaci&oacute;n del pedido y el paso actual desde las variables de sesi&oacute;n.</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def new
+  session[:order_params] ||= {}
+  @order = Order.new(session[:order_params])
+  @order.current_step = session[:order_step]
+end
+</pre>
+
+<p>Ya podemos volver al formulario, y veremos que los datos que vayamos introduciendo seguir&aacute;n estando ah&iacute;.  Y no s&oacute;lo eso, adem&aacute;s iremos al &uacute;ltimo paso en el que est&aacute;bamos.</p>
+
+<h3>Almacenamiento del Pedido</h3>
+
+<p>Por &uacute;ltimo haremos que el formulario sea totalmente funcional haciendo que guarde el pedido cuando se finalice el &uacute;ltimo paso.  Para ello vamos a modificar el controlador de forma que guarde el pedido s&oacute;lo si el paso en el que estamos es el &uacute;ltimo y si el bot&oacute;n pulsado no era el de &ldquo;paso anterior&rdquo;.  Tambi&eacute;n tendremos que cambiar el comportamiento de la respuesta de forma que si se guarda el pedido la aplicaci&oacute;n redirige a la acci&oacute;n <code>show</code> del pedido y muestra un mensaje informativo.</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+class OrdersController &lt; ApplicationController
+  def index
+    @orders = Order.all
+  end
+  
+  def show
+    @order = Order.find(params[:id])
+  end
+  
+  def new
+    session[:order_params] ||= {}
+    @order = Order.new(session[:order_params])
+    @order.current_step = session[:order_step]
+  end
+  
+  def create
+    session[:order_params].deep_merge!(params[:order]) if params[:order]
+    @order = Order.new(session[:order_params])
+    @order.current_step = session[:order_step]
+    if params[:back_button]
+      @order.previous_step
+    elsif @order.last_step?
+      @order.save
+    else
+      @order.next_step
+    end
+    session[:order_step] = @order.current_step
+    
+    if @order.new_record?
+      render &#x27;new&#x27;
+    else
+      flash[:notice] = &quot;Order saved.&quot;
+      redirect_to @order
+    end
+  end
+end
+</pre>
+
+<p>Para que esto funcione tendremos que a&ntilde;adir el m&eacute;todo <code>last_step</code> al modelo <code>Order</code>.</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+def last_step?
+  current_step == steps.last
+end
+</pre>
+
+<p>Cuando ahora rellenemos el &uacute;ltimo paso se guardar&aacute; el pedido y seremos redirigidos a la p&aacute;gina del nuevo pedido.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/396/original/E217I06.png" width="801" height="343" alt="The order has been saved."/>
+</div>
+
+<p>Pero a&uacute;n no hemos terminado.  Si intentamos crear un nuevo pedido el formulario nos llevar&aacute; directamente al &uacute;ltimo paso y veremos los detalles del pedido anterior.  Una vez m&aacute;s, tenemos que cambiar el controlador para que la informaci&oacute;n del pedido que estamos guardando en la sesi&oacute;n se elimine una vez que el pedido haya sido creado correctamente.  Lo haremos poniendo a <code>nil</code> las variables de sesi&oacute;n <code>order_step</code> y <code>order_params</code>.</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def create
+  session[:order_params].deep_merge!(params[:order]) if params[:order]
+  @order = Order.new(session[:order_params])
+  @order.current_step = session[:order_step]
+  if params[:back_button]
+    @order.previous_step
+  elsif @order.last_step?
+    @order.save
+  else
+    @order.next_step
+  end
+  session[:order_step] = @order.current_step
+    
+  if @order.new_record?
+    render &#x27;new&#x27;
+  else
+    session[:order_step] = session[:order_params] = nil
+    flash[:notice] = &quot;Order saved.&quot;
+    redirect_to @order
+  end
+end
+</pre>
+
+<h3>Validaciones</h3>
+
+<p>Lo &uacute;ltimo que nos queda por ver es c&oacute;mo hacer las validaciones del formulario.  Pondremos una validaci&oacute;n que compruebe la presencia de los atributos <code>shipping_name</code> y <code>billing_name</code>.</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+validates_presence_of :shipping_name
+validates_presence_of :billing_name
+</pre>
+
+<p>Queremos que los errores de validaci&oacute;n de cada atributo s&oacute;lo aparezcan en su paso apropiado, lo que haremos a&ntilde;adiendo una condici&oacute;n en los validadores.</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+validates_presence_of :shipping_name, :if =&gt; lambda { |o| o.current_step == &quot;shipping&quot; }
+validates_presence_of :billing_name, :if =&gt; lambda { |o| o.current_step == &quot;billing&quot; }
+</pre>  
+
+<p>Claro est&aacute;, s&oacute;lo queremos que el formulario cambie al paso siguiente (o  anterior) si el pedido es v&aacute;lido, as&iacute; que tenemos que modificar la acci&oacute;n <code>create</code> del controlador para que compruebe que el pedido es v&aacute;lido,  cosa que haremos poniendo una sentencia <code>if</code> al c&oacute;digo que cambia el paso y almacena el registro.</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def create
+  session[:order_params].deep_merge!(params[:order]) if params[:order]
+  @order = Order.new(session[:order_params])
+  @order.current_step = session[:order_step]
+  if @order.valid?
+    if params[:back_button]
+      @order.previous_step
+    elsif @order.last_step?
+      @order.save
+    else
+      @order.next_step
+    end
+    session[:order_step] = @order.current_step
+  end
+  if @order.new_record?
+    render &#x27;new&#x27;
+  else
+    session[:order_step] = session[:order_params] = nil
+    flash[:notice] = &quot;Order saved.&quot;
+    redirect_to @order
+  end
+end
+</pre>
+
+<p>Si ahora creamos un nuevo pedido e intentamos enviar el primer paso veremos que aparece el error de un campo pero no del otro.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/397/original/E217I07.png" width="800" height="500" alt="Only the error for the shipping step is shown."/>
+</div>
+
+<p>Igualmente si intentamos movernos al siguiente paso y dejamos su campo vac&iacute;o, s&oacute;lo veremos el error correspondente.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/398/original/E217I08.png" width="800" height="536" alt="Likewise on the billing step only the error for the billing infomation field is shown."/>
+</div>
+
+<p>Podemos organizar un poco la validaci&oacute;n cambiando las expresiones lambda por m&eacute;todos llamados <code>shipping?</code> y <code>billing?</code>.</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+class Order &lt; ActiveRecord::Base
+  attr_accessible :shipping_name, :billing_name
+  attr_writer :current_step
+
+  validates_presence_of :shipping_name, :if =&gt; :shipping?
+  validates_presence_of :billing_name, :if =&gt; :billing?
+
+  # other methods omittted.
+    
+  def shipping?
+    current_step == &quot;shipping&quot;
+  end
+  
+  def billing?
+    current_step == &quot;billing&quot;
+  end
+end
+</pre>
+
+<p>Tambi&eacute;n resulta &uacute;til tener un m&eacute;todo que valide todos los pasos a la vez.  Podemos escribir un m&eacute;todo llamado <code>all_valid?</code> que recorra los pasos y compruebe que sean v&aacute;lidos.</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+def all_valid?
+  steps.all? do |step|
+    self.current_step = step
+    valid?
+  end
+end
+</pre>
+
+<p>De esta forma si alguna vez hacemos cambios en las validaciones o en la forma en que funcionan los pasos podremos asegurarnos de que no hemos invalidado ninguno de ellos.  Podemos usar este nuevo m&eacute;todo en el controlador para garantizar qu&eacute; s&oacute;lo se guarde el pedido si todos sus pasos son v&aacute;lidos.</p>
+
+<p class="codeFilePath">/app/controllers/orders_controller.rb</p>
+<pre class="ruby">
+def create
+  session[:order_params].deep_merge!(params[:order]) if params[:order]
+  @order = Order.new(session[:order_params])
+  @order.current_step = session[:order_step]
+  if @order.valid?
+    if params[:back_button]
+      @order.previous_step
+    elsif @order.last_step?
+      @order.save if @order.all_valid?
+    else
+      @order.next_step
+    end
+    session[:order_step] = @order.current_step
+  end
+  if @order.new_record?
+    render &#x27;new&#x27;
+  else
+    session[:order_step] = session[:order_params] = nil
+    flash[:notice] = &quot;Order saved.&quot;
+    redirect_to @order
+  end
+end
+</pre>
+
+<p>Lo m&aacute;s &uacute;til del m&eacute;todo <code>all_valid?</code> es que si uno de los pasos no valida entonces se convierte en el paso actual por lo que al usuario se le mostrar&aacute; el primer paso que no ha validado.</p>
+
+<p>Y eso es todo por este episodio.  Tenemos que tener siempre en mente que estamos almacenando los par&aacute;metros del pedido en la sesi&oacute;n, esto quiere decir que si un usuario tiene m&uacute;ltiples ventanas o pesta&ntilde;as abiertas estas compartir&aacute;n la informaci&oacute;n de sesi&oacute;n.  Si quisi&eacute;ramos tratar las ventanas o pesta&ntilde;as de forma indepnediente tendr&iacute;amos que almacenar los par&aacute;metros del pedido en la base de datos y guardar el modelo al principio, utilizando la acci&oacute;n <code>update</code> para ir grabando cada paso.  Alternativamente se podr&iacute;an guardar los par&aacute;metros como campos ocultos en el formulario.</p>
+
+<p>Por &uacute;ltimo, si le echamos un vistazo a la acci&oacute;n <code>create</code> veremos que es bastante m&aacute;s larga y complicada de lo que deber&iacute;a ser.  Si bien para nuestros prop&oacute;sitos esto est&aacute; bien as&iacute;, si quisi&eacute;ramos usar esta t&eacute;cnica para una aplicaci&oacute;n de producci&oacute;n tendr&iacute;amos que refactorizarla un poco.</p>

@@ -1,0 +1,270 @@
+<p>Come gi&agrave; fatto vedere nell&rsquo;episodio 216 [<a href="http://railscasts.com/episodes/216-generators-in-rails-3">guardalo</a>, <a href="http://it.asciicasts.com/episodes/216-generatori-in-rails-3">leggilo</a>] i generatori in Rails 3 sono molto pi&ugrave; modulari e possono essere personalizzati in modi che non erano pensabili con Rails 2. Ciononostante ci sono ancora delle volte in cui si ha ugualmente la necessit&agrave; di creare un generatore completamente nuovo, perch&egrave; magari quelli forniti non vengono incontro appieno alle vostre necessit&agrave;. La creazione di un generatore personalizzato &egrave; stata discussa nell&rsquo;<a href="http://railscasts.com/episodes/58-how-to-make-a-generator">episodio 58</a> ma la tecnica &egrave; cambiata sostanzialmente da allora, per cui riprendiamo il discorso e mostriamo come creare un generatore analogo a quello di tale episodio in Rails 3.</p>
+
+<h3>Incominciamo</h3>
+
+<p>Il modo pi&ugrave; semplice per creare un generatore &egrave; farlo da una nuova applicazione Rails 3, er cui partiamo creandone una nuova. Rails 3.0 beta 4 &egrave; appena stato rilasciato e la sintassi per la creazione di nuove applicazioni &egrave; cambiata, per cui, per creare l&rsquo;applicazione todo che useremo per scrivere il nostro generatore, anzich&egrave; lanciare il comando:</p>
+
+<pre class="terminal">
+$ rails todo
+</pre>
+
+<p>dovremo lanciare:</p>
+
+<pre class="terminal">
+$ rails new todo
+</pre>
+
+<p>Dopo che abbiamo creato la nostra nuova applicazione, possiamo partire con la creazione di del nostro generatore, usando uno dei generatori forniti. Il comando <code>rails g generator</code> crea i file di base di cui avremo bisogno per il nostro nuovo generatore. Possiamo esaminare i parametri che il comando accetta, lanciando:</p>
+
+<pre class="terminal">
+$ rails g generator --help
+</pre>
+
+<p>Il generatore &egrave; piuttosto semplice e ha bisogno solo del nome del generatore che si vuole creare. Vogliamo che il nostro generatore generi un file di layout applicativo, per cui lo chiamiamo <code>layout</code>:</p>
+
+<pre class="terminal">
+$ rails g generator layout
+      <span class="passed">create</span>  lib/generators/layout
+      <span class="passed">create</span>  lib/generators/layout/layout_generator.rb
+      <span class="passed">create</span>  lib/generators/layout/USAGE
+      <span class="passed">create</span>  lib/generators/layout/templates
+</pre>      
+      
+<p>Il generatore crea i file sotto la cartella <code>/lib</code> dell&rsquo;applicazione, il che significa che il generatore sar&agrave; disponibile esclusivamente per questa applicazione. Per renderlo disponibile a qualunque applicazione, dovremo fare un po&rsquo; di lavoro extra; vedremo come fare anche questa cosa pi&ugrave; avanti nel corso dell&rsquo;episodio.</p>
+
+<p>La struttura creata dal generatore &egrave; piuttosto semplice e contiene esclusivamente una classe. Nella classe c&rsquo;&egrave; una linea di codice che dice al generatore di ispezionare nella cartella dei template alla ricerca di ulteriori file:</p>
+
+<p class="codeFilePath">/lib/generators/layout/layout_generator.rb</p>
+<pre class="rails">
+class LayoutGenerator &lt; Rails::Generators::NamedBase
+  source_root File.expand_path(&#x27;../templates&#x27;, __FILE__)
+end
+</pre>
+
+<p>Il genratore <code>generator</code> crea anche un file <code>USAGE</code> che serve a descrivere la documentazione per il nostro generatore. Questa documentazione verr&agrave; mostrata se si lancier&agrave; il nostro generatore con l&rsquo;opzione <code>--help</code>.</p>
+
+<p>La classe creata dal generatore eredita da <code>Rails::Generators::NamedBase</code>. Questo implica che si dovr&agrave; fornire un nome come parametro al lancio del nostro generatore, allo stesso modo di come si &egrave; fatto al lancio del generatore <code>generator</code>. Possiamo averne conferma, lanciando il nostro nuovo generatore con l&rsquo;opzione <code>--help</code>:</p>
+
+<pre class="terminal">
+$ rails g layout --help
+Usage:
+  rails generate layout NAME [options]
+
+Runtime options:
+  -f, [--force]    # Overwrite files that already exist
+  -p, [--pretend]  # Run but do not make any changes
+  -s, [--skip]     # Skip files that already exist
+  -q, [--quiet]    # Supress status output
+
+Description:
+    Explain the generator
+
+Example:
+    rails generate layout Thing
+
+    This will create:
+        what/will/it/create
+</pre>  
+
+<p>Si note che il contenuto del file <code>USAGE</code> viene mostrato in fondo all&rsquo;output.</p>
+
+<p>Vogliamo rendere opzionale il parametro <code>NAME</code> impostando un valore di default pari a <code>application</code>. Possiamo farlo rendendo la nostra classe figlia di <code>Rails::Generators::Base</code>, anzich&egrave; di <code>NamedBase</code>. Ci&ograve; render&agrave; opzionali tutti gli argomenti e di conseguenza ci dar&agrave; pi&ugrave; flessibilit&agrave; nell&rsquo;adattare il generatore alle nostra esigenze.</p>
+
+<p>Possiamo dichiarare gli argomenti accettati dal nostro generatore mediante il metodo <code>argument</code>. Definire gli argomenti per conto nostro anzich&egrave; usare l&rsquo;opzione di default <code>NAME</code> significa che possiamo stabilire un valore di default per ciascuno argomento. Aggiungiamo un argomento <code>layout_name</code> con un valore di default pari a <code>application</code>:</p>
+
+<p class="codeFilePath">/lib/generators/layout/layout_generator.rb</p>
+<pre class="ruby">
+class LayoutGenerator &lt; Rails::Generators::Base
+  source_root File.expand_path(&#x27;../templates&#x27;, __FILE__)
+  argument :layout_name, :type =&gt; :string, :default =&gt; &quot;application&quot;
+end
+</pre>
+
+<p>Se lanciamo nuovamente il generatore con l&rsquo;opzione <code>--help</code>, vedremo il nostro nuovo argomento in lista. E&rsquo; mostrato fra parentesi quadre, ad indicare che &egrave; un parametro opzionale.</p>
+
+<pre class="terminal">
+$ rails g layout --help
+Usage:
+  rails generate layout [LAYOUT_NAME] [options]
+</pre>  
+
+<p>I generatori in Rails 3 si basano sulla libreria <a href="http://github.com/wycats/thor">Thor</a>, che somiglia a rake. Molti dei metodi che chiamiamo nella classe del nostro generatore sono metodi definiti all&rsquo;interno dello stesso Thor, per cui se vorrete saperne di pi&ugrave; potrete consultare il codice sorgente di Thor e la documentazione relativa.</p>
+
+<h3>Creiamo i file che verranno usati dal generatore</h3>
+
+<p>Vogliamo che il nostro generatore crei due file: un file di layout di applicazione e un foglio di stile. Per fare ci&ograve;, creiamo due file nella cartella <code>templates</code> del nostro generatore e facciamo in modo che quest&rsquo;ultimo copi questi file nelle cartelle corrette dell&rsquo;applicazione su cui verr&agrave; lanciato.</p>
+
+<p>Come definiamo il comportamento del generatore? Ebbene, il modo in cui lo si fa &egrave; piuttosto anomalo. Tutti i metodi pubblici definiti nella classe del generatore verranno eseguiti al lancio del generatore. Quindi possiamo definire un metodo chiamato <code>generate_layout</code> e questo sar&agrave; automaticamente eseguito al lancio del generatore. E&rsquo; un concetto piuttosto strano inizialmente, ma alla fine si rivela un buon sistema per poter organizzare il codice all&rsquo;interno del generatore.</p>
+
+<p>La prima cosa che facciamo fare al nostro generatore &egrave; copiare il foglio di stile dalla cartella <code>templates</code> alla cartella <code>/public/stylesheets</code> dell&rsquo;applicazione. Possiamo usare il metodo <code>copy_file</code> per questo:</p>
+
+<p class="codeFilePath">/lib/generators/layout/layout_generator.rb</p>
+<pre class="ruby">
+class LayoutGenerator &lt; Rails::Generators::Base
+  source_root File.expand_path(&#x27;../templates&#x27;, __FILE__)
+  argument :layout_name, :type =&gt; :string, :default =&gt; &quot;application&quot;
+  
+  def generate_layout
+    copy_file &quot;stylesheet.css&quot;, &quot;public/stylesheets/#{layout_name.underscore}.css&quot;
+  end
+  
+end
+</pre>
+
+<p>Il metodo <code>copy_file</code> richiede due parametri. Il primo &egrave; il nome del file nella cartella <code>templates</code> da copiare e il secondo &egrave; il percorso di destinazione. Si noti che il nome del file di destinazione &egrave; basato sul nome dell&rsquo;argomento <code>layout_name</code> che viene passato al generatore. Il metodo <code>argument</code> crea un metodo <code>layout_name</code> che possiamo utilizzare, ma siccome il nome del layout passato potrebbe essere in camel-case, invochiamo sul quest&rsquo;ultimo il metodo <code>underscore</code> per essere certi che sia in un formato adatto ai nomi di file.</p>
+
+<p>Infine dobbiamo creare il file <code>stylesheet.css</code> nella cartella <code>templates</code> e incollarvi il contenuto del <a href="http://github.com/ryanb/railscasts-episodes/blob/master/episode-218/todo/lib/generators/layout/templates/stylesheet.css">default CSS</a> che vogliamo per la nostra applicazione.</p>
+
+<p>Se ora invochiamo il nostro generatore senza argomenti, dovrebbe creare un file <code>application.css</code>:</p>
+
+<pre class="terminal">
+$ rails g layout
+      <span class="passed">create</span>  public/stylesheets/application.css
+</pre>
+
+<p>Poi dobbiamo fare la stessa cosa per il file di layout. Useremo la versione con gli underscore del nome del layout un paio di volte, per cui &egrave; meglio fattorizzare la conversione in un metodo che chiamiamo <code>file_name</code>. Come detto poco fa, ogni metodo pubblico definito nel generatore sar&agrave; invocato al lancio del generatore, per cui dobbiamo dichiarare il metodo <code>file_name</code>, che &egrave; di servizio, privato.</p>
+
+<p>La prossima cosa che dobbiamo fare nel nostro generatore &egrave; creare il file di layout stesso. Potremmo usare nuovamente il metodo <code>copy_file</code>, ma in questo modo avremmo semplicemente una copia esatta del file di template, mentre invece vorremmo far girare un qualche codice erb sul template, in modo che venga modificato al lancio del generatore.</p>
+
+<p>Per fare questo, possiamo usare il metodo <code>template</code>, che accetta argomenti simili a quelli di <code>copy_file</code>, ma che interpreta tutto l&rsquo;erb che trova all&rsquo;interno del template prima di copiarlo nella cartella di destinazione:</p>
+
+<p class="codeFilePath">/lib/generators/layout/layout_generator.rb</p>
+<pre class="ruby">
+class LayoutGenerator &lt; Rails::Generators::Base
+  source_root File.expand_path(&#x27;../templates&#x27;, __FILE__)
+  argument :layout_name, :type =&gt; :string, :default =&gt; &quot;application&quot;
+  
+  def generate_layout
+    copy_file &quot;stylesheet.css&quot;, &quot;public/stylesheets/#{file_name}.css&quot;
+    template &quot;layout.html.erb&quot;, &quot;app/views/layouts/#{file_name}.html.erb&quot;
+  end
+  
+  private
+  def file_name
+    layout_name.underscore
+  end
+  
+end
+</pre>
+
+<p>Poi creiamo il vero e proprio file di template nella cartella <code>templates</code>. Il codice contenutovi sar&agrave; il seguente:</p>
+
+<p class="codeFilePath">/lib/generators/layout/templates/layout.html.erb</p>
+<pre class="ruby">
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+  &lt;head&gt;
+    &lt;title&gt;Untitled&lt;/title&gt;
+    &lt;%%= stylesheet_link_tag &quot;&lt;%= file_name %&gt;&quot; %&gt;
+    &lt;%%= javascript_include_tag :defaults %&gt;
+    &lt;%%= csrf_meta_tag %&gt;
+    &lt;%%= yield(:head) %&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;div id=&quot;container&quot;&gt;
+      &lt;%% flash.each do |name, msg| %&gt;
+        &lt;%%= content_tag :div, msg, :id =&gt; &quot;flash_#{name}&quot; %&gt;
+      &lt;%% end %&gt;
+      &lt;%%= yield %&gt;
+    &lt;/div&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+</pre>
+
+<p>La prima cosa degna di nota &egrave; che dal momento che stiamo usando il metodo <code>template</code>, tutti i tag erb nel codice verranno eseguiti al lancio del generatore. Se vogliamo includere dell&rsquo;erb nel file generato, dobbiamo farne l&rsquo;escape col simbolo percentuale all&rsquo;inizio di ciascun tag erb e ci&ograve; &egrave; quanto abbiamo fatto per la maggior parte del codice erb qui sopra.</p>
+
+<p>Per includere del contenuto dinamico nel template, possiamo invece usare del normale codice erb. Possiamo accedere ai metodi del generatore, anche privati, per cui chiamiamo <code>file_name</code> per inserire il nome corretto del foglio di stile nella chiamata a <code>stylesheet_link_tag</code>.</p>
+
+<p>Per vedere se tutto funziona, rilanciamo il nostro generatore, questa volta passandogli un nome per il layout:</p>
+
+<pre class="terminal">
+$ rails g layout admin
+      <span class="passed">create</span>  public/stylesheets/admin.css
+      <span class="passed">create</span>  app/views/layouts/admin.html.erb
+</pre>
+
+<p>Questa volta il generatore ha creato due file, ciascuno col nome basato sul nome di layout passato come parametro al lancio, per cui tutto sembra funzionare. Se diamo uno sguardo al file di layout generato, notiamo che il metodo <code>file_name</code> &egrave; stato chiamato quando il file &egrave; stato generato, per cui il metodo <code>stylesheet_link_tag</code> ha l&rsquo;argomento corretto. Per gli altri tag erb era stato applicato l&rsquo;escape, per cui ora li ritroviamo correttamente nel file di layout:</p>
+
+<p class="codeFilePath">/app/views/layouts/admin.html.erb</p>
+<pre class="ruby">
+&lt;head&gt;
+  &lt;title&gt;Untitled&lt;/title&gt;
+  &lt;%= stylesheet_link_tag &quot;admin&quot; %&gt;
+  &lt;%= javascript_include_tag :defaults %&gt;
+  &lt;%= csrf_meta_tag %&gt;
+  &lt;%= yield(:head) %&gt;
+&lt;/head&gt;
+</pre>
+
+<h3>Rendere le opzioni facoltative</h3>
+
+<p>C&rsquo;&egrave; ancora una piccola feature che vorremmo aggiungere al nostro generatore: la possibilit&agrave; di passare un&rsquo;opzione che prevenga la generazione del foglio di stile. Possiamo fare questa cosa, usando il metodo <code>class_option</code>:</p>
+
+<p class="codeFilePath">/lib/generators/layout/layout_generator.rb</p>
+<pre class="ruby">
+class LayoutGenerator &lt; Rails::Generators::Base
+  source_root File.expand_path(&#x27;../templates&#x27;, __FILE__)
+  argument :layout_name, :type =&gt; :string, :default =&gt; &quot;application&quot;
+  class_option :stylesheet, :type =&gt; :boolean, :default =&gt; true, :description =&gt; &quot;Include stylesheet file&quot;
+  
+  def generate_layout
+    copy_file &quot;stylesheet.css&quot;, &quot;public/stylesheets/#{file_name}.css&quot; if options.stylesheet?
+    template &quot;layout.html.erb&quot;, &quot;app/views/layouts/#{file_name}.html.erb&quot;
+  end
+  
+  private
+  def file_name
+    layout_name.underscore
+  end
+  
+end
+</pre>
+
+<p>Abbiamo chiamato la nostra option <code>stylesheet</code>, dandole il tipo <code>boolean</code> con un valore di default pari a <code>true</code> e fornendole una descrizione. Nella linea <code>copy_file</code> possiamo ora aggiungere una condizione <code>if</code> per cui il foglio di stile venga copiato solo se l&rsquo;opzione <code>stylesheet</code> vale <code>true</code>.</p>
+
+<p>Analogamente, nel template di layout, vogliamo includere la linea <code>stylesheet_link_tag</code> solo se l&rsquo;opzione <code>stylesheet</code> &egrave; <code>true</code>. Racchiudiamo dunque quella riga di codice in un <code>if</code> affinch&egrave; tutto ci&ograve; avvenga:</p>
+
+<p class="codeFilePath">/lib/generators/layout/templates/layout.html.erb</p>
+<pre class="ruby">
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+  &lt;head&gt;
+    &lt;title&gt;Untitled&lt;/title&gt;
+    &lt;%- if options.stylesheet? -%&gt;
+    &lt;%%= stylesheet_link_tag &quot;&lt;%= file_name %&gt;&quot; %&gt;
+    &lt;%- end -%&gt;
+    &lt;%%= javascript_include_tag :defaults %&gt;
+    &lt;%%= csrf_meta_tag %&gt;
+    &lt;%%= yield(:head) %&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+    &lt;div id=&quot;container&quot;&gt;
+      &lt;%% flash.each do |name, msg| %&gt;
+        &lt;%%= content_tag :div, msg, :id =&gt; &quot;flash_#{name}&quot; %&gt;
+      &lt;%% end %&gt;
+      &lt;%%= yield %&gt;
+    &lt;/div&gt;
+  &lt;/body&gt;
+&lt;/html&gt;
+</pre>
+
+<p>Se lanciamo la documentazione di help per il nostro generatore nuovamente, ora vedremo che abbiamo una nuova opzione (facoltativa) stylesheet.</p>
+
+<pre class="terminal">
+$ rails g layout --help
+Usage:
+  rails generate layout [LAYOUT_NAME] [options]
+
+Options:
+  [--stylesheet]  # Indicates when to generate stylesheet
+                  # Default: true
+</pre>            
+                  
+<p>Ora siamo in grado di generare un layout privo di foglio di stile, usando l&rsquo;opzione <code>--skip-stylesheet</code> (o <code>--no-stylesheet</code>). Cos&igrave; facendo, verr&agrave; creato il solo file di layout:</p>
+
+<pre class="terminal">
+$ rails g layout foo --skip-stylesheet
+      <span class="passed">create</span>  app/views/layouts/foo.html.erb
+</pre>      
+
+<p>E&rsquo; tutto per questo episodio sulla creazione di generatori in Rails 3. Siete invitati a provare per conto vostro la creazione di nuovi generatori. Ogniqualvolta dobbiate riprodurre del codice uguale (o molto simile) nelle vostre applicazioni Rails, questo processo pu&ograve; essere convertito e reso pi&ugrave; rapido e meno noioso dall&rsquo;uso di un generatore. Per condividere il vostro generatore con altri, tutto quello che dovrete fare sar&agrave; di creare un plugin Rails o un gem e mettere il vostro generatore in una cartella <code>lib/generators</code>. Cos&igrave; facendo, chiunque includa tale gem o plugin nella propria applicazione, avr&agrave, a disposizione anche il vostro generatore.</p>

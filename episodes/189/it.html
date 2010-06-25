@@ -1,0 +1,215 @@
+<p>Nel precedente episodio abbiamo creato un sistema di autenticazione basato sui ruoli. Nella pagina di registrazione dell&rsquo;applicazione una serie di checkbox permette all&rsquo;utente di assegnarsi uno o pi&ugrave; ruoli:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/249/original/E189I01.png" width="808" height="510" alt="La pagina di registrazione che mostra i checkbox dei ruoli."/>
+</div>
+
+<p>L&rsquo;applicazione ha un modello <code>Role</code> in cui sono definiti i ruoli e una relazione molti-a-molti fra il <code>Role</code> e lo <code>User</code> per mezzo di un modello <code>Assignment</code>. Se guardiamo sul database vedremo i tre ruoli esistenti:</p>
+
+<pre class="terminal">
+&gt;&gt; Role.all
++----+-----------+-------------------------+-------------------------+
+| id | name      | created_at              | updated_at              |
++----+-----------+-------------------------+-------------------------+
+| 1  | Admin     | 2009-11-16 21:22:59 UTC | 2009-11-16 21:22:59 UTC |
+| 2  | Moderator | 2009-11-16 21:23:06 UTC | 2009-11-16 21:23:06 UTC |
+| 3  | Author    | 2009-11-16 21:23:16 UTC | 2009-11-16 21:23:16 UTC |
++----+-----------+-------------------------+-------------------------+
+3 rows in set
+</pre>
+
+<p>Il problema principale con questa impostazione delle cose &egrave; che c&rsquo;&egrave; un forte accoppiamento fra i ruoli sul database e il codice nel file <code>authorization_rules</code> che definisce i permessi per tale ruolo:</p> 
+
+<pre class="ruby">
+role :author do
+  includes :guest
+  has_permission_on :articles, :to =&gt; [:new, :create]
+  has_permission_on :articles, :to =&gt; [:edit, :update] do
+    if_attribute :user =&gt; is { user }
+  end
+end
+</pre>
+
+<p>Con ruoli e permessi definiti in questo modo non possiamo apportare modifiche alla tabella dei ruoli senza anche necessariamente cambiare il codice Ruby che definisce ciascun ruolo e di conseguenza i benefici di mantenere i ruoli sul database sono persi. Questo episodio vi mostrer&agrave; come rimuovere questo accoppiamento definendo i ruoli esclusivamente sul codice, anzich&egrave; su di una tabella sul database.</p>
+
+<p>Dal momento che non abbiamo pi&ugrave; un modello <code>Role</code>, la prima modifica che facciamo &egrave; al modello <code>User</code>, da dove rimuoviamo le associazioni con assignments e roles, cancellando le seguenti due linee:</p>
+
+<pre class="ruby">
+has_many :assignments
+has_many :roles, :through =&gt; :assignments
+</pre>
+
+<p>Fatto ci&ograve;, dobbiamo creare i ruoli da qualche altra parte. Poich&egrave; i ruoli sono associati agli utenti, li definiamo come costanti nel modello <code>User</code>:</p>
+
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  acts_as_authentic
+  has_many :articles
+  has_many :comments
+
+  ROLES = %w[admin moderator author]
+
+  def role_symbols
+    roles.map do |role|
+      role.name.underscore.to_sym
+    end
+  end
+end
+</pre>
+
+<p>Ora dovremo modificare il codice solamente nel momento in cui si dovranno cambiare i ruoli. Ma la domanda rimane: come associamo un utente ai propri ruoli? Dal momento che non abbiamo pi&ugrave; una tabella dei ruoli, dovremo in qualche maniera cablare questa associazione nel modello <code>User</code>.</p>
+
+<p>Di seguito vi mostreremo due modi per farlo, a seconda del tipo di associazione con cui si sta lavorando.</p> 
+
+<h3>Cablare una relazione uno-a-molti</h3>
+
+<p>Al momento la nostra applicazione ha una relazione molti-a-molti fra gli utenti e i ruoli. Cambiamo questa relazione in una uno-a-molti in modo che ogni utente abbia solo un ruolo associato. Tale ruolo dovr&agrave; essere salvato nella tabella <code>users</code>, ma siccome stiamo memorizzando un unico valore, il ruolo pu&ograve; essere memorizzato in un campo di tipo stringa. Generiamo il campo ruolo con la seguente migration:</p>
+
+<pre class="terminal">
+script/generate migration add_role_to_users role:string
+</pre>
+
+<p>Poi migriamo il database per aggiungere il nuovo campo alla tabella users:</p>
+
+<pre class="terminal">
+rake db:migrate
+</pre>
+
+<p>Il prossimo passo &egrave; modificare la form di registrazione per sostituire i checkbox dei ruoli con una tendina. Per fare ci&ograve;, sostituiamo il codice nel template <code>/app/views/users/new.html.erb</code>:</p>
+
+<pre class="ruby">
+&lt;%= form.label :roles %&gt;
+&lt;% for role in Role.all %&gt;
+  &lt;%= check_box_tag &quot;user[role_ids][]&quot;, role.id, @user.roles.include?(role) %&gt;
+  &lt;%=h role.name %&gt;&lt;br /&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>con questo:</p>
+
+<pre class="ruby">
+&lt;%= form.label :role %&gt;
+&lt;%= form.collection_select :role, User::ROLES, :to_s, :humanize %&gt;
+</pre>
+
+<p>Usiamo <code>collection_select</code> per generare la tendina. Di solito questo metodo lo si usa con un modello, ma funziona bene anche in questo scenario. Quando &egrave; usato con un modello, gli passiamo una collezione di oggetti di modello e le propriet&agrave; che dovrebbero essere utilizzate per impostare il valore e il testo di ciascuna opzione. Anzich&egrave; quello, passiamo l&rsquo;array di nomi di ruoli che abbiamo definito nel modello <code>User</code>. Impostiamo il valore per di ogni opzione, chiamando il metodo <code>:to_s</code> su ciascun ruolo ed il testo da visualizzare chiamando <code><a href="http://api.rubyonrails.org/classes/ActiveSupport/CoreExtensions/String/Inflections.html#M001370">:humanize</a></code> su ciascun ruolo per rendere la descrizione carina da leggere. Come risultato, avremo una tendina che permetter&agrave; agli utenti in fase di registrazione di poter scegliere il proprio unico ruolo:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/250/original/E189I02.png" width="808" height="478" alt="I checkbox sono stati sostituiti da una tendina."/>
+</div>
+
+<p>Siccome stiamo usando declarative authorization nella nostra applicazione, dobbiamo anche fare una modifica al metodo <code>role_symbols</code> nella classe <code>User</code>, cambiandolo affinch&egrave; restituisca il ruolo utente convertito in simbolo:</p>
+
+<pre class="ruby">
+def role_symbols
+  [role.to_sym]
+end
+</pre>
+
+<p>Ora, in fase di creazione di nuovi utenti, il loro ruolo verr&agrave; salvato nel campo <code>role</code> della tabella <code>users</code>:</p>
+
+<pre class="ruby">
+&gt;&gt; User.last.role
+=&gt; &quot;moderator&quot;
+</pre>
+
+<h3>Cablare una relazione molti-a-molti</h3>
+
+<p>Abbiamo cablato con successo una relazione uno-a-molti all&rsquo;interno di un singolo modello, ma come potremmo fare per mantenere la possibilit&agrave; di fare associare pi&ugrave; di un ruolo alla utenza in creazione, senza dover ripristinare il modello (e la tabella) <code>Role</code>? Questo &egrave; un po&rsquo; pi&ugrave; complicato da perseguire, poich&egrave; dobbiamo comprimere molti valori all&rsquo;interno di una singola colonna della tabella users.</p> 
+
+<p>Una soluzione potrebbe essere quella di creare una colonna di testo denominata <code>roles</code> nella tabella <code>users</code> e usare il metodo di Rails <code>serialize</code> per salvare i ruoli dell&rsquo;utente in tale colonna. Questo causerebbe il richiamo del metodo <code>to_yaml</code> sui ruoli prima di salvare il valore del campo nel database. Come approccio funziona, ma rende difficili le successive operazioni di manipolazione dei dati, come ad esempio il recupero degli utenti in base al ruolo, per cui decidiamo di intraprendere una strada diversa.</p>
+
+<p>Anzich&egrave; serializzare i ruoli, useremo una bitmask. In questo modo possiamo salvare pi&ugrave; valori in un singolo campo intero e continuare ad avere la possibilit&agrave; di recuperare gli utenti in base al loro ruolo.</p>
+
+<p>La prima cosa da fare &egrave; aggiungere una nuova colonna chiamata <code>roles_mask</code> alla tabella <code>users</code> per poter salvare il valore della bitmask:</p>
+
+<pre class="terminal">
+script/generate migration add_roles_mask_to_users roles_mask:integer
+</pre>
+
+<p>Poi lanciamo la migrazione:</p>
+
+<pre class="terminal">
+rake db:migrate
+</pre>
+
+<p>Nel modello <code>User</code> dovremo gestire la <code>roles_mask</code> implementando i metodi getter e setter per poter convertire facilmente la bitmask da e verso un array di ruoli:</p>
+
+<pre class="ruby">
+def roles=(roles)
+  self.roles_mask = (roles &amp; ROLES).map { |r| 2**ROLES.index(r) }.sum
+end
+
+def roles
+  ROLES.reject { |r| ((roles_mask || 0) &amp; 2**ROLES.index(r)).zero? }
+end
+</pre>
+
+<p>Il metodo setter accetta un array di ruoli e li converte in una bitmask di interi che viene assegnata all&rsquo;attributo <code>roles_mask</code>. Il getter itera su ciascun ruolo e restituisce un array di ruoli il cui bit sia impostato nella maschera. Ci sono dei plugin disponibili per rendere pi&ugrave; semplice l&rsquo;utilizzo delle bitmask, ma siccome abbiamo un solo campo che ne fa uso e occorrevano davvero poche righe di codice per gestire la nostra bitmask, abbiamo preferito non appoggiarci a uno di essi.</p>
+
+<p>Dobbiamo cambiare nuovamente il metodo <code>role_symbols</code> per farlo andare con i nostri nuovi ruoli. Prendiamo l&rsquo;array di ruoli e convertiamo dunque ciascun ruolo in un simbolo:</p>
+
+<pre class="ruby">
+def role_symbols
+  roles.map(&amp;:to_sym)
+end
+</pre>
+
+<p>L&rsquo;ultima modifica da fare &egrave; di cambiare nuovamente la vista per sostituire la tendina con i checkbox, in modo tale che l&rsquo;utente possa scegliere una serie di ruoli all&rsquo;atto della registrazione:</p>
+
+<pre class="ruby">
+&lt;%= form.label :roles %&gt;
+&lt;% for role in User::ROLES %&gt;
+  &lt;%= check_box_tag &quot;user[roles][]&quot;, role, @user.roles.include?(role) %&gt;
+  &lt;%= h role.humanize %&gt;
+&lt;% end %&gt;
+&lt;%= hidden_field_tag &quot;user[roles][]&quot;%&gt;
+</pre>
+
+<p>La tecnica qui mostrata per creare i checkbox per una relazione molti-a-molti &egrave; simile a quella gi&agrave; vista nell&rsquo;episodio 17 [<a href="http://railscasts.com/episodes/17-habtm-checkboxes">guardalo</a>, <a href="http://it.asciicasts.com/episodes/17-checkox-habtm">leggilo</a>]. Le parentesi quadre vuote in <code>user[roles][]</code> indicano che i valori dei checkbox spuntati saranno passati come array al modello <code>User</code>, dove il metodo setter che abbiamo appena scritto li convertir&agrave; ad un valore di bitmask. L&rsquo;ultimo parametro passato a <code>check_box_tag</code> spunta il checkbox se l&rsquo;utente ha quel ruolo. Il campo nascosto assicura che sia passato un array vuoto se non &egrave; spuntato alcun checkbox.</p>
+
+<p>Tornando ora alla maschera di registrazione, ora, si rivedono i checkbox. Registriamo un nuovo utente ed assegnamogli due ruoli:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/251/original/E189I03.png" width="808" height="478" alt="Registrazione di un nuovo utente e assegnamento dei ruoli."/>
+</div>
+
+<p>Se diamo un&rsquo;occhiata all&rsquo;utente appena creato da console, possiamo vedere i suoi ruoli e i valori assegnati alla <code>roles_mask</code>:</p>
+
+<pre class="ruby">
+&gt;&gt; User.last.roles
+=&gt; [&quot;admin&quot;, &quot;author&quot;]
+&gt;&gt; User.last.roles_mask
+=&gt; 5
+</pre>
+
+<p>Ogni ha un valore doppio rispetto al ruolo a lui successivo, con il ruolo di valore pi&ugrave; basso pari a 1. Per questo, il valore 5 per un utente deriva da <code>(1*1) + (2*0) + (4*1)</code>.</p>
+
+<p>Avendo salvato il ruoli in un&rsquo;unica colonna, come possiamo trovare tutti gli utenti che hanno un certo ruolo? Poniamo di voler trovare tutti gli utenti con privilegi di moderatore. Possiamo fare ci&ograve; che vogliamo, aggiungendo un named scope al nostro modello <code>User</code>:</p>
+
+<pre class="ruby">
+named_scope :with_role, lambda { |role| {:conditions =&gt; &quot;roles_mask &amp; #{2**ROLES.index(role.to_s)} &gt; 0 &quot;} }
+</pre>
+
+<p>Questo named scope accetta un ruolo per argomento e compie su di esso un&rsquo;operazione bit a bit per capire se l&rsquo;utente appartiene a quel ruolo. Possiamo controllare il funzionamento da console, cercando tutti gli utenti con ruolo amministrativo:</p>
+
+<pre class="terminal">
+&gt;&gt; User.with_role(&quot;admin&quot;)
++----+----------+-------------+-------------+-------------+-------------+------------+
+| id | username | email       | crypted_... | password... | persiste... | roles_mask |
++----+----------+-------------+-------------+-------------+-------------+------------+
+| 6  | paul     | paul@tes... | cffada11... | FDGoNtM1... | 35a7d8c8... | 5          |
++----+----------+-------------+-------------+-------------+-------------+------------+
+1 row in set
+</pre>
+
+<p>Questa query restituisce solo l&rsquo;utente pi&ugrave; recente, dal momento che &egrave; lui l&rsquo;unico utente che abbiamo aggiunto da quando abbiamo creato il campo <code>roles_mask</code>.</p>
+
+<p>Se avete bisogno di aggiungere ruoli aggiuntivi all&rsquo;applicazione in seguito, c&rsquo;&egrave; un&rsquo;insidia potenziale a cui dovrete prestare attenzione. Dal momento che la bitmask si basa sulla posizione dei ruoli nell&rsquo;array <code>ROLES</code>, &egrave; indispensabile che ogni nuovo ruolo sia aggiunto in fondo alla lista. Se per sbaglio non si facesse in questo modo, gli utenti gi&agrave; registrati si vedrebbero cambiati i propri ruoli:</p>
+
+<pre class="ruby">
+ROLES = %w[admin moderator author editor]
+</pre>
+<p class="title">Aggiunta di ruoli alla lista.</p>
+
+<p>E&rsquo; tutto per questo episodio. Il bitmasking &egrave; una potente tecnica per incapsulare relazioni molti-a-molti in un singolo campo intero di un modello. Detto ci&ograve; ha senso applicare questo metodo solo nei casi in cui si ha una lista di record che non appartengono ad alcuna tabella del database. La nostra lista di ruoli &egrave; cos&igrave; strettamente legata al codice che non ha alcun senso memorizzarla al di fuori del codice stesso, dal momento che non possiamo cambiare un ruolo senza dover cambiare il codice che definisce i permessi per quel ruolo. Se vi trovate in una situazione in cui potete aggiungere o cambiare uno di questi record senza la conseguente necessit&agrave; di dover fare modifiche al codice, allora l&rsquo;approccio tradizionale con relazione molti-a-molti sul database rimane la soluzione migliore.</p>

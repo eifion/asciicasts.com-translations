@@ -1,0 +1,176 @@
+<p>Episode 193 [<a href="http://railscasts.com/episodes/193-tableless-model">watch</a>, <a href="http://asciicasts.com/episodes/193-tableless-model">read</a>] was all about tableless models. In that episode we created a model that used some of ActiveRecord&rsquo;s features but which didn&rsquo;t have a database table behind it. The technique we used was quite a hack as this is something that ActiveRecord wasn&rsquo;t designed to do but now in Rails 3.0 we have a new feature called ActiveModel which makes doing something like this a lot easier.</p>
+
+<p>Before we get into the details of ActiveModel we&rsquo;ll first describe the part of the application that we&rsquo;re going to modify to use it.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/399/original/E219I01.png" width="801" height="465" alt="The form for creating a new message."/>
+</div>
+
+<p>The screenshot above shows a contact form that has been created using Rails&rsquo; scaffolding. The application has a model called <code>Message</code> that is currently backed by ActiveRecord which means that we&rsquo;re managing messages through the database. We&rsquo;re going to change the way this form works so that it just sends emails and doesn&rsquo;t store messages in a database table.</p>
+
+<p>When you&rsquo;re thinking of doing something like this it&rsquo;s always a good idea to first consider your requirements and make sure that you really don&rsquo;t want to store the data from the form in a database as there are often good side-effects to doing this. A database can act as a backup and also makes it easier to move the message-sending into a queue in a background process. For the purposes of this example, however, we don&rsquo;t want any of that  functionality so we&rsquo;re free to go ahead and make our model tableless.</p>
+
+<p>The code for the Message class looks like this:</p>
+
+<p class="codeFilePath">/app/models/message.rb</p>
+<pre class="ruby">
+class Message &lt; ActiveRecord::Base
+ validates_presence_of :name
+ validates_format_of :email, :with =&gt; /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+ validates_length_of :content, :maximum =&gt; 500
+end
+</pre>
+
+<p><code>Message</code> inherits from <code>ActiveRecord::Base</code> as you would expect a model class to, but as we don&rsquo;t want this model to have a database back-end we&rsquo;re going to remove that inheritance. As soon as we do this, though, our form will no longer work as the validators are provided by ActiveRecord. Fortunately, we can restore this functionality by using ActiveModel.</p>
+
+<p>If we take a look at the <a href="http://github.com/rails/rails/">Rails 3 source code</a> we&rsquo;ll see the that there are <code>activerecord</code> and <code>activemodel</code> directories. The core Rails team has taken everything from ActiveRecord that wasn&rsquo;t specific to the database backend and moved it out into ActiveModel. ActiveRecord still relies heavily on ActiveModel for the functionality that isn&rsquo;t specific to the database and as ActiveModel is full-featured and thoroughly tested it&rsquo;s great for use outside ActiveRecord.</p>
+
+<p>It we take a look in the directory that contains the <a href="http://github.com/rails/rails/tree/master/activemodel/lib/active_model/">code for ActiveModel</a> we can see the functionality that it provides.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/400/original/E219I02.png" width="800" height="644" alt="The list of files in the ActiveModel directory."/>
+</div>
+
+<p>We can see from the list above that ActiveModel includes code to handle callbacks, dirty tracking, serialization and validation, among other things. The last of these is exactly what we&rsquo;re looking for.</p>
+
+<p>The <a href="http://github.com/rails/rails/blob/master/activemodel/lib/active_model/validations.rb">code for validations</a> has the following comment near the top and we can see from it that it&rsquo;s fairly easy to add validations to a model. All we need to do is include the <code>Validations</code> module and provide getter methods for the attributes that we&rsquo;re calling validators on.</p>
+
+<pre class="ruby">
+&nbsp;&nbsp;# == Active Model Validations
+&nbsp;&nbsp;#   
+&nbsp;&nbsp;# Provides a full validation framework to your objects.
+&nbsp;&nbsp;# 
+&nbsp;&nbsp;# A minimal implementation could be:
+&nbsp;&nbsp;# 
+&nbsp;&nbsp;#   class Person
+&nbsp;&nbsp;#     include ActiveModel::Validations
+&nbsp;&nbsp;# 
+&nbsp;&nbsp;#     attr_accessor :first_name, :last_name
+&nbsp;&nbsp;#
+&nbsp;&nbsp;#     validates_each :first_name, :last_name do |record, attr, value|
+&nbsp;&nbsp;#       record.errors.add attr, &#x27;starts with z.&#x27; if value.to_s[0] == ?z
+&nbsp;&nbsp;#     end
+&nbsp;&nbsp;#   end
+&nbsp;&nbsp;# 
+</pre>
+
+<p>Now that we know this we can apply it to our Message model.</p>
+
+<p class="codeFilePath">/app/models/message.rb</p>
+<pre class="ruby">
+class Message
+  include ActiveModel::Validations
+  
+  attr_accessor :name, :email, :content
+ 
+  validates_presence_of :name
+  validates_format_of :email, :with =&gt; /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+  validates_length_of :content, :maximum =&gt; 500
+end
+</pre>
+
+<p>This isn&rsquo;t enough to get our model to behave as the controller expects it to, though. There are two problems in the <code>create</code> method. Firstly the call to <code>Message.new</code> won&rsquo;t work as our <code>Message</code> model no longer has an initializer that takes a hash of attributes as an argument. Secondly, <code>save</code> won&rsquo;t work as we don&rsquo;t have a database backend to save the new message to.</p>
+
+<p class="codeFilePath">/apps/controllers/messages_controller.rb</p>
+<pre class="ruby">
+class MessagesController &lt; ApplicationController
+  def new
+    @message = Message.new
+  end
+
+  def create
+    @message = Message.new(params[:message])
+    if @message.save
+      # TODO send message here
+      flash[:notice] = &quot;Message sent! Thank you for contacting us.&quot;
+      redirect_to root_url
+    else
+      render :action =&gt; &#x27;new&#x27;
+    end
+  end
+end
+</pre>
+
+<p>We&rsquo;ll fix the second of these problems first. While we can&rsquo;t save a message we can check that it is valid, so we&rsquo;ll replace <code>@message.save</code> with <code>@message.valid?</code>.</p>
+
+<p class="codeFilePath">/app/controllers/messages_controllers.rb</p>
+<pre class="ruby">
+def create
+  @message = Message.new(params[:message])
+  if @message.valid?
+    # TODO send message here
+    flash[:notice] = &quot;Message sent! Thank you for contacting us.&quot;
+    redirect_to root_url
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end
+</pre>
+
+<p>We can solve the first problem by writing an <code>initialize</code> method in the <code>Message</code> model that takes a hash as a parameter. This method will loop through each item in the hash and assign the value to the appropriate attribute for the message using the <code>send</code> method.</p>
+
+<p class="codeFilePath">/app/models/message.rb</p>
+<pre class="ruby">
+class Message
+  include ActiveModel::Validations
+  
+  attr_accessor :name, :email, :content
+ 
+  validates_presence_of :name
+  validates_format_of :email, :with =&gt; /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+  validates_length_of :content, :maximum =&gt; 500
+  
+  def initialize(attributes = {})
+    attributes.each do |name, value|
+      send(&quot;#{name}=&quot;, value)
+    end
+  end
+end
+</pre>
+
+<p>If we reload the form now we&rsquo;ll see that we&rsquo;re not quite there yet, however.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/401/original/E219I03.png" width="796" height="510" alt="The form throws an error."/>
+</div>
+ 
+<p>This time the error is caused by a missing <code>to_key</code> method in the <code>Message</code> model. The error is thrown by the <code>form_for</code> method so it seems that Rails itself is expecting our model to have functionality that it doesn&rsquo;t yet support. Let&rsquo;s add that functionality now.</p>
+
+<p>Rather than guessing everything that Rails expects the model to have there&rsquo;s a nice <a href="http://github.com/rails/rails/blob/master/activemodel/lib/active_model/lint.rb">lint test</a> included with ActiveModel that allows us to check whether our custom model behaves as Rails expects it to. If we include the <code>ActiveModel::Lint::Tests</code> module in a tests for the model it will check that the model has all of the required functionality.</p>
+
+<p>The source code for the <code>Lint::Tests</code> module shows the methods that the model needs to respond to in order for it to work as it should, including <code>to_key</code>. We can make our model work by including a couple of ActiveRecord modules. The first of these is <a href="http://github.com/rails/rails/blob/master/activemodel/lib/active_model/conversion.rb"><code>Conversion</code></a>, which provides that to_key method and several others. The other module is the <a href="http://github.com/rails/rails/blob/master/activemodel/lib/active_model/naming.rb"><code>Naming</code></a> module, but in this case we extend it in our class rather than including it as it includes some class methods.</p>
+
+<p>As well as including the <code>Conversion</code> module we need to define a <code>persisted?</code> method in our model, which needs to return <code>false</code> as our model isn&rsquo;t persisted to a database. With these changes in place our <code>Message</code> model now looks like this:</p>
+
+<p class="codeFilePath">/app/models/message.rb</p>
+<pre class="ruby">
+class Message
+  include ActiveModel::Validations
+  include ActiveModel::Conversion
+  extend ActiveModel::Naming
+  
+  attr_accessor :name, :email, :content
+ 
+  validates_presence_of :name
+  validates_format_of :email, :with =&gt; /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+  validates_length_of :content, :maximum =&gt; 500
+  
+  def initialize(attributes = {})
+    attributes.each do |name, value|
+      send(&quot;#{name}=&quot;, value)
+    end
+  end
+  
+  def persisted?
+    false
+  end
+end
+</pre>
+
+<p>If we reload the form now it will work again which means that the <code>Message</code> model now satisfies all of the requirements that Rails 3 relies on for a model. If we try to submit the form we&rsquo;ll see that the validators are working, too.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/402/original/E219I04.png" width="800" height="631" alt="The form now works, including the validators."/>
+</div>
+
+<p>We&rsquo;ve only covered a little of what ActiveModel provides in this episode but this should have been enough to whet your appetite and give you a reason to look more deeply into its source code to see what it can do. The code is well documented and structured so if you see something you might find useful then there should be enough information in the comments for that file to get you started using it.</p>

@@ -1,0 +1,303 @@
+<p>Il metodo <a href="http://api.rubyonrails.org/classes/ActiveRecord/Base.html#M002263">find</a> di ActiveRecord accetta diverse opzioni. Due di queste, che esamineremo in questo episodio, sono <code>include</code> e <code>joins</code>. Si confondono spesso fra di loro dal momento che svolgono compiti piuttosto simili, ma ci sono dei particolari casi in cui dobbiamo necessariamente sceglierne uno al posto dell&rsquo;altro.</p>
+
+<p>Per spiegare le differenze fra <code>include</code> e <code>joins</code>, useremo un&rsquo;applicazione Rails in cui gli utenti possono scrivere commenti. I due modelli sono in relazione fra di loro con una associazione standard <code>has_many</code> / <code>belongs_to</code>:</p>
+
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  has_many :comments
+end
+</pre>
+
+<pre class="ruby">
+class Comment &lt; ActiveRecord::Base
+  belongs_to :user
+end
+</pre>
+
+<p>L&rsquo;applicazione ha una pagina che mostra tutti i commenti che sono stati scritti. Per ciascuno viene anche mostrato il nome dell&rsquo;autore, unitamente anche al testo &ldquo;(admin)&rdquo;, nel caso in cui l&rsquo;utente sia un amministratore.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/199/original/E181I01.png" width="816" height="538" alt="La pagina dei commenti dell&rsquo;applicazione." />
+</div>
+
+<p>Poniamo di voler modificare la pagina, per mostrare solamente i commenti scritti da utenti amministratori. Per fare ci&ograve;, dobbiamo cambiare la find all&rsquo;interno della action <code>index</code> del <code>CommentsController</code> che attualmente si presenta cos&igrave;:</p>
+
+<pre class="ruby">
+def index
+  @comments = Comment.all(:order =&gt; &quot;comments.created_at desc&quot;)
+end	
+</pre>
+
+<p>Noi vogliamo invece filtrare i commenti su di un attributo presente nella tabella users, per cui dobbiamo mettere in join tale tabella in una singola query con la find dei nostri <code>Comments</code>. Per&ograve; ci viene un dubbio: dobbiamo usare la <code>joins</code> o la <code>include</code> per farlo? Per capirlo, confronteremo i due tipi di query in console.</p>
+
+<p>Prima proviamo a usare <code>joins</code>, aggiungendo una condizione, affinch&egrave; siano restituiti solo gli utenti amministratori.</p>
+
+<pre class="terminal">
+&gt;&gt; c = Comment.all(:joins =&gt; :user, :conditions =&gt; { :users =&gt; { :admin =&gt; true } })  Comment Load (1.2ms)   SELECT &quot;comments&quot;.* FROM &quot;comments&quot; INNER JOIN &quot;users&quot; ON &quot;users&quot;.id = &quot;comments&quot;.user_id WHERE (&quot;users&quot;.&quot;admin&quot; = &#x27;t&#x27;) 
++----+-----------------------+---------+-----------------------+-----------------------+
+| id | content               | user_id | created_at            | updated_at            |
++----+-----------------------+---------+-----------------------+-----------------------+
+| 3  | Some people, when ... | 1       | 2009-09-28 19:00:3... | 2009-09-28 19:00:3... |
+| 5  | Write the code as ... | 2       | 2009-09-28 19:44:0... | 2009-09-28 19:44:0... |
+| 6  | Walking on water a... | 1       | 2009-09-28 19:46:2... | 2009-09-28 19:46:2... |
+| 8  | It should be noted... | 2       | 2009-09-28 19:49:3... | 2009-09-28 19:49:3... |
++----+-----------------------+---------+-----------------------+-----------------------+
+4 rows in set
+</pre>
+
+<p>La joins esegue una singola query che restituisce solamente gli attributi dalla tabella comments. Se proviamo a prendere un riferimento all&rsquo;utente del primo commento, vien fatta un&rsquo;ulteriore chiamata al database, dal momento che non &egrave; stato recuperato alcun attributo dalla tabella users con la prima query:</p>
+
+<pre class="terminal">
+&gt;&gt; c.first.user
+  User Load (0.3ms)   SELECT * FROM &quot;users&quot; WHERE (&quot;users&quot;.&quot;id&quot; = 1) 
++----+--------+-------+-------------------------+-------------------------+
+| id | name   | admin | created_at              | updated_at              |
++----+--------+-------+-------------------------+-------------------------+
+| 1  | Andrea | true  | 2009-09-28 18:51:53 UTC | 2009-09-28 18:51:53 UTC |
++----+--------+-------+-------------------------+-------------------------+
+1 row in set
+</pre>
+
+<p>Ora proviamo a riottenere lo stesso risultato, questa volta usando per&ograve; la <code>include</code> al posto della <code>joins</code>:</p>
+
+<pre class="terminal">
+&gt;&gt; c = Comment.all(:include =&gt; :user, :conditions =&gt; { :users =&gt; { :admin =&gt; true } })
+  Comment Load Including Associations (0.7ms)   SELECT &quot;comments&quot;.&quot;id&quot; AS t0_r0, &quot;comments&quot;.&quot;content&quot; AS t0_r1, &quot;comments&quot;.&quot;user_id&quot; AS t0_r2, &quot;comments&quot;.&quot;created_at&quot; AS t0_r3, &quot;comments&quot;.&quot;updated_at&quot; AS t0_r4, &quot;users&quot;.&quot;id&quot; AS t1_r0, &quot;users&quot;.&quot;name&quot; AS t1_r1, &quot;users&quot;.&quot;admin&quot; AS t1_r2, &quot;users&quot;.&quot;created_at&quot; AS t1_r3, &quot;users&quot;.&quot;updated_at&quot; AS t1_r4 FROM &quot;comments&quot; LEFT OUTER JOIN &quot;users&quot; ON &quot;users&quot;.id = &quot;comments&quot;.user_id WHERE (&quot;users&quot;.&quot;admin&quot; = &#x27;t&#x27;) 
++----+-----------------------+---------+-----------------------+-----------------------+
+| id | content               | user_id | created_at            | updated_at            |
++----+-----------------------+---------+-----------------------+-----------------------+
+| 3  | Some people, when ... | 1       | 2009-09-28 19:00:3... | 2009-09-28 19:00:3... |
+| 5  | Write the code as ... | 2       | 2009-09-28 19:44:0... | 2009-09-28 19:44:0... |
+| 6  | Walking on water a... | 1       | 2009-09-28 19:46:2... | 2009-09-28 19:46:2... |
+| 8  | It should be noted... | 2       | 2009-09-28 19:49:3... | 2009-09-28 19:49:3... |
++----+-----------------------+---------+-----------------------+-----------------------+
+4 rows in set
+</pre>
+
+<p>Questa volta viene eseguita una query SQL pi&ugrave; complicata e vengono prese colonne sia dalla tabella comments, sia dalla tabella users. I modelli <code>User</code> associati sono salvati in memoria, per cui quando si prende il riferimento all&rsquo;utente del primo commento, questa volta non avvene nessuna ulteriore chiamata al database:</p>
+
+<pre class="terminal">
+&gt;&gt; c.first.user
++----+--------+-------+-------------------------+-------------------------+
+| id | name   | admin | created_at              | updated_at              |
++----+--------+-------+-------------------------+-------------------------+
+| 1  | Andrea | true  | 2009-09-28 18:51:53 UTC | 2009-09-28 18:51:53 UTC |
++----+--------+-------+-------------------------+-------------------------+
+1 row in set
+</pre>
+
+<h3>Modifica alla pagina dei commenti</h3>
+
+<p>Ora che abbiamo un po&rsquo; capito le differenze fra la <code>include</code> e la <code>joins</code>, ci chiediamo quali fra queste due si debba usare per la nostra pagina dei commenti. La domanda che ci dobbiamo porre in realt&agrave; &egrave; &ldquo;useremo degli attributi del modello in relazione?&rdquo; Nel nostro caso la risposta &egrave; &ldquo;s&igrave;&rdquo;, dal momento che stiamo mostrando il nome dell&rsquo;utente su ciascun commento. Significa anche che vogliamo ottenere gli utenti nello stesso momento in cui recuperiamo i commenti, per cui dobbiamo usare <code>include</code> in questo caso.</p>
+
+<p>Tornando al nostro <code>CommentsController</code>, cambiamo la action <code>index</code> affinch&egrave; recuperi gli utenti insieme ai commenti:</p>
+
+<pre class="ruby">
+def index
+  @comments = Comment.all(:include =&gt; :user, :conditions =&gt; { :users =&gt; { :admin =&gt; true} }, :order =&gt; &quot;comments.created_at desc&quot;)
+end
+</pre>
+
+<p>La <code>find</code> appare un tantino complessa ora, per cui probabilmente sposteremmo alcune parti in un named scope se questa fosse un&rsquo;applicazione da destinarsi alla produzione, ma siccome non lo &egrave;, lasciamo tutto cos&igrave; com&rsquo;&egrave; e non deviamo dai nostri intenti didattici.</p>
+
+<p>Se invece non avessimo mostrato i nomi degli utenti a fianco dei commenti? Vediamo questo caso. Per prima cosa dobbiamo togliere le parti che mostrano il nome dell&rsquo;utente (e se &egrave; amministratore) dal partial <code>comment</code>:</p>
+
+<pre class="terminal">
+&lt;div class=&quot;comment&quot;&gt;
+  &lt;%= simple_format comment.content %&gt;
+  <span style="text-decoration: line-through;">&lt;p class=&quot;author&quot;&gt;</span>
+    <span style="text-decoration: line-through;">&lt;%= h comment.user.name %&gt;</span>
+    <span style="text-decoration: line-through;">&lt;% if comment.user.admin? %&gt;(admin)&lt;% end %&gt;</span>
+  <span style="text-decoration: line-through;">&lt;/p&gt;</span>
+  &lt;p class=&quot;actions&quot;&gt;
+    &lt;%= link_to &quot;edit&quot;, edit_comment_path(comment) %&gt; |
+    &lt;%= link_to &quot;destroy&quot;, comment, :method =&gt; :delete, :confirm =&gt; &quot;Are you sure?&quot; %&gt;
+  &lt;/p&gt;
+&lt;/div&gt;
+</pre>
+
+<p>Ricaricando la pagina ora, i nomi degli utenti sono effettivamente scomparsi:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/200/original/E181I02.png" width="819" height="433" alt="La pagina dei commenti con i nomi degli utenti rimossi." />
+</div>
+
+<p>Non stiamo pi&ugrave; mostrando alcuna informazione sull&rsquo;utente associato al commento nella pagina, per cui la include ora &egrave; piuttosto inefficiente, dal momento che recuperiamo inutilmente tutte le informazioni sull&rsquo;utente. In questo caso, la scelta corretta &egrave; quella di usare la <code>joins</code>;, in questo modo si evita di caricare inutilmente dal database informazioni che non servono. Tutto ci&ograve; che dobbiamo fare, dunque, &egrave; di sostituire la <code>include</code> con la <code>joins</code> all&rsquo;interno della find:</p>
+
+<pre class="ruby">
+def index
+  @comments = Comment.all(:joins =&gt; :user, :conditions =&gt; { :users =&gt; { :admin =&gt; true} }, :order =&gt; &quot;comments.created_at desc&quot;)
+end
+</pre>
+
+<p>In questo modo utilizziamo la tabella users esclusivamente per filtrare e rendiamo la pagina dei commenti molto pi&ugrave; performante sia come tempi di risposta, sia come occupazione di memoria.</p>
+
+<h3>Un altro esempio</h3>
+
+<p>Ridiamo un&rsquo;occhiata all&rsquo;SQL prodotto quando abbiamo eseguito da console la nostra find con <code>include</code>:</p>
+
+<pre class="terminal">
+SELECT &quot;comments&quot;.&quot;id&quot; AS t0_r0, &quot;comments&quot;.&quot;content&quot; AS t0_r1, &quot;comments&quot;.&quot;user_id&quot; AS t0_r2, &quot;comments&quot;.&quot;created_at&quot; AS t0_r3, &quot;comments&quot;.&quot;updated_at&quot; AS t0_r4, &quot;users&quot;.&quot;id&quot; AS t1_r0, &quot;users&quot;.&quot;name&quot; AS t1_r1, &quot;users&quot;.&quot;admin&quot; AS t1_r2, &quot;users&quot;.&quot;created_at&quot; AS t1_r3, &quot;users&quot;.&quot;updated_at&quot; AS t1_r4 FROM &quot;comments&quot; LEFT OUTER JOIN &quot;users&quot; ON &quot;users&quot;.id = &quot;comments&quot;.user_id WHERE (&quot;users&quot;.&quot;admin&quot; = &#x27;t&#x27;)
+</pre>
+
+<p>Questa istruzione &egrave; piuttosto complicata dal momento che prende ciascuna colonna sia dalla tabella comments, sia dalla tabella users, rinominandole tutte. Significa che la <code>include</code> non lavora realmente con la opzione <code>select</code>, poich&egrave; non abbiamo alcun controllo su come la prima parte della istruzione di SELECT sia generata. Se occorre poter definire i campi della SELECT, dovremmo usare la <code>joins</code> sulla <code>include</code>.</p>
+
+<p>In che casi potrebbe tornarci utile tutto ci&ograve;? Nella nostra pagina degli utenti, abbiamo un elenco di utenti e, per ciascuno di essi, un contatore che rappresenta il numero di commenti scritti da ciascun utente:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/201/original/E181I03.png" width="800" height="502" alt="La pagina degli utenti." />
+</div>
+
+<p>Nel file della vista per tale pagina, il numero dei commenti &egrave; ottenuto usando la seguente linea di codice:</p>
+
+<pre class="ruby">
+&lt;%= pluralize user.comments.count, &quot;comment&quot; %&gt;
+</pre>
+
+<p>Questo codice esegue una query separata per ciascun utente in lista, il che non &egrave; certo l&rsquo;ideale. Sarebbe meglio se potessimo recuperare il numero di commenti nello stesso istante in cui recuperiamo il resto delle informazioni sugli utenti.</p>
+
+<p>Lo possiamo fare, usando la <code>joins</code> con l&rsquo;opzione <code>select</code>. Usiamo nuovamente la console per dimostrare come fare.</p>
+
+<p>Questa volta recuperiamo tutti gli utenti e usiamo la <code>joins</code> per associarli alla tabella comments. Usiamo l&rsquo;opzione <code>select</code> per restringere le colonne alle sole della tabella users e per ottenere un conteggio dei commenti, e anche l&rsquo;opzione <code>group</code> che fornisce ActiveRecord, per raggruppare i risultati per <code>id</code> di ciascun utente:</p>
+
+<pre class="terminal">
+&gt;&gt; User.all(:joins =&gt; :comments, :select =&gt; &quot;users.*, count(comments.id) as comments_count&quot;, :group =&gt; &quot;users.id&quot;)
+</pre>
+
+<p>Lanciando questa, otteniamo i dettagli per tutti gli utenti e un contatore del numero di commenti che ciascuno ha fatto:</p>
+
+<pre class="terminal">
+User Load (1.3ms)   SELECT users.*, count(comments.id) as comments_count FROM &quot;users&quot; INNER JOIN &quot;comments&quot; ON comments.user_id = users.id GROUP BY users.id
++----+--------+-------+------------------+------------------+----------------+
+| id | name   | admin | created_at       | updated_at       | comments_count |
++----+--------+-------+------------------+------------------+----------------+
+| 1  | Andrea | true  | 2009-09-28 18... | 2009-09-28 18... | 2              |
+| 2  | Susan  | true  | 2009-09-28 18... | 2009-09-28 18... | 2              |
+| 3  | Paul   | false | 2009-09-28 18... | 2009-09-28 18... | 3              |
+| 4  | John   | false | 2009-09-28 18... | 2009-09-28 18... | 1              |
++----+--------+-------+------------------+------------------+----------------+
+4 rows in set
+</pre>
+
+<p>Ora che siamo in grado di recuperare gli utenti e il numero di commenti che ciascuno di essi ha scritto in un&rsquo;unica query, possiamo cambiare la pagina index per usare la nuova query. Dobbiamo fare due piccole modifiche. Nel controller, sostituiamo <code>User.all</code> con la nostra nuova <code>find</code>:</p>
+
+<pre class="terminal">
+def index
+  @users = User.all(:joins =&gt; :comments, :select =&gt; &quot;users.*, count(comments.id) as comments_count&quot;, :group =&gt; &quot;users.id&quot;)
+end
+</pre>
+
+<p>e nella vista index possiamo usare il campo <code>comments_count</code> per mostrare il numero di commenti che ciascun utente ha scritto, sostituendo il codice <code>comments.count</code> che causava l&rsquo;esecuzione di una nuova query su ciascun utente in pagina:</p>
+
+<pre class="ruby">
+&lt;%= pluralize user.comments_count, &quot;comment&quot; %&gt;
+</pre>
+
+<p>La pagina degli utenti apparir&agrave; assolutamente identica a prima, al ricaricamento, ma sar&agrave; molto pi&ugrave; efficiente nel modo in cui accede al database, poich&egrave; far&agrave; un&rsquo;unica query.</p>
+
+<h3>Un altro utilizzo per la joins</h3>
+
+<p>Concludiamo l&rsquo;episodio mostrandovi un altro buon candidato all&rsquo;uso della <code>joins</code> sulla <code>include</code>. Sotto ci sono i modelli <code>User</code> e <code>Comment</code> che abbiamo gi&agrave; usato, pi&ugrave; altri due nuovi: <code>Group</code> e <code>Membership</code>:</p>
+
+<pre class="ruby">
+class Group &lt; ActiveRecord::Base
+  has_many :memberships
+  has_many :users, :through =&gt; :memberships
+end
+
+class Membership &lt; ActiveRecord::Base
+  belongs_to :user
+  belongs_to :group
+end
+
+class User &lt; ActiveRecord::Base
+  has_many :memberships
+  has_many :groups, :through =&gt; :memberships
+  has_many :comments
+end
+
+class Comment &lt; ActiveRecord::Base
+  belongs_to :user
+end
+</pre>
+
+<p>In questo scenario <code>User</code> e <code>Group</code> sono in relazione molti-a-molti fra loro mediante la associativa <code>Membership</code>. Vogliamo mostrare tutti i commenti che sono stati scritti dagli utenti che appartengono ad un gruppo specifico. Idealmente vorremmo che ci fosse una sorta di associazione fra  <code>Group</code> e <code>Comment</code>, forse qualcosa del genere:</p>
+
+<pre class="ruby">
+class Group &lt; ActiveRecord::Base
+  has_many :membership
+  has_many :users, :through =&gt; :memberships
+  has_many :comments, :through =&gt; :users
+end
+</pre>
+
+<p>Ruby non supporta le associazioni <code>has_many :through</code> annidate tipo questa, per&ograve;, per cui dobbiamo trovare un&rsquo;altra soluzione. Fortunatamente possiamo usare anche qui la <code>joins</code>.</p> 
+
+<p>Ecco come appare la pagina che stiamo costruendo, la vista <code>show</code> del <code>GroupController</code>. Abbiamo una lista dei menbri del gruppo, ma non abbiamo ancora aggiunto i loro commenti:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/202/original/E181I04.png" width="802" height="428" alt="La pagina dei gruppi." />
+</div>
+
+<p>Torniamo nuovamente sulla console per cercare di trovare il codice che ci mostri i commenti. Innanzitutto otteniamo il nostro gruppo:</p>
+
+<pre class="terminal">
+&gt;&gt; g = Group.first
+  Group Load (0.4ms)   SELECT * FROM &quot;groups&quot; LIMIT 1
++----+------------------+-------------------------+-------------------------+
+| id | name             | created_at              | updated_at              |
++----+------------------+-------------------------+-------------------------+
+| 1  | Musician&#x27;s Guild | 2009-10-01 20:09:11 UTC | 2009-10-01 20:09:11 UTC |
++----+------------------+-------------------------+-------------------------+
+1 row in set
+</pre>
+
+<p>And then we&rsquo;ll use <code>joins</code> to get the comments for the group&rsquo;s members. We need to join the users and memberships tables so we can join both the <code>User</code> and <code>Memberships</code> associations. Then we can add conditions and restrict the memberships to those whose <code>group_id</code> is the <code>id</code> of our group:</p>
+
+<pre class="terminal">
+&gt;&gt; Comment.all(:joins =&gt; { :user =&gt; :memberships }, 
+:conditions =&gt; { :memberships =&gt; { :group_id =&gt; g.id } } )
+  Comment Load (0.7ms)   SELECT &quot;comments&quot;.* FROM &quot;comments&quot; 
+INNER JOIN &quot;users&quot; ON &quot;users&quot;.id = &quot;comments&quot;.user_id 
+INNER JOIN &quot;memberships&quot; ON memberships.user_id = users.id 
+WHERE (&quot;memberships&quot;.&quot;group_id&quot; = 1) 
++----+--------------------+---------+--------------------+--------------------+
+| id | content            | user_id | created_at         | updated_at         |
++----+--------------------+---------+--------------------+--------------------+
+| 1  | I have always w... | 3       | 2009-09-28 18:5... | 2009-09-28 18:5... |
+| 3  | Some people, wh... | 1       | 2009-09-28 19:0... | 2009-09-28 19:0... |
+| 4  | Java is to Java... | 3       | 2009-09-28 19:0... | 2009-09-28 19:0... |
+| 5  | Write the code ... | 2       | 2009-09-28 19:4... | 2009-09-28 19:4... |
+| 6  | Walking on wate... | 1       | 2009-09-28 19:4... | 2009-09-28 19:4... |
+| 7  | Never trust a c... | 3       | 2009-09-28 19:4... | 2009-09-28 19:4... |
+| 8  | It should be no... | 2       | 2009-09-28 19:4... | 2009-09-28 19:4... |
++----+--------------------+---------+--------------------+--------------------+
+7 rows in set
+</pre>
+<p>Running the query shows all of the comments from the users in our group so we can use it to finish off our group page. We&rsquo;ll use it in a new comments method in our <code>Group</code> model.</p>
+<pre class="ruby">
+class Group &lt; ActiveRecord::Base
+  has_many :memberships
+  has_many :users, :through =&gt; :memberships
+
+  def comments
+    Comment.all(:joins =&gt; { :user =&gt; :memberships}, :conditions =&gt; { :memberships =&gt; { :group_id =&gt; id } } )
+  end
+end
+</pre>
+<p>We still need to display the comments on our page so we&rsquo;ll have to update our view. We already have a <code>comment</code> partial so all we need to do is render the comments.</p>
+<pre class="ruby">
+&lt;h2&gt;Comments&lt;/h2&gt;
+&lt;%= render @group.comments %&gt;
+</pre>
+<p>If we reload the page now we&rsquo;ll see the comments below the list of users.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/203/original/E181I05.png" height="498" width="815" alt="The groups page with the comments added.	"/>
+</div>
+
+<p>Looking again at our <code>Group</code> model&rsquo;s comments method it would appear to work if we replace the <code>joins</code> with <code>include</code> and these two options often appear to be interchangeable.  Bear in mind though that using <code>include</code> here would load the user and memberships associated models into memory which in this case we don&rsquo;t want.</p>
+
+<p>Our comments method is almost creating another association and in these cases we can used <code>scoped</code> instead of <code>all</code>. This will behave almost like a named scope, but one which is generated dynamically. The advantage is that we can then chain other scopes to it to further limit and change the limit of the find.</p>
+
+<p>If you found this episode useful and you&rsquo;d like more information on performing ActiveRecord queries Ryan Bates has produced a series of screencasts called <a href="http://www.pragprog.com/screencasts/v-rbar/everyday-active-record">&ldquo;Everyday Active Record&rdquo;</a> that go into more depth on the areas we&rsquo;ve covered.</p>

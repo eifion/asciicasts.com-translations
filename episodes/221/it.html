@@ -1,0 +1,268 @@
+<p>Sono passati quasi due anni da quando &egrave; stato trattato l&rsquo;argomento <a href="http://railscasts.com/episodes/123-subdomains">sottodomini</a>. Rails 3 introduce alcuni supporti ai sottodomini, che vedremo in questo episodio.</p>
+
+<p>L&rsquo;applicazione che useremo sar&agrave; la solita gi&agrave; usata nell&rsquo;altro episodio sui sottodomini. Si tratta di una semplice applicazione di blogging che supporta pi&ugrave; di un blog. Di sotto &egrave; riportata la home page che elenca tutti i blog. Ciascun blog ha un insieme di articoli ad esso associati.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/408/original/E221I01.png" width="800" height="331" alt="La nostra applicazione di blogging."/>
+</div>
+
+<p>Se clicchiamo sul link di modifica di un blog, vedremo che ciascuno ha due attributi: un <code>name</code> e un <code>subdomain</code>. Vogliamo usare l&rsquo;attributo <code>subdomain</code> come sottodominio nell&rsquo;URL per tale blog:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/409/original/E221I02.png" width="800" height="388" alt="La pagina di edit di un blog."/>
+</div>
+
+<h3>Configurazione dei sottodomini nell&rsquo;ambiente di sviluppo</h3>
+
+<p>La prima cosa da configurare &egrave; la modalit&agrave; di gestione dei sottodomini nella modalit&agrave; di sviluppo. La nostra applicazione ha l&rsquo;URL <a href="http://localhost:3000">http://localhost:3000</a> che non ci consente di avere sottodomini, per cui dobbiamo trovare un modo alternativo.</p>
+
+<p>Uno dei modi per farlo potrebbe essere quello di configurare la nostra applicazione per usare <a href="http://www.modrails.com">Passenger</a>. Potremmo quindi assegnarle un dominio tipo <code>http://blog.local</code> e modificare il file <code>/etc/hosts</code> per configurare i sottodomini in questo modo:</p>
+
+<p class="codeFilePath">/etc/hosts</p>
+<pre class="css">
+127.0.0.1 personal.blog.local company.blog.local
+</pre>
+
+<p>Idealmente vorremmo poter usare un carattere wildcard che faccia match con ciascun sottodominio in nodo tale che non dobbiamo continuamente cambiare il file degli host quando sviluppiamo la nostra applicazione. Sfortunatamente non possiamo farlo, per cui dovremo trovare un&rsquo;altra soluzione.</p>
+
+<p>Una buona soluzione &egrave; offerta da <a href="http://tbaggery.com/2010/03/04/smack-a-ho-st.html">Tim Pope sul suo blog</a>. Lui ha comprato il nome di dominio <code>smackaho.st</code> e lo ha reso un wildcard del localhost. Uno dei tizi che ha lasciato un commento sul suo blog ha fatto qualcosa del genere con un nome di dominio pi&ugrave; corto, <code>lvh.me</code>. Useremo questo approccio.</p>
+
+<p>Se puntiamo a <a href="http://lvh.me:3000/">http://lvh.me:3000/</a> vedremo la home page della nostra applicazione, poich&egrave; <code>lvh.me</code> viene risolto nell&rsquo;indirizzo IP 127.0.0.1. La differenza sta nel fatto che ora possiamo anteposse un qualunque sottodominio che vogliamo all&rsquo;URL e questo continuer&agrave; a puntare alla stessa applicazione.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/410/original/E221I03.png" width="800" height="388" alt="Il blog &egrave; ora disponibile in un sottodominio."/>
+</div>
+
+<p>Ora che siamo in grado di usare i sottodomini nella nostra applicazione, possiamo configurare i suoi instradamenti in modo tale che il sottodominio personal conduca alla action show del blog Personal. Ecco come attualmente appare il nostro file di route:</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Bloggit::Application.routes.draw do |map|
+  resources :comments
+  resources :articles
+  resources :blogs
+  root :to =&gt; &quot;blogs#index&quot;
+end
+</pre>
+
+<p>Per ora l&rsquo;instradamento radice punta alla action <code>blogs/index</code>. Vogliamo che questo sia vero solo nel caso in cui non sia specificato alcun sottodominio; laddove vi sia indicato un sottodominio, dovrebbe essere mostrata invece la vista associata alla action <code>blogs/show</code>. In Rails 3 si pu&ograve; fare tutto ci&ograve; aggiungendo un vincolo:</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Bloggit::Application.routes.draw do |map|
+  resources :comments
+  resources :articles
+  resources :blogs
+  match &#x27;/&#x27; =&gt; &#x27;blogs#show&#x27;, :constraints =&gt; { :subdomain =&gt; /.+/ }
+  root :to =&gt; &quot;blogs#index&quot;
+end
+</pre>
+
+<p>In un&rsquo;applicazione Rails 2 avremmo dovuto usare un plugin per farlo, ma in Rails 3 tutto ci&ograve; &egrave; gi&agrave; incluso nel framework. L&rsquo;opzione <code>:subdomain</code> accetta sia una string, sia un&rsquo;espressione regolare come argomento: in questo caso abbiamo usato un&rsquo;espressione regolare che facesse match con almeno un carattere, in modo tale che ogni sottodominio facesse match con l&rsquo;instradamento. Si noti come sia essenziale che l&rsquo;instradamento radice venga messo dopo il route di sottodominio. Se cos&igrave; non fosse, l&rsquo;instradamento di root intercetterebbe tutti gli indirizzi di sottodominio per primo, e gli instradamenti ai sottodomini non verrebbero mai chiamati. Come regola aurea generale, pi&ugrave; il route &egrave; specifico, pi&ugrave; deve stare in alto nella lista.</p>
+
+<p>Se ora visitiamo il sottodominio <code>personal</code>, otteniamo un errore, ma ce lo aspettavamo, dal momento che stiamo eseguendo al action <code>show</code> del <code>BlogsController</code> e non abbiamo fornito un <code>id</code>:</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/411/original/E221I04.png" width="800" height="312" alt="La pagina show solleva un&rsquo;eccezione perch&egrave; il controller si aspetta un ID che non gli abbiamo fornito."/>
+</div>
+
+<p>La cosa &egrave; semplice da sistemare. Dobbiamo solo modificare la action <code>show</code> in modo tale che trovi un blog in base al sottodominio piuttosto che per <code>id</code>:</p>
+
+<p class="codeFilePath">/app/controllers/blogs_controller.rb</p>
+<pre class="ruby">
+def show
+  @blog = Blog.find_by_subdomain!(request.subdomain)
+end
+</pre>
+
+<p>Quando adesso ricarichiamo la pagina, vediamo gli articoli del nostro blog &ldquo;Personal&rdquo;:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/412/original/E221I05.png" width="815" height="427" alt="Il blog &egrave; ora rintracciato per sottodominio."/>
+</div>
+
+<p>Se togliamo il sottodominio, vedremo la home page che avevamo in precedenza:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/413/original/E221I06.png" width="810" height="341" alt="Senza sottodomini, viene mostrata la home page."/>
+</div>
+
+<p>C&rsquo;&egrave; ancora un piccolo problema con gli instradamenti, tuttavia. Se andiamo su <a href="http://www.lvh.me:3000">http://www.lvh.me:3000</a>, la nostra applicazione cercher&agrave; un blog di sottodominio <code>www</code>, mentre invece in questo caso dovrebbe puntare alla pagina index dei blog. Potremmo provare a correggere questa cosa agendo in qualche maniera furba sull&rsquo;espressione regolare nei vincoli presenti nel file di routes, ma invece, al fine di concederci una maggior flessibilit&agrave; e controllo sui sottodomini, faremo la stessa cosa nel codice Ruby. Tutto ci&ograve; &egrave; reso possibile da Rails 3, scrivendo una classe e spostando il codice coi vincoli l&igrave; dentro.</p>
+
+<p>Per prima cosa cambieremo il file degli instradamenti affinch&egrave; utilizzi una nuova classe chiamata <code>Subdomain</code>. Facciamo ci&ograve;, usando il metodo <code>constraints</code> e passandogli la classe come argomento:</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Bloggit::Application.routes.draw do |map|
+  resources :comments
+  resources :articles
+  resources :blogs
+  constraints(Subdomain) do
+    match &#x27;/&#x27; =&gt; &#x27;blogs#show&#x27;  
+  end
+  root :to =&gt; &quot;blogs#index&quot;
+end
+</pre>
+
+<p>Poi dobbiamo creare la classe <code>Subdomain</code> che andr&agrave; nella cartella <code>/lib</code>. Questa classe dovr&agrave; avere un metodo di classe denominato <code>matches?</code> che accetta un oggetto <code>request</code> per parametro. Questo oggetto request &egrave; esattamente lo stesso oggetto che accediamo nei nostri controller e nelle nostre viste, per cui su di esso possiamo usare gli stessi metodi che usiamo in quei contesti. Questo metodo deve restituire un valore booleano che indica se il route dato fa match con la richiesta o meno. Nel nostro caso vogliamo che il metodo restituisca <code>true</code> solo se la request ha un sottodominio e tale sottodominio non &egrave; <code>www</code>, per cui la nostra classe sar&agrave; cos&igrave; fatta:</p>
+
+<p class="codeFilePath">/lib/subdomain.rb</p>
+<pre class="ruby">
+class Subdomain
+  def self.matches?(request)
+    request.subdomain.present? &amp;&amp; request.subdomain != &#x27;www&#x27;
+  end
+end
+</pre>
+
+<p>Quando ora visitiamo <a href="http://www.lvh.me:3000">http://www.lvh.me:3000</a>, vediamo la home page proprio come volevamo:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/414/original/E221I07.png" width="800" height="333" alt="Il sottodominio www ora mostra la home page."/>
+</div>
+
+<h3>Correggere i link</h3>
+
+<p>Ora sistemeremo i collegamenti a ciascun blog nella home page in modo tale che puntino al sottodominio corretto anzich&egrave; alla normale action <code>show</code> per tale blog, dal momento che se cos&igrave; fosse, verrebbe fuori un errore causato dal fatto che ora la action show si aspetta un sottodominio.</p>
+
+<p>Nel codice della vista per l&rsquo;action <code>index</code> abbiamo un link standard a ciascun blog fra tag <code>h2</code>:</p>
+
+<p class="codeFilePath">/app/views/blogs/index.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;Blogs&quot; %&gt;
+
+&lt;% for blog in @blogs %&gt;
+  &lt;div&gt;
+    &lt;h2&gt;&lt;%= link_to blog.name, blog %&gt;&lt;/h2&gt;
+    &lt;div class=&quot;actions&quot;&gt;
+      &lt;%= link_to &quot;Edit&quot;, edit_blog_path(blog) %&gt; | 
+      &lt;%= link_to &quot;Destroy&quot;, blog, :confirm =&gt; &#x27;Are you sure?&#x27;, :method =&gt; :delete %&gt;
+    &lt;/div&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Cambiamo questo link affinch&egrave; punti all&rsquo;URL radice con l&rsquo;opportuno sottodominio. Sfortunatamente non possiamo passare una option <code>subdomain</code> al metodo <code>root_url</code> come potremmo fare con subdomain_fu. In questo caso dobbiamo creare il nome dell&rsquo;host completo da zero e includere in quello il sottodominio. Il nome dell&rsquo;host sar&agrave; creato a partire dal <code>subdomain</code> del blog, dal <code>domain</code> corrente e dalle propriet&agrave; <code>port_string</code> dell&rsquo;oggetto <code>request</code>:</p>
+
+<p class="codeFilePath">/app/views/blogs/index.html.erb</p>
+<pre class="ruby">
+&lt;h2&gt;&lt;%= link_to blog.name, root_url(:host =&gt; blog.subdomain + &#x27;.&#x27; + request.domain + request.port_string) %&gt;&lt;/h2&gt;
+</pre>
+
+<p>Al ricaricamento della pagina principale, ora i link ai blog punteranno ai sottodomini corretti.</p>
+
+<h3>Ripulire il codice per cambiare il sottodominio</h3>
+
+<p>Ora tutto funziona bene, ma il codice riportato sopra che crea i link ad altri sottodomini potrebbe essere un po&rsquo; pi&ugrave; pulito, specialmente se dovessimo usarlo parecchio. Per ripulire il tutto, spostiamo la logica in un metodo helper a parte che chiamiamo <code>with_subdomain</code> e che accetta il <code>subdomain</code> come argomento. Innanzitutto cambiamo il codice della vista, affinch&egrave; chiami il metodo che stiamo per implementare:</p>
+
+<p class="codeFilePath">/app/views/blogs/index.html.erb</p>
+<pre class="ruby">
+&lt;h2&gt;&lt;%= link_to blog.name, root_url(:host =&gt; with_subdomain(blog.subdomain)) %&gt;&lt;/h2&gt;
+</pre>
+
+<p>Mettiamo il metodo helper dentro il proprio module, in un file chiamato <code>url_helper.rb</code>:</p>
+
+<p class="codeFilePath">/app/helpers/url_helper.rb</p>
+<pre class="ruby">
+module UrlHelper
+  def with_subdomain(subdomain)
+    subdomain = (subdomain || &quot;&quot;)
+    subdomain += &quot;.&quot; unless subdomain.empty?
+    [subdomain, request.domain, request.port_string].join
+  end
+end
+</pre>
+
+<p>Il codice nel module per prima cosa imposta il <code>subdomain</code> ad una stringa vuota, se il valore passato &egrave; <code>nil</code>, poi gli aggiunge un punto, nel caso in cui <code>subdomain</code> non sia una stringa vuota. Infine concatena <code>subdomain</code>, <code>domain</code> e <code>port_string</code> e restituisce il valore.</p>
+
+<p>Aggiungiamo il module anche all&rsquo;<code>ApplicationController</code>, in modo tale che tutti i nostri controller possano utilizzare questo metodo:</p>
+
+<p class="codeFilePath">/app/controllers/application_controller.rb</p>
+<pre class="ruby">
+class ApplicationController &lt; ActionController::Base
+  include UrlHelper
+  protect_from_forgery
+  layout &#x27;application&#x27;
+end
+</pre>
+
+<p>Anche se abbiamo ripulito abbastanza il codice della vista, potrebbe esserlo ancor di pi&ugrave; se potessimo semplicemente aggiungere un&rsquo;opzione <code>:subdomain</code> al metodo <code>root_url</code> e ci&ograve; &egrave; possibile se ridefiniamo il metodo <code>url_for</code>. Tutto ci&ograve; che dobbiamo fare &egrave; aggiungere il seguente metodo al nostro module <code>UrlHelper</code>:</p>
+
+<p class="codeFilePath">/app/helpers/url_helper.rb</p>
+<pre class="ruby">
+def url_for(options = nil)
+  if options.kind_of?(Hash) &amp;&amp; options.has_key?(:subdomain)
+    options[:host] = with_subdomain(options.delete(:subdomain))
+  end
+  super
+end
+</pre>
+
+<p>Il metodo ridefinito <code>url_for</code> controlla per vedere se l&rsquo;hash <code>options</code> ha una chiave denominata <code>:subdomain</code> al suo interno e, se cos&igrave;, imposta l&rsquo;opzione <code>:host</code> ad essere il valore di <code>with_subdomain</code> per tale sottodominio. Infine chiama la <code>super</code>, in modo tale che tutto il codice di default del metodo originale si eseguito e la parte restante dell&rsquo;URL sia generata opportunamente. Non c&rsquo;&egrave; bisogno di usare <code>alias_method_chain</code> in questo caso, chiamare la <code>super</code> &egrave; sufficiente.</p>
+
+<p>Ora possiamo aggiornare il codice della nostra vista per usare la option <code>:subdomain</code>:</p>
+
+<p class="codeFilePath">/app/views/blogs/index.html.erb</p>
+<pre class="ruby">
+&lt;h2&gt;&lt;%= link_to blog.name, root_url(:subdomain =&gt; blog.subdomain) %&gt;&lt;/h2&gt;
+</pre>
+
+<p>Al ricaricamento della pagina index, cliccando su uno dei link ai blog il link condurra ancora all&rsquo;URL corretto con il giusto sottodominio:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/415/original/E221I08.png" width="801" height="338" alt="L&rsquo;opzione :subdomain ora funziona."/>
+</div>
+
+<p>Sarebbe bello avere un link su ogni blog che potesse riportare alla pagina index. Possiamo aggiungerlo invocando <code>root_url</code> con un valore false per l&rsquo;opzione <code>:subdomain</code>:</p>
+
+<p class="codeFilePath">/app/views/blogs/show.html.erb</p>
+<pre class="ruby">
+&lt;p&gt;&lt;%= link_to &quot;All Blogs&quot;, root_url(:subdomain =&gt; false) %&gt;&lt;/p&gt;
+</pre>
+
+<p>Ci&ograve; ci dar&agrave; il link alla pagina index che volevamo:</p>
+
+<h3>Gestire domini di primo livello diversi</h3>
+
+<p>Un aspetto che non abbiamo ancora affrontato &egrave; come gestire nomi di dominio composti da pi&ugrave; di due parti. Ebbene, anche se il nostro codice per il sottodominio funzioner&agrave; per i domini .com, non funzioner&agrave; invece per i domini che finiscono, per esempio, per .co.uk. Per far s&igrave; che funzioni anche per questi ultimi, dobbiamo cambiare la nostra applicazione ovunque chiami <code>request.domain</code> o <code>request.subdomain</code> affinch&egrave; possiamo indicare il numero di punti che ha il nome di dominio (al netto dei sottodomini). Rails assume un valore di default di 1, ma come appena citato per i domini del tipo .co.uk dobbiamo impostare tale valore a 2.</p>
+
+<p>Dobbiamo cambiare la nostra applicazione in due punti: nel metodo <code>UrlHelper</code> e nella classe <code>Subdomain</code> usata nei nostri instradamenti:</p>
+
+<p class="codeFilePath">/app/helpers/url_helper.rb</p>
+<pre class="ruby">
+def with_subdomain(subdomain)
+  subdomain = (subdomain || &quot;&quot;)
+  subdomain += &quot;.&quot; unless subdomain.empty?
+  [subdomain, request.domain(2), request.port_string].join
+end
+</pre>  
+
+<p class="codeFilePath">/lib/subdomains.rb</p>
+<pre class="ruby">
+class Subdomain
+  def self.matches?(request)
+    request.subdomain(2).present? &amp;&amp; request.subdomain(2) != &quot;www&quot;
+  end
+end
+</pre>
+
+<p>Ovviamente non vogliamo veramente cablare tale valore nel codice. Lo dovremo realisticamente rendere dinamico in modo tale che in modalit&agrave; di sviluppo possiamo impostare un valore di 1 (per un dominio del tipo <code>lvh.me</code>) mentre in produzione useremo 2. Questo valore pu&ograve; essere impostato in un file di configurazione esterno che carica l&rsquo;ambiente in modo opportuno.</p>
+
+<h3>Cookie</h3>
+
+<p>C&rsquo;&egrave; un&rsquo;ultima questione che affronteremo in questo episodio. Se osserviamo i cookie presenti nel nostro browser e li filtriamo per il nome di dominio che abbiamo utilizzato per questa applicazione, vedremo che viene salvata una sessione diversa per ciascun sottodominio visitato. Non vogliamo che avvenga questo, perch&egrave; significa che le sessioni non sono condivise fra i vari sottodomini.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/416/original/E221I09.png" width="805" height="246" alt="Ciascun sottodominio ha un cookie proprio."/>
+</div>
+
+<p>Una soluzione a questo problema &egrave; stata presentata nell&rsquo;episodio 123, ma ora in Rails 3 c&rsquo;&egrave; un modo migliore per risolvere lo stesso problema. Nel file <code>/config/initializers/session_store.rb</code> dobbiamo semplicemente aggiungere l&rsquo;opzione <code>:domain</code> al metodo <code>Rails.application.config.session_store</code>, dandogli come valore <code>:all</code>:</p>
+
+<p class="codeFilePath">/config/initializers/sesion_store.rb</p>
+<pre class="ruby">
+Rails.application.config.session_store :cookie_store, :key =&gt; &#x27;_bloggit_session&#x27;, :domain =&gt; :all
+</pre>
+
+<p>Tuttavia non &egrave; sufficiente questo intervento da solo. L&rsquo;opzione <code>:domain</code> &egrave; stata aggiunta solo dopo l&rsquo;uscita di Rails 3.0 beta 4, che nel momento in cui si sta scrivendo questo episodio &egrave; anche la versione corrente. Pertanto occorre lanciare l&rsquo;applicazione su Edge Rails oppure attendere la prossima release candidate per vedere il tutto funzionare correttamente. Usata con una versione di Rails che la supporta, questa opzione rende le sessioni della nostra applicazione condivise fra i sottodomini. L&rsquo;opzione <code>:all</code> assume che la nostra applicazione abbia un dominio di primo livello di dimensione 1. Se cos&igrave; non fosse, potremmo definire un nome di dominio al posto di :all e quest&rsquo;ultimo verrebbe utilizzato come dominio base per la sessione.</p> 
+
+<p>E&rsquo; tutto per questo episodio. Poter gestire sottodomini senza la necessit&agrave; di installare plugin di terze parti &egrave; una bella novit&agrave; di Rails 3 e pu&ograve; essere utilizzata in vari modi nelle nostre applicazioni.</p>

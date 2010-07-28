@@ -1,0 +1,402 @@
+<p>Una buena forma de mostrar res&uacute;menes o estad&iacute;sticas, si tenemos una aplicaci&oacute;n que contiene muchos datos, es mostrar una gr&aacute;fica con dichos datos.  A continuaci&oacute;n se muestra una captura de pantalla de la interfaz administrativa de una aplicaci&oacute;n de comercio electr&oacute;nico.  Cada pedido tiene un n&uacute;mero de pedido, una fecha de compra, un campo que indica si el &iacute;tem ha sido enviado y su coste total.  Este sistema contiene cientos de pedidos a lo largo de decenas de p&aacute;ginas, lo que hace que sea tedioso calcular a mano cualquier dato estad&iacute;stico acerca de dichos datos.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/423/original/E223I01.png" width="816" height="381" alt="La página de pedidos."/>
+</div>
+
+<p>Si tuvi&eacute;semos una gr&aacute;fica en la parte de superior de la p&aacute;gina que mostrase un resumen de los pedidos a lo largo del tiempo nos ser&iacute;a mucho m&aacute;s f&aacute;cil detectar tendencias en los datos de ventas.  Eso es precisamente lo que haremos en este episodio.</p>
+
+<h3>Highcharts</h3>
+
+<p>Hay muchas librer&iacute;as de gr&aacute;ficas disponibles pero la que vamos a usar es <a href="http://www.highcharts.com">Highcharts</a>. Se trata de una soluci&oacute;n de cliente y utiliza JavaScript y SVG o VML, por lo que no hay dependencias de <em>plugins</em> como Flash o generadores de im&aacute;genes en el lado del servidor como ImageMagick.  Como veremos, Highcharts puede generar gr&aacute;ficas atractivas con s&oacute;lo unas l&iacute;neas de JavaScript.</p>
+
+<p>Hay que tener en cuenta, antes de considerar el uso de Highcharts para nuestros proyectos,  que es gratuita s&oacute;lo para proyectos no comerciales.   Si este no es nuestro caso, veremos algunas alternativas m&aacute;s adelante.</p>
+
+<p>Una vez que hayamos 
+ <a href="http://www.highcharts.com/download">descargado Highcharts</a> tendremos que extraer el fichero <code>highcharts.js</code> en el directorio <code>/public/javascripts</code> de nuestra aplicaci&oacute;n.  Tambi&eacute;n tendremos que a&ntilde;adir la &uacute;ltima versi&oacute;n de la librer&iacute;a jQuery y <a href="http://github.com/rails/jquery-ujs">la versi&oacute;n compatible con jQuery de <code>rails.js</code> </a>, que es necesaria porque se trata de una aplicaci&oacute;n Rails 3.  Hay m&aacute;s detalles de todo esto en el Episodio 205  [ <a href="http://railscasts.com/episodes/205-unobtrusive-javascript">verlo</a>, <a href="http://es.asciicasts.com/episodes/205-javascript-no-intrusivo">leerlo</a>].</p>
+
+<p>Con estos archivos en su sitio ya podemos a&ntilde;adir la siguiente l&iacute;nea a la secci&oacute;n
+<code>&lt;head&gt;</code> del fichero de <em>layout</em> de nuestra aplicaci&oacute;n, para que sean correctamente referenciados.</p>
+
+<p class="codeFilePath">/app/views/layouts/applications.html.erb</p>
+<pre class="ruby">
+&lt;%= javascript_include_tag &quot;jquery-1.4.2.min&quot;, &quot;rails&quot;, &quot;highcharts&quot; %&gt;
+</pre>
+
+<p>Highcharts depende de jQuery o MooTools, as&iacute; que tendremos que incluir una de estas dos librer&iacute;as antes de cargar el fichero <code>highcharts.js</code>.</p>
+
+<h3>Creaci&oacute;n de una gr&aacute;fica</h3>
+
+<p>Una vez que hemos instalado Highcharts podemos empezar a&ntilde;adiendo una gr&aacute;fica a nuestra p&aacute;gina de pedidos.  Lo que queremos es a&ntilde;adir una gr&aacute;fica de l&iacute;nea sencilla que muestre los ingresos obtenidos por d&iacute;a.  Lo primero que tenemos que hacer es a&ntilde;adir un elemento vac&iacute;o en la p&aacute;gina de pedidos donde queremos que aparezca la gr&aacute;fica.</p>
+
+
+<p class="codeFilePath">/app/views/orders/index.html.erb</p>
+<pre class="ruby">
+&lt;%= will_paginate(@orders) %&gt;
+
+&lt;div id=&quot;orders_chart&quot; style=&quot;width: 560px; height: 300px;&quot;&gt;&lt;/div&gt;
+
+&lt;table class=&quot;pretty&quot;&gt;
+  &lt;!-- Orders table code here --&gt;
+&lt;/table&gt;
+</pre>
+
+<p>Tenemos que dar un <code>id</code> para poder identificarlo y para poder especificar un ancho y un alto.  Por lo general definir&iacute;amos el estilo de un elemento en un fichero CSS separado, pero por comodidad lo hemos incluido aqu&iacute; en el marcado HTML.</p>
+
+<p>A continuaci&oacute;n tenemos que a&ntilde;adir el JavaScript para generar la gr&aacute;fica.  Una vez m&aacute;s, en una aplicaci&oacute;n de producci&oacute;n tendr&iacute;amos que crear un fichero separado en lugar de embeberlo pero aqu&iacute; seguiremos el enfoque m&aacute;s f&aacute;cil.  N&oacute;tese que si tuvi&eacute;semos que extraer el JavaScript a su propio archivo esto tendr&iacute;a el efecto (no deseado) de que el c&oacute;digo para generar la gr&aacute;fica ser&iacute;a m&aacute;s complejo porque vamos a generar JavaScript din&aacute;micamente con ERb.  En una aplicaci&oacute;n de producci&oacute;n har&iacute;amos esto realizando peticiones AJAX seg&uacute;n cargue la p&aacute;gina, pero con el c&oacute;digo en l&iacute;nea que vamos a usar en nuestro ejemplo esto no ser&aacute; un problema.</p>
+
+<p>Queremos que la gr&aacute;fica sea s&oacute;lo generada cuando el DOM de la p&aacute;gina haya terminado de cargar por lo que rodearemos nuestro c&oacute;digo de la funci&oacute;n <code>$</code> de jQuery de forma que el <em>script</em> no sea ejecutado hasta entonces.  Dentro de la funci&oacute;n crearemos el c&oacute;digo necesario para generar una gr&aacute;fica b&aacute;sica.</p>
+
+<p class="codeFilePath">/app/views/orders/index.html.erb</p>
+<pre class="javascript">
+&lt;script type=&quot;text/javascript&quot; charset=&quot;utf-8&quot;&gt;
+  $(function () {
+    new Highcharts.Chart({
+      chart: { renderTo: &#x27;orders_chart&#x27; }
+    });
+  });
+&lt;/script&gt;
+</pre>
+
+<p>Hemos creado la gr&aacute;fica con un nuevo objeto <code>Highcharts.Chart</code> y le hemos pasado un <em>hash</em> de opciones.  Hay m&uacute;ltiples opciones que se le pueden pasar, merece la pena mirar la  <a href="http://www.highcharts.com/ref">referencia de la web Highcharts</a> para ver qu&eacute; es lo que podemos usar.</p>
+
+<p>Para empezar vamos a a&ntilde;adir la opci&oacute;n <code>chart</code>.  Esta opci&oacute;n tiene a su vez una opci&oacute;n <code>renderTo</code> que recibe el <code>id</code> de una capa, por lo que le pasaremos el identificador de nuestra capa <code>orders_chart</code>.</p>
+
+<p>Si ahora recargamos la p&aacute;gina de pedidos deber&iacute;amos ver en la parte superior una gr&aacute;fica vac&iacute;a, lo que nos indica que estamos en el buen camino.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/424/original/E223I02.png" width="817" height="462" alt="Se muestra una gráfica vacía en la parte superior de la página."/>
+</div>
+
+<p>Ahora le vamos a&ntilde;adir m&aacute;s opciones a la gr&aacute;fica y por supuesto algunos datos que dibujar.  Vamos a a&ntilde;adir una opci&oacute;n <code>title</code> que tiene su propia opci&oacute;n <code>text</code> para establecer el t&iacute;tulo de la gr&aacute;fica, una opci&oacute;n <code>xAxis</code> que tiene su opci&oacute;n <code>type</code> puesta a  <code>&#x27;datetime&#x27;</code> porque nuestra gr&aacute;fica mostrar&aacute; fechas en su eje X, una opci&oacute;n <code>yAxis</code> con el t&iacute;tulo <code>&#x27;Dollars&#x27;</code> y por &uacute;ltimo los datos propiamente dichos.</p>
+
+<p>Una gr&aacute;fica puede visualizar varias series de datos por lo que tendremos que pasarle un <em>array</em> de <em>hashes</em> a la opci&oacute;n <code>series</code>.  Cada uno de estos <em>hashes</em> puede contener cualquier n&uacute;mero de puntos por lo que su valor es un <em>array</em>.  En el c&oacute;digo de abajo hemos creado una serie de datos con cinco valores para probar que nuestra gr&aacute;fica funciona antes de a&ntilde;adir los datos de verdad.</p>
+
+<p class="codeFilePath">/app/views/orders/index.html.erb</p>
+<pre class="javascript">
+$(function () {
+  new Highcharts.Chart({
+    chart: { renderTo: &#x27;orders_chart&#x27; },
+    title: { text: &#x27;Orders by Day&#x27; },
+    xAxis: { type: &#x27;datetime&#x27; },
+    yAxis: {
+      title: { text: &#x27;Dollars&#x27;}
+    },
+    series: [{
+      data: [1, 2, 5, 7, 3]
+    }]
+  });
+});
+</pre>
+
+<p>Si recargamos la p&aacute;gina veremos que ahora se dibuja la gr&aacute;fica con sus cinco puntos de datos obtenidos del <em>array</em>.  Todav&iacute;a tenemos que trabajar en la l&iacute;nea temporal del eje X pero por ahora estamos avanzando adecuadamente.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/425/original/E223I03.png" width="817" height="462" alt="La gráfica con cinco puntos de prueba."/>
+</div>
+
+<p>En la opci&oacute;n <code>series</code> podemos activar un par de opciones para especificar el punto de inicio y el intervalo entre puntos en el eje X.  La primera es  <code>pointInterval</code> que recibe un n&uacute;mero que representa el tiempo entre fechas en milisegundos.  Utilizaremos esta opci&oacute;n para que entre cada punto haya un d&iacute;a, y utilizaremos un poco de c&oacute;digo ERb para calcular el n&uacute;mero de milisegundos que hay en un d&iacute;a.  El c&oacute;digo Ruby <code>1.day</code> nos dar&aacute; el n&uacute;mero de segundos que hay en un d&iacute;a, que tenemos que multiplicar por 1000 para obtener el valor en milisegundos que Highcharts necesita.</p>
+
+<p>La segunda opci&oacute;n es <code>pointStart</code>, que define la fecha y hora del primer punto.  Esta opci&oacute;n requiere, igual que antes, un n&uacute;mero de milisegundos y si bien en una aplicaci&oacute;n &quot;de verdad&quot; utilizar&iacute;amos algo m&aacute;s din&aacute;mico para definir la fecha de comienzo aqu&iacute; utilizaremos una fecha de hace tres semanas, nuevamente utilizando ERb para recuperar ese valor en segundos y multiplic&aacute;ndolo por 1000.</p>
+
+
+<p class="codeFilePath">/app/views/orders/index.html.erb</p>
+<pre class="javascript">
+$(function () {
+  new Highcharts.Chart({
+    chart: { renderTo: &#x27;orders_chart&#x27; },
+    title: { text: &#x27;Orders by Day&#x27; },
+    xAxis: { type: &#x27;datetime&#x27; },
+    yAxis: {
+      title: { text: &#x27;Dollars&#x27; }
+    },
+    series: [{
+      pointInterval: &lt;%= 1.day * 1000 %&gt;,
+      pointStart: &lt;%= 3.weeks.ago.at_midnight.to_i * 1000 %&gt;,
+      data: [1, 2, 5, 7, 3]
+    }]
+  });
+});
+</pre>
+
+<p>Si  ahora  recargamos  la p&aacute;gina  de  pedidos  el  eje  X ya muestra  las  fechas.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/432/original/E223I04.png" width="817" height="462" alt="En el eje X ahora aparecen las fechas."/>
+</div>
+
+<h3>Inclusi&oacute;n de datos reales</h3>
+
+<p>Una vez que tenemos la gr&aacute;fica configurada a nuestro gusto podemos reemplazar los datos de prueba con datos reales obtenidos de nuestra tabla de pedidos.  Primero veremos la manera ineficiente de hacerlo porque es m&aacute;s f&aacute;cil escribir el c&oacute;digo de esta manera y luego veremos c&oacute;mo optimizarlo todo al final del episodio.</p>
+
+<p>Necesitaremos la suma del todal de los pedidos de cada d&iacute;a, as&iacute; que tendremos que escribir un m&eacute;todo de clase en el modelo <code>Order</code> para recuperar todas las compras de un d&iacute;a determinado y calcular la suma del atributo <code>total_price</code> de cada una de ellas.</p>
+
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+class Order &lt; ActiveRecord::Base
+  def self.total_on(date)
+    where(&quot;date(purchased_at) = ?&quot;,date).sum(:total_price)
+  end
+end
+</pre>
+
+<p>Ahora ya podemos usar este m&eacute;todo para recuperar los datos de cada uno de los d&iacute;as que aparece en la gr&aacute;fica y podemos reemplazar los datos de prueba con el siguiente c&oacute;digo:</p>
+
+<p class="codeFilePath">/app/views/orders/index.html.erb</p>
+<pre class="javascript">
+series: [{
+  pointInterval: &lt;%= 1.day * 1000 %&gt;,
+  pointStart: &lt;%= 3.weeks.ago.at_midnight.to_i * 1000 %&gt;,
+  data: &lt;%= (3.weeks.ago.to_date..Date.today).map { |date| Order.total_on(date).to_f}.inspect %&gt;
+ }]
+</pre> 
+
+<p>En el c&oacute;digo ERb anterior creamos un rango de fechas entre hoy y tres semanas antes y luego usamos el m&eacute;todo <code>map</code> para iterar sobre ese rango y recuperar el total de los pedidos de cada d&iacute;a.  Aplicamos <code>inspect</code> sobre el resultado para convertirlo a algo que pueda usarse desde JavaScript.</p>
+
+<p>Si recargamos la p&aacute;gina otra vez veremos que ya no salen nuestros datos de prueba y que ahora aparecen los datos reales de las &uacute;ltimas tres semanas, con un punto para cada d&iacute;a y los ingresos totales de los pedidos de cada d&iacute;a en d&oacute;lares.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/426/original/E223I05.png" width="816" height="478" alt="Se muestran los datos de nuestros pedidos"/>
+</div>
+
+<h3>Tooltips</h3>
+
+<p>Aunque nuestra gr&aacute;fica tiene buen aspecto la informaci&oacute;n que aparece cuando ponemos el rat&oacute;n sobre uno de los puntos es mejorable.  Podemos hacerlo a&ntilde;adiendo la opci&oacute;n <code>tooltip</code> al c&oacute;digo de la gr&aacute;fica.</p>
+
+
+<p class="codeFilePath">/app/views/orders/index.html.erb</p>
+<pre class="javascript">
+$(function () {
+  new Highcharts.Chart({
+    chart: { renderTo: &#x27;orders_chart&#x27; },
+    title: { text: &#x27;Orders by Day&#x27; },
+    xAxis: { type: &#x27;datetime&#x27; },
+    yAxis: {
+      title: { text: &#x27;Dollars&#x27; }
+    },
+    tooltip: {
+      formatter: function () {
+        return Highcharts.dateFormat(&quot;%B %e %Y&quot;, this.x) + &#x27;: &#x27; +
+          &#x27;$&#x27; + Highcharts.numberFormat(this.y, 2);
+      }
+    },    
+    series: [{
+      pointInterval: &lt;%= 1.day * 1000 %&gt;,
+      pointStart: &lt;%= 3.weeks.ago.at_midnight.to_i * 1000 %&gt;,
+      data: &lt;%= (3.weeks.ago.to_date..Date.today).map { |date| Order.total_on(date).to_f}.inspect %&gt;
+    }]
+  });
+});
+</pre>
+
+<p>Esta opci&oacute;n tiene su propia opci&oacute;n  <code>formatter</code> que recibe una funci&oacute;n como argumento, la cual debe devolver una cadena que es lo que aparecer&aacute; como texto del <em>tooltip</em>.  Para esto se pueden utilizar algunos formateadores que proporciona Highcharts, por ejemplo en el c&oacute;digo anterior hemos usado dos: uno para formatear la fecha del eje X y otro para el valor num&eacute;rico del eje Y.</p>
+
+<p>Si volvemos a recargar la p&aacute;gina y ponemos el rat&oacute;n sobre uno de los puntos veremos nuestro <em>tooltip</em> pulcramente formateado.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/427/original/E223I06.png" width="816" height="478" alt="Cada punto tiene ahora un tooltip personalizado."/>
+</div>
+
+<h3>Visualizaci&oacute;n de m&uacute;ltiples series</h3>
+
+<p>Con esta gr&aacute;fica de nuestros pedidos es f&aacute;cil ver tendencias en los datos.  En la gr&aacute;fica anterior puede verse que ha habido un incremento de &oacute;rdenes desde el 19 de Julio.  Para determinar qu&eacute; es lo que ha causado este alza en las ventas podemos reemplazar la serie que muestra las ventas totales por dos que muestren las ventas de descargas (las que tienen un valor <code>shipping</code> a <code>false</code>) y las ventas f&iacute;sicas.</p>
+
+<p>Vamos a tener que distinguir los pedidos que fueron enviados de los que fueron descargados as&iacute; que lo primero que haremos ser&aacute; a&ntilde;adir dos &aacute;mbitos a nuestra clase <code>Order</code> para que podamos recuperar f&aacute;cilmente cada tipo de pedido.</p>
+
+<p class="codeFilePath">/app/models/order.rb</p>
+<pre class="ruby">
+class Order &lt; ActiveRecord::Base
+  scope :shipping, where(:shipping =&gt; true)
+  scope :download, where(:shipping =&gt; false)
+
+  def self.total_on(date)
+    where(&quot;date(purchased_at) = ?&quot;,date).sum(:total_price)
+  end
+end
+</pre>
+
+<p>De vuelta en el c&oacute;digo JavaScript de la vista de pedidos tenemos que a&ntilde;adir otra opci&oacute;n <code>series</code> de forma que se dibujen dos conjuntos de datos.  Para distinguir las dos series les hemos dado a cada una de ellas un nombre diferente.</p>
+
+<p class="codeFilePath">/app/views/orders/index.html.erb</p>
+<pre class="javascript">
+$(function () {
+  new Highcharts.Chart({
+    chart: { renderTo: &#x27;orders_chart&#x27; },
+    title: { text: &#x27;Orders by Day&#x27; },
+    xAxis: { type: &#x27;datetime&#x27; },
+    yAxis: {
+      title: { text: &#x27;Dollars&#x27; }
+    },
+    tooltip: {
+      formatter: function () {
+        return Highcharts.dateFormat(&quot;%B %e %Y&quot;, this.x) + &#x27;: &#x27; +
+          &#x27;$&#x27; + Highcharts.numberFormat(this.y, 2);
+      }
+    },    
+    series: [{
+      name: &quot;Shipping&quot;,
+      pointInterval: &lt;%= 1.day * 1000 %&gt;,
+      pointStart: &lt;%= 3.weeks.ago.at_midnight.to_i * 1000 %&gt;,
+      data: &lt;%= (3.weeks.ago.to_date..Date.today).map { |date| Order.shipping.total_on(date).to_f}.inspect %&gt;
+    },
+    {
+      name: &quot;Download&quot;,
+      pointInterval: &lt;%= 1.day * 1000 %&gt;,
+      pointStart: &lt;%= 3.weeks.ago.at_midnight.to_i * 1000 %&gt;,
+      data: &lt;%= (3.weeks.ago.to_date..Date.today).map { |date| Order.download.total_on(date).to_f}.inspect %&gt;
+    }]
+  });
+});
+</pre>
+
+<p>Ahora tenemos dos series y hemos usado el correspondiente &aacute;mbito en cada uno de ellos para recuperar los datos relevantes para cada d&iacute;a.  L&aacute; gr&aacute;fica ahora mostrar&aacute; ambas series, con sus nombres en la leyenda inferior.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/428/original/E223I07.png" width="816" height="478" alt="Ahora en la gráfica aparecen dos series separadas para los pedidos descargados y los enviados."/>
+</div>
+
+<p>Ahora podemos ver los totales de ventas f&iacute;sicas y descargadas y podemos ver que el pico de pedidos de los &uacute;ltimos d&iacute;as se corresponde con un incremento en las ventas tanto f&iacute;sicas como de descargas.  Obs&eacute;rvese que cuando un gr&aacute;fico muestra m&aacute;s de una serie podemos hacer clic en la leyenda para ocultar o mostrar dicha serie.</p>
+
+<h3>Eliminando la duplicaci&oacute;n</h3>
+
+<p>Al a&ntilde;adir una segunda serie a la gr&aacute;fica hemos introducido cierta duplicidad en el c&oacute;digo JavaScript con el problema de que si quisi&eacute;ramos a&ntilde;adir m&aacute;s series tendr&iacute;amos que repetirnos todav&iacute;a m&aacute;s.  Podemos atajar este problema utilizando un poco de c&oacute;digo Ruby para generar din&aacute;micamente el c&oacute;digo JavaScript de cada serie.</p>
+
+<p class="codeFilePath">/app/views/orders/index.html.erb</p>
+<pre class="javascript">
+$(function () {
+  new Highcharts.Chart({
+    chart: { renderTo: &#x27;orders_chart&#x27; },
+    title: { text: &#x27;Orders by Day&#x27; },
+    xAxis: { type: &#x27;datetime&#x27; },
+    yAxis: {
+      title: { text: &#x27;Dollars&#x27; }
+    },
+    tooltip: {
+      formatter: function () {
+        return Highcharts.dateFormat(&quot;%B %e %Y&quot;, this.x) + &#x27;: &#x27; +
+          &#x27;$&#x27; + Highcharts.numberFormat(this.y, 2);
+      }
+    },    
+    series: [
+      &lt;% { &quot;Download&quot; =&gt; Order.download, &quot;Shipping&quot; =&gt; Order.shipping }.each do |name, order| %&gt;
+    {
+      name: &quot;&lt;%= name %&gt;&quot;,
+      pointInterval: &lt;%= 1.day * 1000 %&gt;,
+      pointStart: &lt;%= 3.weeks.ago.at_midnight.to_i * 1000 %&gt;,
+      data: &lt;%= (3.weeks.ago.to_date..Date.today).map { |date| order.total_on(date).to_f}.inspect %&gt;
+    },
+    &lt;% end %&gt;]
+  });
+});
+</pre>
+
+<p>En lugar de definir cada serie por separado ahora tenemos un <em>hash</em> que define el nombre de cada serie y el c&oacute;digo que hay que usar para recuperar los pedidos de cada serie.  Luego podemos iterar por ese <em>hash</em> y generar el JavaScript de la serie correspondiente.</p>
+
+<h3>Optimizaci&oacute;n de la consulta</h3>
+
+<p>La gr&aacute;fica ya muestra la informaci&oacute;n que queremos pero el SQL que se est&aacute; usando para recuperar los datos es bastante ineficiente.  El <em>log</em> de desarrollo nos revela que se hace una consulta separada para cada nodo de la gr&aacute;fica.</p>
+
+<pre class="terminal">
+  SQL (0.6ms)  SELECT SUM(&quot;orders&quot;.&quot;total_price&quot;) AS sum_id FROM &quot;orders&quot; WHERE (&quot;orders&quot;.&quot;shipping&quot; = &#x27;t&#x27;) AND (date(purchased_at) = &#x27;2010-07-18&#x27;)
+  SQL (0.6ms)  SELECT SUM(&quot;orders&quot;.&quot;total_price&quot;) AS sum_id FROM &quot;orders&quot; WHERE (&quot;orders&quot;.&quot;shipping&quot; = &#x27;t&#x27;) AND (date(purchased_at) = &#x27;2010-07-19&#x27;)
+  SQL (0.6ms)  SELECT SUM(&quot;orders&quot;.&quot;total_price&quot;) AS sum_id FROM &quot;orders&quot; WHERE (&quot;orders&quot;.&quot;shipping&quot; = &#x27;t&#x27;) AND (date(purchased_at) = &#x27;2010-07-20&#x27;)
+  SQL (0.6ms)  SELECT SUM(&quot;orders&quot;.&quot;total_price&quot;) AS sum_id FROM &quot;orders&quot; WHERE (&quot;orders&quot;.&quot;shipping&quot; = &#x27;t&#x27;) AND (date(purchased_at) = &#x27;2010-07-21&#x27;)
+  SQL (0.7ms)  SELECT SUM(&quot;orders&quot;.&quot;total_price&quot;) AS sum_id FROM &quot;orders&quot; WHERE (&quot;orders&quot;.&quot;shipping&quot; = &#x27;t&#x27;) AND (date(purchased_at) = &#x27;2010-07-22&#x27;)
+</pre>  
+
+<p>Podemos mejorar esto de forma que se lance una &uacute;nica llamada para cada serie utilizando los m&eacute;todos <code>group</code> y <code>select</code>.  Queremos recuperar los pedidos del modelo <code>Order</code> y agruparlos por su <code>purchase_date</code> y para cada grupo de &oacute;rdenes devuelto queremos la fecha y el precio total.  El siguiente c&oacute;digo  hace eso:</p>
+
+<pre class="ruby">
+Order.group(&quot;date(purchased_at)&quot;).select(&quot;purchased_at, sum(total_price) as total_price&quot;)
+</pre>
+
+<p>Podemos comprobarlo en la consola y recuperar el <code>total_price</code> del primer &iacute;tem devuelto por la consulta.</p>
+
+<pre class="terminal">
+&gt; Order.group(&quot;date(purchased_at)&quot;).select(&quot;purchased_at, sum(total_price) as total_price&quot;).first.total_price.to_f
+ =&gt; 403.0
+</pre>
+
+<p>Pero hay un ligero problema con este enfoque.  Si no hay pedidos en un d&iacute;a determinado tendremos un punto ausente en los datos devueltos por lo que el resto de puntos posteriores estar&aacute;n desplazados un d&iacute;a en la gr&aacute;fica.  Tenemos que tener en cuenta esta posibilidad, lo que va a complicar el c&oacute;digo.  Para organizarlo lo mejor posible, vamos a llevar esto a un m&eacute;todo <em>helper</em>.</p>
+
+<p class="codeFilePath">/app/views/orders/index.html.erb</p>
+<pre class="javascript">
+$(function () {
+  new Highcharts.Chart({
+    chart: { renderTo: &#x27;orders_chart&#x27; },
+    title: { text: &#x27;Orders by Day&#x27; },
+    xAxis: { type: &#x27;datetime&#x27; },
+    yAxis: {
+      title: { text: &#x27;Dollars&#x27; }
+    },
+    tooltip: {
+      formatter: function () {
+        return Highcharts.dateFormat(&quot;%B %e %Y&quot;, this.x) + &#x27;: &#x27; +
+          &#x27;$&#x27; + Highcharts.numberFormat(this.y, 2);
+      }
+    },    
+    series: [
+      &lt;% { &quot;Both&quot; =&gt; Order, &quot;Download&quot; =&gt; Order.download, &quot;Shipping&quot; =&gt; Order.shipping }.each do |name, order| %&gt;
+    {
+      name: &quot;&lt;%= name %&gt;&quot;,
+      pointInterval: &lt;%= 1.day * 1000 %&gt;,
+      pointStart: &lt;%= 3.weeks.ago.at_midnight.to_i * 1000 %&gt;,
+      data: &lt;%= orders_chart_series(orders, 3.weeks.ago) %&gt;
+    },
+    &lt;% end %&gt;]
+  });
+});
+</pre>
+
+<p>Hemos reemplazado el c&oacute;digo que recupera los datos por una llamada a un m&eacute;todo llamado <code>orders_chart_series</code> que recibe como argumentos el &aacute;mbito relevante del modelo <code>Order</code> y la fecha de inicio de la serie.  Vamos a escribir este nuevo m&eacute;todo en el m&oacute;dulo <code>OrdersHelper</code>.</p>
+
+<p class="codeFilePath">/app/helpers/orders_helper.rb</p>
+<pre class="ruby">
+module OrdersHelper
+  def orders_chart_series(orders, start_time)
+    orders_by_day = orders.where(:purchased_at =&gt; start_time.beginning_of_day..Time.zone.now.end_of_day).
+                    group(&quot;date(purchased_at)&quot;).
+                    select(&quot;purchased_at, sum(total_price) as total_price&quot;)
+    (start_time.to_date..Date.today).map do |date|
+      order = orders_by_day.detect { |order| order.purchased_at.to_date == date }
+      order &amp;&amp; order.total_price.to_f || 0
+    end.inspect
+  end
+end
+</pre>
+
+<p>En el m&eacute;todo <code>orders_chart_series</code> pasamos el &aacute;mbito <code>orders</code> y recuperamos los pedidos que entran dentro del rango de fechas entre <code>start_time</code> y la fecha de hoy.  Despu&eacute;s agrupamos los resultados por d&iacute;a y escogemos la fecha y el total de pedidos de dicho d&iacute;a.  Por &uacute;ltimo iteramos sobre el rango de fechas para recuperar el total de pedidos de cada d&iacute;a, introduciendo un <code>0</code> si no se hicieron pedidos ese d&iacute;a.</p>
+
+<p>Si recargamos la p&aacute;gina y miramos el <em>log</em> de desarrollo veremos que ahora hemos reducido a dos el n&uacute;mero de consultas a la base de datos.</p>
+
+<pre class="terminal">
+  Order Load (2.6ms)  SELECT purchased_at, sum(total_price) as total_price FROM &quot;orders&quot; WHERE (&quot;orders&quot;.&quot;shipping&quot; = &#x27;f&#x27;) AND (&quot;orders&quot;.&quot;purchased_at&quot; BETWEEN &#x27;2010-07-01 00:00:00.000000&#x27; AND &#x27;2010-07-22 23:59:59.999999&#x27;) GROUP BY date(purchased_at)
+  Order Load (1.5ms)  SELECT purchased_at, sum(total_price) as total_price FROM &quot;orders&quot; WHERE (&quot;orders&quot;.&quot;shipping&quot; = &#x27;t&#x27;) AND (&quot;orders&quot;.&quot;purchased_at&quot; BETWEEN &#x27;2010-07-01 00:00:00.000000&#x27; AND &#x27;2010-07-22 23:59:59.999999&#x27;) GROUP BY date(purchased_at)
+</pre>  
+  
+<h3>Alternativas</h3>
+
+<p>Highcharts es una librer&iacute;a de gr&aacute;ficas excelente pero puede que no sea exactamente lo que estamos buscando, por lo que finalizaremos este episodio recorriendo algunas alternativas.</p>
+
+<p>La primera de ellas es  <a href="http://people.iola.dk/olau/flot/examples/graph-types.html">Flot</a>. Tambi&eacute;n utiliza JavaScript y puede usarse para generar gr&aacute;ficos bastante bonitos.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/429/original/E223I08.png" width="828" height="512" alt="Flot"/>
+</div>
+
+<p>Otra librer&iacute;a basada en JavaScript es <a href="http://g.raphaeljs.com">gRrapha&euml;l</a>. Es muy &uacute;til para generar diagramas de barra o tarta, por lo que se recomienda echarle un vistazo si tenemos que generar este tipo de gr&aacute;ficas.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/430/original/E223I09.png" width="828" height="512" alt="gRrapha&euml;l"/>
+</div>
+
+<p>Y por &uacute;ltimo tenemos <a href="http://bluff.jcoglan.com">Bluff</a>. Est&aacute; basada en la librer&iacute;a Gruff de Ruby.  Es una soluci&oacute;n muy bonita y sencilla, por lo que si buscamos una soluci&oacute;n ligera podr&iacute;a interesarnos.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/431/original/E223I10.png" width="828" height="512" alt="Bluff"/>
+</div>
+
+<p>Y eso es todo por este episodio.  Si necesitamos mostrar gr&aacute;ficas en nuestra aplicaci&oacute;n tenemos muchas opciones donde escoger.</p>

@@ -1,0 +1,323 @@
+<p>The first release candidate for Rails 3.0 has just been released. This makes it a great time to try out Rails 3, if you haven&rsquo;t already, and to see what changes will need to be made to your current Rails 2 applications go get them working. In this episode we&rsquo;ll show you how to upgrade a Rails 2.3 application to Rails 3.0.</p>
+
+<p>There are already a number of episodes on Rails 3.0 that you can watch or read and we&rsquo;ll refer to some relevant episodes as we work through upgrading. The application we&rsquo;re going to start upgrading is the railscasts.com site, the source code of which is available on <a href="http://github.com/ryanb/railscasts">Github</a>.</p>
+
+<p>Even if you&rsquo;re not ready to use Rails 3 in production yet it&rsquo;s still worth trying to upgrade your Rails 2 applications just to see what problems you might run in to. If your applications use Git for source control it&rsquo;s easy to create a separate branch to experiment on so having downloaded the code we&rsquo;ll create a new branch called <code>rails3</code>.</p>
+
+<pre class="terminal">
+$ git checkout -b rails3
+Switched to a new branch &#x27;rails3&#x27;
+</pre>
+
+<h3>Before We Start Upgrading</h3>
+
+<p>Before upgrading an application to Rails 3 we should upgrade it to the latest version of Rails 2.3 which at the time of writing is Rails 2.3.8. Likewise, any gems that the application uses should be upgraded to their latest version. This way we&rsquo;ll ensure that there are no compatibility problems with the latest versions.</p>
+
+<p>Once we&rsquo;ve upgraded Rails and the gems we should run our tests. Having a good automated test suite will help ensure that everything is still working as it should.</p>
+
+<pre class="terminal">
+$ rake spec
+(in /Users/eifion/rails/apps_for_asciicasts/ep225/railscasts)
+DEPRECATION WARNING: Rake tasks in vendor/plugins/hoptoad_notifier/tasks 
+........................................................................................................................................................
+
+152 examples, 0 failures
+</pre>
+
+<p>Everything passes so we&rsquo;re ready to start the upgrade.</p>
+
+<h3>Updating Ruby and Installing Rails 3</h3>
+
+<p>For this update we want to use the latest version of Ruby and have a clean slate for our Rails 3 environment and so we&rsquo;ll use <a href="http://rvm.beginrescueend.com">rvm</a> to install the latest version of Ruby 1.9.2 and install Rails 3.0 on top of that. There are frequent updates to rvm so we&rsquo;ll ensure that we have the latest version by running rvm update before installing Ruby.</p>
+
+<pre class="terminal">
+$ rvm update
+
+rvm 0.1.40 by Wayne E. Seguin (wayneeseguin@gmail.com) [http://rvm.beginrescueend.com/]
+
+info: fetching rvm-0.1.43.tar.gz
+
+info: Extracting rvm-0.1.43.tar.gz ...
+
+info: Installing rvm-0.1.43...
+</pre>
+
+<p>Once rvm has updated itself we&rsquo;ll need to reload it. We can do that by running</p>
+
+<pre class="terminal">
+$ rvm reload
+</pre>
+
+<p>Now we can use rvm to install Ruby 1.9.2.</p>
+
+<pre class="terminal">
+$ rvm install 1.9.2
+</pre>
+
+<p>This command will download, compile and install the latest version of Ruby 1.9.2, currently rc2.  When this has completed (it may take a few minutes) we can switch to the new version and check that it works.</p>
+
+<pre class="terminal">
+$ rvm 1.9.2
+$ ruby -v
+ruby 1.9.2dev (2010-07-11 revision 28618) [x86_64-darwin10.4.0]
+</pre>
+
+<p>Now that we know that we&rsquo;re running the correct version of Ruby we can install the Rails 3.0 release candidate gem.</p>
+
+<pre class="terminal">
+gem install rails --pre
+</pre>
+
+<p>Note that as we using an rvm-installed version of Ruby we don&rsquo;t need to use sudo to install gems.</p>
+
+<h3>Beginning The Upgrade</h3>
+
+<p>We now have a fresh install of Ruby and Rails 3.0 so we&rsquo;re ready to begin upgrading our application. To help us there&rsquo;s an official <a href="http://github.com/rails/rails_upgrade">rails_upgrade plugin</a> that we can use to see what changes we need to make. To install it we&rsquo;ll first need to swap back to our Rails 2 environment. This is installed on our system version of Ruby so we first need to swap back to it by running.</p>
+
+<pre class="terminal">
+$ rvm system
+</pre>
+
+<p>We can now install the plugin.</p>
+
+<pre class="terminal">
+$ script/plugin install git://github.com/rails/rails_upgrade.git
+</pre>
+
+<p>This will show some <a href="http://github.com/rails/rails_upgrade/blob/master/install.rb">helpful documentation</a> after it installs. One of the key commands it adds is <code>rake rails:upgrade:check</code>. When we run this command from our application&rsquo;s directory it will show a list of everything that needs to be updated in our application. The output is too long to show here, but as an example the first part is shown.</p>
+
+<pre class="terminal">
+$ rake rails:upgrade:check
+
+(in /Users/eifion/rails/apps_for_asciicasts/ep225/railscasts)
+Old router API
+The router API has totally changed.
+More information: http://yehudakatz.com/2009/12/26/the-rails-3-router-rack-it-up/
+
+The culprits: 
+	- config/routes.rb
+</pre>	
+
+<p>Before we start the upgrade we&rsquo;ll run <code>rake rails:upgrade:backup</code>. This will back up some of the key files that are likely to be overwritten during the upgrade.</p>
+
+<pre class="terminal">
+$ rake rails:upgrade:backup
+(in /Users/eifion/rails/apps_for_asciicasts/ep225/railscasts)
+DEPRECATION WARNING: Rake tasks in vendor/plugins/hoptoad_notifier/tasks are deprecated. Use lib/tasks instead. (called from /Library/Ruby/Gems/1.8/gems/rails-2.3.8/lib/tasks/rails.rb:10)
+
+* backing up .gitignore to .gitignore.rails2
+* backing up app/controllers/application_controller.rb to app/controllers/application_controller.rb.rails2
+* backing up app/helpers/application_helper.rb to app/helpers/application_helper.rb.rails2
+* backing up config/routes.rb to config/routes.rb.rails2
+* backing up config/environment.rb to config/environment.rb.rails2
+* backing up config/environments/development.rb to config/environments/development.rb.rails2
+* backing up config/environments/production.rb to config/environments/production.rb.rails2
+* backing up config/database.yml to config/database.yml.rails2
+
+This is a list of the files analyzed and backed up (if they existed);
+you will probably not want the generator to replace them since
+you probably modified them (but now they&#x27;re safe if you accidentally do!).
+
+- .gitignore
+- app/controllers/application_controller.rb
+- app/helpers/application_helper.rb
+- config/routes.rb
+- config/environment.rb
+- config/environments/development.rb
+- config/environments/production.rb
+- config/environments/staging.rb
+- config/database.yml
+- config.ru
+- doc/README_FOR_APP
+- test/test_helper.rb
+</pre>
+
+<p>We start the upgrade by creating a new Rails 3 application in the application&rsquo;s directory. In order to do that we need to swap back to our Ruby 1.9.2 environment.</p>
+
+<pre class="terminal">
+$ rvm 1.9.2
+</pre>
+
+<p>We can now create the new Rails 3 application with</p>
+
+<pre class="terminal">
+$ rails new .
+</pre>
+
+<p>As we&rsquo;re creating a new application in the same directory as an existing one we&rsquo;ll be asked if we want to overwrite some of the existing ones. If we&rsquo;re not sure if a file should be overwritten we can use the <code>d</code> option to see the differences between the existing file and the one that will be overwritten.</p>
+
+<p>We we&rsquo;ve just made backups of most of the important files in our application so we can choose to overwrite all of the conflicting files with the exception of the following:</p>
+
+<ul style="list-style-type:disc; list-style-position: inside;">
+ <li><code>/README</code></li>
+ <li><code>/app/views/layouts/application.html.erb</code></li>
+ <li><code>/public/javascripts/application.js</code></li>
+</ul>
+ 
+<p>The other files will either not have changed from their defaults or will have been backed up, allowing us to move any changes back into the new versions as we go along.</p>
+
+<p>Our application has now been upgraded to Rails 3.0 but we still have to go through the files that we backed up and move over any code that is specific to our application. Each backed-up file will be in its original directory with a <code>.rails2</code> extension so we just need to open up each backup file along with the new version and copy any code we want to keep over.</p>
+
+<p>We&rsquo;ll start with the routes file. The routing syntax has changed but the old syntax still works in Rails 3.0, although it has been deprecated. For now we can just paste in the routes from the backup file into the new routes file and we&rsquo;ll test it later.</p>
+
+<p>Next we&rsquo;ll take a look at the <code>/config/environment.rb</code> file. Fixing this will involve a little more work as the configuration has changed quite a lot in Rails 3. The default Rails 3 environment file is quite short as the configuration options don&rsquo;t belong there any more, going instead into the <code>/config/application.rb</code> file.</p>
+
+<p>There are three sections of the backed-up <code>environment.rb</code> file that we need to consider. The first is the time zone configuration code.</p>
+
+<pre class="terminal">
+config.time_zone = &#x27;Pacific Time (US &amp; Canada)&#x27;
+</pre>
+
+<p>This line can be moved into <code>/config/application.rb</code>.</p> 
+
+<p>The second part is the session code.</p>
+
+<pre class="terminal">
+config.action_controller.session = {
+  :session_key =&gt; APP_CONFIG[&#x27;session_key&#x27;],
+  :secret      =&gt; APP_CONFIG[&#x27;session_secret&#x27;]
+}
+</pre>
+
+<p>In Rails 3 this code belongs in an initializer file and if we look at that file we&rsquo;ll see the code for configuring the application&rsquo;s session data.</p>
+
+<p class="codeFilePath">/config/initializers/session_store.rb</p>
+<pre class="ruby">
+# Be sure to restart your server when you modify this file.
+
+Railscasts::Application.config.session_store :cookie_store, :key =&gt; &#x27;_railscasts_session&#x27;
+
+# Use the database for sessions instead of the cookie-based default,
+# which shouldn&#x27;t be used to store highly confidential information
+# (create the session table with &quot;rake db:sessions:create&quot;)
+# Railscasts::Application.config.session_store :active_record_store
+</pre>
+
+<p>We can leave this code as it is for now. It might need to be changed later on but that won&rsquo;t be necessary in order to get the site up and running.</p>
+
+<p>Finally, at the bottom of the backed-up <code>envronment.rb</code> file is the code that configures the application&rsquo;s gems.</p>
+
+<pre class="ruby">
+config.gem &quot;RedCloth&quot;, :lib =&gt; &#x27;redcloth&#x27;, :version =&gt; &quot;&gt;= 4.0&quot;
+config.gem &quot;coderay&quot;
+config.gem &#x27;acts-as-list&#x27;
+config.gem &#x27;will_paginate&#x27;
+config.gem &#x27;thinking-sphinx&#x27;, :lib =&gt; &#x27;thinking_sphinx&#x27;
+config.gem &#x27;whenever&#x27;, :lib =&gt; false
+</pre>
+
+<p>This code can be copied into our application&rsquo;s <code>Gemfile</code>, which is in the application&rsquo;s root directory. The syntax has changed slightly so the code will need to be changed to look like this:</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+gem &quot;RedCloth&quot;, &quot;&gt;=4.0&quot;, :require =&gt; &#x27;redcloth&#x27;
+gem &quot;coderay&quot;
+gem &#x27;acts-as-list&#x27;
+gem &#x27;will_paginate&#x27;
+gem &#x27;thinking-sphinx&#x27;, :require =&gt; &#x27;thinking_sphinx&#x27;
+gem &#x27;whenever&#x27;, :require =&gt; false
+</pre>
+
+<p>As well as changing <code>config.gem</code> to <code>gem</code> on each line there are a couple of other changes that we need to make. Version numbers are now just supplied as a second argument and the <code>:lib</code> option is now <code>:require</code>.</p>
+
+<p>Once we have done that we need to run <code>bundle install</code> to make sure that all of the required gems are installed. For more information about bundler and installing gems you can <a href="http://railscasts.com/episodes/201-bundler">watch</a> or <a href="http://asciicasts.com/episodes/201-bundler">read</a> episode 201. We won&rsquo;t go into moving code from the other backup files but it should be fairly straightforward to transfer the necessary code.</p>
+
+<p>With the gems installed we&rsquo;ll try starting the server to see if the application will start.</p>
+
+<pre class="terminal">
+$ rails s
+/Users/eifion/.rvm/gems/ruby-1.8.7-p299/gems/will_paginate-2.3.14/lib/will_paginate.rb:39:in `enable_activerecord&#x27;: 
+undefined method `returning&#x27; for WillPaginate:Module (NoMethodError)
+# rest of error truncated&hellip;
+</pre>
+
+<p>It won&rsquo;t and the reason is that there&rsquo;s an error in the <code>will_paginate</code> gem&rsquo;s code where we have an undefined <code>returning</code> method. This method was available in Rails 2 but has been removed in Rails 3.</p>
+
+<p>In cases like these it&rsquo;s worth checking the <a href="http://rubygems.org">RubyGems</a> website to see if there is a newer prerelease version of the gem available that is compatible with Rails 3.0. In the case of <code>will_paginate</code> there is and we can use it by adding a version number for that gem in our <code>Gemfile</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="terminal">
+gem &#x27;will_paginate&#x27;, &#x27;&gt;=3.0.pre&#x27;
+</pre>
+
+<p>If we run <code>bundle install</code> again the prerelease version of the gem will be installed and we&rsquo;ll be able to use it in our application. Now that we have that newer version installed we can try running the server again.</p>
+
+<pre class="terminal">
+$ rails s
+/Users/eifion/.rvm/gems/ruby-1.8.7-p299/gems/after_commit-1.0.7/lib/after_commit/active_record.rb:15:in `include_after_commit_extensions&#x27;: undefined method `subclasses_of&#x27; for Object:Class (NoMethodError)
+	from /Users/eifion/.rvm/gems/ruby-1.8.7-p299/gems/after_commit-1.0.7/lib/after_commit.rb:81
+	from /Users/eifion/.rvm/gems/ruby-1.8.7-p299/gems/thinking-sphinx-1.3.18/lib/thinking_sphinx.rb:2:in `require&#x27;
+	from /Users/eifion/.rvm/gems/ruby-1.8.7-p299/gems/thinking-sphinx-1.3.18/lib/thinking_sphinx.rb:2
+</pre>
+
+<p>This error appears to be caused by the Thinking Sphinx gem. Again there is a prerelease version available that we can use instead so we can make another change to the <code>Gemfile</code> and then run bundle install again.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+gem &#x27;thinking-sphinx&#x27;, &#x27;&gt;=2.0.0.rc1&#x27;, :require =&gt; &#x27;thinking_sphinx&#x27;
+</pre>
+
+<p>Let&rsquo;s try running the server again.</p>
+
+<pre class="terminal">
+$ rails s
+DEPRECATION WARNING: railtie_name is deprecated and has no effect. (called from &lt;class:Railtie&gt; at /Users/eifion/.rvm/gems/ruby-1.9.2-rc2/gems/will_paginate-3.0.pre/lib/will_paginate/railtie.rb:6)
+=&gt; Booting WEBrick
+=&gt; Rails 3.0.0.rc application starting in development on http://0.0.0.0:3000
+=&gt; Call with -d to detach
+=&gt; Ctrl-C to shutdown server
+Exiting
+/Users/eifion/rails/apps_for_asciicasts/ep225/railscasts/config/routes.rb:2:in `block in &lt;top (required)&gt;&#x27;: undefined local variable or method `map&#x27; for #&lt;ActionDispatch::Routing::Mapper:0x00000101dffde8&gt; (NameError)
+</pre>
+
+<p>This time we get a little further. The server does try to start but then complains about an undefined variable or method called map in the routes. As we&rsquo;ve pasted the old routing code over into the new routes file we&rsquo;re calling a <code>map</code> variable but that variable isn&rsquo;t passed to the block as it isn&rsquo;t required in Rails 3. We can still use the old routing syntax though and pass that variable in.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Railscasts::Application.routes.draw do |map|
+  map.resources :spam_questions
+
+  map.resources :spam_checks
+
+  map.with_options :controller =&gt; &#x27;info&#x27; do |info|
+    info.about &#x27;about&#x27;, :action =&gt; &#x27;about&#x27;
+    info.contest &#x27;contest&#x27;, :action =&gt; &#x27;contest&#x27;
+    info.feeds &#x27;feeds&#x27;, :action =&gt; &#x27;feeds&#x27;
+    info.give_back &#x27;give_back&#x27;, :action =&gt; &#x27;give_back&#x27;
+  end
+  
+  map.login &#x27;login&#x27;, :controller =&gt; &#x27;sessions&#x27;, :action =&gt; &#x27;new&#x27;
+  map.logout &#x27;logout&#x27;, :controller =&gt; &#x27;sessions&#x27;, :action =&gt; &#x27;destroy&#x27;
+  
+  map.resources :sponsors
+  map.resources :comments
+  map.resources :tags
+  map.resources :episodes, :collection =&gt; { :archive =&gt; :get }
+  map.resources :sessions
+  map.resources :spam_reports, :member =&gt; { :confirm =&gt; :post }, :collection =&gt; { :confirm =&gt; :post }
+  
+  map.root :episodes
+end
+</pre>
+
+<p>When we try to start the server up again it&rsquo;s fourth-time lucky and it boots up without any errors.</p>
+
+<pre class="terminal">
+$ rails s
+DEPRECATION WARNING: railtie_name is deprecated and has no effect. (called from &lt;class:Railtie&gt; at /Users/eifion/.rvm/gems/ruby-1.9.2-rc2/gems/will_paginate-3.0.pre/lib/will_paginate/railtie.rb:6)
+=&gt; Booting WEBrick
+=&gt; Rails 3.0.0.rc application starting in development on http://0.0.0.0:3000
+=&gt; Call with -d to detach
+=&gt; Ctrl-C to shutdown server
+[2010-08-05 19:30:22] INFO  WEBrick 1.3.1
+[2010-08-05 19:30:22] INFO  ruby 1.9.2 (2010-07-11) [x86_64-darwin10.4.0]
+[2010-08-05 19:30:22] INFO  WEBrick::HTTPServer#start: pid=9933 port=3000
+</pre>
+
+<p>If we visit the home page in a browser now we&rsquo;ll see the default home page as it will have been recreated in the <code>/public</code> directory when we created the Rails 3 application. We can see from this page that the correct environment is being used our app.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/439/original/E225I01.png" width="807" height="538" alt="The default home page of our updates application."/>
+</div>
+
+<p>Even though we have our application booting successfully there&rsquo;s still a lot we need to fix as we&rsquo;ll see if we run rails:upgrade:check again. We also need to run our specs again to see if they pass. We&rsquo;ll cover these in the next episode.</p>

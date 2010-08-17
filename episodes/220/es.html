@@ -1,0 +1,209 @@
+<p>Existen varias librer&iacute;as para generar archivos PDF en Ruby.  Una de las m&aacute;s populares es <a href="http://prawn.majesticseacreature.com/">Prawn</a>, que es una excelente manera de generar PDFs desde cero con Ruby y que ya estudiamos en el Episodio 153 [<a href="http://railscasts.com/episodes/153-pdfs-with-prawn">verlo</a>, <a href="http://asciicasts.com/episodes/153-pdfs-with-prawn">leero</a>].  Sin embargo hay situaciones en las que nos ser&iacute;a mucho m&aacute;s f&aacute;cil generar un PDF a partir de un documento HTML ya existente, que es el caso que veremos en este episodio.</p>
+
+<p>La generaci&oacute;n de PDFs a partir de HTML no es una idea precisamente nueva pero hasta ahora las soluciones disponibles costaban dinero, pero ha habido mucha actividad en este campo a partir de una soluci&oacute;n propuesta por <a href="http://thinkrelevance.com/blog/2010/06/15/rethinking-pdf-creation-in-ruby.html">Jared Pace</a> con su nueva librer&iacute;a <a href="http://github.com/jdpace/PDFKit">PDFKit</a>.  La gema depende de <a href="http://code.google.com/p/wkhtmltopdf/">wkhtmltopdf</a>, una herramienta que utiliza el motor de WebKit para generar documentos PDF, as&iacute; que para instalar PDFKit tenemos primero que instalar wkhtmltopdf.  PDFKit ya viene con wkhtmltopdf as&iacute; que, dependiendo de nuestro entorno, puede que esto no sea necesario.</p>
+
+<p>La gema de PDFKit se instala de la forma habitual:</p>
+
+<pre class="terminal">
+$ gem install pdfkit
+</pre>
+
+<p>Tras su instalaci&oacute;n PDFKit puede generar un archivo PDF si se le pasa un archivo HTML o la direcci&oacute;n de una p&aacute;gina web.  La gema tambi&eacute;n viene con un <em>middleware</em> de Rack que se puede usar para generar PDFs a partir de cualquier p&aacute;gina de un sitio simplemente a&ntilde;adiendo <code>.pdf</code> a la URL.  Este es el enfoque que usaremos en nuestra aplicaci&oacute;n.</p>
+
+<h3>Creaci&oacute;n de PDFs de facturas</h3>
+
+<p>La aplicaci&oacute;n que vamos a usar para demostrar el uso de PDFKit es la misma con la que trabajamos en el episodio sobre Prawn.  Debajo se muestra la p&aacute;gina de pedido de una aplicaci&oacute;n sencilla de comercio electr&oacute;nico.   Queremos a&ntilde;adir un enlace a esta p&aacute;gina que permita descargar la versi&oacute;n en PDF del pedido, y para eso es para lo que vamos a usar PDFKit.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/403/original/E220I01.png" width="800" height="390" alt="Página de un pedido."/>
+</div>
+
+<p>Lo primero que haremos ser&aacute; a&ntilde;adir una referencia a PDFKit en nuestra aplicaci&oacute;n.  Dado que estamos con una aplicaci&oacute;n Rails 3 podemos modificar el archivo <code>Gemfile</code>:</p>
+
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+gem &quot;pdfkit&quot;
+</pre>
+
+<p>Y despu&eacute;s, para asegurarnos de que la gema est&aacute; instalada:</p>
+
+<pre class="terminal">
+$ bundle install
+</pre>
+
+<p>A continuaci&oacute;n tenemos que a&ntilde;adir el <em>middleware</em>.  En una aplicaci&oacute;n Rails 3 esto hay que hacerlo en el fichero  <code>/config/application.rb</code> (si estuvi&eacute;ramos con una aplicaci&oacute;n Rails 2 ir&iacute;a en el fichero de configuraci&oacute;n <code>environment.rb</code>).   Modificaremos el entorno para que la aplicaci&oacute;n utilice el <em>middleware</em> de PDFKit.</p>
+	
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby">
+require File.expand_path(&#x27;../boot&#x27;, __FILE__)
+
+require &#x27;rails/all&#x27;
+
+# Auto-require default libraries and those for the current Rails environment.
+Bundler.require :default, Rails.env
+
+module Store
+  class Application &lt; Rails::Application
+    config.secret_token = &#x27;6f22fa632e18b338b4babfa5fca632f5454fc97317cb52f372fa0f0fdd7f4d5bd95a060ff412c7230627b5c17906c9762c09208624bc1ab97f8d5344d8d4f467&#x27;
+    config.filter_parameters &lt;&lt; :password
+    config.middleware.use &quot;PDFKit::Middleware&quot;
+  end
+end
+</pre>
+
+<p>Podemos ejecutar <code>rake middleware</code> para ver qu&eacute; <em>middlewares</em> est&aacute;n siendo utilizados por nuestra aplicaci&oacute;n, con lo que podemos comprobar si aparece el de PDFKit:</p>
+
+<pre class="terminal">
+$ rake middleware
+(in /Users/eifion/rails/apps_for_asciicasts/ep220/store)
+use ActionDispatch::Static
+use Rack::Lock
+use ActiveSupport::Cache::Strategy::LocalCache
+use Rack::Runtime
+use Rails::Rack::Logger
+use ActionDispatch::ShowExceptions
+use ActionDispatch::RemoteIp
+use Rack::Sendfile
+use ActionDispatch::Callbacks
+use ActiveRecord::ConnectionAdapters::ConnectionManagement
+use ActiveRecord::QueryCache
+use ActionDispatch::Cookies
+use ActionDispatch::Session::CookieStore
+use ActionDispatch::Flash
+use ActionDispatch::ParamsParser
+use Rack::MethodOverride
+use ActionDispatch::Head
+use PDFKit::Middleware
+run Store::Application.routes
+</pre>
+
+<p>Como en el listado aparece <code>PDFKit::Middleware</code> podemos continuar.  Ya es posible a&ntilde;adir la extensi&oacute;n <code>.pdf</code> a cualquier URL de nuestra aplicaci&oacute;n para obtener una versi&oacute;n en PDF de la misma.  Si hacemos as&iacute; para una de las facturas de la aplicaci&oacute;n veremos su versi&oacute;n en PDF:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/404/original/E220I02.png" width="810" height="368" alt="La version PDF de una factura."/>
+</div>
+
+<p>Y eso es todo.  Pr&aacute;cticamente sin tener que hacer nada hemos creado una versi&oacute;n PDF del pedido.  Podr&iacute;a tener mejor aspecto, pero ya tenemos una base sobre la que trabajar.</p>
+
+<h3>Personalizando el aspecto de la factura en PDF</h3>
+
+<p>Lo primero que haremos con la factura es quitar el fondo azul de la versi&oacute;n en PDF.  Tenemos que ser capaces de distinguir la versi&oacute;n PDF de forma que podamos aplicar diferentes reglas de estilo y esto puede hacerse modificando la llamada al <em>middleware</em> para que PDFKit utilice el tipo de medio impreso.</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby">
+config.middleware.use &quot;PDFKit::Middleware&quot;, :print_media_type =&gt; true
+</pre>
+
+<p>El fichero de <em>layout</em> de nuestra aplicaci&oacute;n tenemos una etiqueta <code>stylesheet_link_tag</code> que incluye la hoja de estilos  <code>application.css</code>.  Por defecto, esta hoja tiene el tipo de medio  <code>screen</code> lo que significa que con el cambio que acabamos de hacer al <em>middleware</em> ninguno de los estilos de esa hoja ser&aacute; aplicado en la versi&oacute;n en PDF.  Vamos a modificar la etiqueta <code>stylesheet_link_tag</code> para que se corresponda con el tipo de medio <code>all</code>, con lo o ue los estilos se aplicar&aacute;n tanto a versi&oacute;n de pantalla (HTML) como a la de impresi&oacute;n (PDF).</p>
+
+<p class="codeFilePath">/application/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= stylesheet_link_tag &quot;application&quot;, :media =&gt; &#x27;all&#x27; %&gt;
+</pre>
+
+<p>Podr&iacute;amos haber creado una hoja de estilos completamente separada para la hoja de impresi&oacute;n pero en vez de eso vamos a incluir las reglas que aplican para la versi&oacute;n de impresi&oacute;n en la misma hoja de estilos.  Al final del archivo CSS podemos a&ntilde;adir una regla de tipo de medio, y las reglas definidas en dicha secci&oacute;n s&oacute;lo ser&aacute;n aplicables a la vista en PDF.  Por tanto para eliminar el fondo azul de nuestra vista de impresi&oacute;n podemos a&ntilde;adir la siguiente regla CSS al final de la hoja de estilos de nuestra aplicaci&oacute;n.</p>
+
+<p class="codeFilePath">/public/stylesheets/application.css</p>
+<pre class="css">
+@media print {
+	body { background-color: #FFF; }
+  #container {
+		width: auto;
+		margin: 0;
+		padding: 0;
+		border: none;
+	}
+}
+</pre>
+
+<p>Cuando recarguemos la vista de p&aacute;gina de nuestro pedido veremos que el fondo azul habr&aacute; desaparecido.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/405/original/E220I03.png" width="800" height="435" alt="Ya hemos quitado el fondo azul"/>
+</div>
+
+<p>El PDF que tenemos ahora es muy parecido al que creamos en el episodio sobre Prawn, pero hemos tenido que escribir mucho menos c&oacute;digo para conseguir el mismo resultado.  Prawn tiene sus ventajas, porque nos da mucho m&aacute;s control sobre la forma en que la se genera el fichero PDF, especialmente en documentos con varias p&aacute;ginas.  Con PDFKit si la tabla del pedido ocupase varias p&aacute;ginas tendr&iacute;amos problemas para controlar la forma en la que se muestran en cada p&aacute;gina las cabeceras y pies.</p>
+
+<h3>Control de saltos de p&aacute;gina</h3>
+
+<p>Dicho esto, con PDFKit s&iacute; que podemos tener cierto control sobre los saltos de p&aacute;gina.  Si a&ntilde;adimos unos p&aacute;rrafos de texto al principio del pedido (para que la tabla quede m&aacute;s abajo) veremos que la tabla ahora aparece en dos p&aacute;ginas distintas.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/406/original/E220I04.png" width="800" height="435" alt="La tabla ocupando dos páginas."/>
+</div>
+
+<p>Podemos evitar este problema modificando la hoja de estilos de impresi&oacute;n para que se inserte un salto de p&aacute;gina justo antes de la tabla y que siempre aparezca en la parte de arriba de la p&aacute;gina, con la propiedad   <code>page-break-before</code>.</p>
+
+<p class="codeFilePath">/public/stylesheets/application.css</p>
+<pre class="css">
+@media print {
+	body { background-color: #FFF; }
+  #container {
+		width: auto;
+		margin: 0;
+		padding: 0;
+		border: none;
+	}
+	
+	#line_items {
+		page-break-before: always;
+	}
+}
+</pre>
+
+<p>Si recargamos el documento PDF de nuevo, la tabla volver&aacute; a aparecer en su propia p&aacute;gina.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/407/original/E220I05.png" width="802" height="490" alt="Si se inserta un salto de página nos aseguramos de que la tabla quede entera"/>
+</div>
+
+<p>A pesar de tener este control b&aacute;sico de los saltos de p&aacute;gina con PDFKit, si nuestros documentos
+son m&aacute;s complicados deberemos quedarnos con Prawn.</p>
+	
+<p>Hay todav&iacute;a un &uacute;ltimo cambio que queremos hacer antes de acabar este episodio.  Se trata de a&ntilde;adir un enlace de la versi&oacute;n PDF en la p&aacute;gina HTML de la factura.  Primero a&ntilde;adiremos un enlace al archivo PDF al final de la p&aacute;gina.</p>
+
+<p class="codeFilePath">/app/views/orders/show.html.erb</p>
+<pre class="ruby">
+&lt;p&gt;&lt;%= link_to &quot;Download Invoice (PDF)&quot;, order_path(@order, :format =&gt; &quot;pdf&quot;) %&gt;&lt;/p&gt;
+</pre>
+
+<p>Con esto veremos un enlace en el pedido en HTML a la versi&oacute;n PDF, pero este enlace tambi&eacute;n aparecer&aacute; en la versi&oacute;n PDF (cosa que no queremos)  Podemos ocultar este enlace en el PDF dando un identificador al elemento de p&aacute;rrafo que contiene el enlace:</p>
+
+<p class="codeFilePath">/app/views/orders/show.html.erb</p>
+<pre class="ruby">
+&lt;p id=&quot;pdf_link&quot;&gt;&lt;%= link_to &quot;Download Invoice (PDF)&quot;, order_path(@order, :format =&gt; &quot;pdf&quot;) %&gt;&lt;/p&gt;
+</pre>
+
+<p>Y modificando despu&eacute;s la hoja de estilos para que oculte dicho enlace en la versi&oacute;n impresa.</p>
+
+
+<p class="codeFilePath">/public/stylesheets/application.css</p>
+<pre class="css">
+@media print {
+	body { background-color: #FFF; }
+  #container {
+		width: auto;
+		margin: 0;
+		padding: 0;
+		border: none;
+	}
+	
+	#line_items {
+		page-break-before: always;
+	}
+	
+	#pdf_link {
+		display: none;
+	}
+}
+</pre>
+
+<p>Ahora tendremos un enlace al PDF en la versi&oacute;n HTML de la factura, pero dicho no enlace no aparecer&aacute; en el PDF.</p>
+
+<h3>Una alternativa</h3>
+
+<p>Antes de cerrar este episodio mencionaremos una alternativa a PDFKit, <a href="http://github.com/mileszs/wicked_pdf">Wicked PDF</a>.  Este <em>plugin</em> tiene un enfoque distinto del de PDFKit, aunque tambi&eacute;n usa wkhtmltopdf.  Wicked PDF no es un <em>middlware</em> sino que es un <em>renderer</em> de Rails.   Wicked PDF nos da m&aacute;s control sobre qu&eacute; acciones pueden mostrarse como PDFs, por lo que es una opci&oacute;n que merece la pena tener en cuenta.</p>
+
+<p>Y eso es todo por este episodio.  Ya hemos cubierto dos maneras muy distintas de generar documentos PDF en nuestras aplicaciones Rails, cada una de ellas con sus ventajas y desventajas.   Si bien PDFKit nos da la facilidad de generar PDFs a partir del HTML, con Prawn tendremos m&aacute;s control sobre los archivos generales.  Hay que considerar bien ambos enfoques.</p>

@@ -1,0 +1,304 @@
+  <p>Enquanto as principais mudan&ccedil;as nos controllers do Rails 3 aconteceram nos &quot;bastidores&quot;, existem algumas diferen&ccedil;as para os desenvolvedores. Este epis&oacute;dio vai cobrir algumas das novas funcionalidades que foram adicionadas.</p>
+
+	<h3>Par&acirc;metros no Log</h3>
+
+	<p>A primeira mudan&ccedil;a que vamos mostrar &eacute; no <code>ApplicationController</code>. Em uma aplica&ccedil;&atilde;o Rails 2, voc&ecirc; pode filtrar certos par&acirc;metros para n&atilde;o aparecerem em texto simples no arquivo de log, usando o m&eacute;todo <code>filter_parameter_logging</code>, como mostrado aqui:</p>
+
+	<p class="codeFilePath">/app/controllers/application_controller.rb</p>
+	<pre class="ruby">
+		class ApplicationController &lt; ActionController::Base
+	  	protect_from_forgery
+	  	filter_parameter_logging :password
+		end
+	</pre>
+
+<p>Esse m&eacute;todo foi substitu&iacute;do (deprecated) no Rails 3 e deve ser removido da sua aplica&ccedil;&atilde;o. A filtragem de par&acirc;metros est&aacute; configurada agora no arquivo <code>/config/application.rb</code>. O c&oacute;digo que configura os par&acirc;metros que devem ser filtrados est&aacute; no final do arquivo.</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby">
+# Configure sensitive parameters which will be filtered from the log file.
+config.filter_parameters += [:password]
+</pre>
+
+<p>Essa linha &eacute; adicionada por padr&atilde;o nas novas aplica&ccedil;&otilde;es Rails 3. &Eacute; f&aacute;cil esquecer de adicionar filtragem em uma aplica&ccedil;&atilde;o, ent&atilde;o &eacute;  bom ter essa funcionalidade como padr&atilde;o. Isso ir&aacute;, da forma que est&aacute;, filtrar somente o par&acirc;metro de senha. Ser&aacute; necess&aacute;rio alterar se outro par&acirc;metro, como um n&uacute;mero de cart&atilde;o de cr&eacute;dito, precisar ser filtrado tamb&eacute;m.</p>
+
+<h3>Modos de Redirecionamento</h3>
+
+<p>Em seguida vamos dar uma olhada no <code>ProductsController</code> de uma aplica&ccedil;&atilde;o de loja virtual que tenho escrito. E em como redirecionamentos s&atilde;o tratados quando uma action, como <code>create</code> ou <code>update</code>, &eacute; chamada em um controller t&iacute;pico Rails, com os sete m&eacute;todos habituais RESTful. Se olharmos o c&oacute;digo do m&eacute;todo <code>create</code>, veremos que depois de validado, o  <code>Product</code> foi salvo, a action define uma mensagem <code>flash</code> e ent&atilde;o redireciona para a action <code>show</code> do produto rec&eacute;m-criado.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+def create
+  @product = Product.new(params[:product])
+  if @product.save
+    flash[:notice] = &quot;Successfully created product.&quot;
+    redirect_to @product
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end
+</pre>
+
+<p>Esse comportamento &eacute; bastante comum em um controller e no Rails 3 podemos combinar essas duas linhas de modo que a mensagem <code>flash</code> torna-se um par&acirc;metro do m&eacute;todo <code>redirect_to</code>.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+def create
+  @product = Product.new(params[:product])
+  if @product.save
+    redirect_to @product, :notice =&gt; &quot;Successfully created product.&quot;
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end
+</pre>
+
+<p>As mensagens <code>:notice</code> ou <code>:alert</code> v&atilde;o funcionar aqui, mas qualquer outro tipo de mensagem <code>flash</code> ter&aacute; que ser incorporada em um <code>:flash</code> hash. Esse recurso tamb&eacute;m foi adicionado ao Rails 2.3.6, por isso, se voc&ecirc; estiver usando a vers&atilde;o mais recente do Rails 2, ent&atilde;o voc&ecirc; pode usar esse atalho tamb&eacute;m.</p>
+
+<p>O m&eacute;todo <code>redirect_to</code> acima tem uma inst&acirc;ncia de um model como par&acirc;metro. Passar um objeto do model <code>Product</code>, como <code>@product</code>, &eacute; um atalho para o uso do m&eacute;todo <code>product_path(@product)</code>. Isso &eacute; traduzido para o path da action <code>show</code> desse produto. Se quis&eacute;ssemos redirecionar para a p&aacute;gina de edi&ccedil;&atilde;o, em vez disso, poder&iacute;amos usar <code>edit_product_path(@product)</code>. Mas existe um outro atalho que podemos usar. Em vez de escrever:</p>
+
+<pre class="ruby">
+redirect_to edit_product_path(@product)
+</pre> 
+
+<p>Poder&iacute;amos escrever:</p>
+
+<pre class="ruby">
+redirect_to [:edit, @product]
+</pre>
+
+<p>Isso ser&aacute; traduzido para o mesmo path da action edit do produto acima, mas com um pouco menos de c&oacute;digo. Como o <code>:notice</code>, essa op&ccedil;&atilde;o acima tamb&eacute;m funciona na &uacute;ltima vers&atilde;o do Rails 2. Esse atalho funciona com recursos aninhados tamb&eacute;m. Ent&atilde;o se um produto pertence a uma categoria, ele pode ser redirecionado com:</p>
+
+<pre class="ruby">
+redirect_to [@category, @product]
+</pre>
+
+<p>Essa t&eacute;cnica de usar array funciona em qualquer lugar que voc&ecirc; precisa gerar uma URL e pode ser usado no c&oacute;digo das views em um m&eacute;todo <code>link_to</code>, bem como nos controllers.</p>
+
+<h3>Cookies Permanentes</h3>
+
+<p>O pr&oacute;ximo recurso novo que vamos demonstrar s&atilde;o os cookies permanentes. Digamos que quando um usu&aacute;rio cria um novo produto, queremos armazenar o <code>id</code> do produto em um cookie. Podemos usar o m&eacute;todo <code>cookies</code> para fazer isso:</p>
+
+<p class="codeFilePath">/app/controllers/proucts_controller.rb</p>
+<pre class="ruby">
+def create
+  @product = Product.new(params[:product])
+  if @product.save
+    cookies[:last_product_id] = @product.id
+    redirect_to @product, :notice =&gt; &quot;Successfully created product.&quot;
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end
+</pre>
+
+<p>Esse c&oacute;digo cria um cookie de sess&atilde;o que durar&aacute; apenas enquanto o usu&aacute;rio mant&eacute;m a sua janela do navegador aberta. Para criar um cookie com uma data de validade expl&iacute;cita no Rails 2, ter&iacute;amos que transformar o valor em um hash e definir um tempo de validade expl&iacute;cito assim:</p>
+
+<pre class="ruby">
+cookies[:last_product_id] = { :value =&gt; @product_id, :expires =&gt; 1.month.from_now }
+</pre>
+
+<p>No Rails 3 (no Rails 2.3.6 e acima), podemos usar o novo m&eacute;todo <code>cookies.permanent</code> para criar um cookie com um tempo de vida longo.</p>
+
+<pre class="ruby">
+cookies.permanent[:last_product_id] = @product.id
+</pre>
+
+<p>N&oacute;s tamb&eacute;m podemos criar cookies assinados dessa forma. Por enquanto n&atilde;o entramos em detalhes sobre isso aqui, mas h&aacute; um <a href="http://m.onkey.org/2010/2/5/signed-and-permanent-cookies-in-rails-3">&oacute;timo post</a> no blog do Pratik Naik sobre esse assunto, que merece leitura. Essencialmente podemos usar o m&eacute;todo <code>cookies.permanent.signed</code> para gerar um cookie criptografado e l&ecirc;-lo novamente mais tarde. Note que vamos precisar obter o <code>cookie_verifier_secret</code> em nossa aplica&ccedil;&atilde;o para isso funcionar.</p>
+
+<h3>Usando <code>respond_with</code></h3>
+
+<p>A &uacute;ltima coisa que vamos mostrar neste epis&oacute;dio &eacute; provavelmente a mais significativa mudan&ccedil;a nos controller do Rails 3: <code>respond_with</code>. N&oacute;s vamos demonstrar isso adicionando um servi&ccedil;o REST sobre uma interface XML para o nosso <code>ProductsController</code>. Isso significa que cada uma das actions do controller ter&aacute; que devolver uma resposta XML, al&eacute;m de sua resposta padr&atilde;o HTML.</p>
+
+<p>Em uma aplica&ccedil;&atilde;o Rails 2, n&oacute;s implementar&iacute;amos isso usando <code>respond_to</code> em cada action, assim:</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+def index
+  @products = Product.all
+  respond_to do |format|
+    format.html
+    format.xml { render :xml =&gt; @products }
+  end
+end
+</pre>
+
+<p>Dentro do bloco <code>respond_to</code> especificamos cada um dos formatos que a action responde, renderizando a vers&atilde;o XML do array de produtos para uma requisi&ccedil;&atilde;o XML. Essa abordagem pode tornar-se inc&ocirc;moda se for necess&aacute;rio fazer isso para cada action de um controller.</p>
+
+<p>No Rails 3, podemos substituir esse c&oacute;digo por uma chamada ao m&eacute;todo <code>respond_with</code>, passando o objeto apropriado, nesse caso, o array de produtos. Para o <code>respond_with</code> funcionar tamb&eacute;m precisamos usar o m&eacute;todo de classe <code>respond_to</code> para especificar quais tipos MIME o controller deve responder e assim o <code>respond_with</code> sabe o que responder com em cada action.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; ApplicationController
+  respond_to :html, :xml
+  
+  def index
+    @products = Product.all
+    respond_with @products
+    end
+  end
+
+  # Other methods
+end
+</pre>
+
+<p>Agora que mudamos o nosso <code>ProductsController</code> para usar <code>respond_with</code>, vamos ver se as altera&ccedil;&otilde;es funcionaram. Se visitarmos a p&aacute;gina index de produtos em um navegador, vamos ver a action index com o HTML renderizado como n&oacute;s esperamos.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/433/original/E224I01.png" width="800" height="333" alt="The products index page."/>
+</div>
+
+<p>E se acrescentarmos <code>.xml</code> &agrave; URL, vamos obter a resposta XML.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/434/original/E224I02.png" width="801" height="199" alt="The products index page as XML.	"/>
+</div>
+
+<p>Como o m&eacute;todo <code>respond_with</code> funciona? Para uma simples requisi&ccedil;&atilde;o GET, como <code>index</code>, ele procura, de acordo com o MIME type apropriado, pelo arquivo da view correspondente, como o arquivo <code>.html.erb</code>, e renderiza. Se o <code>respond_with</code> n&atilde;o conseguir encontrar o arquivo da view, ent&atilde;o ele vai tentar chamar um m&eacute;todo como o <code>to_xml</code> ou o <code>to_json</code> para deixar o objeto que foi passado no formato adequado.</p>
+
+<p>Sabendo disso, podemos atualizar os m&eacute;todos <code>show</code> e <code>new</code> no <code>ProductsController</code> para usar o <code>respond_with</code>.</p>
+
+<p class="codeFilePath">/app/controller/products_controller.rb</p>
+<pre class="ruby">
+def show
+  @product = Product.find(params[:id])
+  respond_with @product
+end
+
+def new
+  @product = Product.new
+  respond_with @product
+end
+</pre>
+
+<p>A action <code>create</code> &eacute; mais complicada, pois ela tem alguns c&oacute;digos HTML espec&iacute;ficos, como por exemplo, as chamadas para <code>redirect_to</code> e <code>render</code>. N&oacute;s n&atilde;o queremos usar esses c&oacute;digos em uma resposta XML. Podemos contornar o problema removendo-os do m&eacute;todo e adicionando uma chamada para <code>respond_with</code>, deixando o m&eacute;todo parecido com este:</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+def create
+  @product = Product.new(params[:product])
+  if @product.save
+    cookies[:last_product_id] = @product.id
+    flash[:notice] = &quot;Successfully created product.&quot;
+  end
+  respond_with(@product)
+end
+</pre>
+
+<p>N&oacute;s podemos fazer isso porque o <code>respond_with</code> ir&aacute; automaticamente redirecionar ou renderizar, dependendo se o objeto passado para ele &eacute; v&aacute;lido. Podemos agora acrescentar <code>respond_with</code> aos outros m&eacute;todos do controller, removendo qualquer c&oacute;digo HTML espec&iacute;fico. O c&oacute;digo do nosso controller ser&aacute; parecido com este:</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; ApplicationController
+  respond_to :html, :xml
+  
+  def index
+    @products = Product.all
+    respond_with @products
+  end
+  
+  def show
+    @product = Product.find(params[:id])
+    respond_with @product
+  end
+
+  def new
+    @product = Product.new
+    respond_with @product
+  end
+  
+  def create
+    @product = Product.new(params[:product])
+    if @product.save
+      cookies[:last_product_id] = @product.id
+      flash[:notice] = &quot;Successfully created product.&quot;
+    end
+    respond_with(@product)
+  end
+
+  def edit
+    @product = Product.find(params[:id])
+    respond_with(@product)
+  end
+
+  def update
+    @product = Product.find(params[:id])
+    if @product.update_attributes(params[:product])
+      flash[:notice] = &quot;Successfully updated product.&quot;
+    end
+    respond_with(@product)
+  end
+  
+  def destroy
+    @product = Product.find(params[:id])
+    @product.destroy
+    flash[:notice] = &quot;Successfully destroyed product.&quot;
+    respond_with(@product)
+  end
+end
+</pre>
+
+<p>O m&eacute;todo <code>respond_with</code> pode ser um pouco confuso, por isso aqui vai um resumo.</p>
+
+<p>Para uma requisi&ccedil;&atilde;o GET, <code>respond_with</code> procurar&aacute; primeiro por uma view que responde ao formato espec&iacute;fico. Se encontrar ir&aacute; renderiz&aacute;-la; caso contr&aacute;rio ele ir&aacute; chamar <code>to_xml</code> (ou qualquer outro formato que foi solicitado) no objeto que foi passado para ele.</p>
+
+<p>Para qualquer outro tipo de solicita&ccedil;&atilde;o, <code>respond_with</code> primeiro verifica se o objeto passado tem algum erro. Se isso acontecer, ent&atilde;o a view apropriada ser&aacute; renderizada (por exemplo, <code>new</code> para a action <code>create</code> e <code>edit</code> para a action <code>update</code>). Se n&atilde;o houver nenhum erro, ent&atilde;o ele ir&aacute; redirecionar para a p&aacute;gina espec&iacute;fica do objeto (ou seja, a action <code>show</code>).</p>
+
+<p>N&oacute;s podemos testar isso editando um de nossos produtos.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/435/original/E224I03.png" width="800" height="378" alt="Editing a product."/>
+</div>
+
+<p>Ao clicar no bot&atilde;o &quot;Update Product&quot; a action <code>update</code> &eacute; chamada e <code>respond_with</code> ir&aacute; executar um redirecionamento para a p&aacute;gina do produto.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/436/original/E224I04.png" width="800" height="358" alt="The product has been successfully updated."/>
+</div>
+
+<p>Da mesma forma, se clicarmos no link &quot;destroy&quot;, seremos redirecionados para a p&aacute;gina index.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/437/original/E224I05.png" width="801" height="337" alt="respond_with redirects to the index page after deleting a product."/>
+</div>
+
+<p>Se o comportamento padr&atilde;o do <code>respond_with</code> n&atilde;o satisfizer certas necessidades da nossa aplica&ccedil;&atilde;o, podemos personaliz&aacute;-lo para determinadas actions. Como um exemplo, digamos que quando atualizarmos um produto, n&oacute;s queremos o redirecionamento para a action <code>index</code> em vez do padr&atilde;o que &eacute; a action <code>show</code>. Nesse caso, podemos passar a op&ccedil;&atilde;o de <code>location</code> para o <code>respond_with</code> para que ele redirecione para uma action diferente. Para redirecionar para a p&aacute;gina index de produtos em vez de um produto espec&iacute;fico da p&aacute;gina, podemos alterar a action <code>update</code> da seguinte forma:</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+def update
+  @product = Product.find(params[:id])
+  if @product.update_attributes(params[:product])
+    flash[:notice] = &quot;Successfully updated product.&quot;
+  end
+  respond_with(@product, :location =&gt; products_url)
+end
+</pre>
+
+<p>Tamb&eacute;m podemos substituir formatos espec&iacute;ficos passando um bloco para o <code>respond_with</code>, como far&iacute;amos com o <code>respond_to</code>. Portanto, se queremos apenas rederizar algum texto para o formato XML da action edit, podemos faz&ecirc;-lo.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+def edit
+  @product = Product.find(params[:id])
+  respond_with(@product) do |format|
+    format.xml { render :text =&gt; &quot;I&#x27;m XML!&quot; }
+  end
+end
+</pre>
+
+<p>Quando visitarmos a vers&atilde;o XML da p&aacute;gina de edi&ccedil;&atilde;o, vamos ver essa string renderizada.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/438/original/E224I06.png" width="799" height="140" alt="The edit page showing the custom XML."/>
+</div>
+
+<p>Finalmente, se precisamos de uma completa personaliza&ccedil;&atilde;o, podemos passar uma classe responder personalizada. Dessa forma, o controller ir&aacute; entregar tudo para a classe e o comportamento da resposta ser&aacute; como gostar&iacute;amos.</p>
+
+<pre class="ruby">
+respond_with(@product, :responder =&gt; MyResponder)
+</pre>
+
+<p>Para um exemplo de cria&ccedil;&atilde;o de uma classe responder, d&ecirc; uma olhada no <a href="http://github.com/rails/rails/blob/master/actionpack/lib/action_controller/metal/responder.rb">Responder class</a> do Rails 3. O c&oacute;digo &eacute; bastante f&aacute;cil de ler, est&aacute; bem documentado e voc&ecirc; ter&aacute; uma ideia melhor de como funciona uma resposta.</p>
+
+<p>Por esse epis&oacute;dio, &eacute; isso. Como voc&ecirc; pode ver o <code>respond_with</code> &eacute; uma maneira muito conveniente para lidar com v&aacute;rios formatos. Mas se voc&ecirc; estiver personalizando-o muito, poderia ser mais f&aacute;cil deixar tudo como est&aacute; e n&atilde;o us&aacute;-lo. Alternativamente, se voc&ecirc; tem um monte de duplica&ccedil;&atilde;o, voc&ecirc; pode criar sua classe de resposta personalizada.</p>

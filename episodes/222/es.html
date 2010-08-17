@@ -1,0 +1,203 @@
+<p>En el episodio 203 [<a href="http://railscasts.com/episodes/203-routing-in-rails-3">verlo</a>, <a href="http://es.asciicasts.com/episodes/203-rutas-en-rails-3">leerlo</a>] le dimos un repaso al sistema de rutas de Rails 3, pero se nos quedaron en el tintero algunas funcionalidades avanzadas que pueden sacar todo el partido a la flexibilidad del enrutador de Rails 3.  Veremos algunas de ellas en este episodio.</p>
+
+<h3>Rutas para aplicaciones Rack</h3>
+
+<p>Comenzaremos con un ejemplo sencillo.  Nuestra aplicaci&oacute;n de ejemplo tiene una ruta que apunta su URL ra&iacute;z a la acci&oacute;n <code>index</code> del controlador <code>HomeController</code>&rsquo;s <code>index</code>.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Store::Application.routes.draw do |map|
+  root :to =&gt; &quot;home#index&quot;
+end
+</pre>
+
+<p>Lo importante aqu&iacute; es saber que la cadena <code>&quot;home#index&quot;</code> es una abreviatura y por debajo dicha cadena se convierte a:</p>
+
+<pre class="ruby">
+HomeController.action(:index)
+</pre>
+
+<p>El m&eacute;todo <code>action</code> devuelve una aplicaci&oacute;n Rack, y por tanto es f&aacute;cil obtener una aplicaci&oacute;n Rack a partir de cualquier controlador Rails.  Como demostraci&oacute;n, vamos a crear una aplicaci&oacute;n Rack sencilla pas&aacute;ndole el <em>hash</em> de entorno a un nuevo objeto <code>proc</code>, devolviendo un <em>array</em> con un c&oacute;digo de estado, un <em>hash</em> de cabeceras vac&iacute;o y el contenido.</p>
+
+<p class="codeFilePath">/config.routes.rb</p>
+<pre class="ruby">
+Store::Application.routes.draw do |map|
+  root :to =&gt; proc { |env| [200, {}, [&quot;Welcome&quot;]] }
+end
+</pre>
+
+<p>Si visitamos la URL ra&iacute;z de nuestra aplicaci&oacute;n veremos dicha respuesta.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/417/original/E222I01.png" width="798" height="280" alt="La salida de nuestra aplicación Rack."/>
+</div>
+
+<p>Toda esta flexibilidad hace que sea muy f&aacute;cil integrar cualquier aplicaci&oacute;n basada en Rack dentro de una aplicaci&oacute;n Rails.  Ve&aacute;moslo con Sinatra.</p>
+
+<p>Primero tenemos que a&ntilde;adir una referencia a la gema Sinatra en el fichero <code>Gemfile</code> de nuestra aplicaci&oacute;n.</p>
+
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+gem &#x27;sinatra&#x27;
+</pre>
+
+<p>Nos aseguraremos de que la gema est&aacute; instalada ejecutando</p>
+
+<pre class="ruby">
+bundle install
+</pre>
+
+<p>Ya podemos escribir nuestra aplicaci&oacute;n Sinatra.  La vamos a poner en el directorio <code>/lib</code>, y la llamaremos <code>home_app.rb</code>.  Tenemos que crear una clase que herede de <code>Sinatra::Base</code> con un m&eacute;todo <code>get</code> para la URL ra&iacute;z que devuelve una cadena.</p>
+
+<p class="codeFilePath">/lib/home_app.rb</p>
+<pre class="ruby">
+class HomeApp &lt; Sinatra::Base
+  get &quot;/&quot; do
+    &quot;Hello from Sinatra&quot;
+  end
+end
+</pre>
+
+<p>Ahora ya podemos actualizar el fichero de rutas para que la ruta ra&iacute;z apunte a nuestra aplicaci&oacute;n Rack <code>HomeApp</code>.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Store::Application.routes.draw do |map|
+  root :to =&gt; HomeApp
+end
+</pre>
+
+<p>Si recargamos la portada de la aplicaci&oacute;n ahora veremos la respuesta de la aplicaci&oacute;n Sinatra.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/418/original/E222I02.png" width="798" height="280" alt="La salida de nuestra aplicación Sinatra."/>
+</div>
+
+<h3>Redirecciones</h3>
+
+<p>Uno de los beneficios de la integraci&oacute;n de Rack con Rails es el nuevo m&eacute;todo <code>redirect</code>, que veremos a continuaci&oacute;n c&oacute;mo funciona.  Supongamos que nuestra aplicaci&oacute;n tiene una ruta para mostra una p&aacute;gina de informaci&oacute;n con la URL <code>/about</code>, que est&aacute; mapeada a la acci&oacute;n <code>about</code> del controlador <code>InfoController</code>.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Store::Application.routes.draw do |map|
+  root :to =&gt; HomeApp
+  match &quot;/about&quot; =&gt; &quot;info#about&quot; 
+end
+</pre>
+
+<p>Si por ejemplo queremos cambiar la URL de <code>/about</code> a <code>/aboutus</code> podr&iacute;amos cambiar f&aacute;cilmente la ruta, pero entonces tendr&iacute;amos que ver qu&eacute; hacemos con la URL antigua que ya no mapea a ninguna acci&oacute;n.  Pero ahora con Rails 3 podemos hacer redirecciones f&aacute;cilmente con el m&eacute;todo <code>redirect</code>.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Store::Application.routes.draw do |map|
+  root :to =&gt; HomeApp
+  match &quot;/about&quot; =&gt; redirect(&quot;/aboutus&quot;)
+  match &quot;/aboutus&quot; =&gt; &quot;info#about&quot; 
+end
+</pre>
+
+<p>Con esta redirecci&oacute;n la antigua ruta redirigir&aacute; a la nueva, por tanto si visitamos la URL <code>/about</code> seremos redirigidos a <code>/aboutus</code>.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/419/original/E222I03.png" width="800" height="337" alt="Aquí se muestra la página redirigida."/>
+</div>
+
+<p>Veamos a continuaci&oacute;n un ejemplo del uso de <code>redirect</code> un poco m&aacute;s complicado.  Supongamos que  tenemos un controlador <code>ProductsController</code> y queremos tener una URL de atajo de la forma <code>/p/:id</code> para cada producto.  Para eso podemos modificar las rutas de esta forma:</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Store::Application.routes.draw do |map|
+  get &quot;info/about&quot;
+
+  root :to =&gt; HomeApp
+  match &quot;/about&quot; =&gt; redirect(&quot;/aboutus&quot;)
+  match &quot;/aboutus&quot; =&gt; &quot;info#about&quot; 
+  
+  resources :products
+  match &quot;/p/:id&quot; =&gt; redirect(&quot;/products/%{id}&quot;)
+end
+</pre>
+
+<p>La ruta abreviada de un producto es la &uacute;ltima ruta del archivo.  Redirige la URL abreviada a la URL normal de un producto utilizando otra vez el m&eacute;todo <code>redirect</code> pero esta vez lo hace a una URL din&aacute;mica.  Para poder poner el <code>id</code> del producto en la URL redirigida tenemos que usar un signo de porcentaje seguido del par&aacute;metro <code>id</code> rodeado de llaves.</p>
+
+<p>Si ahora visitamos la URL <code>http://localhost:3000/p/1</code> seremos redirigidos a la p&aacute;gina de ese producto.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/420/original/E222I04.png" width="800" height="337" alt="La página redirigida de producto."/>
+</div>
+
+<p>Aunque no lo veremos por ahora, si necesitamos m&aacute;s control sobre la redirecci&oacute;n le podemos pasar un bloque al m&eacute;todo <code>redirect</code>.  Los detalles sobre c&oacute;mo hacerlo est&aacute;n en el <a href="http://guides.rails.info/routing.html#redirection">sitio de rails.info</a>.</p>
+
+<h3>Rails Metal</h3>
+
+<p>En el episodio 150 repasamos Rails Metal [<a href="http://railscasts.com/episodes/150-rails-metal">verlo</a>, <a href="http://asciicasts.com/episodes/150-rails-metal">leero</a>] y creamos una p&aacute;gina que listaba los procesos en ejecuci&oacute;n en un momento dado.  En Rails 3 la t&eacute;cnica es bastante diferente pero es mucho m&aacute;s f&aacute;cil de usar gracias a la integraci&oacute;n de Rack.  Primero tenemos que crear la nueva ruta y hacer que apunte a la nueva aplicaci&oacute;n Rack que bautizaremos como <code>ProcessesApp</code>.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+match &quot;/processes&quot; =&gt; ProcessesApp
+</pre>
+
+<p>Crearemos la aplicaci&oacute;n en el directorio <code>/lib</code>, donde editaremos el fichero <code>processes_app.rb</code>.  La clase tendr&aacute; un m&eacute;todo de clase llamado  <code>call</code> que recibe un <em>hash</em> de entorno, en el cual ejecutaremos el mismo comando que en el episodio 150 y devolveremos el resultado.</p>
+
+<p class="codeFilePath">/lib/processes_app.rb</p>
+<pre class="ruby">
+class ProcessesApp
+  def self.call(env)
+    [200, {}, [`ps -axcr -o &quot;pid,pcpu, pmem, time, comm&quot;`]]
+  end
+end
+</pre>
+
+<p>Si vamos a la p&aacute;gina de procesos en el navegador, veremos el listado de procesos, y se puede comprobar que la p&aacute;gina se recarga muy r&aacute;pidamente porque estamos usando una sencilla aplicaci&oacute;n Rack.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/421/original/E222I05.png" width="801" height="335" alt="Nuestra aplicación de procesos."/>
+</div>
+
+<p>La clase <code>ProcessApp</code> no tiene nada de especial (en realidad se trata de una aplicaci&oacute;n Rack sencilla), pero queda claro que con unas pocas l&iacute;neas de c&oacute;digo hemos reproducido el comportamiento del episodio 150 de una manera mucho m&aacute;s f&aacute;cil.</p>
+
+<p>No tenemos control alguno sobre el aspecto de la p&aacute;gina de procesos porque la respuesta no pasa por ninguna plantilla.  Sin embargo podemos expandir nuestra aplicaci&oacute;n Rack para que incluya el comportamiento de un controlador Rails, lo que permitir&iacute;a usar plantillas y hacer que la p&aacute;gina fuese menos plana.</p>
+
+<p>Para que la p&aacute;gina de procesos pueda mostrar una plantilla erb en lugar de la salida en crudo del comando <code>ps</code>  tan s&oacute;lo tenemos que asegurarnos de que la clase <code>ProcessesApp</code> herede de <code>ActionController::Metal</code>, con lo que adquirir&aacute; ciertos comportamientos de los controladores de nuestra aplicaci&oacute;n Rails, pero lo har&aacute; a un nivel tan bajo que tenemos tambi&eacute;n que incluir  <code>ActionController::Rendering</code> para tener todo lo que nos hace falta.</p>
+
+<p>Dado que el c&oacute;digo que estamos usando funciona a un nivel m&aacute;s bajo que un controlador Rails normal tenemos que especificar la ubicaci&oacute;n de las vistas invocando al m&eacute;todo de Rails  <code>append_view_path</code> y pas&aacute;ndole el <em>path</em> al directorio  <code>views</code> de nuestra aplicaci&oacute;n, con lo que nuestro controlador busque sus plantillas en el mismo lugar que un controlador normal.</p>
+
+<p>Queremos que el controlador tenga una acci&oacute;n <code>index</code> por lo que hemos cambiado el m&eacute;todo  <code>self.call</code> por un m&eacute;todo  <code>index</code> que hace la misma llamada a <code>ps</code> pero asignando la salida a una variable de instancia.  Despu&eacute;s el m&eacute;todo llama a  <code>render</code> para mostrar la plantilla.  Al contrario que en un controlador Rails normal la plantilla se muestra autom&aacute;ticamente.</p>
+
+<p class="codeFilePath">/lib/processes_app.rb</p>
+<pre class="ruby">
+class ProcessesApp &lt; ActionController::Metal
+  include ActionController::Rendering
+  
+  append_view_path &quot;#{Rails.root}/app/views&quot;
+  
+  def index
+    @processes = `ps -axcr -o &quot;pid,pcpu, pmem, time, comm&quot;`
+    render
+  end
+end
+</pre>
+
+<p>Ahora tenemos que crear la plantilla.  En el directorio <code>views</code> de nuestra aplicaci&oacute;n crearemos el directorio <code>process_app</code> en el que pondremos nuestra nueva plantilla, en la que podemos escribir el c&oacute;digo que queramos en este archivo como har&iacute;amos con una plantilla erb normal.</p>
+
+<p class="codeFilePath">/app/views/processes_app/index.html.erb</p>
+<pre class="ruby">
+&lt;h1&gt;Processes&lt;/h1&gt;
+&lt;pre&gt;&lt;%= @processes %&gt;&lt;/pre&gt;
+</pre>
+
+<p>Ya casi hemos terminado.  Lo &uacute;nico que tenemos que hacer es modificar la ruta para que apunte a esta acci&oacute;n espec&iacute;fica.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+match &quot;/processes&quot; =&gt; ProcessesApp.action(:index)
+</pre>
+
+<p>Si reiniciamos el servidor y visitamos otra vez la p&aacute;gina de procesos veremos que ya se usa nuestra plantilla.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/422/original/E222I06.png" width="801" height="335" alt="La página de procesos con su plantilla."/>
+</div>
+
+<p>Tal y como acabamos de ver, Rails 3 es muy modular y nos permite poner en nuestras aplicaciones Rack justo s&oacute;lo la funcionalidad que queramos.  Hay que tener en cuenta que escribir un controlador de esta manera s&oacute;lo nos ahorrar&aacute; un par de milisegundos en el mejor de los casos, por lo que lo mejor es crear primero un controlador Rails normal y luego hacer pruebas de rendimiento antes de escribir una aplicaci&oacute;n Rack tal y como hemos hecho en este episodio.</p>

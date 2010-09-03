@@ -1,0 +1,62 @@
+<p><img src="/system/photos/13/original/E017I01.png" width="392" height="402" alt="The edit form with the checkboxes added." style="float: right;"/>En nuestra aplicaci&oacute;n de ejemplo para este episodio, tenemos dos modelos (<code>Product</code> y <code>Category</code>), cada uno con una relaci&oacute;n <code>has_and_belongs_to_many</code> (tiene_y_pertenece_a_muchos) que se corresponde con el otro modelo.  Nos gustar&iacute;a poder editar las categor&iacute;as en las que se encuentra un producto utilizando una lista de checkboxes en el formulario de edici&oacute;n para ese producto.</p>
+
+<h3>Agregar checkboxes</h3>
+
+<p>Actualmente, el formulario para editar nuestro producto, tiene campos para el nombre y el precio del producto, pero no hay forma de editar las categorias en las que se encuentra un producto. Existen dos formas  para agregar un checkbox a un formulario. Utilizando <code>check_box</code> o <code>check_box_tag</code>. Vamos a utilizar <code>check_box_tag</code>, ya que nos brinda el control que necesitamos sobre el nombre del checkbox. El c&oacute;digo que agregaremos al formulario de edici&oacute;n (<code>products/edit.html.erb</code>) se muestra debajo.</p>
+
+<pre class="ruby">
+&lt;% for category in Category.find(:all) %&gt;  
+    &lt;div&gt;  
+      &lt;%= check_box_tag &quot;product[category_ids][]&quot;, category.id, @product.categories.include?(category) %&gt;  
+      &lt;%= category.name %&gt;  
+    &lt;/div&gt;  
+&lt;% end %&gt;  
+</pre>
+
+<p><code>check_box_tag</code> toma tres par&aacute;metros: el nombre del checkbox, el valor del checkbox y un valor booleano que determina si el checkbox debe estar marcado. El nombre que hemos utilizado se ve un poco extra&ntilde;o, pero muy pronto entender&aacute; porqu&eacute; se llama de esta forma. Para  determinar si cada checkbox de categor&iacute;a debe ser marcado o no, debemos verificar si el producto se encuentra dentro de esa categor&iacute;a utilizando <code>@product.categories.include?(category)</code>.</p>
+
+<h3>Veamos si funciona</h3>
+
+<div class="imageWrapper">
+  <img src="/system/photos/14/original/E017I02.png" width="800" height="500" alt="The edit form with the checkboxes added."/>
+</div>
+<p class="title">El formulario de edici&oacute;n con los checkboxes agregados.</p>
+
+<p>Si actualizamos el formulario y lo probamos, veremos que funciona y las categor&iacute;as del producto son actualizadas cuando marcamos alguno de los checkboxes y clickeamos &#x27;submit&#x27;. C&oacute;mo sabe Rails como actualizar el producto correctamente?. El log de desarrollo tiene la respuesta.</p>
+
+<pre class="terminal">
+Processing ProductsController#update (for 127.0.0.1 at 2009-01-15 20:57:56) [PUT]
+Parameters: {&quot;commit&quot;=&gt;&quot;Edit&quot;, &quot;authenticity_token&quot;=&gt;&quot;31b711f2c24ae7cea5abf3f758eef46b472eebf3&quot;, &quot;product&quot;=&gt;{&quot;price&quot;=&gt;&quot;99.0&quot;, &quot;name&quot;=&gt;&quot;Television Stand&quot;, &quot;category_ids&quot;=&gt;[&quot;2&quot;, &quot;4&quot;]}, &quot;id&quot;=&gt;&quot;1&quot;}
+</pre>
+
+<p>Cuando el formulario es enviado, pasa los par&aacute;metros de categor&iacute;a en el hash de producto como un array. Hace esto, debido el nombre que le asignamos a los checkboxes (<code>product[category_ids][]</code>). La primera parte del nombre le indica a Rails que pase las ids de categor&iacute;a (<code>category_id</code>) como parte del hash de producto, mientras que los corchetes vac&iacute;os le indican que pase los valores como un array. Pero, &iquest;d&oacute;nde se encuentra el m&eacute;todo <code>category_ids</code>, al que llamamos cuando los par&aacute;metros del producto son actualizados? La respuesta es que es generado por el m&eacute;todo <code>has_and_belongs_to_many</code> en el modelo <code>Product</code>. Podemos probar esto abriendo <code>script/console</code> y actualizar un producto manualmente.</p>
+
+<pre class="terminal">
+&gt;&gt; p = Product.first
+=&gt; #&lt;Product id: 1, name: &quot;Television Stand&quot;, price: 99.0, created_at: &quot;2009-01-11 21:32:12&quot;, updated_at: &quot;2009-01-11 21:32:12&quot;&gt;
+&gt;&gt; p.category_ids
+=&gt; [2, 3]
+&gt;&gt; p.category_ids = [1,4]
+=&gt; [1, 4]
+&gt;&gt; 
+</pre>
+
+<p>Al hacer esto, Rails genera el siguiente SQL para actualizar las categor&iacute;as del producto:</p>
+
+<pre class="sql">
+DELETE FROM &quot;categories_products&quot; WHERE product_id = 1 AND category_id IN (2,3)  
+INSERT INTO &quot;categories_products&quot; (&quot;product_id&quot;, &quot;id&quot;, &quot;category_id&quot;) VALUES (1, 1, 1)  
+INSERT INTO &quot;categories_products&quot; (&quot;product_id&quot;, &quot;id&quot;, &quot;category_id&quot;) VALUES (1, 4, 4)  
+</pre>
+
+<h3>Una peque&ntilde;a advertencia</h3>
+
+<p>Existe a&uacute;n un peque&ntilde;o problema con nuestro m&eacute;todo update. Si desmarcamos todos los checkboxes para retirar al producto de todas las categor&iacute;as, entonces la actualizaci&oacute;n fallar&aacute; en retirar de cualquier categor&iacute;a en la que se encontrase el producto. Esto se debe a que el valor de un checkbox en un formulario HTML no ser&aacute; enviado si es deseleccionado y por lo tanto ninguna id de categor&iacute;a van a aparecer en el hash de par&aacute;metros del producto, lo que lleva a que las ids de categor&iacute;a no ser&aacute;n actualizadas.</p>
+
+<p>Para solucionar este problema debemos modificar nuestro controlador de productos para configurar el par&aacute;metro <code>category_id</code> para que sea un array vac&iacute;o cuando no sea pasado a la acci&oacute;n update. Podemos hacer esto utilizando el operador <code>||=</code> de Ruby y agregar lo siguiente a la acci&oacute;n update.</p>
+
+<pre class="ruby">
+params[:product][:category_ids] ||= []  
+</pre>
+
+<p>Esto nos asegura que si ning&uacute;n checkbox es marcado, indicando que no se encuentra en ninguna categor&iacute;a, entonces el producto se actualizar&aacute; correctamente.</p>

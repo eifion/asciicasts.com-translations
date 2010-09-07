@@ -1,0 +1,236 @@
+<p>In this episode we&rsquo;re going to show you how to make a table sortable by clicking on one of its columns. Below is a page from a store application that shows a list of products in a table. We want to be able to sort the items in the table by clicking on one of the table headers. This might not be particularly useful here where we only have a few products but if we had hundreds of items in a paginated table then being able to sort the columns would be very helpful indeed.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/449/original/E228I01.png" width="800" height="526" alt="The table of products."/>
+</div>
+
+<p>There are a number of plugins available that we could use here such as Searchlogic, which was covered in episode 176 [<a href="http://railscasts.com/episodes/176-searchlogic">watch</a>, <a href="http://asciicasts.com/episodes/176-searchlogic">read</a>], but we&rsquo;re not going to use any of them here, instead doing it all from scratch.</p>  
+
+<h3>Making The Links</h3>
+
+<p>We&rsquo;ll start in the view code for the index action which contains the table that renders the products.</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;Products&quot; %&gt;
+
+&lt;table class=&quot;pretty&quot;&gt;
+  &lt;tr&gt;
+    &lt;th&gt;Name&lt;/th&gt;
+    &lt;th&gt;Price&lt;/th&gt;
+    &lt;th&gt;Released&lt;/th&gt;
+  &lt;/tr&gt;
+  &lt;% for product in @products %&gt;
+  &lt;tr&gt;
+    &lt;td&gt;&lt;%= product.name %&gt;&lt;/td&gt;
+    &lt;td class=&quot;price&quot;&gt;&lt;%= number_to_currency(product.price, :unit =&gt; &quot;&amp;pound;&quot;) %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= product.released_at.strftime(&quot;%B %e, %Y&quot;) %&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;% end %&gt;
+&lt;/table&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;New Product&quot;, new_product_path %&gt;&lt;/p&gt;
+</pre>
+
+<p>Most of the changes we need to make will be to the header cells in this table. We want the text in those cells to be links so that the table is sorted when they are clicked. We&rsquo;ll approach this in small steps doing the simplest thing that works at each stage. This way we&rsquo;ll see the process evolve as we progress.</p>
+
+<p>The first thing we&rsquo;ll do is make the table headings links, so we&rsquo;ll need to add <code>link_to</code> before each header cell&rsquo;s text. (We can do this more quickly in TextMate by holding down the option key and selecting the three columns at the end of the opening <code>&lt;th&gt;</code> tag. Any text we type then will be added to all three lines.) The page we want each link to go to is the same page we&rsquo;re on but with different query string parameters. To do that we just need to specify a hash as the second parameter to <code>link_to</code>.</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">
+&lt;th&gt;&lt;%= link_to &quot;Name&quot;, :sort =&gt; &quot;name&quot; %&gt;&lt;/th&gt;
+&lt;th&gt;&lt;%= link_to &quot;Price&quot;, :sort =&gt; &quot;price&quot; %&gt;&lt;/th&gt;
+&lt;th&gt;&lt;%= link_to &quot;Released&quot;, :sort =&gt; &quot;released_at&quot; %&gt;&lt;/th&gt;
+</pre>
+
+<p>When we reload the products page the header cells will have turned to links and if we hover the cursor over each one we&rsquo;ll see the appropriate parameter in the query string of the link&rsquo;s URL.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/450/original/E228I02.png" width="800" height="526" alt="Each column&rsquo;s header text is now a link."/>
+</div>
+
+<h3>Sorting The Products</h3>
+
+<p>To get the sorting working we need to modify the <code>ProductController</code>&rsquo;s <code>index</code> action so that it orders the products according to the sort parameter in the query string.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+def index
+  @products = Product.order(params[:sort])
+end
+</pre>
+
+<p>We&rsquo;re using the Rails 3 <code>order</code> method here to sort the products, but if this was a Rails 2 application we could use <code>find</code> along with a hash to specify the order. Note that we&rsquo;re passing in user parameters directly into the order clause and this is something we shouldn&rsquo;t do as the input isn&rsquo;t sanitized and there&rsquo;s a danger of SQL injection. (This topic was covered back in episode 25 [<a href="http://railscasts.com/episodes/25-sql-injection">watch</a>, <a href="http://asciicasts.com/episodes/25-sql-injection">read</a>].) We&rsquo;ll leave it as it is for now and come back later in this episode to fix it.</p>
+
+<p>With this code in place the sorting will now work and when we reload the page and click on one of the headings the table will be sorted by the field we clicked.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/451/original/E228I03.png" width="800" height="526" alt="The table now sorts by the clicked column."/>
+</div>
+
+<h3>Toggling The Sort Order</h3>
+
+<p>We&rsquo;ve made quite a lot of progress so far without having to write much code but there are still other features to add, such as ordering a column in the reverse direction by clicking it again, and showing an arrow icon to indicate the current sort.</p>
+
+<p>We&rsquo;ll tackle toggling first. When we click the link for the column the table&rsquo;s currently sorted by it should show the table sorted by the same field but in the opposite order. Doing this in the view code would add a lot of logic there and create duplication so we&rsquo;ll create a helper method to generate each link.</p>
+
+<p>We&rsquo;ll call the new helper method will be called <code>sortable</code> and it will take two arguments, the second of which is optional. The first argument will be the column name and the second will be the column header text if this is different from the column name. Our table header will now look like this:</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">
+&lt;tr&gt;
+  &lt;th&gt;&lt;%= sortable &quot;name&quot; %&gt;&lt;/th&gt;
+  &lt;th&gt;&lt;%= sortable &quot;price&quot; %&gt;&lt;/th&gt;
+  &lt;th&gt;&lt;%= sortable &quot;released_at&quot;, &quot;Released&quot; %&gt;&lt;/th&gt;
+&lt;/tr&gt;
+</pre>
+
+<p>We&rsquo;ll write the <code>sortable</code> method in the <code>ApplicationHelper</code> module.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+module ApplicationHelper
+  def sortable(column, title = nil)
+    title ||= column.titleize
+    direction = (column == params[:sort] &amp;&amp; params[:direction] == &quot;asc&quot;) ? &quot;desc&quot; : &quot;asc&quot;
+    link_to title, :sort =&gt; column, :direction =&gt; direction
+  end
+end
+</pre>
+
+<p>The method has the two arguments we mentioned earlier, with the <code>title</code> argument having a default value of <code>nil</code> so that we can set a value based on the column argument if only one argument is passed in. Next we have the logic that determines what the sort direction for the link. If the column we&rsquo;re generating the link for is the current sort column and the current direction is ascending then we&rsquo;ll set the direction to <code>desc</code> so that the next time that field is clicked the column is sorted the other way. In all other cases we want the sort direction to be ascending. Having worked out the direction we can add it as a parameter to the link.</p>
+
+<p>If we reload the page and click the &ldquo;Name&rdquo; link the table will be sorted by name in ascending order. When we click the &ldquo;Name&rdquo; link again the <code>direction</code> parameter changes to <code>desc</code> in the query string but the table isn&rsquo;t sorted in descending order.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/452/original/E228I04.png" width="800" height="519" alt="The sort direction in the query string."/>
+</div>
+
+<p>The table isn&rsquo;t being re-sorted in the correct direction because we&rsquo;re not taking the direction into consideration in the controller. To fix this we just need to add the direction into the parameter that passed to the <code>order</code> method when we fetch all of the products in the <code>ProductController</code>&rsquo;s <code>index</code> action.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+def index
+  @products = Product.order(params[:sort] + &#x27; &#x27; + params[:direction])
+end
+</pre>
+
+<p>Again we&rsquo;re passing parameters from the user straight into a query here which is unsafe, but we will come back to this later and correct it. When we reload the page, however, the items are sorted correctly and we can now click on any of the columns to sort by that column in either ascending or descending order.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/453/original/E228I05.png" width="800" height="519" alt="We can now sort in both directions."/>
+</div>
+
+<h3>Adding Default Values</h3>
+
+<p>While out table now seems to be working well but if we remove the query string from the URL and try going to the products page we&rsquo;ll get an error as the code in the controller will try to read the parameter values from the query string. As these parameters are both now <code>nil</code> the error is thrown when the code tries to join them together as a string.</p>
+
+<p>We need to set some default values for the <code>sort</code> and <code>direction</code> parameters. We could modify the <code>params</code> hash directly and set both values if they don&rsquo;t exist in the query string but instead we&rsquo;ll write two methods in the controller that will return the parameter or a default value. We&rsquo;ll then use those methods to build up the order argument.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; ApplicationController
+  helper_method :sort_column, :sort_direction
+  def index
+    @products = Product.order(sort_column + &#x27; &#x27; + sort_direction)
+  end
+  
+  private
+  def sort_column
+    params[:sort] || &quot;name&quot;
+  end
+  
+  def sort_direction
+    params[:direction] || &quot;asc&quot;
+  end
+end
+</pre>
+
+<p>We need to make these two methods available to the <code>ApplicationHelper</code> so that they can be used in the <code>sortable</code> method we wrote earlier and so we&rsquo;ve made them both helper methods. Next we&rsquo;ll modify <code>sortable</code> to make use of these methods.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+module ApplicationHelper
+  def sortable(column, title = nil)
+    title ||= column.titleize
+    direction = (column == sort_column &amp;&amp; sort_direction == &quot;asc&quot;) ? &quot;desc&quot; : &quot;asc&quot;
+    link_to title, :sort =&gt; column, :direction =&gt; direction
+  end
+end
+</pre>
+
+<p>Now if we visit the products page without specifying any parameters the page will use the default of sorting by the product&rsquo;s name in ascending order. When we click the &ldquo;Name&rdquo; link for the first time it will re-sort the list by descending order of name, as we&rsquo;d expect.</p>
+  
+<div class="imageWrapper">
+  <img src="/system/photos/454/original/E228I06.png" width="800" height="517" alt="A default sort order."/>
+</div>
+
+<h3>Securing The Query</h3>
+
+<p>As we mentioned earlier it&rsquo;s not a good idea to pass user input directly into a database query, such as the order clause, because of the dangers of SQL injection. We need to sanitize the input before passing it to the order clause. We could do some generic sanitizing on the parameters but instead we&rsquo;ll take a stricter approach to what we allow.</p>
+
+<p>As we&rsquo;ve written accessor methods for the sort column and direction we can add code in these to ensure that the values passed to order are valid and safe. The sort direction is only going to have one of two values so we can check that the passed parameter matches one of those and, if not, set the default value of <code>asc</code>.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+def sort_direction
+  %w[asc desc].include?(params[:direction]) ?  params[:direction] : &quot;asc&quot;
+end
+</pre>
+
+<p>We can do something similar in the <code>sort_column</code> method to make sure that the sort parameter matches one of the fields in the Product model, defaulting to &ldquo;name&rdquo; otherwise.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+def sort_column
+  Product.column_names.include?(params[:sort]) ? params[:sort] : &quot;name&quot;
+end
+</pre>
+
+<p>You might want to be even more strict here and restrict the sorting to only certain columns in the table, but this approach will work well enough here.</p>
+
+<h3>Indicating the Current Sort Field</h3>
+
+<p>We&rsquo;ll finish off this episode by adding an an icon next to the current sort field that indicates the direction in which it is being sorted. We can do this with CSS but we&rsquo;ll first need to adjust our <code>sortable</code> helper method so that it adds a class name to the link in the header cell for the current sort field.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+module ApplicationHelper
+  def sortable(column, title = nil)
+    title ||= column.titleize
+    css_class = (column == sort_column) ? &quot;current #{sort_direction}&quot; : nil
+    direction = (column == sort_column &amp;&amp; sort_direction == &quot;asc&quot;) ? &quot;desc&quot; : &quot;asc&quot;
+    link_to title, {:sort =&gt; column, :direction =&gt; direction}, {:class =&gt; css_class}
+  end
+end
+</pre>
+
+<p>In the method  we&rsquo;ve now added a <code>css_class</code> variable. If the current column is the sort column that variable has a value of either &ldquo;<code>current asc</code>&rdquo; or &ldquo;<code>current desc</code>&rdquo; depending on the current sort direction, otherwise it it set to <code>nil</code>.</p>
+
+<p>In the code that generates the link we then add a <code>class</code> attribute. So that the attribute isn&rsquo;t added to the query string we need to separate the parameter into two hashes. This way the class attribute will be added as an attribute to the anchor tag.</p>
+
+<p>We&rsquo;ve already added the two image files we&rsquo;re going to use into our application&rsquo;s <code>/public/images</code> directory so we just need to add some CSS to our application&rsquo;s stylesheet so that the right image is shown.</p>
+
+<p class="codeFilePath">/public/stylesheets/application.css</p>
+<pre class="css">
+.pretty th .current {
+  padding-right: 12px;
+  background-repeat: no-repeat;
+  background-position: right center;
+}
+.pretty th .asc { 
+  background-image: url(/images/up_arrow.gif); 
+}
+
+.pretty th .desc { 
+  background-image: url(/images/down_arrow.gif); 
+}
+</pre>
+
+<p>When we re-sort the table now the column that the table is currently sorted by has an arrow indicating that it is the current sort column.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/455/original/E228I07.png" width="800" height="530" alt="The arrow shows the current sort field and order."/>
+</div>
+
+<p>That&rsquo;s it for this episode. We now have what we want: a table that we can sort by any of its columns and with an indicator to show us what the current sort column is.</p>

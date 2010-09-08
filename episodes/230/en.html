@@ -1,0 +1,360 @@
+<p>In this episode we&rsquo;re going look at a gem by Jos&eacute; Valim called <a href="http://github.com/josevalim/inherited_resources">Inherited Resources</a>. This gem extracts common functionality from RESTful controllers and lets you remove duplication from controller code. This isn&rsquo;t the first Rails gem that provides this type of help, <a href="http://railscasts.com/episodes/92-make-resourceful">episode 92</a> covered a gem called make_resourceful and there are other plugins available too. Each takes a slightly different approach and are worth taking a look at before you decide which one to use, if any. We&rsquo;ve chosen Inherited Resources as it works well with Rails 3.0 and feels a little more up-to-date.</p>
+
+<p>The Rails application we&rsquo;ll be working with in this episode is a simple e-commerce application. This application has a list of products and each product has a number of associated reviews.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/461/original/E230I01.png" width="816" height="409" alt="The products list page."/>
+</div>
+
+<p>We&rsquo;ll use Inherited Resources to clean up the internals of this application and see how much controller code we can remove without affecting the functionality.</p>
+
+<h3>Installing Inherited Resources</h3>
+
+<p>The <code>ProductController</code>&rsquo;s code currently looks like this.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; ApplicationController
+  def index
+    @products = Product.all
+  end
+
+  def show
+    @product = Product.find(params[:id])
+  end
+
+  def new
+    @product = Product.new
+  end
+  
+  def create
+    @product = Product.new(params[:product])
+    if @product.save
+      flash[:notice] = &quot;Successfully created product.&quot;
+      redirect_to @product
+    else
+      render :action =&gt; &#x27;new&#x27;
+    end
+  end
+  
+  def edit
+    @product = Product.find(params[:id])
+  end
+  
+  def update
+    @product = Product.find(params[:id])
+    if @product.update_attributes(params[:product])
+      flash[:notice] = &quot;Successfully updated product.&quot;
+      redirect_to @product
+    else
+      render :action =&gt; &#x27;edit&#x27;
+    end
+  end
+  
+  def destroy
+    @product = Product.find(params[:id])
+    @product.destroy
+    flash[:notice] = &quot;Successfully destroyed product.&quot;
+    redirect_to products_url
+  end
+
+end
+</pre>
+
+<p>If you have a number of RESTful controllers in your application you&rsquo;ll find yourself writing code like this in each one of them and it&rsquo;s in situations like these that Inherited Resources is most useful. If, however, you generally customize your controllers quite heavily then an abstraction like Inherited Resources may not suit your needs. The controller code above follows the RESTful pattern quite closely so we can use it to see what Inherited Resources provides.</p>
+
+Our e-commerce application is written in Rails 3 and so we add Inherited Resources to our application by including the gem in our <code>Gemfile</code>.
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.0&#x27;
+
+gem &#x27;sqlite3-ruby&#x27;, :require =&gt; &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;inherited_resources&#x27;
+</pre>
+
+<p>It&rsquo;s then installed in the usual way with</p>
+<pre class="terminal">
+$ bundle install
+</pre>
+
+<p>This will install the gem along with a couple of dependencies: <code>has_scope</code> and <code>responders</code>.</p>
+
+<p>Once the gems are installed we can update our <code>ProductsController</code> to use Inherited Resources. To do this we make the controller inherit from <code>InheritedResources::Base</code> instead of <code>ApplicationController</code>. <code>InheritedResources::Base</code> inherits from <code>ApplicationController</code> so it will have all of its functionality.</p> 
+
+<p>As the <code>ProductsController</code> is a pretty standard RESTful controller we can replace all of its methods with the code inherited from Inherited Resources, leaving the controller code quite a bit shorter.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; InheritedResources::Base
+
+end
+</pre>
+
+<p>We&rsquo;ll need to restart the server to get the new gems loaded but once we do we&rsquo;ll see that the pages related to products work just as they did before. We can even create a new product successfully and the appropriate flash message is shown when we do so.</p>
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/462/original/E230I02.png" width="816" height="409" alt="Successfully adding a product."/>
+</div>
+
+<h3>Customizing an Action</h3>
+
+<p>When we created a new product above we were redirected to that product&rsquo;s <code>show</code> page afterwards, but what if we want the application to redirect to the <code>index</code> action instead? Inherited Resources allows us to override any of its default actions by simply overriding the relevant method in the controller so we could write a <code>create</code> method in the <code>ProductsController</code> that would create the new product and then redirect to the <code>index</code> action.</p>
+
+<p>There&rsquo;s no need, though, to completely rewrite the create action just to change the redirect. We can include Inherited Resource&rsquo;s behaviour by calling <code>create!</code> and passing it a block. Changing the redirect URL when a new model object is created successfully is a common thing to want to do and so we can simply return the desired URL in a block.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; InheritedResources::Base
+  def create
+    create! { products_path }
+  end
+end
+</pre>
+
+<p>There are other things we can do in the block and these are explained in the <a href="http://github.com/josevalim/inherited_resources#readme">documentation</a>.</p>
+
+<p>Now when we create a new product we&rsquo;re redirected to the <code>index</code> action just like we want.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/463/original/E230I03.png" width="816" height="409" alt="Adding a product now redirects us to the index action."/>
+</div>
+
+<h3>Working With Different Formats</h3>
+
+<p>If we want our controller to be able to respond to different formats, say to work with XML as well as HTML, it&rsquo;s easy to do this. All we need to do is add <code>respond_to</code> as we would with any other Rails 3 controller.</p> 
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; InheritedResources::Base
+  respond_to :html, :xml
+
+  def create
+    create! { products_path }
+  end
+end
+</pre>
+
+<p>This will work in the same way we showed in episode 224 [watch4, read5]. If we visit <code>/products.xml</code> now we&rsquo;ll get a list of products in XML.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/464/original/E230I04.png" width="819" height="408" alt="The products as XML."/>
+</div>
+
+<h3>Nested Resources</h3>
+
+<p>Now that we&rsquo;ve tidied up the <code>ProductsController</code>, lets move on to the <code>ReviewsController</code>. Reviews are nested under products so if the reviews for an article we&rsquo;ll be at the URL <code>/products/1/reviews</code> for the product with an <code>id</code> of <code>1</code>. This is the <code>index</code> action of the <code>ReviewsController</code>. Likewise if we add a review the URL will still be nested under products.</p>
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/465/original/E230I05.png" width="800" height="406" alt="The reviews are nested under products."/>
+</div>
+
+<p>The code for the <code>ReviewsController</code> looks like this:</p>
+
+<p class="codeFilePath">/app/controllers/reviews_controller.rb</p>
+<pre class="ruby">
+class ReviewsController &lt; ApplicationController
+  def index
+    @product = Product.find(params[:product_id])
+    @reviews = @product.reviews
+  end
+
+  def new
+    @product = Product.find(params[:product_id])
+    @review = Review.new
+  end
+  
+  def create
+    @product = Product.find(params[:product_id])
+    @review = @product.reviews.build(params[:review])
+    if @review.save
+      flash[:notice] = &quot;Successfully created review.&quot;
+      redirect_to product_reviews_path(@product)
+    else
+      render :action =&gt; &#x27;new&#x27;
+    end
+  end
+
+end
+</pre>
+
+<p>The immediate difference between this controller and the <code>ProductsController</code> is that it only has three of the seven RESTful actions. The other difference is that, because it handles nesting, each action gets a product based on a parameter in the URL.</p>
+
+<p>Even though we have a nested resource here the behaviour is fundamentally the same as in the <code>ProductsController</code> and Inherited Resources will still work well here. We can remove the existing code in the controller and change the class so that it inherits from <code>InheritedResources::Base</code>. All we need to do to handle the nesting is use <code>belongs_to</code>, which is a method that Inherited Resources provides and which can be used in define relations between controllers in the same way that they&rsquo;re defined between models. With this in place Inherited Resources handles fetching the correct product for us.</p>
+
+<p class="codeFilePath">/app/controllers/reviews_controller.rb</p>
+<pre class="ruby">
+class ReviewsController &lt; InheritedResources::Base
+  belongs_to :product
+end
+</pre>
+
+<p>As it stands the <code>ReviewsController</code> will have all seven actions, as this is Inherited Resources&rsquo; default behaviour, but we want this controller to only respond to <code>index</code>, <code>new</code> and <code>create</code>. We can use the actions method to restrict the actions that are available.</p>
+
+<p class="codeFilePath">/app/controllers/reviews_controller.rb</p>
+<pre class="ruby">
+class ReviewsController &lt; InheritedResources::Base
+  belongs_to :product
+  actions :index, :new, :create
+end
+</pre>
+
+<p>As we did with the <code>ProductsController</code> we want to change the URL that we redirect to after creating a new review. There are a number of URL helper methods that Inherited Resources provides to redirect to various actions, which is useful here as we have some nesting here. In this case we can use a method called <code>collection_url</code> which will redirect to the <code>index</code> action and handle the nesting for us.</p>
+
+<p class="codeFilePath">/app/controllers/reviews_controller.rb</p>
+<pre class="ruby">
+class ReviewsController &lt; InheritedResources::Base
+  belongs_to :product
+  actions :index, :new, :create
+  
+  def create
+    create! { collection_url }
+  end
+end
+</pre>
+
+<p>We can test this by adding a review.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/466/original/E230I06.png" width="801" height="451" alt="Adding a review."/>
+</div>
+
+<p>After we submit the new review we&rsquo;ll be redirected to the reviews page for that product just as we want.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/467/original/E230I07.png" width="801" height="526" alt="After adding a review we're now redirected back to the reviews page."/>
+</div>
+
+<h3>Public Scopes</h3>
+
+<p>Inherited Resources has another useful feature called <code>has_scope</code>. To use it we just need to add a reference to the gem in the <code>Gemfile</code> and then run <code>bundle install</code> again.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.0&#x27;
+
+gem &#x27;sqlite3-ruby&#x27;, :require =&gt; &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;inherited_resources&#x27;
+gem &#x27;has_scope&#x27;
+</pre>
+
+<p>With this installed we can call <code>has_scope</code> in any of our controllers and pass it the name of a scope on the related model. For this example we&rsquo;ll add the <code>limit</code> scope, which is provided by default to all Rails 3 models, to the <code>ProductsController</code>.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; InheritedResources::Base
+  respond_to :html, :xml
+  
+  has_scope :limit
+
+  def create
+    create! { products_path }
+  end
+end
+</pre>
+
+<p>With this in place we can add scopes as parameters to the URL, so if we pass in a <code>limit</code> parameter that scope will be called and we&rsquo;ll restrict the number of products that are shown.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/468/original/E230I08.png" width="800" height="358" alt="Using the limit scope in the query string."/>
+</div>
+
+<p>If we want the scope to be applied all the time even when it&rsquo;s not mentioned in the query string, we can pass in a default value.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; InheritedResources::Base
+  respond_to :html, :xml
+  
+  has_scope :limit, :default =&gt; 3
+
+  def create
+    create! { products_path }
+  end
+end
+</pre>
+
+<p>Now, if we don&rsquo;t pass in a <code>limit</code> parameter the default value will be used as we&rsquo;ll see three products.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/469/original/E230I09.png" width="800" height="405" alt="The default value is used when we don't pass in a limit."/>
+</div>
+
+<p>This works with custom scopes as well. We&rsquo;ll add a scope to the <code>Review</code> model that will allow us to filter reviews by their rating.</p>
+
+<p class="codeFilePath">/app/models/review.rb</p>
+<pre class="ruby">
+class Review &lt; ActiveRecord::Base
+  belongs_to :product
+  scope :rating, proc { |rating| where(:rating =&gt; rating) }
+end
+</pre>
+
+<p>Now we&rsquo;ll make the scope public by adding it to the <code>ReviewsController</code>.</p>
+
+<p class="codeFilePath">/app/controllers/reviews_controller.rb</p>
+<pre class="ruby">
+class ReviewsController &lt; InheritedResources::Base
+  belongs_to :product
+  actions :index, :new, :create
+  has_scope :rating
+  
+  def create
+    create! { collection_url }
+  end
+end
+</pre>
+
+<p>We can now use a rating parameter in the URL to restrict the reviews by their rating.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/470/original/E230I10.png" width="800" height="334" alt="Filtering the reviews by rating."/>
+</div>
+
+<p>The <code>has_scope</code> gem can be used outside Inherited Resources by using the <code>apply_scopes</code> method inside the <code>index</code> action. There are more details about this in the <a href="http://github.com/plataformatec/has_scope">documentation on Github</a>.</p>
+
+<h3>Customizing The Flash Message</h3>
+
+<p>The last thing we&rsquo;ll cover is how to customize the flash message. When we create a new review the default message is &ldquo;Review was successfully created.&rdquo; but we can alter this to be whatever we want by changing the internationalization files. Even if your application doesn&rsquo;t support multiple languages these files are a great place to store strings that will be displayed in the user interface. Every Rails 3 application has an English localization file included in it at <code>/config/locales/en.yml</code>.</p>
+
+<p>To override Inherited Resources&rsquo; default flash messages we create a <code>flash:</code> key, under which we have a key containing the name of the controller, in this case <code>reviews:</code>. Under there we add a key for the action and below that one for the name of the flash message. For our reviews controller the configuration file will look like this:</p>
+
+<p class="codeFilePath">/config/locales/en.yml</p>
+<pre class="ruby">
+# Sample localization file for English. Add more files in this directory for other locales.
+# See http://github.com/svenfuchs/rails-i18n/tree/master/rails%2Flocale for starting points.
+
+en:
+  flash:
+    reviews:
+      create:
+        notice: &quot;Your review has been created!&quot;
+</pre>
+
+<p>If we don&rsquo;t want to have to configure this for each controller in our application we can replace the controller name with <code>actions:</code> and then the messages will be applied to every single controller. We can use a <code>resource_name</code> variable placeholder to specify the name of the current model.</p>
+
+<p class="codeFilePath">/config/locales/en.yml</p>
+<pre class="ruby">
+# Sample localization file for English. Add more files in this directory for other locales.
+# See http://github.com/svenfuchs/rails-i18n/tree/master/rails%2Flocale for starting points.
+
+en:
+  flash:
+    actions:
+      create:
+        notice: &quot;Your {{resource_name}} has been created!&quot;
+</pre>
+
+<p>We can test this out by creating a new review. When we submit it the custom flash message will be shown.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/471/original/E230I11.png" width="815" height="334" alt="The custom flash message shows when we create a review."/>
+</div>
+
+<p>That&rsquo;s it for this episode. If you find yourself creating the same controller code again and again then it&rsquo;s well worth taking a look at Inherited Resources. The <a href="http://github.com/josevalim/inherited_resources#readme">README file</a> is fairly extensive and covers parts that we haven&rsquo;t mentioned here. Likewise the <a href="http://wiki.github.com/josevalim/inherited_resources/">wiki page</a> is worth reading too.</p>

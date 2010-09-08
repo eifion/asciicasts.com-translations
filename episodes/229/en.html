@@ -1,0 +1,308 @@
+<p>Imagine that you have a blogging application that allows its users to add comments to articles. The blog is very popular so new comments are added frequently. If someone comes to the site to read an article and its comments and afterwards decides to add their own comment it&rsquo;s possible that by the time they come to add their new comment other new comments have already been added to the article making their comment incorrect or irrelevant. It would be helpful therefore if the article page kept itself updated and automatically added any new comments that were posted. We&rsquo;ll show you how to do that in this episode.</p>
+
+<h3>Setting Up jQuery</h3>
+
+<p>We&rsquo;re going to have to use JavaScript in order to update the page on the fly and we&rsquo;re going to use jQuery instead of Prototype as our preferred JavaScript library. As our application is written in Rails 3 we can use the <code><a href="http://github.com/indirect/jquery-rails">jquery-rails</a></code> gem to make it easy to replace the Prototype files with jQuery&rsquo;s.</p>
+
+<p>To use the gem we just need to add a reference to it in our application&rsquo;s <code>Gemfile</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+gem &#x27;jquery-rails&#x27;
+</pre>
+
+<p>We can then set it up by running</p>
+
+<pre class="terminal">
+$ bundle install
+</pre>
+
+<p>After Bundler has finished there will be a new generator available that we can run to set up jQuery in our application. When we run it it will remove the Prototype files, add the jQuery ones and then overwrite the application&rsquo;s default <code>rails.js</code> file with a jQuery compatible one. (If you want to install the jQuery UI library along with jQuery you can pass a <code>--ui</code> option to install those files.)</p>
+
+<pre class="terminal">
+$ rails g jquery:install
+      <span class="passed">remove</span>  public/javascripts/controls.js
+      <span class="passed">remove</span>  public/javascripts/dragdrop.js
+      <span class="passed">remove</span>  public/javascripts/effects.js
+      <span class="passed">remove</span>  public/javascripts/prototype.js
+      <span class="passed">create</span>  public/javascripts/jquery.min.js
+      <span class="passed">create</span>  public/javascripts/jquery.js
+    <span class="failed">conflict</span>  public/javascripts/rails.js
+Overwrite /Users/eifion/rails/apps_for_asciicasts/ep229/blog/public/javascripts/rails.js? (enter &quot;h&quot; for help) [Ynaqdh] Y
+       <span class="forced">force</span>  public/javascripts/rails.js
+</pre>       
+
+<p>One of the useful things about the jquery-rails gem is that it automatically overrides the defaults that are included when we use the line</p>
+
+<pre class="ruby">
+&lt;%= javascript_include_tag :defaults %&gt;
+</pre>
+
+<p>in our layout file so we don&rsquo;t need to make any changes here.</p>
+
+<h3>Setting up Polling</h3>
+
+<p>Now that we&rsquo;ve set up jQuery in our application we can start to do the work necessary to get our comments to self-update. There are two ways that we can approach this problem. One way is to use polling. Our application can send an AJAX request to the server at a regular interval to see if the number of comments has changed. The other option is to use <a href="http://en.wikipedia.org/wiki/WebSockets">WebSockets</a> to provide a permanent connection to the server and to push any changes to the user as soon as they become available. Polling is the easier of the two options as WebSockets are not supported by all browsers yet and would require more coding along with a library such as <a href="http://github.com/lifo/cramp">Cramp</a> to get working. We don&rsquo;t need instant updates when a new comment is posted, a delay of a few seconds is perfectly acceptable, and so we&rsquo;ll take the polling approach.</p>
+
+<p>We&rsquo;ll write the JavaScript that will poll for changes in the application&rsquo;s <code>application.js</code> file. This file is included in all of the app&rsquo;s pages so we&rsquo;ll need to ensure that the code that checks for updated comments is only run on pages that have comments on them. The polling code will look like this.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">
+$(function () {
+  if ($(&#x27;#comments&#x27;).length &gt; 0) {
+    setTimeout(updateComments, 10000);
+  }
+});
+
+function updateComments() {
+  $.getScript(&#x27;/comments.js&#x27;);
+  setTimeout(updateComments, 10000);
+}
+</pre>
+
+<p>The code above starts with a call to jQuery&rsquo;s <code>$</code> function. When this function is called with a function as an argument, as it is here, the code inside the function is run when the page&rsquo;s DOM has loaded. In this case when the DOM loads we check that the current page is an article page by looking for an element with an <code>id</code> of <code>comments</code>. If that element is found then we use <code>setTimeout</code> to call a function called <code>updateComments</code> after a delay of ten seconds.</p>
+
+<p>In the <code>updateComments</code> function we want to get any updated comments for the article. There are a number of different ways we could do this. We could get the server to return the new comments in JSON format and use that data to create the HTML for the new comments but the problem with that is that <code>updateComments</code> would need to generate the correct HTML for the new comments. It would be easier to generate the HTML on the server and send back some JavaScript that will update the page to add that HTML in the correct place.</p>
+
+<p>To do this we use jQuery&rsquo;s <code>getScript</code> function. If we pass this function a URL it will make an AJAX request to that URL and execute any script that is returned. We&rsquo;ll use <code>getScript</code> to call the <code>CommentsController</code>&rsquo;s <code>index</code> action with a JavaScript format. We&rsquo;ll need to add some query string parameters to the URL so that we can say which comments should be returned, but we&rsquo;ll come back to that later.</p>
+
+<p>After <code>getScript</code> has completed we call <code>setTimeout</code> again so that <code>updateComments</code> is called again after another ten seconds. We could have used <code>setInterval</code> instead of <code>setTimeout</code> when we check that the comments element exists so that we don&rsquo;t need to call it again here, but there is an advantage to taking this approach. If we used <code>setInterval</code> then <code>updateComments</code>  would be called every ten seconds no matter how long the AJAX call took to reply. Taking this approach means that the request will be made ten seconds after the call returns so that we&rsquo;re not placing as heavy a load on the server when it gets busy.</p>
+
+<p>The <code>CommentsController</code> doesn&rsquo;t currently have an <code>index</code> action so we&rsquo;ll have to write one. It will need to fetch the appropriate comments using the parameters we pass in from the JavaScript code above but we&rsquo;ll leave it empty for now.</p>
+
+<p class="codeFilePath">/app/controllers/comments_controller.rb</p>
+<pre class="ruby">
+def index
+
+end
+</pre>
+
+<p>We&rsquo;ll need a JavaScript template to go with the action. In it we&rsquo;ll just put a piece of test code to make sure that the polling is working.</p>
+
+<p class="codeFilePath">/app/views/comments/index.js.erb</p>
+<pre class="javascript">
+alert(&#x27;Comments go here&#x27;);
+</pre>
+
+<p>When we start up the application&rsquo;s server and visit the page for an article now we&rsquo;ll see the alert appear about ten seconds after the page loads which means that the JavaScript above is being returned from the server and executed on the client.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/456/original/E229I01.png" width="824" height="504" alt="The alert is shown when the polling takes place."/>
+</div>
+
+<h3>Fetching The Correct Comments</h3>
+
+<p>Now that we have this working the next step is to get the relevant comments. We need to add two parameters to the call to the <code>CommentController</code>&rsquo;s <code>index</code> action: the <code>id</code> of the current article and a timestamp so that we know which comments to get.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">
+function updateComments() {
+  $.getScript(&#x27;/comments.js?article_id=&#x27; + article_id + &quot;&amp;after=&quot; + after);
+  setTimeout(updateComments, 10000);
+}
+</pre>
+
+<p>What we still need to work out in the code above is where we will get the values for the <code>article_id</code> and <code>after</code> variables that we haven&rsquo;t yet defined. In this case we can generate the values in Rails and pass them to JavaScript from the HTML document. This application uses HTML 5 so we can make use of data attributes to add the data to the document.</p>
+
+<p>We&rsquo;ll add the attributes in to the view code for the <code>ArticleController</code>&rsquo;s <code>show</code> action. Data attributes can have any name as long as it begins with <code>data-</code> so we&rsquo;ll add a <code>data-id</code> attribute to the article&rsquo;s wrapper <code>div</code> that has a value of the article&rsquo;s <code>id</code> and in similarly in the wrapper <code>div</code> for each comment we&rsquo;ll add a <code>data-time</code> attribute containing the comment&rsquo;s <code>created_at</code> value, converted to an integer.</p>
+
+<p class="codeFilePath">/app/views/articles/show.html.erb</p>
+<pre class="ruby">
+&lt;% title @article.name %&gt;
+
+&lt;div id=&quot;article&quot; data-id=&quot;&lt;%= @article.id %&gt;&quot;&gt;
+  &lt;%= simple_format @article.content %&gt;
+  
+  &lt;p&gt;&lt;%= link_to &quot;Back to Articles&quot;, articles_path %&gt;&lt;/p&gt;
+  
+  &lt;% unless @article.comments.empty? %&gt;
+    &lt;h2&gt;&lt;%= pluralize(@article.comments.size, &#x27;commment&#x27;) %&gt;&lt;/h2&gt;
+    
+    &lt;div id=&quot;comments&quot;&gt;
+    &lt;% for comment in @article.comments %&gt;
+      &lt;div class=&quot;comment&quot; data-time=&quot;&lt;%= comment.created_at.to_i %&gt;&quot;&gt;
+        &lt;strong&gt;&lt;%= comment.name %&gt;&lt;/strong&gt;
+        &lt;em&gt;on &lt;%= comment.created_at.strftime(&#x27;%b %d, %Y at %I:%M %p&#x27;) %&gt;&lt;/em&gt;
+        &lt;%= simple_format comment.content %&gt;
+      &lt;/div&gt;
+    &lt;% end %&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+  
+  &lt;h3&gt;Add your comment&lt;/h3&gt;
+  &lt;%= render :partial =&gt; &#x27;comments/form&#x27; %&gt;
+&lt;/div&gt;
+</pre>
+
+<p>We can now go back to the <code>updateComments</code> function and set the values of the <code>article_id</code> and <code>after</code> variables from those data attributes. Getting the article&rsquo;s <code>id</code> is straightforward: we simply get it from the element with an <code>id</code> of <code>article</code>. There could be a number of comments on the page and we need to get the last one so we&rsquo;ll use the selector <code>.comment:last</code> to get it, then read its <code>data-time</code> attribute.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">
+function updateComments() {
+  var article_id = $(&#x27;#article&#x27;).attr(&#x27;data-id&#x27;);
+  var after = $(&#x27;.comment:last&#x27;).attr(&#x27;data-time&#x27;);
+  $.getScript(&#x27;/comments.js?article_id=&#x27; + article_id + &quot;&amp;after=&quot; + after);
+  setTimeout(updateComments, 10000);
+}
+</pre>
+
+<p>Now that we have values for both of these variables we can use them to fetch only the comments that have been created for that article after the timestamp for the last one on the page.</p>
+
+<p>It&rsquo;s a good idea when doing something like this to check the development log to make sure that it looks like everything is working as it should be. If we visit the articles page and then look at the log we&rsquo;ll see that the the request for the comments JavaScript is being made every ten seconds or so as we expect and the parameters look to be correct too.</p>
+
+<pre class="terminal">
+Started GET &quot;/comments.js?article_id=1&amp;after=1283173233&quot; for 127.0.0.1 at 2010-09-02 19:58:53 +0100
+  Processing by CommentsController#index as JS
+  Parameters: {&quot;article_id&quot;=&gt;&quot;1&quot;, &quot;after&quot;=&gt;&quot;1283173233&quot;}
+Rendered comments/index.js.erb (0.4ms)
+Completed 200 OK in 41ms (Views: 41.1ms | ActiveRecord: 0.0ms)
+
+
+Started GET &quot;/comments.js?article_id=1&amp;after=1283173233&quot; for 127.0.0.1 at 2010-09-02 19:59:07 +0100
+  Processing by CommentsController#index as JS
+  Parameters: {&quot;article_id&quot;=&gt;&quot;1&quot;, &quot;after&quot;=&gt;&quot;1283173233&quot;}
+Rendered comments/index.js.erb (0.4ms)
+Completed 200 OK in 34ms (Views: 33.6ms | ActiveRecord: 0.0ms)
+</pre>
+
+<p>Now that we know that the parameters are being passed correctly we can use them in the <code>CommentsController</code>&rsquo;s <code>index</code> action to get the new comments.</p>
+
+<p class="codeFilePath">/app/controllers/comments_controller.rb</p>
+<pre class="ruby">
+def index
+  @comments = Comment.where(&quot;article_id = ? and created_at &gt; ?&quot;, params[:article_id], Time.at(params[:after].to_i))
+end
+</pre>  
+
+<p>We can now update the associated JavaScript template so that it renders out the comments rather than just showing an alert. Before we do that, however, we&rsquo;ll need move the code that renders a comment out from the article&rsquo;s <code>show</code> view into a partial so that we can use it in the JavaScript template. We&rsquo;ll move it into a new partial file called <code>_comment.html.erb</code>.</p>
+
+<p class="codeFilePath">/app/views/comments/_comment.html.erb</p>
+<pre class="ruby">
+&lt;div class=&quot;comment&quot; data-time=&quot;&lt;%= comment.created_at.to_i %&gt;&quot;&gt;
+  &lt;strong&gt;&lt;%= comment.name %&gt;&lt;/strong&gt;
+  &lt;em&gt;on &lt;%= comment.created_at.strftime(&#x27;%b %d, %Y at %I:%M %p&#x27;) %&gt;&lt;/em&gt;
+  &lt;%= simple_format comment.content %&gt;
+&lt;/div&gt;
+</pre>
+
+<p>Then in the <code>show</code> action we can just render the partial for the collection of comments.</p>
+
+<p class="codeFilePath">/app/views/comments/show.html.erb</p>
+<pre class="ruby">
+&lt;% title @article.name %&gt;
+
+&lt;div id=&quot;article&quot; data-id=&quot;&lt;%= @article.id %&gt;&quot;&gt;
+  &lt;%= simple_format @article.content %&gt;
+  &lt;p&gt;&lt;%= link_to &quot;Back to Articles&quot;, articles_path %&gt;&lt;/p&gt;
+  &lt;% unless @article.comments.empty? %&gt;
+    &lt;h2&gt;&lt;%= pluralize(@article.comments.size, &#x27;commment&#x27;) %&gt;&lt;/h2&gt;
+    &lt;div id=&quot;comments&quot;&gt;
+    &lt;%= render @article.comments %&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+  &lt;h3&gt;Add your comment&lt;/h3&gt;
+  &lt;%= render :partial =&gt; &#x27;comments/form&#x27; %&gt;
+&lt;/div&gt;
+</pre>
+
+<p>We can update the comments <code>index</code> JavaScript template so that it generates the JavaScript to update the comments.</p>
+
+<p class="codeFilePath">/app/views/comments/index.js.erb</p>
+<pre class="javascript">
+$(&#x27;#comments&#x27;).append(&quot;&lt;%= escape_javascript(raw render(@comments))%&gt;&quot;);
+</pre>
+
+<p>This code renders the collection of comments using the partial we have just written. We have to wrap the output from the partial in the <code>raw</code> method as by default Rails 3 will escape the HTML and we don&rsquo;t want that to happen. We then have to call <code>escape_javascript</code> on the output from that command so that the HTML is safe to embed into a JavaScript string. The JavaScript that is sent back to the browser appends this string to the end of the comments <code>div</code>.</p>
+
+<p>We can take a look at the page in the browser now to see if the comments update automatically and we get mixed results. While the comments do get updated we&rsquo;re seeing the last comment added again and again.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/457/original/E229I02.png" width="816" height="570" alt="The last comment is added repeatedly."/>
+</div>
+
+<p>This is happening because when we get the new comments the timestamp we pass in in only precise to a second. In this case we&rsquo;re getting the comments after 13:00:33 on August 30th 2010, but if we look in the database the comment was actually left at 13:00:33.892041 and while this isn&rsquo;t much of a difference it&rsquo;s enough for it to be considered after the time passed to the query. To fix this we need to round up so that we get the comments left at least a second later than the current latest comment and so we&rsquo;ll add <code>1</code> to the integer value received from the parameters in the query.</p>
+
+<p class="codeFilePath">/app/controllers/comments_controller.rb</p>
+<pre class="ruby">
+def index
+  @comments = Comment.where(&quot;article_id = ? and created_at &gt; ?&quot;, params[:article_id], Time.at(params[:after].to_i + 1))
+end
+</pre>
+
+<p>Now we won&rsquo;t see the final comment appearing repeatedly. We can test that the updating works by opening the article&rsquo;s page in two browser windows, submitting a comment in one and seeing if it appears in the other.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/458/original/E229I03.png" width="818" height="345" alt="Adding a comment in one browser."/>
+</div>
+
+<p>After a few seconds the polling takes place and the comment appears in the other browser.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/459/original/E229I04.png" width="816" height="448" alt="The new comment is automatically shown in the other browser window."/>
+</div>
+
+<h3>Updating The Count</h3>
+
+<p>While the new comment was added, the heading that lists the number of comments wasn&rsquo;t updated to match. Let&rsquo;s fix that next.</p>
+
+<p>We can update the comments count in the same file we use to update the comments. At first the obvious thing might be to do something like this:</p>
+
+<p class="codeFilePath">/app/views/comments/index.js.erb</p>
+<pre class="javascript">
+$(&#x27;#comments&#x27;).append(&quot;&lt;%= escape_javascript(raw render(@comments))%&gt;&quot;);
+$(&#x27;#article h2&#x27;).text(&#x27;&lt;%= @comments.first.article.comments.size %&gt; comments&#x27;);
+</pre>
+
+<p>This approach will make a call on the database to get the number of comments, however, and as this code will be called frequently it makes sense to avoid this if we can. We can instead get the number of comments from the page by counting the number of elements on the page with a class of <code>comment</code>.</p>
+
+<p class="codeFilePath">/app/views/comments/index.js.erb</p>
+<pre class="javascript">
+$(&#x27;#comments&#x27;).append(&quot;&lt;%= escape_javascript(raw render(@comments))%&gt;&quot;);
+$(&#x27;#article h2&#x27;).text($(&#x27;.comment&#x27;).length + &#x27; comments&#x27;);
+</pre>
+
+<p>This won&rsquo;t code won&rsquo;t handle pluralization so it will only show &ldquo;comments&rdquo;, even if there&rsquo;s only one comment, but we&rsquo;ll leave that. As a final touch we&rsquo;ll add a clause so that the JavaScript is only set if there are some new comments.</p>
+
+<p class="codeFilePath">/app/views/comments/index.js.erb</p>
+<pre class="javascript">
+&lt;% unless @comments.empty? %&gt;
+$(&#x27;#comments&#x27;).append(&quot;&lt;%= escape_javascript(raw render(@comments))%&gt;&quot;);
+$(&#x27;#article h2&#x27;).text($(&#x27;.comment&#x27;).length + &#x27; comments&#x27;);
+&lt;% end %&gt;
+</pre>
+
+<p>When we add another comment in one browser now the comments are updated in the other along with the count.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/460/original/E229I05.png" width="816" height="448" alt="The comments count is now updated correctly."/>
+</div>
+
+<h3>A Final Fix</h3>
+
+<p>There&rsquo;s one small problem with our code that still needs fixing. In the <code>updateComments</code> function the value of the <code>after</code> variable is set from an attribute taken from the last comment on the page. If there are no comments for the article that&rsquo;s being viewed then this value will be blank so we&rsquo;ll set a default value of zero in this case so that all of the comments are returned.</p>
+
+<p class="codeFilePath">/public/application.js</p>
+<pre class="javascript">
+$(function () {
+  if ($(&#x27;#comments&#x27;).length &gt; 0) {
+    setTimeout(updateComments, 10000);
+  }
+});
+
+function updateComments() {
+  var article_id = $(&#x27;#article&#x27;).attr(&#x27;data-id&#x27;);
+  if ($(&#x27;.comment&#x27;).length &gt; 0) {
+    var after = $(&#x27;.comment:last&#x27;).attr(&#x27;data-time&#x27;);
+  }
+  else {
+    var after = 0;
+  }
+  
+  $.getScript(&#x27;/comments.js?article_id=&#x27; + article_id + &quot;&amp;after=&quot; + after);
+  setTimeout(updateComments, 10000);
+}
+</pre>
+
+<p>There are other improvements we could make to this part of the code. For example we could make the update interval dynamic so that if the last comment was added a long time ago, say over an hour, the polling frequency is reduced. This way less strain will be placed on the server when articles that haven&rsquo;t had comments added recently are being viewed.</p>
+
+<p>We could also spice up the user interface a little by adding highlighting to indicate when new comments are added to the page. Alternatively we could add a link that says that new comments are available and only show them when it is clicked.</p>

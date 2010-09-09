@@ -1,0 +1,353 @@
+<p>Nell&rsquo;ultimo episodio vi abbiamo mostrato come aggiornare un&rsquo;applicazione da Rails 2 a Rails 3, usando il sito Railscasts come esempio. Siamo arrivati fino al punto di far partire senza errori l&rsquo;applicazione, ma ci sono ancora delle cose che devono essere sistemate o aggiornate. In questo episodio ci occuperemo proprio di queste cose.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/440/original/E226I01.png" width="800" height="506" alt="Il sito &egrave; ora funzionante."/>
+</div>
+
+<p>Un metodo ovvio per capire cosa resta da sistemare &egrave; quello di lanciare i test o le specs dell&rsquo;applicazione, ma prima di fare questa operazione, vale la pena fare un rapido giro sull&rsquo;applicazione col browser, in modo tale da rendersi conto "manualmente" degli errori pi&ugrave; macroscopici. Facendo ci&ograve; per l&rsquo;applicazione Railscast, scopriamo abbastanza in fretta che, sebbene la pagina di indice degli episodi funzioni a dovere, le pagine di dettaglio del singolo episodio non funzionano e lanciano il seguente errore:</p>
+
+<pre class="terminal">
+uninitialized constant ApplicationHelper::Textilizer
+</pre>
+
+<p>In questa applicazione <code>Textilizer</code> &egrave; una classe personalizzata presente nella cartella <code>/lib</code> ed &egrave; proprio questo posizionamento a creare dei problemi, poich&egrave; per default, in Rails 3 i file presenti nella cartella <code>/lib</code> non vengono pi&ugrave; inclusi automaticamente nel percorso di caricamento dell&rsquo;applicazione, come invece avveniva in Rails 2. Per risolvere il problema possiamo o imporre manualmente un <code>require</code> del file nella cartella <code>/lib</code>, oppure aggiungere la cartella al percorso di caricamento.</p>
+
+<p>Optiamo per la seconda strada e aggiungiamo la cartella all&rsquo;<code>autoload_paths</code>. C&rsquo;&egrave; una linea di codice commentata nel file <code>/config/application.rb</code> che possiamo decommentare e personalizzare per lo scopo:</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby">
+# Custom directories with classes and modules you want to be autoloadable.
+config.autoload_paths += %W(#{Rails.root}/lib)
+</pre>
+
+<p>Il team di sviluppo del core Rails sta ancora lavorandoci su per trovare la migliore soluzione per gestire il caricamento dei file dalla cartella <code>/lib</code>, per cui il tutto potrebbe cambiare nella versione definitiva di Rails 3.</p>
+
+<p>Quando ricarichiamo la pagina, ora otteniamo un errore diverso:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/441/original/E226I02.png" width="800" height="364" alt="La pagina di dettaglio mostra ancora degli errori."/>
+</div>
+
+<p>La pagina ora solleva un errore relativo ad una costante <code>APP_CONFIG</code> mancante. Questa costante &egrave; definita in un pre-initializer in <code>/config/preinitializer.rb</code>:</p>
+
+<p class="codeFilePath">/config/preinitializer.rb</p>
+<pre class="ruby">
+# load app_config.yml
+require &#x27;yaml&#x27;
+APP_CONFIG = YAML.load(File.read(&quot;#{Rails.root}/config/app_config.yml&quot;))
+</pre>
+
+<p>In un&rsquo;applicazione Rails 2 questo file sarebbe stato quello in cui avremmo messo tutto ci&ograve; che andava definito prima del caricamento dell&rsquo;applicazione e in questo caso era usato per caricare un file YAML personalizzato. In Rails 3 il file <code>preinitializer.rb</code> non &egrave; pi&ugrave; suppportato, per cui qualsiasi codice che vi si trovi al suo interno andrebbe, al passaggio a Rails 3, spostato nel file <code>config/application.rb</code>. In particolare, il codice proveniente dal file preinitializer deve essere posizionato vicino alla cima del file, subito prima della riga <code>require &#x27;rails/all&#x27;</code>.</p>
+
+<p>Non possiamo incollare pari pari il codice cos&igrave; com&rsquo;era, perch&egrave; usa <code>Rails.root</code> che non &egrave; disponibile prima del require <code>rails/all</code>. Dobbiamo invece riferire i file, relativamente alla posizione del file in cui ci troviamo, ossia <code>application.rb</code>:</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby">
+require File.expand_path(&#x27;../boot&#x27;, __FILE__)
+
+# load app_config.yml
+require &#x27;yaml&#x27;
+APP_CONFIG = YAML.load(File.read(File.expand_path(&#x27;../app_config.yml&#x27;, __FILE__)))
+
+require &#x27;rails/all&#x27;
+</pre>
+
+<p>Quando ricarichiamo nuovamente la pagina, ora si carica, ma non sembra ancora a posto. L&rsquo;HTML nelle note ha subito un escaping e la barra laterale destra non si vede. Comunque la pagina bene o male si vede e ci&ograve; per ora pu&ograve; renderci soddisfatti. Tutto quello che faremo ora, sar&agrave; di navigare tutte le pagine del sito per individuare eventuali eccezioni. Una volta sistemate le pagine che generavano errori, possiamo fare un secondo giro su ciascuna pagina per sistemare gli errori simili al seguente:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/442/original/E226I03.png" width="798" height="538" alt="La pagina si carica, ma non appare corretta."/>
+</div>
+
+<h3>Lanciamo i test dell&rsquo;applicazione</h3>
+
+<p>Se lanciamo nuovamente il task rake <code>rails:upgrade:check</code>, vedremo che ci sono ancora un po&rsquo; di questioni aperte da sistemare. Generalmente si tratta di cose legate a deprecazioni, per cui appariranno come warning, dal momento che continuano a funzionare anche con Rails 3.0, anche se da Rails 3.1 verosimilmente smetteranno di andare. Dal momento che le modifiche che dobbiamo fare riguardano delle fix a deprecazioni piuttosto che errori veri e propri, diamo subito uno sguardo al test suite dell&rsquo;applicazione ed assicuriamoci che tutti i test passino prima di fare una qualunque modifica al codice.</p> 
+
+<p>Per lanciare i test, dobbiamo innanzitutto aggiungere i gem opportuni al nostro <code>Gemfile</code>. Vogliamo avere disponibili questi gem solo in ambiente di test, perch&egrave; serviranno solo l&igrave;, per cui useremo il metodo group. Potr&agrave; sembrare che abbiamo voluto installare i gem solo per l&rsquo;ambiente di test, ma i gem che includono task Rake, come ad esempio RSpec, dovranno essere inclusi anche nell&rsquo;ambiente di sviluppo.</p>
+
+<p>L&rsquo;applicazione Railscasts usa <a href="http://rubygems.org/gems/mocha">Mocha</a> per fare del mocking, insieme a <a href="http://rspec.info/">RSpec</a> e a <a href="http://rubygems.org/gems/factory_girl">Factory Girl</a>, per cui dovremo aggiungere il seguente codice al <code>Gemfile</code>:</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+group :development, :test do
+  gem &quot;mocha&quot;
+  gem &quot;rspec-rails&quot;, &quot;&gt;= 2.0.0.beta.19&quot;
+  gem &quot;factory_girl_rails&quot;
+end
+</pre>
+
+<p>Per assicurarci che questi gem vengano installati, lanciamo nuovamente <code>bundle install</code> e poi, per avere pronto all&rsquo;uso RSpec, lanceremo i suoi generatori. Il generatore sovrascriver&agrave; i file gi&agrave; installati di RSpec, per cui sar&agrave; il caso di farne un backup prima di procedere:</p>
+
+<pre class="terminal">
+$ rails g rspec:install
+      <span class="passed">create</span>  .rspec
+       <span class="info">exist</span>  spec
+    <span class="failed">conflict</span>  spec/spec_helper.rb
+Overwrite /Users/asalicetti/rails/apps_for_asciicasts/ep226/railscasts/spec/spec_helper.rb? (enter &quot;h&quot; for help) [Ynaqdh] Y
+       <span class="forced">force</span>  spec/spec_helper.rb
+      <span class="passed">create</span>  autotest
+      <span class="passed">create</span>  autotest/discover.rb
+</pre>      
+
+<p>Il file <code>spec_helper.rb</code> rigenerato dovr&agrave; essere sistemato prima di andare avanti. Per default user&agrave; Rspec per il mocking, per cui aggiorneremo la linea <code>config.mock_with</code> affinch&egrave; usi Mocha.</p>
+
+<p>L&rsquo;applicazione inoltre ha un po&rsquo; di macro personalizzate per RSpec nel file <code>/spec/controller_macros.rb</code> e anche queste dovranno essere incluse. Pi&ugrave; su nel file <code>spec_helper</code> c&rsquo;&egrave; una linea di codice che include tutto ci&ograve; che si trova sotto la cartella <code>support</code>, per cui tutto quello che dovremo fare, sar&agrave; di creare questa cartella sotto la cartella <code>spec</code> e spostare l&igrave; il file. Poi, per includere le macro in RSpec, dobbiamo aggiungere una linea <code>config.include</code>, in modo che il nostro modulo personalizzato sia incluso. Fatte queste modifiche, il file apparir&agrave; cos&igrave;:</p>
+
+<p class="codeFilePath">/spec/spec/helper.rb</p>
+<pre class="ruby">
+# This file is copied to ~/spec when you run &#x27;ruby script/generate rspec&#x27;
+# from the project root directory.
+ENV[&quot;RAILS_ENV&quot;] ||= &#x27;test&#x27;
+require File.expand_path(&quot;../../config/environment&quot;, __FILE__)
+require &#x27;rspec/rails&#x27;
+
+# Requires supporting files with custom matchers and macros, etc,
+# in ./support/ and its subdirectories.
+Dir[&quot;#{File.dirname(__FILE__)}/support/**/*.rb&quot;].each {|f| require f}
+
+RSpec.configure do |config|
+  config.mock_with :mocha
+  config.fixture_path = &quot;#{::Rails.root}/spec/fixtures&quot;
+  config.use_transactional_fixtures = true
+  config.include ControllerMacros
+end
+</pre>
+
+<p>Siamo ora pronti per lanciare le specs e vedere quante di queste passano. Sappiamo gi&agrave; che ci saranno un po&rsquo; di warning di deprecazione, ma per ora ci occuperemo solo dei test falliti.</p>
+
+<pre class="terminal">
+$ rake spec
+</pre>
+
+<p>Questo comando produrr&agrave; un bel po&rsquo; di messaggi in output ed infine mostrer&agrave; che i test eseguiti hanno sollevato un errore. La riga significativa &egrave;:</p>
+
+<pre class="terminal">
+/Users/asalicetti/rails/apps_for_asciicasts/ep226/railscasts/spec/controllers/episodes_controller_spec.rb:5:in `block in &lt;top (required)&gt;&#x27;: undefined local variable or method `integrate_views&#x27; for :Class (NameError)
+</pre>
+
+<p>Se vedete messaggi di errore simili a questo e non siete sicuri di come sistemarli, pu&ograve; essere utile cercare risposte all&rsquo;errore su Google, per vedere se qualcun&rsquo;altro ha avuto in precedenza lo stesso problema e ha trovato una soluzione. In questo caso la soluzione &egrave; semplice. Il metodo <code>integrate_views</code> &egrave; stato rinominato in <code>render_views</code>, per cui dobbiamo cambiare tale occorrenza, ovunque si presenti nella nostra applicazione.</p>
+
+<p>Una volta fatto ci&ograve;, rilanciamo nuovamente le specs. Di nuovo, vedremo molti messaggi di deprecazione sull&rsquo;output, ma fra loro vedremo anche che passeranno tutti i test, tranne quattro di essi:</p>
+
+<pre class="terminal">
+Finished in 3.53 seconds
+<span class="failed">152 examples, 4 failures</span>
+
+1) CommentsController as guest index action should render index template for rss with xml
+    Failure/Error: response.should have_tag(&#x27;title&#x27;, :text =&gt; &#x27;Railscasts Comments&#x27;)
+    <span class="failed">undefined method `has_tag?&#x27; for #&lt;ActionController::TestResponse:0x000001040f2dc8&gt;</span>
+    # ./spec/controllers/comments_controller_spec.rb:16:in `block (2 levels) in &lt;main&gt;&#x27;
+
+2) EpisodesController as guest index action should render index template for rss with xml
+    Failure/Error: response.should have_tag(&#x27;title&#x27;, :text =&gt; &#x27;Railscasts&#x27;)
+    <span class="failed">undefined method `has_tag?&#x27; for #&lt;ActionController::TestResponse:0x00000104007710&gt;</span>
+    # ./spec/controllers/episodes_controller_spec.rb:26:in `block (2 levels) in &lt;top (required)&gt;&#x27;
+
+3) EpisodesController as guest index action should render index template for rss with xml for iPod
+    Failure/Error: response.should have_tag(&#x27;title&#x27;, :text =&gt; /Railscasts.+iPod/)
+    <span class="failed">undefined method `has_tag?&#x27; for #&lt;ActionController::TestResponse:0x00000102e2dd00&gt;</span>
+    # ./spec/controllers/episodes_controller_spec.rb:33:in `block (2 levels) in &lt;top (required)&gt;&#x27;
+
+4) EpisodesController as guest show action should render show template for rss with xml
+    Failure/Error: response.should have_tag(&#x27;title&#x27;, :text =&gt; /Comments/)
+    <span class="failed">undefined method `has_tag?&#x27; for #&lt;ActionController::TestResponse:0x000001041f03b0&gt;</span>
+    # ./spec/controllers/episodes_controller_spec.rb:65:in `block (2 levels) in &lt;top (required)&gt;&#x27;
+</pre>    
+    
+<p>Tutti questi fallimenti derivano da un&rsquo;unica causa comune: il metodo <code>have_tag</code>. Ancora una volta, una rapida ricerca su Google ci aiuta a capire che il problema &egrave; legato a Webrat ed al fatto che <code>have_tag</code> &egrave; stato rimosso. Ora esiste un metodo simile, <code>have_selector</code>, che possiamo usare. Le opzioni per <code>have_selector</code> sono lievemente diverse, dovremo sostituire l&rsquo;opzione <code>:text</code> con un&rsquo;opzione <code>:content</code>, per cui per esempio:</p>
+
+<pre class="ruby">
+response.should have_tag(&#x27;title&#x27;, :text =&gt; &#x27;Railscasts&#x27;)
+</pre>
+
+<p>diverr&agrave;:</p>
+
+<pre class="ruby">
+response.should have_selector(&#x27;title&#x27;, :content =&gt; &#x27;Railscasts&#x27;)
+</pre>
+
+<p>Fatte anche queste modifiche e rilanciando i test ora, dovrebbe andare tutto bene:</p>
+
+<pre class="terminal">
+Finished in 3.44 seconds
+<span class="passed">152 examples, 0 failures</span>
+</pre>
+
+<h3>Rimozione del codice deprecato</h3>
+
+<p>Ora che tutti i test sono passati, possiamo cominciare a lavorare sulla lista dei messaggi generati dal task <code>rake rails:upgrade:check</code> per ridurre il numero di deprecazioni. Il primo elemento della lista riguarda una chiamata ad ActiveRecord:</p>
+
+<pre class="terminal">
+<span class="failed">Soon-to-be-deprecated ActiveRecord calls</span>
+Methods such as find(:all), find(:first), finds with conditions, and the :joins option will soon be deprecated.
+More information: <span class="url">http://m.onkey.org/2010/1/22/active-record-query-interface</span>
+</pre>
+
+<p>Si riferisce a un pezzo di codice che continua ad usare la vecchia sintassi <code>find</code>, come ad esempio questo metodo presente nella classe di modello Episode, che accetta un hash di condizioni:</p>
+
+<p class="codeFilePath">/app/models/episode.rb</p>
+<pre class="ruby">
+def self.primitive_search(query)
+  find(:all, :conditions =&gt; primitive_search_conditions(query))
+end
+</pre>
+
+<p>Possiamo aggiornare codice come questo, adottando semplicemente il nuovo metodo <code>where</code>:</p>
+
+<p class="codeFilePath">/app/models/episode.rb</p>
+<pre class="ruby">
+def self.primitive_search(query)
+  where(primitive_search_conditions(query))
+end
+</pre>
+
+<p>La nuovo sintassi per le query ActiveRecord &egrave; stata trattata nell&rsquo;episodio 202 [<a href="http://railscasts.com/episodes/202-active-record-queries-in-rails-3">guardalo</a>, <a href="http://it.asciicasts.com/episodes/202-query-active-record-in-rails-3">leggilo</a>], per cui per maggiori dettagli vi rimandiamo l&agrave;.</p>
+
+<p>Il successivo errore in lista &egrave; questo:</p>
+
+<pre class="terminal">
+<span class="failed">named_scope is now just scope</span>
+The named_scope method has been renamed to just scope.
+More information: <span class="url">http://github.com/rails/rails/commit/d60bb0a9e4be2ac0a9de9a69041a4ddc2e0cc914</span>
+</pre>
+
+<p>Anche questo &egrave; semplice da sistemare. Dobbiamo solo sostituire nel modello ciascuna chiamata a <code>named_scope</code> con <code>scope</code>. Anche gli argomenti dovranno essere aggiornati alla nuova sintassi di Rails 3. Per cui, per esempio, nel modello <code>Comment</code>:</p>
+
+<p class="codeFilePath">/app/models/comment.rb</p>
+<pre class="ruby">
+named_scope :recent, :order =&gt; &quot;created_at DESC&quot;
+</pre>
+
+<p>diventa:</p>
+
+<p class="codeFilePath">/app/models/comment.rb</p>
+<pre class="ruby">
+scope :recent, order(&quot;created_at DESC&quot;)
+</pre>
+
+<p>Si noti che man mano che sistemiamo queste cose fra le varie classi dell&rsquo;applicazione, dovremmo avere l&rsquo;accortezza di rilanciare ogni volta la suite dei test per assicurarci di non introdurre regressioni.</p>
+
+<p>Il problema successivo ai named scopes &egrave; quello riguardante il routing. Il plugin rails upgrade include un task rake per aggiornare un file di route, ma &egrave; consigliabile fare questa operazione a mano, in modo tale da cogliere l&rsquo;occasione per fare un po&rsquo; di pulizia.</p>
+
+<p>Al momento, il file degli instradamenti appare cos&igrave;:</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Railscasts::Application.routes.draw do |map|
+  map.resources :spam_questions
+
+  map.resources :spam_checks
+
+  map.with_options :controller =&gt; &#x27;info&#x27; do |info|
+    info.about &#x27;about&#x27;, :action =&gt; &#x27;about&#x27;
+    info.contest &#x27;contest&#x27;, :action =&gt; &#x27;contest&#x27;
+    info.feeds &#x27;feeds&#x27;, :action =&gt; &#x27;feeds&#x27;
+    info.give_back &#x27;give_back&#x27;, :action =&gt; &#x27;give_back&#x27;
+  end
+  
+  map.login &#x27;login&#x27;, :controller =&gt; &#x27;sessions&#x27;, :action =&gt; &#x27;new&#x27;
+  map.logout &#x27;logout&#x27;, :controller =&gt; &#x27;sessions&#x27;, :action =&gt; &#x27;destroy&#x27;
+  
+  map.resources :sponsors
+  map.resources :comments
+  map.resources :tags
+  map.resources :episodes, :collection =&gt; { :archive =&gt; :get }
+  map.resources :sessions
+  map.resources :spam_reports, :member =&gt; { :confirm =&gt; :post }, :collection =&gt; { :confirm =&gt; :post }
+  
+  map.root :episodes
+end
+</pre>
+
+<p>La nuova sintassi per gli instradamenti &egrave; stata trattata in dettaglio nell&rsquo;episodio 203 [<a href="http://railscasts.com/episodes/203-routing-in-rails-3">guardalo</a>, <a href="http://it.asciicasts.com/episodes/203-routing-in-rails-3">leggilo</a>] per cui non ritratteremo l&rsquo;argomento anche qui. Dopo le opportune modifiche, il file degli instradamenti dovrebbe apparire cos&igrave;:</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Railscasts::Application.routes.draw do
+  root :to =&gt; &quot;episodes#index&quot;
+  
+  match &quot;about&quot; =&gt; &quot;info#about&quot;, :as =&gt; &quot;about&quot;
+  match &quot;contest&quot; =&gt; &quot;info#contest&quot;, :as =&gt; &quot;contest&quot;
+  match &quot;feeds&quot; =&gt; &quot;info#feeds&quot;, :as =&gt; &quot;feeds&quot;
+  match &quot;give_back&quot; =&gt; &quot;info#give_back&quot;, :as =&gt; &quot;give_back&quot;
+  match &quot;login&quot; =&gt; &quot;sessions#new&quot;, :as =&gt; &quot;login&quot;
+  match &quot;logout&quot; =&gt; &quot;sessions#destroy&quot;, :as =&gt; &quot;logout&quot;
+  
+  resources :sponsors
+  resources :comments
+  resources :tags
+  resources :episodes do
+    collection do
+      get :archive
+    end
+  end
+  resources :sessions
+  resources :spam_questions
+  resources :spam_checks
+  resources :spam_reports do
+    member do
+      post :confirm
+    end
+    collection do
+      post :confirm
+    end
+  end
+end
+</pre>
+
+<p>Il nuovo file &egrave; leggermente pi&ugrave; lungo, ma appare pi&ugrave; chiaro.</p>
+
+<p>L&rsquo;ultimo elemento rimasto da sistemare sono le chiamate agli helper ERb:</p>
+
+<pre class="terminal">
+<span class="failed">Deprecated ERb helper calls</span>
+Block helpers that use concat (e.g., form_for) should use &lt;%= instead of &lt;%.  The current form will continue to work for now, but you will get deprecation warnings since this form will go away in the future.
+More information: <span class="url">http://weblog.rubyonrails.org/</span>
+</pre>
+
+<p>Nel codice delle viste, in Rails 3, talvolta occorre usare <code>&lt;%=</code> anzich&egrave; <code>&lt;%</code> all&rsquo;inizio di un blocco che genera dei contenuti in output, tipo il <code>form_for</code>.</p> 
+
+<p>Un esempio di questo tipo di codice lo si ritrova nel file archive.html.erb:</p>
+
+<p class="codeFilePath">/app/views/episodes/archive.html.erb</p>
+<pre class="ruby">
+&lt;% form_tag archive_episodes_path, :method =&gt; &#x27;get&#x27; do %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag &quot;Search&quot;, :name =&gt; nil %&gt;
+  &lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Il <code>form_tag</code> in questo codice inserir&agrave; del contenuto attorno a ci&ograve; che si trova all&rsquo;interno del suo blocco, per cui dovremo cambiare la sintassi del tag e usare anche il simbolo =:</p>
+
+<p class="codeFilePath">/app/views/episodes/archive.html.erb</p>
+<pre class="ruby">
+&lt;%= form_tag archive_episodes_path, :method =&gt; &#x27;get&#x27; do %&gt;
+</pre>
+
+<p>Non tutti i blocchi nel codice delle viste debbono essere cambiati, comunque, sebbene il task <code>rake rails:upgrade:check</code> dica diversamente. Per esempio, nel codice qui riportato, in cui iteriamo su ciascun elemento in un hash, non aggiungeremo il simbolo =, dal momento che questo codice non aggiunge alcun tag attorno al codice presente all&rsquo;interno del blocco stesso:</p>
+
+<p class="codeFilePath">/app/views/episodes/archive.html.erb</p>
+<pre class="ruby">
+&lt;% @episode_months.each do |month, episodes| %&gt;
+  &lt;h2&gt;&lt;%=h month.strftime(&#x27;%B %Y&#x27;) %&gt;&lt;/h2&gt;
+  &lt;% for episode in episodes %&gt;
+    &lt;div&gt;
+      &lt;%= episode.position %&gt;.
+      &lt;%= link_to episode.name, episode %&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+&lt;% end %&gt;
+</pre>
+
+<p>Potrete avere maggiori dettagli in merito, consultando l&rsquo;episodio 208 [<a href="http://railscasts.com/episodes/208-erb-blocks-in-rails-3">guardalo</a>, <a href="http://it.asciicasts.com/episodes/208-blocchi-erb-in-rails-3">leggilo</a>].</p>
+
+<p>Finito di aggiornare tuttoo il codice delle viste, il controllo sull&rsquo;upgrade mostrer&agrave; ancora degli errori, ma questi ultimi sono da considerarsi falsi, dal momento che considerano tutti i blocchi in tutte le viste. Si tenga presente che si dovranno aggiornare solo i tag dei blocchi che generano effettivamente del contenuto, come <code>form_for</code>, <code>form_tag</code>, <code>div_for</code> e cos&igrave; via. Se non siete sicuri sul da farsi, non mettetelo e poi controllate la presenza di errori di deprecazione nei vostri logdi test o di sviluppo.</p>
+
+<p>Ora che abbiamo finito di sfruttare il plugin di upgrade, possiamo rimuoverlo lanciando:</p>
+
+<pre class="terminal">
+$ rails plugin remove rails_upgrade
+</pre>
+
+<p>Abbiamo fatto un bel po&rsquo; di passi avanti nell&rsquo;aggiornamento dell&rsquo;applicazione a Rails 3. I test ora passano tutti e abbiamo rimosso tutto il codice deprecato. Abbiamo ancora i problemi che avevamo visto poco fa, comunque, a causa dei quali veniva erroneamente fatto l&rsquo;escape di parti dell&rsquo;HTML della pagina e poi c&rsquo;era anche il problema della barra laterale mancante. Ci occuperemo di queste cose nel prossimo episodio.</p>

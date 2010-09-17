@@ -1,0 +1,243 @@
+<head><base href="http://asciicasts.com/"></head>
+
+<p>Con este episodio concluimos nuestra serie sobre la actualización a Rails 3 de una aplicación Rails 2.  Ya hemos recorrido un largo trecho; pasan todos los tests de la aplicación y hemos usado el <em>plugin</em> de actualización de Rails para localizar y corregir en su mayor parte aquellas áreas de la aplicación que necesitan ser modificadas para funcionar en Rails 3.  Pero nos siguen quedando cosas que hay que corregir en la capa de vistas por lo que dedicaremos este episodio a su corrección.</p>
+
+<h3>Eliminación de las advertencias de código no actualizado</h3>
+
+<p>Antes de que comenzar a corregir la capa de vista le vamos a echar otro vistazo a los tests.  Al acabar el último episodio pasaban todos los tests pero aparecía un gran número de advertencias que avisaban de que estamos usando funcionalidades que son a extinguir.  Ejecutemos una vez más los tests para ver si podemos reducir estos avisos.</p>
+
+
+<pre class="terminal">
+$ rake spec
+
+# (se omite gran parte de la salida)
+
+.DEPRECATION WARNING: error_messages_for was removed from Rails and is now available as a plugin. Please install it with `rails plugin install git://github.com/rails/dynamic_form.git`. (called from _app_views_sponsors__form_html_erb___2363957037552137609_2171491000_4161310651677273387 at /Users/eifion/rails/apps_for_asciicasts/ep227/railscasts/app/views/sponsors/_form.html.erb:2)
+<span class="passed">...................................................</span>
+
+<span class="passed">Finished in 3.24 seconds</span>
+<span class="passed">152 examples, 0 failures</span>
+</pre>
+
+<p>Los tests siguen pasando pero aparecen, como vemos, muchas advertencias.  Por fortuna casi todas son duplicadas por lo que no nos debería costar demasiado quitarlas.</p>
+
+<p>Hemos omitido la mayor parte de la salida, quedándonos sólo con el último mensaje.  En Rails 3 los métodos 
+ <code>error_messages_for</code> y <code>error_messages_on</code> son a extinguir, y podemos cambiarlos por un código nuestro que recorra los mensajes de error de nuestro modelo con <code>errors.full_messages</code>.  Los  antiguos métodos seguirán estando disponibles en forma de <em>plugin</em>, por lo que tomaremos este camino más facil y lo instalaremos.  Las instrucciones de instalación aparecen en el mismo mensaje de advertencia.</p>
+
+<pre class="terminal">
+$ rails plugin install git://github.com/rails/dynamic_form.git
+Initialized empty Git repository in /Users/eifion/rails/apps_for_asciicasts/ep227/railscasts/vendor/plugins/dynamic_form/.git/
+remote: Counting objects: 22, done.
+remote: Compressing objects: 100% (17/17), done.
+remote: Total 22 (delta 2), reused 0 (delta 0)
+Unpacking objects: 100% (22/22), done.
+From git://github.com/rails/dynamic_form
+ * branch            HEAD       -&gt; FETCH_HEAD
+</pre> 
+
+<p>Si volvemos a ejectuar <code>rake spec</code> después de instalar el <em>plugin</em> veremos que la advertencia deja de aparecer.  Sin embargo hay otros errores, apareciendo  el siguiente con más frecuencia:</p>
+
+<pre class="terminal">
+DEPRECATION WARNING: subclasses is deprecated and will be removed from Rails 3.0 (use descendants instead). (called from block (2 levels) in load_models 
+at /Users/eifion/.rvm/gems/ruby-1.9.2-rc2/gems/thinking-sphinx-2.0.0.rc1/lib/thinking_sphinx/context.rb:58)
+</pre>
+
+<p>La responsable de este mensaje es la librería <a href="http://freelancing-god.github.com/ts/en/">Thinking Sphinx</a>.  Si recibimos errores de un <em>plugin</em> debemos mirar en su seguimiento de errores si se han reportado problemas parecidos al que nos estemos encontrando.   Si no es así podemos añadirlo nosotros mismos y tal vez se corrija en la siguiente versión (como alternativa, siempre podemos bifurcar el código y corregir el error nosotros mismos)</p>
+
+<p>Este problema, en el caso de Thinking Sphinx, ya ha sido corregido pero todavía no está incluido en la última revisión de la gema a fecha de hoy.  Para eliminar el mensaje de nuestra aplicación podemos decirle a Bundler que obtenga el código de Thinking Sphinx de un repositorio de git en lugar de la gema.</p>
+
+<p>Así, en lugar de incluir Thinking Sphinx de esta manera:</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+gem &#x27;thinking-sphinx&#x27;, &#x27;&gt;=2.0.0.rc1&#x27;, :require =&gt; &#x27;thinking_sphinx&#x27;
+</pre>
+
+<p>lo incluiremos de esta otra:</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+gem &#x27;thinking-sphinx&#x27;, :require =&gt; &#x27;thinking_sphinx&#x27;, :git =&gt; &quot;git://github.com/freelancing-god/thinking-sphinx.git&quot;, :branch =&gt; &quot;rails3&quot;
+</pre>
+
+<p>Una vez más tenemos que ejecutar <code>bundle install</code> para que descargue Thinking Sphinx de su repositorio de git tras lo cual la aplicación empezará a usar esta versión en lugar de la de la gema.  Si volvemos a ejecutar nuestros tests veremos que pasan todos sin advertencia alguna:</p>
+
+<pre class="terminal">
+$ rake spec
+<span class="passed">........................................................................................................................................................</span>
+
+<span class="passed">Finished in 3.3 seconds</span>
+<span class="passed">152 examples, 0 failures</span>
+</pre>
+
+<h3>Ajustes de las vistas</h3>
+
+<p>Una vez que nos hemos quitado de enmedio los mensajes que nos avisan de funcionalidades que dejan de estar soportadas nos podemos centrar en las vistas.   El primer problema que salta a la vista es que la barra lateral está ausente en la página de los episodios.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/443/original/E227I01.png" width="805" height="550" alt="A la página de episodio le falta la barra lateral."/>
+</div>
+
+<p>Una parte tan importante de la página como esta debería estar cubierta por un test, aunque sólo fuese para comprobar su presencia.  Si estuviéramos actualizando la aplicación para producción entonces escribiríamos un test, pero nosotros no lo haremos.</p>
+
+<p>Si miramos en el fichero de <em>layout</em>, el código que genera la barra lateral es el siguiente:</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= yield(:side) || render(:partial =&gt; &#x27;shared/side&#x27;) %&gt;
+</pre>
+
+<p>Este código hará un <code>yield</code> de la barra lateral, y si el resultado es <code>nil</code>, entonces mostrará el parcial llamado <code>side</code>.    El problema es que en versiones anteriores de Rails <code>yield</code> devuelve nil si se ha hecho la llamada a <code>content_for</code> en la página, mientras que en Rails 3 devolverá una cadena vacía por lo que nunca pasará por la segunda llamada de la condición.</p>
+
+<p>Para corregir esto podemos usar el método <code>content_for?</code> que devolverá <code>true</code> si el bloque de contenido ha sido definida.  Si lo tiene mostraremos ese bloque y en caso contrario se mostrará el parcial.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= content_for?(:side) ? yield(:side) : render(:partial=&gt; &#x27;shared/side&#x27;) %&gt;
+</pre>
+
+<p>Si recargamos la página ahora se verá la barra lateral.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/444/original/E227I02.png" width="801" height="545" alt="Vuelve a aparecer la barra lateral."/>
+</div>
+
+<p>Aún nos quedan por corregir otros problemas en las vistas. Si cargamos la página de un episodio, podremos comprobar que en las notas hay parte del contenido que está siendo escapado.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/445/original/E227I03.png" width="801" height="545" alt="Aparece HTML escapado en la página de episodio."/>
+</div>
+
+<p>El contenido de esa parte de la página pasa por el método <code>textilize</code> que está definido en el módulo 
+ <code>ApplicationHelper</code>.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+module ApplicationHelper
+  def textilize(text)
+    Textilizer.new(text).to_html unless text.blank?
+  end
+end
+</pre>
+
+<p>El método devuelve HTML como cadena.  En Rails 3 si vamos a pasar una cadena de HTML para que la vista la muestre debemos marcarla como "HTML seguro", o de lo contrario será automáticamente escapada.  Tan sólo necesitamos para ello ejecuta rel método <code>html_safe</code> sobre la cadena.</p>
+	
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">
+module ApplicationHelper
+  def textilize(text)
+    Textilizer.new(text).to_html.html_safe unless text.blank?
+  end
+end
+</pre>
+
+<p>Tras esto la cadena queda marcada como segura y ya no sufrirá el proceso de escape.  Vimos esto con detalle en el episodio 204 [<a href="http://railscasts.com/episodes/204-xss-protection-in-rails-3">verlo</a>, <a href="http://es.asciicasts.com/episodes/204-proteccion-contra-xss-en-rails-3">leerlo</a>].   Podremos ver que las anotaciones vuelven a aparecer correctamente cuando recarguemos la página.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/446/original/E227I04.png" width="801" height="545" alt="Ya aparecen bien las notas."/>
+</div>
+
+<p>Sólo nos queda un pequeño problema en la página: la barra de títulos debería incluir el nombre del episodio.  Este problema es específico de la forma en la que se gestionan los títulos en la aplicación, en lugar de utilizar <code>content_for</code> para el título se usa un método <em>helper</em> llamado <code>title</code> que establece una variable de instancia.</p>
+
+<p class="codeFilePath">/app/helpers/layout_helper.rb</p>
+<pre class="ruby">
+module LayoutHelper
+  def title(page_title, show_title = true)
+    @content_for_title = page_title.to_s
+    @show_title = show_title
+  end
+end
+</pre>
+
+<p>Para corregir esto deberíamos establecer el contenido del título usando <code>content_for</code> de la siguiente manera:</p>
+
+
+<p class="codeFilePath">/app/helpers/layout_helper.rb</p>
+<pre class="ruby">
+module LayoutHelper
+  def title(page_title, show_title = true)
+    content_for(:title, page_title.to_s)
+    @show_title = show_title
+  end
+end
+</pre>
+
+<p>Con esto ya podemos llamar a <code>yield(:title)</code> en el <em>layout</em> y el título aparecerá correctamente.  Podemos pasar el contenido en un bloque directamente o, como es nuestro caso, como un segundo argumento.</p>
+
+<h3>Corrección de los enlaces de borrado</h3>
+
+<p>El siguiente error aparece en la sección de administración de la aplicación.  En la página de abajo aparece un listado de objetos del modelo, cada uno con un enlace &ldquo;edit&rdquo; y &ldquo;destroy&rdquo;.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/447/original/E227I05.png" width="800" height="480" alt="The Spam Questions page."/>
+</div>
+
+<p>El problema radica en los enlaces a &ldquo;destroy&rdquo;.  Si hacemos clic en uno de ellos seremos llevados a la acción code>show</p> de la pregunta, en lugar de hacer un <code>destroy</code>.  La razón por la que no se llama a <code>delete</code> es porque en Rails 3 el JavaScript que se usa para estos enlaces es no destructivo.  Si examinamos el HTML de una de las preguntas comprobaremos que el JavaScript ya no aparece embebido en la etiqueta del enlace de borrado.  En su lugar hay dos atributos de HTML5 que comienzan con <code>data-</code> y deberíamos tener código JavaScript que detectase estos atributos y cambiase la petición para que fuese de tipo DELETE.
+
+<pre class="ruby">
+&lt;tr&gt;
+  &lt;td&gt;What does the M stand for in MVC?&lt;/td&gt;
+  &lt;td&gt;model&lt;/td&gt;
+  &lt;td&gt;&lt;a href=&quot;/spam_questions/1/edit&quot;&gt;Edit&lt;/a&gt;&lt;/td&gt;
+  &lt;td&gt;&lt;a href=&quot;/spam_questions/1&quot; data-confirm=&quot;Are you sure?&quot; data-method=&quot;delete&quot; rel=&quot;nofollow&quot;&gt;Destroy&lt;/a&gt;&lt;/td&gt;
+&lt;/tr&gt;
+</pre>
+
+<p>Como usamos jQuery en nuestra aplicación tenemos que descargar un fichero  <a href="http://github.com/rails/jquery-ujs/blob/master/src/rails.js">rails.js</a> adaptado del proyecto jquery-ujs.  Esto no sería necesario si usásemos Prototype porque el fichero correcto ya viene incluido en el directorio <code>/public/javascripts</code>.  Cuando hayamos descargado y copiado a este lugar el fichero en cuestión tendremos que referenciarlo en la sección de cabecera del fichero de <em>layout</em> de nuestra aplicación.  También tenemos que añadir una etiqueta meta para evitar peticiones falsas XSS:</p>
+
+<p class="codeFilePath">/application/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= javascript_include_tag &#x27;jquery&#x27;, &#x27;rails&#x27;, &#x27;application&#x27; %&gt;
+&lt;%= csrf_meta_tag %&gt;
+</pre>
+
+<p>Cubrimos el nuevo uso de JavaScript no intrusivo en el episodio 205 [<a href="http://railscasts.com/episodes/205-unobtrusive-javascript">verlo</a>, <a href="http://es.asciicasts.com/episodes/205-javascript-no-intrusivo">leerlo</a>].</p>  
+
+<p>Ya que estamos en el fichero de <em>layout</em> actualizaremos la aplicación para que use HTML5 cambiando el DOCTYPE y la etiqueta de apertura:</p>
+
+<p class="codeFilePath">/application/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+</pre>
+
+<p>Tendremos que pasar el código por un validador, por todavía quedan otras cosas por hacer para que la aplicación sea totalmente compatible con HTML5 válido.</p>
+
+<p>Con el nuevo fichero <code>rails.js</code> en su sitio, si recargamos la página de preguntas e intentamos borrar una de las preguntas, aparecerá el diálogo de confirmación de JavaScript y la cuestión será borrada si lo confirmamos.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/448/original/E227I06.png" width="420" height="153" alt="Ya funcionan los enlaces de borrado."/>
+</div>
+
+<p>El último cambio que nos queda por hacer al código de la vista es borrar las llamadas al método <code>h</code>.  En Rails 2 cuando queríamos que la salida fuese escapada en HTML teníamos que rodearla por el método <code>h</code>.  En Rails 3 toda la salida viene escapada por defecto, por lo que podemos aclarar las vistas repasándolas y borrando dicho método.   Esto lo vimos en el capítulo 204 [<a href="http://railscasts.com/episodes/204-xss-protection-in-rails-3">verlo</a>, <a href="http://es.asciicasts.com/episodes/204-proteccion-contra-xss-en-rails-3">leerlo</a>].  Si dejamos tal cual las llamadas al método tampoco pasará nada, pero el aspecto de la vista resultará mucho más claro si lo quitamos.</p>
+
+<h3>Borrado de ficheros obsoletos</h3>
+
+<p>Ya nos queda poco para terminar con la actualización; ya funciona todo pero tenemos que hacer limpieza de algunos de los ficheros que ya no nos hacen falta.  Cuando generamos la nueva aplicación Rails 3, se nos habrá creado una nueva página de bienvenida que hemos de borrar.</p>
+
+<pre class="terminal">
+$ rm public/index.html
+</pre>
+
+<p>Lo mismo para la imagen con el logotipo de Rails que aparece en dicha página.</p>
+
+
+<pre class="terminal">
+$ rm public/images/rails.png
+</pre>
+
+<p>También hay ficheros en el directorio <code>/script</code> que ya no son necesarios para Rails 3, y que podemos borrar.</p>
+
+<pre class="terminal">
+$ ls script
+about		destroy		process	setup
+autospec	generate		rails		setup_test
+console	performance	runner	spec
+dbconsole	plugin		server	spec_server
+</pre>
+
+<p>Rails 3 sólo utiliza el <em>script</em> <code>rails</code>, por lo que podemos borrar los otros como <code>console</code>, <code>server</code>, etc.</p>
+
+<p>Con esto damos por concluida la serie de episodios dedicada a la actualización de aplicaciones Rails 2.  Debemos tener en cuenta que mucho de lo que hemos cubierto aquí es específico de la aplicación de Railscasts, por lo que es imposible que hayamos visto absolutamente todo lo necesario para actualizar una aplicación cualquiera.  Si vemos avisos de funcionalidad no soportada o errores es posible que alguien se haya topado con el mismo problema y podamos encontrar una solución con una búsqueda en Google.  También es recomendable repasar los últimos episodios que cubren Rails 3.</p>
+
+<p>La mayoría de los problemas con los que nos toparemos cuando actualicemos una aplicación vendrán provocados por los <em>plugins</em>.  El sitio de Rails Plugins tiene un listado de <em>plugins</em>, indicando cuáles de ellos son compatibles con Rails 3 y cuáles no.  Si tenemos problema con un <em>plugin</em> en concreto, también puede ser interesante mirar su repositorio en Github para ver si existe una versión compatible con Rails 3.</p>

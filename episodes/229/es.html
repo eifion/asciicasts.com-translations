@@ -1,0 +1,314 @@
+<head><base href='http://asciicasts.com'></head>
+
+<p>Supongamos que tenemos una aplicaci&oacute;n de <em>blog</em> que permite a los usuarios a&ntilde;adir comentarios en los art&iacute;culos.  Este <em>blog</em> es muy popular por lo que los comentarios se a&ntilde;aden con mucha frecuencia.  Si alguien viene al sitio a leer un art&iacute;culo y decide comentar algo es posible que para cuando vaya a a&ntilde;adir su comentario ya se hayan publicado otros comentarios que hagan que su comentario sea incorrecto o irrelevante.  Ser&iacute;a &uacute;til, por tanto, que la p&aacute;gina se actualizase autom&aacute;ticamente mostrando los nuevos comentarios seg&uacute;n se vayan publicando.  Veremos c&oacute;mo se puede hacer esto en este episodio.</p>
+
+<h3>Configuraci&oacute;n de jQuery</h3>
+
+<p>Vamos a tener que usar JavaScript para la actualizaci&oacute;n de la p&aacute;gina al vuelo, y como es habitual vamos a usar jQuery en lugar de la librer&iacute;a Prototype que viene incluida en Rails.  Como se trata de una aplicaci&oacute;n Rails 3podemos usar la gema <a href="http://github.com/indirect/jquery-rails">jquery-rails</a> para reemplazar f&aacute;cilmente los archivos de Prototype por los de jQuery.</p>
+
+<p>Para utilizar la gema tan s&oacute;lo tenemos que referenciarla desde el <code>Gemfile</code> de nuestra aplicaci&oacute;n.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+gem &#x27;jquery-rails&#x27;
+</pre>
+
+<p>Podemos configurarla usando</p>
+
+<pre class="terminal">
+$ bundle install
+</pre>
+
+<p>Cuando Bundler termine su trabajo tendremos a nuestra disposici&oacute;n un nuevo generador que podemos ejecutar para configurar nuestra aplicaci&oacute;n para usar jQuery.  Si lo ejecutamos eliminar&aacute; los archivos de Prototype e instalar&aacute; los de jQuery y luego sobreescribir&aacute; el fichero <code>rails.js</code> por defecto de Rails (que usa Prototype) por uno adaptado a jQuery (si queremos instalar tambi&eacute;n la librer&iacute;a jQuery UI podemos pasarle la opci&oacute;n <code>--ui</code> para que instale tambi&eacute;n estos archivos)</p>
+
+<pre class="terminal">
+$ rails g jquery:install
+      <span class="passed">remove</span>  public/javascripts/controls.js
+      <span class="passed">remove</span>  public/javascripts/dragdrop.js
+      <span class="passed">remove</span>  public/javascripts/effects.js
+      <span class="passed">remove</span>  public/javascripts/prototype.js
+      <span class="passed">create</span>  public/javascripts/jquery.min.js
+      <span class="passed">create</span>  public/javascripts/jquery.js
+    <span class="failed">conflict</span>  public/javascripts/rails.js
+Overwrite /Users/eifion/rails/apps_for_asciicasts/ep229/blog/public/javascripts/rails.js? (enter &quot;h&quot; for help) [Ynaqdh] Y
+       <span class="forced">force</span>  public/javascripts/rails.js
+</pre>       
+
+<p>Una de las cosas m&aacute;s &uacute;tiles de la gema jquery-rails es que sobreescribe los valores por defecto que se generan cuando utilizamos la l&iacute;nea</p>
+
+<pre class="ruby">
+&lt;%= javascript_include_tag :defaults %&gt;
+</pre>
+
+<p>en nuestro fichero de <em>lyaout</em> por lo que aqu&iacute; no tendremos que hacer ning&uacute;n cambio.</p>
+
+<h3>Configuraci&oacute;n de la consulta peri&oacute;dica</h3>
+
+<p>Una vez que hemos configurado jQuery en nuestra aplicaci&oacute;n podemos empezar a hacer lo que necesitamos para que los comentarios se actualicen autom&aacute;ticamente.  Podemos enfocar el problema de dos formas.  Una de ella es hacer una consulta peri&oacute;dica (<em>polling</em>).  Nuestra aplicaci&oacute;n puede, a intervalos regulares enviar una petici&oacute;n AJAX al servidor para ver si ha cambiado el n&uacute;mero de comentarios.  La otra opci&oacute;n es utilizar  <a href="http://en.wikipedia.org/wiki/WebSockets">WebSockets</a> para tener una conexi&oacute;n permanente con el servidor y enviar los cambios al usuario tan pronto como est&eacute;n disponibles.  La m&aacute;s f&aacute;cil es la primera porque los WebSockets todav&iacute;a no est&aacute;n soportados por todos los navegadores y nos exigir&iacute;a adem&aacute;s trabajar con una librer&iacute;a como  <a href="http://github.com/lifo/cramp">Cramp</a>.  Como nos parece aceptable tener un retraso de un par de segundos cuando se publique un nuevo comentario, aplicaremos la t&eacute;cnica de la consulta peri&oacute;dica.</p>
+
+<p>Escribiremos el JavaScript que realiza la consulta peri&oacute;dica en el fichero <code>application.js</code> de la aplicaci&oacute;n.  Este fichero se incluye en todas las p&aacute;ginas de la aplicaci&oacute;n por lo que nos tocar&aacute; asegurarnos de que el c&oacute;digo que busca si hay comentarios actualizados s&oacute;lo se ejecuta en las p&aacute;ginas que muestren comentarios.  El c&oacute;digo de la consulta peri&oacute;dica tiene el siguiente aspecto:</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">
+$(function () {
+  if ($(&#x27;#comments&#x27;).length &gt; 0) {
+    setTimeout(updateComments, 10000);
+  }
+});
+
+function updateComments() {
+  $.getScript(&#x27;/comments.js&#x27;);
+  setTimeout(updateComments, 10000);
+}
+</pre>
+
+<p>El c&oacute;digo comienza con una llamada a la funci&oacute;n <code>$</code> de jQuery.  Cuando se invoca esta funci&oacute;n pasando como argumento una funci&oacute;n (como es el caso) el c&oacute;digo dentro de la funci&oacute;n se ejecutar&aacute; cuando se haya cargado el DOM de la p&aacute;gina.  En este caso lo que queremos que ocurre es comprobar si estamos en una p&aacute;gina de art&iacute;culo buscando un elemento con <code>id</code> llamado <code>comments</code>, y si lo encontramos usamos <code>setTimeout</code> para llamar a la funci&oacute;n <code>updateComments</code> despu&eacute;s de esperar diez segundos.</p>
+
+<p>En la funci&oacute;n <code>updateComments</code> queremos recibir si los comentarios que se hayan actualizado en el articulo, y hay varias formas de hacerlo.  Podr&iacute;amos hacer que el servidor devolviese los nuevos comentarios en formato JSON y utilizar dichos datos para crear el HTML de los nuevos comentarios, pero el problema con esto es que <code>updateComments</code> deber&iacute;a generar el HTML correcto para los nuevos comentarios.  Ser&iacute;a m&aacute;s f&aacute;cil si gener&aacute;semos el HTML en el servidor y envi&aacute;semos un JavaScript que actualizase la p&aacute;gina para a&ntilde;adir dicho HTML en su sitio.</p>
+
+<p>Para hacer esto utilizaremos la funci&oacute;n <code>getScript</code> de jQuery.  Si le pasamos a esta funci&oacute;n una URL realizar&aacute; una petici&oacute;n AJAX a la misma y ejecutar&aacute; cualquier <em>script</em> que le sea devuelto.  Utilizaremos <code>getScript</code> para llamar al m&eacute;todo <code>index</code> de <code>CommentsController</code> con formato JavaScript.  Tendremos tambi&eacute;n que a&ntilde;adir alg&uacute;n que otro par&aacute;metro a la URL para que podamos decir cu&aacute;ntos comentarios se deben devolver, pero ya regresaremos a esto m&aacute;s adelante.</p>
+
+<p>Cuando <code>getScript</code> haya terminado llamaremos nuevamente a <code>setTimeout</code> para que se ejecute nuevamente la funci&oacute;n <code>updateComments</code> a los diez segundos.  Podr&iacute;amos haber usado <code>setInterval</code> en lugar de <code>setTimeout</code> para no tener que estar lanzando el temporizador una y otra vez, pero hacerlo as&iacute; tiene una ventaja, y es que si utiliz&aacute;semos <code>setInterval</code> entonces se invocar&iacute;a <code>updateComments</code> cada diez segundos independientemente de lo que tardase su ejecuci&oacute;n, de esta forma la petici&oacute;n se har&aacute; diez segundos despu&eacute;s de que la funci&oacute;n haya terminado de forma que no causaremos una carga demasiado elevada en el servidor cuando est&eacute; recibiendo mucho tr&aacute;fico.</p>
+
+<p><code>CommentsController</code> todav&iacute;a no tiene acci&oacute;n <code>index</code> por lo que tendremos que escribirla.  Tendr&aacute; que recuperar los comentarios utilizando los par&aacute;metros que reciba del c&oacute;digo JavaScript, pero por ahora la dejaremos en blanco.</p>
+
+<p class="codeFilePath">/app/controllers/comments_controller.rb</p>
+<pre class="ruby">
+def index
+
+end
+</pre>
+
+<p>Necesitaremos una plantilla de JavaScript con la acci&oacute;n.  En ella tan s&oacute;lo pondremos un poco de c&oacute;digo de pruebas para asegurarnos de que la consulta funciona.</p>
+
+<p class="codeFilePath">/app/views/comments/index.js.erb</p>
+<pre class="javascript">
+alert(&#x27;Comments go here&#x27;);
+</pre>
+
+<p>Si arrancamos el servidor de la aplicaci&oacute;n y visitamos la p&aacute;gina de un art&iacute;culo veremos que aparece la alerta al cabo de diez segundos tras la carga de la p&aacute;gina, lo que quiere decir que el JavaScript devuelto se est&aacute; ejecutando en el cliente.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/456/original/E229I01.png" width="824" height="504" alt="Cuando se realiza la consulta se muestra la alerta."/>
+</div>
+
+<h3>Recuperaci&oacute;n de los comentarios</h3>
+
+<p>Ahora que ya tenemos los comentarios funcionando el siguiente paso es recuperar los comentarios relevantes.  Tan s&oacute;lo tenemos que a&ntilde;adir dos par&aacute;metros a la acci&oacute;n <code>index</code> de <code>CommentController</code>: el <code>id</code> del art&iacute;culo actual y una marca de tiempo para que sepamos qu&eacute; comentarios debemos recuperar.</p>
+
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">
+function updateComments() {
+  $.getScript(&#x27;/comments.js?article_id=&#x27; + article_id + &quot;&amp;after=&quot; + after);
+  setTimeout(updateComments, 10000);
+}
+</pre>
+
+<p>Lo que todav&iacute;a nos queda pendiente en el c&oacute;digo anterior es de d&oacute;nde obtener los valores de las variables  <code>article_id</code> y <code>after</code> que todav&iacute;a no hemos definido.  En este caso podemos generar los valores en Rails y pas&aacute;rselos a JavaScript mediante el documento HTML.  Esta aplicaci&oacute;n utiliza HTML5 por lo que podemos usar atributos de datos para a&ntilde;adir estos datos al documento</p>
+
+<p>Vamos a a&ntilde;adir los atributos en el c&oacute;digo de la vista de la acci&oacute;n <code>show</code> de <code>ArticleController</code>.  Los atributos de datos pueden tener el nombre que queramos siempre que empiecen por <code>data-</code>por lo que a&ntilde;adiremos un atributo <code>data-id</code> al <code>div</code> que rodea al art&iacute;culo y le daremos el valor del <code>id</code> del atributo.  Similarmente en el <code>div</code> que rodea a cada comentario a&ntilde;adiremos un atributo <code>data-time</code> que contiene el valor de <code>created_at</code> para cada comentario (convertido a un entero)</p>
+
+<p class="codeFilePath">/app/views/articles/show.html.erb</p>
+<pre class="ruby">
+&lt;% title @article.name %&gt;
+
+&lt;div id=&quot;article&quot; data-id=&quot;&lt;%= @article.id %&gt;&quot;&gt;
+  &lt;%= simple_format @article.content %&gt;
+  
+  &lt;p&gt;&lt;%= link_to &quot;Back to Articles&quot;, articles_path %&gt;&lt;/p&gt;
+  
+  &lt;% unless @article.comments.empty? %&gt;
+    &lt;h2&gt;&lt;%= pluralize(@article.comments.size, &#x27;commment&#x27;) %&gt;&lt;/h2&gt;
+    
+    &lt;div id=&quot;comments&quot;&gt;
+    &lt;% for comment in @article.comments %&gt;
+      &lt;div class=&quot;comment&quot; data-time=&quot;&lt;%= comment.created_at.to_i %&gt;&quot;&gt;
+        &lt;strong&gt;&lt;%= comment.name %&gt;&lt;/strong&gt;
+        &lt;em&gt;on &lt;%= comment.created_at.strftime(&#x27;%b %d, %Y at %I:%M %p&#x27;) %&gt;&lt;/em&gt;
+        &lt;%= simple_format comment.content %&gt;
+      &lt;/div&gt;
+    &lt;% end %&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+  
+  &lt;h3&gt;Add your comment&lt;/h3&gt;
+  &lt;%= render :partial =&gt; &#x27;comments/form&#x27; %&gt;
+&lt;/div&gt;
+</pre>
+
+<p>Ahora podemos volver a la funci&oacute;n <code>updateComments</code> y establecer los valores de las variables <code>article_id</code> y <code>after</code> a partir de estos atributos de datos.  La recuperaci&oacute;n del <code>id</code> del art&iacute;culo es inmediata: tan s&oacute;lo tenemos que cogerla del elemento cuyo <code>id</code> sea <code>article</code>.  Podr&iacute;a haber varios comentarios en la p&aacute;gina y queremos encontrar el &uacute;ltimo por lo que tendremos que usar el selector <code</p>.comment:last</code> para recuperarlo y luego leer su atributo <code>data-time</code>.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">
+function updateComments() {
+  var article_id = $(&#x27;#article&#x27;).attr(&#x27;data-id&#x27;);
+  var after = $(&#x27;.comment:last&#x27;).attr(&#x27;data-time&#x27;);
+  $.getScript(&#x27;/comments.js?article_id=&#x27; + article_id + &quot;&amp;after=&quot; + after);
+  setTimeout(updateComments, 10000);
+}
+</pre>
+
+<p>Ahora que ya tenemos valores para estas dos variables podemos usarlas para recuperar s&oacute;lo los comentarios que se hayan creado para este art&iacute;culo despu&eacute;s del instante de tiempo del &uacute;ltimo comentario que se est&eacute; mostrando en la p&aacute;gina.</p>
+
+<p>Cuando hacemos cosas como esta es buena idea comprobar el <em>log</em> de desarrollo para estar seguros de que todo funciona como deber&iacute;a.  Si visitamos la p&aacute;gina de art&iacute;culos y luego miramos el <em>log</em> veremos que la petici&oacute;n para el JavaScript de comentarios se est&aacute; haciendo cada diez segundos m&aacute;s o menos como era de esperar y tambi&eacute;n parece que los par&aacute;metros est&aacute;n correctos.</p>
+
+<pre class="terminal">
+Started GET &quot;/comments.js?article_id=1&amp;after=1283173233&quot; for 127.0.0.1 at 2010-09-02 19:58:53 +0100
+  Processing by CommentsController#index as JS
+  Parameters: {&quot;article_id&quot;=&gt;&quot;1&quot;, &quot;after&quot;=&gt;&quot;1283173233&quot;}
+Rendered comments/index.js.erb (0.4ms)
+Completed 200 OK in 41ms (Views: 41.1ms | ActiveRecord: 0.0ms)
+
+
+Started GET &quot;/comments.js?article_id=1&amp;after=1283173233&quot; for 127.0.0.1 at 2010-09-02 19:59:07 +0100
+  Processing by CommentsController#index as JS
+  Parameters: {&quot;article_id&quot;=&gt;&quot;1&quot;, &quot;after&quot;=&gt;&quot;1283173233&quot;}
+Rendered comments/index.js.erb (0.4ms)
+Completed 200 OK in 34ms (Views: 33.6ms | ActiveRecord: 0.0ms)
+</pre>
+
+<p>Ahora que sabemos que los par&aacute;metros se pasan correctamente podemos utilizarlos en la acci&oacute;n 
+	<code>index</code> de <code>CommentsController</code> para recuperar nuevos comentarios.</p>
+	
+<p class="codeFilePath">/app/controllers/comments_controller.rb</p>
+<pre class="ruby">
+def index
+  @comments = Comment.where(&quot;article_id = ? and created_at &gt; ?&quot;, params[:article_id], Time.at(params[:after].to_i))
+end
+</pre>  
+
+<p>Ya podemos cambiar la plantilla JavaScript para que muestre los comentarios en lugar de sacar una alerta.  Pero antes de eso tenemos que quitar el c&oacute;digo que muestra el comentario de la vista <code>show</code> del art&iacute;culo y ponerlo en un parcial para poder usarlo en la plantilla JavaScript.  El parcial ser&aacute;  <code>_comment.html.erb</code>.</p>
+
+<p class="codeFilePath">/app/views/comments/_comment.html.erb</p>
+<pre class="ruby">
+&lt;div class=&quot;comment&quot; data-time=&quot;&lt;%= comment.created_at.to_i %&gt;&quot;&gt;
+  &lt;strong&gt;&lt;%= comment.name %&gt;&lt;/strong&gt;
+  &lt;em&gt;on &lt;%= comment.created_at.strftime(&#x27;%b %d, %Y at %I:%M %p&#x27;) %&gt;&lt;/em&gt;
+  &lt;%= simple_format comment.content %&gt;
+&lt;/div&gt;
+</pre>
+
+<p>En la acci&oacute;n <code>show</code> podemos simplemente mostrar el parcial para la colecci&oacute;n de comentarios:</p>
+
+<p class="codeFilePath">/app/views/comments/show.html.erb</p>
+<pre class="ruby">
+&lt;% title @article.name %&gt;
+
+&lt;div id=&quot;article&quot; data-id=&quot;&lt;%= @article.id %&gt;&quot;&gt;
+  &lt;%= simple_format @article.content %&gt;
+  &lt;p&gt;&lt;%= link_to &quot;Back to Articles&quot;, articles_path %&gt;&lt;/p&gt;
+  &lt;% unless @article.comments.empty? %&gt;
+    &lt;h2&gt;&lt;%= pluralize(@article.comments.size, &#x27;commment&#x27;) %&gt;&lt;/h2&gt;
+    &lt;div id=&quot;comments&quot;&gt;
+    &lt;%= render @article.comments %&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+  &lt;h3&gt;Add your comment&lt;/h3&gt;
+  &lt;%= render :partial =&gt; &#x27;comments/form&#x27; %&gt;
+&lt;/div&gt;
+</pre>
+
+<p>Ya podemos cambiar la plantilla JavaScript de <code>index</code> de comentarios para que genere el c&oacute;digo que actualice los comentarios:</p>
+
+<p class="codeFilePath">/app/views/comments/index.js.erb</p>
+<pre class="javascript">
+$(&#x27;#comments&#x27;).append(&quot;&lt;%= escape_javascript(raw render(@comments))%&gt;&quot;);
+</pre>
+
+<p>Este c&oacute;digo saca la colecci&oacute;n de comentarios utilizando el parcial que acabamos de escribir.  Tenemos que rodear la salida del parcial con el m&eacute;todo <code>raw</code> porque por defecto Rails 3 escapar&aacute; el HTML (cosa que no queremos que ocurra).  Luego tenemos que llamar a <code>escape_javascript</code> sobre la salida de ese comando para que HTML pueda ser embebido en una cadena JavaScript.  El JavaScript que se env&iacute;a al navegador tomar&aacute; esta cadena y la insertar&aacute; al final del <code>div</code> de comentarios.</p>
+
+<p>Podemos mirar ahora la p&aacute;gina con el navegador para ver si los comentarios se actualizan autom&aacute;ticamente, y comprobamos que tenemos un &eacute;xito parcial: aunque los comentarios se actualizan vemos que lo que se a&ntilde;ade una vez tras otra es el &uacute;ltimo comentario.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/457/original/E229I02.png" width="816" height="570" alt="Aparece el último comentario una y otra vez."/>
+</div>
+
+<p>Esto ocurre porque cuando recuperamos los &uacute;ltimos comentarios la marca de tiempo que pasamos s&oacute;lo tiene precisi&oacute;n hasta el segundo.  En este caso estamos recuperando los comentarios despu&eacute;s de las 13:00:33 del 30 de Agosto de 2010, pero si miramos en la base de datos veremos que el comentario se insert&oacute; exactamente a las 13:00:33.892041.  Si bien no es una diferencia apreciable es suficiente como para que se considere que fue despu&eacute;s de la fecha que estamos consulta.  Para corregir esto tenemos que redondear hacia arriba para recuperar los comentarios al menos un segundo despu&eacute;s del comentario actual, por lo que le sumaremos 1 al valor entero recibido como par&aacute;metro de la consulta.</p>
+
+<p class="codeFilePath">/app/controllers/comments_controller.rb</p>
+<pre class="ruby">
+def index
+  @comments = Comment.where(&quot;article_id = ? and created_at &gt; ?&quot;, params[:article_id], Time.at(params[:after].to_i + 1))
+end
+</pre>
+
+<p>Ahora veremos que el &uacute;ltimo comentario no se repite una vez tras otra.  Podemos ver que la actualizaci&oacute;n funciona abriendo la p&aacute;gina del art&iacute;culo en dos ventanas del navegador, enviando un comentario en una de ellas y viendo que aparece en la otra.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/458/original/E229I03.png" width="818" height="345" alt="Añadimos un comentario en un navegador."/>
+</div>
+
+<p>Tras unos segundos tiene lugar el refresco autom&aacute;tico y aparece el comentario en la otra ventana del navegador.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/459/original/E229I04.png" width="816" height="448" alt="Se muestra el nuevo comentario automátiamente en la otra ventana de navegador."/>
+</div>
+
+<h3>Actualizaci&oacute;n del total</h3>
+
+<p>Aunque se ha a&ntilde;adido el nuevo comentario, el encabezado que muestra el n&uacute;mero de comentarios totales no se ha actualizado de manera acorde.  Corrij&aacute;moslo.</p>
+
+<p>Podemos actualizar la cuenta de comentarios en el mismo archivo que usamos para actualizar los comentarios.  Lo obvio ser&iacute;a hacer algo como:</p>
+
+<p class="codeFilePath">/app/views/comments/index.js.erb</p>
+<pre class="javascript">
+$(&#x27;#comments&#x27;).append(&quot;&lt;%= escape_javascript(raw render(@comments))%&gt;&quot;);
+$(&#x27;#article h2&#x27;).text(&#x27;&lt;%= @comments.first.article.comments.size %&gt; comments&#x27;);
+</pre>
+
+<p>Sin embargo este c&oacute;digo realizar&aacute; una llamada a la base de datos para recuperar el numero de comentarios, y dado que este c&oacute;digo ser&aacute; llamado con mucha frecuencia tiene sentido evitar esto si podemos.  Lo que podemos hacer es contar el n&uacute;mero de comentarios que hay en la p&aacute;gina viendo cu&aacute;ntos elementos hay que tengan la clase  <code>comment</code>.</p>
+
+<p class="codeFilePath">/app/views/comments/index.js.erb</p>
+<pre class="javascript">
+$(&#x27;#comments&#x27;).append(&quot;&lt;%= escape_javascript(raw render(@comments))%&gt;&quot;);
+$(&#x27;#article h2&#x27;).text($(&#x27;.comment&#x27;).length + &#x27; comments&#x27;);
+</pre>
+
+<p>No nos preocuparemos de que este c&oacute;digo no gestiona la pluralizaci&oacute;n adecuadamente, por lo que s&oacute;lo mostrar&aacute; el literal  &ldquo;comments&rdquo; incluso si s&oacute;lo tenemos un comentario.  Como toque final a&ntilde;adiremos una cl&aacute;usula para que s&oacute;lo se env&iacute;e el JavaScript si existen comentarios.</p>
+
+
+<p class="codeFilePath">/app/views/comments/index.js.erb</p>
+<pre class="javascript">
+&lt;% unless @comments.empty? %&gt;
+$(&#x27;#comments&#x27;).append(&quot;&lt;%= escape_javascript(raw render(@comments))%&gt;&quot;);
+$(&#x27;#article h2&#x27;).text($(&#x27;.comment&#x27;).length + &#x27; comments&#x27;);
+&lt;% end %&gt;
+</pre>
+
+<p>Si ahora a&ntilde;adimos un comentario en una ventana del navegador veremos que dicho comentario y el contador total se actualiza en la otra ventana.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/460/original/E229I05.png" width="816" height="448" alt="Ahora se actualiza correctamente la cuenta de comentarios."/>
+</div>
+
+<h3>Correcci&oacute;n final</h3>
+
+<p>Todav&iacute;a queda un peque&ntilde;o problema en nuestro c&oacute;digo que hemos de arreglar.  En la funci&oacute;n <code>updateComments</code>  elvalor de la variable <code>after</code> se establece a partir de un atributo del &uacute;ltimo comentario de la p&aacute;gina.  Si no hay comentarios para el art&iacute;culo que est&aacute; siendo visualizado entonces este valor estar&aacute; vac&iacute;o por lo que en este caso estableceremos un valor por defecto de cero para que se devuelvan todos los comentarios.</p>
+
+<p class="codeFilePath">/public/application.js</p>
+<pre class="javascript">
+$(function () {
+  if ($(&#x27;#comments&#x27;).length &gt; 0) {
+    setTimeout(updateComments, 10000);
+  }
+});
+
+function updateComments() {
+  var article_id = $(&#x27;#article&#x27;).attr(&#x27;data-id&#x27;);
+  if ($(&#x27;.comment&#x27;).length &gt; 0) {
+    var after = $(&#x27;.comment:last&#x27;).attr(&#x27;data-time&#x27;);
+  }
+  else {
+ h    var after = 0;
+  }
+  
+  $.getScript(&#x27;/comments.js?article_id=&#x27; + article_id + &quot;&amp;after=&quot; + after);
+  setTimeout(updateComments, 10000);
+}
+</pre>
+
+<p>Hay otras mejores que podr&iacute;amos hacer en esta parte del c&oacute;digo, por ejemplo podr&iacute;amos hacer que el intervalo de refresco fuese din&aacute;mico de forma que si el &uacute;ltimo comentario se a&ntilde;adi&oacute; hace mucho tiempo (por ejemplo una hora) la frecuencia de consulta se redujese, y as&iacute; impondr&iacute;amos una menor carga en el servidor cuando se visualicen art&iacute;culos donde no haya habido comentarios recientemente.</p>
+
+<p>Tambi&eacute;n podr&iacute;amos mejorar un poco la interfaz a&ntilde;adiendo un efecto de resaltado para indicar cuando aparecen nuevos comentarios en la p&aacute;gina.  Tambi&eacute;n podr&iacute;amos, alternativamente, a&ntilde;adir un enlace que dijese que han aparecido nuevos comentarios y s&oacute;lo mostrarlos cuando se haga clic sobre &eacute;l.</p>

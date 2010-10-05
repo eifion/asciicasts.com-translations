@@ -1,0 +1,133 @@
+<p>In the recent Rails Rumble competition participants tried to create a Rails application in 48 hours. The signup page for the competition was interesting, offering a way to sign in through a number of different services.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/475/original/E233I01.png" width="804" height="716" alt="The Rails Rumble login page."/>
+</div>
+
+<p>Providing logins via different services can take a lot of work to implement, but the Rails Rumble site solves this by using Janrain who provide a service called <a href="http://www.janrain.com/products/engage">Janrain Engage</a> (also known as RPX). This is a central authentication service; one API that an application can communicate with to enable authentication via a large number of other providers. Janrain is a commercial service, but there is a free Basic plan which is perfect for something like a Rails Rumble entry.</p>
+
+<h3>Signing Up For Engage</h3>
+
+<p>Signing up for the basic Janrain Engage service is simple. Once we&rsquo;ve signed up and provided a name for our application we&rsquo;ll be taken to our account&rsquo;s home page. Here we&rsquo;ll need to note our API key and the name of the application, in this case &lsquo;asciicasts&rsquo;. We&rsquo;ll also need to set up the providers we want to use. If we sign in and then click the &lsquo;Providers&rsquo; tab we&rsquo;ll be taken to a page where we can choose the services our application&rsquo;s users will be able to sign in with.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/476/original/E233I02.png" width="802" height="582" alt="Choosing authentication providers for our application."/>
+</div>
+
+<p>The free plan only allows use to choose six providers but that still gives us plenty of choice. Note that some of them require extra setup. To use Twitter, for example, we&rsquo;d need to set up our application as an OAuth client, but that&rsquo;s easy enough to do. For our application we&rsquo;ll stick with the four providers that are provided by default.</p>
+
+<h3>Modifying our Application to use Engage</h3>
+
+<p>Now that we&rsquo;re signed up we can use Engage in a Rails application. If we were creating authentication from scratch we could use the <a href="http://github.com/grosser/rpx_now">RPXNow</a> gem which offers a lot of functionality to help us use Engage in an application. If our application used Authlogic then there&rsquo;s an <a href="http://github.com/tardate/authlogic_rpx">Authlogic RPX</a> gem that is worth investigating. Finally there is the <a href="http://github.com/slainer68/devise_rpx_connectable">RPX Connectable</a> gem for use with Devise. The application we&rsquo;re working with in this episode uses Devise so we&rsquo;ll be using this last gem to embed Engage into it. If you&rsquo;re not familiar with Devise then take a look at episode 209 [<a href="http://railscasts.com/episodes/209-introducing-devise">watch</a>, <a href="http://asciicasts.com/episodes/209-introducing-devise">read</a>] for an introduction.</p>
+
+<p>Our application already has &ldquo;Sign up&rdquo; and &ldquo;Sign in&rdquo; links and these take the user to a simple form that needs to be filled in with an email address and password.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/477/original/E233I03.png" width="802" height="438" alt="Our application&rsquo;s current sign-in page."/>
+</div>
+
+<p>We want to replace these links with a single link that takes the user to a page where they can sign in via Engage and this is where we can make use of the RPX Connectable gem.</p> 
+
+<p>To use the gem in our application we just need to add a reference to it the <code>Gemfile</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.0&#x27;
+gem &#x27;sqlite3-ruby&#x27;, &#x27;1.2.5&#x27;, :require =&gt; &#x27;sqlite3&#x27;
+gem &#x27;devise&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;devise_rpx_connectable&#x27;
+</pre>
+
+<p>Then install it with</p>
+
+<pre class="terminal">
+$ bundle install
+</pre>
+
+<p>To use RPX we&rsquo;ll need to add an <code>rpx_identifier</code> field to our <code>Users</code> table. We&rsquo;ll generate a new migration to do this.</p>
+
+<pre class="terminal">
+$ rails g migration add_rpx_to_users rpx_identifier:string
+</pre>
+
+<p>We can then run the migration to  add the new field.</p>
+
+<pre class="terminal">
+$ rake db:migrate
+</pre>
+
+<p>Next we need to modify the call to <code>devise</code> in the <code>User</code> model so that it has <code>:rpx_connectable</code> in its list of modules.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  devise :database_authenticatable, :registerable, 
+         :recoverable, :rememberable, :trackable, :validatable, :rpx_connectable
+
+  # Setup accessible (or protected) attributes for your model
+  attr_accessible :email, :password, :password_confirmation
+end
+</pre>
+
+<p>Finally we have to update our application&rsquo;s Devise config file to specify the name we gave the application when we signed up for Engage, along with the API key we were given.</p>
+
+<p class="codeFilePath">/config/initializers/devise.rb</p>
+<pre class="ruby">
+Devise.setup do |config|
+  # Configure the e-mail address which will be shown in DeviseMailer.
+  config.mailer_sender = &quot;test@example.com&quot;
+  config.rpx_application_name = &#x27;asciicasts&#x27;
+  RPXNow.api_key = &quot;aaabbbcccdddeeefff&quot; # real key goes here.
+end
+</pre>
+
+<p>Now that we have everything set up we can replace our application&rsquo;s &ldquo;Sign up&rdquo; and &ldquo;Sign in&rdquo; links in the layout file with a link to the Engage signup page, passing in the URL we want to return to after signing in.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= link_to_rpx "Sign in", user_session_url %&gt;
+</pre>
+
+<h3>Logging In</h3>
+
+<p>We now have the code in place to try logging in. When we click the &ldquo;Sign in&rdquo; link on our application we&rsquo;ll now be taken to a page on Janrain&rsquo;s server.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/478/original/E233I04.png" width="814" height="444" alt="We can now sign in with Engage."/>
+</div>
+
+<p>We can now sign in using one of the accounts above and, assuming we enter our details correctly we&rsquo;ll be redirected back to our application.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/479/original/E233I05.png" width="813" height="375" alt="Signed in successfully via Google."/>
+</div>
+
+<p>Note that we&rsquo;re now signed in to the application.</p>
+
+<h3>A Better Login Page</h3>
+
+<p>If we want the sign-in panel to be a cool JavaScript overlay instead of a separate page we can do so by including the following line of code just before the closing body tag on the layout page.</p> 
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= javascript_include_rpx(user_session_url) %&gt;
+</pre>
+
+<p>This will add some JavaScript to our application that shows an overlay on the site when a user tries to log in.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/480/original/E233I06.png" width="813" height="413" alt="Using a popup panel to sign in"/>
+</div>
+
+<p>Alternatively we could embed the sign-in panel anywhere in our application by using an iframe. To do this all we need to do is to add the following line of code somewhere in the view code.</p>
+
+<pre class="ruby">
+&lt;%= embed_rpx user_session_url %&gt;
+</pre>
+
+<p>This code is best placed somewhere near the sign up or login forms to provide an alternative way to log in.</p>
+
+<p>Everything we&rsquo;ve shown you in this episode is in the Devise RPX Connectable README file, along with some information about additional options that can be passed in so that we can request additional information about each logged-in user.</p>

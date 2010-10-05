@@ -1,0 +1,174 @@
+<p>En el episodio anterior introdujimos <a href="http://github.com/justinfrench/formtastic">Formtastic</a>, una excelente gema para producir vistas con muy poco c&oacute;digo. Con &eacute;l creamos una aplicaci&oacute;n b&aacute;sica para una cl&iacute;nica veterinaria que ten&iacute;a formularios para agregar y editar animales y categor&iacute;as de animales. En este episodio usaremos algunas funciones m&aacute;s avanzadas de Formtastic para extender nuestra aplicaci&oacute;n.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/222/original/E185I01.png" width="800" height="477" alt="La p&aacute;gina para editar un animal"/>
+</div>
+
+<p>Al final del &uacute;ltimo episodio, ten&iacute;amos un formulario que pod&iacute;amos utilizar para crear y actualizar los detalles de un animal. En este episodio modificaremos el formulario para agregarle algunas caracter&iacute;sticas m&aacute;s.</p>
+
+<h3>Manejando Relaciones Many-to-Many</h3>
+
+<p>Un animal puede llegar a la cl&iacute;nica veterinaria con un varios problemas, por lo que la primer modificaci&oacute;n que vamos a realizar en nuestra aplicaci&oacute;n es agregar un modelo <code>Problem</code>. Este modelo tendr&aacute; una relaci&oacute;n many-to-many con <code>Animal</code>. En el episodio previo, vimos lo bien que Formtastic maneja las relaciones one-to-many en los formularios cuando lo utilizamos para crear un dropdown de la categor&iacute;a. No es necesario decir que puede trabajar con relaciones many-to-many de igual forma.</p>
+
+<p>Comenzaremos por crear el scaffolding del modelo <code>Problem</code>. Como en el episodio anterior, utilizaremos <a href="http://github.com/ryanb/nifty-generators">nifty generators</a> de Ryan Bates para crear el scaffold de una forma m&aacute;s simple.</p>
+<pre class="terminal">
+script/generate nifty_scaffold problem name:string
+</pre>
+<p>Como estamos creando una relaci&oacute;n many-to-many necesitaremos un modelo de join. Crearemos uno llamado <code>Symptom</code> que referenciar&aacute; a ambos, <code>Animal</code> y <code>Problem</code>.</p>
+<pre class="terminal">
+script/generate nifty_scaffold symptom animal_id:integer problem_id:integer --skip-controller
+</pre>
+<p>No hay necesidad de manipular los s&iacute;ntomas directamente desde la interfaz web, por lo que utilizamos la opci&oacute;n <code>--skip-controller</code> para evitar crear el controlador.</p>
+
+<p>Para completar este paso, migraremos nuestra base de datos para crear las nuevas tablas.</p>
+<pre class="terminal">
+rake db:migrate
+</pre>
+<p>Luego, debemos configurar la asociaci&oacute;n entre los modelos <code>Problem</code>, <code>Symptom</code> y <code>Animal</code>. Un <code>Problem</code> tiene muchos <code>Symptoms</code> y <code>Animals</code>:</p>
+<pre class="ruby">
+class Problem &lt; ActiveRecord::Base
+  attr_accessible :name
+  has_many :symptoms
+  has_many :animals, :through =&gt; :symptoms
+end
+</pre>
+<p>Un <code>Symptom</code> pertenece a un <code>Problem</code> y a un <code>Animal</code>:</p>
+<pre class="ruby">
+class Symptom &lt; ActiveRecord::Base
+  attr_accessible :animal_id, :problem_id
+  belongs_to :animal
+  belongs_to :problem
+end
+</pre>
+<p>Finalmente un <code>Animal</code> tiene muchos <code>Symptoms</code> y <code>Problems</code>:</p>
+<pre class="ruby">
+class Animal &lt; ActiveRecord::Base
+  attr_accessible :name, :category_id, :born_on, :female, :problem_ids
+  belongs_to :category
+  has_many :symptoms
+  has_many :problems, :through =&gt; :symptoms
+end
+</pre>
+<p>Hay un cambio m&aacute;s que debemos realizar a nuestro modelo <code>Animal</code>. Como utilizaremos <code>attr_accessible</code> para controlar que campos pueden ser actualizados por asignamiento masivo, necesitamos agregar <code>problem_ids</code> a la lista de campos accesibles de forma de poder asignar m&uacute;ltiples problemas a un animal de forma masiva y permitir actualizaciones a trav&eacute;s de la interfaz de usuario.</p>
+
+<p>Ahora que modificamos los modelos podemos actualizar el formulario para que los problemas puedan ser asignado a los animales. Solo necesitamos agregar <code>&lt;%= f.input :problems %&gt;</code> al formulario de animal para mostrar los problemas como un select m&uacute;ltiple.</p>
+<pre class="ruby">
+&lt;% semantic_form_for @animal do |f| %&gt;
+  &lt;% f.inputs do %&gt;
+    &lt;%= f.input :name %&gt;
+    &lt;%= f.input :born_on, :start_year =&gt; 1900 %&gt;
+    &lt;%= f.input :category, :include_blank =&gt; false %&gt;
+    &lt;%= f.input :female, :as =&gt; :radio, :label =&gt; &quot;Gender&quot;, :collection =&gt; [[&quot;Male&quot;, false], [&quot;Female&quot;, true]] %&gt;
+    &lt;%= f.input :problems %&gt;
+  &lt;% end %&gt;
+  &lt;%= f.buttons %&gt;
+&lt;% end %&gt;
+</pre>
+<p>Si recargamos la p&aacute;gina ahora, veremos la lista de problemas en el formulario. (Agregamos algunos problemas a la base de datos de forma de tener algo que mostrar.) Si seleccionamos un par de problemas y salvamos nuestro animal veremos que est&aacute;n seleccionados al volver a editar el animal.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/223/original/E185I02.png" width="800" height="588" alt="Los problemas listados con un select m&uacute;ltiple"/>
+</div>
+
+<p>Nos gustar&iacute;a mostrar los problemas como una lista de checkboxes en lugar de un select m&uacute;ltiple. La &uacute;ltima vez utilizamos la opcion :as de Formtastic para cambiar checkboxes a botones de radio y podemos realizar el mismo cambio aqu&iacute; para mostrar la lista como checkboxes.</p>
+<pre class="ruby">
+&lt;%= f.input :problems, :as =&gt; :checkboxes %&gt;
+</pre>
+<p>Otra recarga de la p&aacute;gina y los problemas son mostrados como checkboxes, con los &iacute;tems previamente seleccionados en el select m&uacute;ltiple chequeados.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/224/original/E185I03.png" width="800" height="583" alt="Los problemas son ahora mostrados como una lista de checkboxes"/>
+</div>
+
+<h3>Trabajando Con Campos Requeridos</h3>
+
+<p>Cada etiqueta de campo tiene un asterisco a su derecha para indicar que es requerido. Formtastic hace que todos los campos sean requeridos por defecto. Podemos sobreescribir este comportamiento para un campo espec&iacute;fico utilizando la opci&oacute;n <code>:required</code>.</p>
+<pre class="ruby">
+&lt;%= f.input :problems, :as =&gt; :check_boxes, :required =&gt; false %&gt;
+</pre>
+<p>Controlar esto campo-por-campo puede convertirse r&aacute;pidamente en una molestia; ser&iacute;a mucho m&aacute;s f&aacute;cil si podemos utilizar las validaciones del modelo para controlar que campos son requeridos. Formtastic soporta este comportamiento, pero antes debemos instalar un plugin llamado <a href="http://github.com/redinger/validation_reflection">validation_reflection</a> para poder utilizarlo.</p>
+
+<p>Podemos instalar el plugin en nuestra aplicaci&oacute;n desde GitHub.</p>
+<pre class="terminal">
+script/plugin install git://github.com/redinger/validation_reflection.git
+</pre>
+<p>Una vez que validation_reflection est&aacute; instalado, necesitamos reiniciar nuestro servidor as&iacute; nuestro plugin es reconocido. Si recargamos la p&aacute;gina veremos que los asteriscos se han ido. Esto es porque ninguno de los campos del modelo Animal tiene validaciones.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/225/original/E185I04.png" width="800" height="583" alt="Los indicadores de campos requeridos no se muestran m&aacute;s."/>
+</div>
+
+<p>Podemos ahora agregar validaciones a los atributos <code>name</code> y <code>born_on</code> para que sear requeridos&hellip;</p>
+<pre class="ruby">
+class Animal &lt; ActiveRecord::Base
+  attr_accessible :name, :category_id, :born_on, :female, :problem_ids
+  belongs_to :category
+  has_many :symptoms
+  has_many :problems, :through =&gt; :symptoms
+  validates_presence_of :name, :born_on
+end
+</pre>
+<p>&hellip;y si recargamos el formulario nuevamente, los asteriscos aparecer&aacute;n nuevamente en las etiquetas de esos campos.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/226/original/E185I05.png" width="800" height="582" alt="Los dos primeros campos son ahora requeridos por las validaciones del modelo"/>
+</div>
+
+<h3>Como Maneja Formtastic Los Mensajes De Error</h3>
+
+<p>Formtastic muestra los mensajes de error de un formulario junto a cada campo. Si quitamos el nombre de nuestro animal y tratamos de actualizar, se mostrar&aacute; el mensaje de error por defecto.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/227/original/E185I06.png" width="797" height="280" alt="El texto por defecto en la validaci&oacute;n de campo."/>
+</div>
+
+<p>Podemos cambiar el comportamiento si lo creemos necesario alterando la configuraci&oacute;n de Formtastic</p>
+
+<p>Lo mejor es colocar los detalles de configuraci&oacute;n en un archivo en el directorio <code>/config/initializers</code>. Llamaremos al archivo <code>formtastic_config.rb</code>. La <a href="http://github.com/justinfrench/formtastic">p&aacute;gina GitHub de Formtastic</a> tiene los detalles de lo que se puede poner dentro del archivo de configuraci&oacute;n e incluso hay un <a href="http://github.com/justinfrench/formtastic/blob/master/generators/formtastic/templates/formtastic.rb">archivo de prueba</a> que podemos consultar. Una de las opciones de configuraci&oacute;n listadas aqu&iacute; es <code>inline_errors</code>, que es la que debemos cambiar para indicar donde mostrar los errores del formulario. Para ocultar los errores podemos setear <code>inline_errors</code> a <code>:none</code> en el archivo de configuraci&oacute;n.</p>
+
+<pre class="ruby">Formtastic::SemanticFormBuilder.inline_errors = :none</pre>
+
+<p>Si tratamos de enviar el formulario inv&aacute;lido nuevamente no nos mostrar&aacute; errores. Si queremos desplegar los errores como una lista en el tope del formulario podemos utilizar el m&eacute;todo <code>error_messages</code> para mostrar los errores en el estilo &ldquo;cl&aacute;sico&rdquo; de Rails.</p> 
+<pre class="ruby">
+&lt;% semantic_form_for @animal do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;% f.inputs do %&gt;
+  &lt;!-- rest of form --&gt;
+</pre>
+<p>Los errores son desplegados ahora en el tope del formulario.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/228/original/E185I07.png" width="790" height="380" alt="Los errores son desplegados ahora en el tope del formulario."/>
+</div>
+
+<h3>Hints</h3>
+
+<p>Hay una opci&oacute;n de campos de Formtastic que a&uacute;n no hemos mostrado: <code>:hint</code>. Como su nombre sugiere, <code>:hint</code> muestra un mensaje de hint junto al campo. Para agregar un hint al campo de nombre, solamente necesitamos agregar el mensaje apropiado.</p>
+
+<pre class="ruby">&lt;%= f.input :name, :hint =&gt; &quot;Enter the owner&amp;rsquo;s name if none is provided.&quot; %&gt;</pre>
+<p>Cuando recargamos la p&aacute;gina el mensaje de hint es mostrado debajo del campo del formulario.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/229/original/E185I08.png" width="816" height="286" alt="El hint es mostrado debajo del campo."/>
+</div>
+
+<p>Si queremos darle estilo al mensaje de hint o a a cualquier otra parte de nuestro formulario, lo podemos hacer modificando el archivo <code>formtastic_changes.css</code> que Formtastic gener&oacute; en el pasado episodio cuando ejecutamos</p>
+<pre class="terminal">
+script/generate formtastic_stylesheets
+</pre>
+<p>El archivo esta pre-cargado con una secci&oacute;n de comentarios, la cu&aacute;l para nuestra suerte, incluye un ejemplo de como alterar el estilo del texto del hint. Si queremos que el tama&ntilde;o del texto del hint sea de 11px y en formato it&aacute;lica, podemos hacerlo utilizando el siguiente CSS:</p>
+<pre class="terminal">
+form.formtastic fieldset ol li p.inline-hints { 
+  font-style: italic;
+  font-size: 11px;
+}
+</pre>
+<p>Recargamos el formulario nuevamente y el texto del hint habr&aacute; cambiado.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/230/original/E185I09.png" width="816" height="286" alt="Nuestro hint ahora tiene estilo."/>
+</div>
+
+<p>Si queremos realizar m&aacute;s cambios a la apariencia del formulario, lo mejor es mirar el archivo <code>formtastic.css</code> para ver como est&aacute;n definidos los estilos por defecto. Podemos utilizar selectores similares en <code>formtastic_changes.css</code> para sobre-escribir los originales.</p>
+
+<p>Eso es todo por este episodio. Es de esperar que te ha dado suficiente informaci&oacute;n acerca de Formtastic para persuadirte a que lo pruebes en tus propias aplicaciones. Hay una serie de caracter&iacute;sticas que no hemos logrado cubrir en el curso de estos dos episodios. La documentaci&oacute;n de Formtastic cubre todas sus caracter&iacute;sticas y vale la pena utilizarla para encontrar m&aacute;s informaci&oacute;n, incluido el soporte de internacionalizaci&oacute;n</p>

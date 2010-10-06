@@ -1,0 +1,355 @@
+<p>L&rsquo;episodio di questa settimana sar&agrave; un po&rsquo; diverso. Andremo infatti ad esplorare le parti interne di Rails 3 e a spulciare fra il suo codice, focalizzandoci su quello che gestisce il routing. Qui sotto &egrave; riportato il file di route dell&rsquo;applicazione del negozio virtuale dell&rsquo;ultimo episodio. Per poter sapere ci&ograve; che fa di fatto questo codice di routing, daremo un&rsquo;occhiata al codice Rails che viene richiamato quando lo si lancia:</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Store::Application.routes.draw do
+  resources :products do
+    resources :reviews
+  end
+  root :to =&gt; &quot;products#index&quot;
+end
+</pre>
+
+<p>Potreste domandarvi quale sia il punto di tutto ci&ograve; e se serva a qualcosa andare a vedere del codice non nostro, ma secondo me leggere codice Ruby scritto da altri &egrave; un eccellente modo di migliorare le proprie competenze in Ruby. Vedrete trucchi e tecniche che altri usano e che potrete in seguito riciclare per il vostro codice. Leggere il codice sorgente di Rails &egrave; anche un buon modo per imparare ad usare meglio Rails e proprio in questa occasione potremo scoprire modi migliori di scrivere il file di routing. Se avete intenzione di provare a debuggare un problema o di ottimizzare del codice in uno dei vostri progetti, o se state persino per considerare seriamente l&rsquo;idea di contribuire a Rails, allora leggere le sue parti interne rappresenta un ottimo modo per cominciare.</p>
+
+<h3>Partiamo</h3>
+
+<p>Questo episodio tratter&agrave; alcuni aspetti avanzati, per cui si assume che conosciate gi&agrave; il funzionamento del routing in Rails 3. Se cos&igrave; non fosse, o se voleste rinfrescare le vostre conoscenze in merito, potreste <a href="http://railscasts.com/episodes/203-routing-in-rails-3">guardare</a> o <a href="http://it.asciicasts.com/episodes/203-routing-in-rails-3">leggere</a> l&rsquo;episodio 203 prima di questo, considerato anche che la sintassi di Rails 3 differisce abbastanza rispetto a Rails 2.</p>
+
+<p>Il codice sorgente di Rails &egrave; conservato su <a href="http://github.com/rails/rails">Github</a> ed &egrave; semplice clonare il repository per consultare il codice contenutovi. Dobbiamo solo lanciare:</p>
+
+<pre class="terminal">
+$ git clone git://github.com/rails/rails.git
+</pre>
+
+<p>Il branch master del repository che abbiamo scaricato &egrave; per Rails 3.1, che &egrave; la versione attualemente in sviluppo, ma noi vogliamo consultare i sorgenti della stessa versione su cui gira la nostra applicazione. Possiamo spostarci alla versione taggata 3.0.0 lanciando:</p>
+
+<pre class="terminal">
+$ git checkout v3.0.0
+</pre>
+
+<p>Aprendo la cartella di Rails notiamo subito che Rails &egrave; composto da tante parti differenti. Tutto ci&ograve; che concerne i controller, le viste o i route, si trova sotto la cartella <code>actionpack</code>, per cui &egrave; questa la parte del codice che ci interessa:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/472/original/E231I01.png" width="795" height="454" alt="La struttura delle cartelle del codice sorgente di Rails."/>
+</div>
+
+<p>Sotto <code>actionpack</code> la maggior parte del codice riguardante il routing &egrave; sotto la cartella <code>lib/action_dispatch</code>:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/473/original/E231I02.png?1284930544" width="796" height="540" alt="La struttura della cartella actionpack che mostra i file di routing."/>
+</div>
+
+<h3>I metodi <code>routes</code> e <code>draw</code></h3>
+
+<p>Prima di cominciare a guardare il codice sorgente di Rails, ritorniamo alla nostra applicazione e guardiamo nuovamente il file di route:</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Store::Application.routes.draw do
+  resources :products do
+    resources :reviews
+  end
+  root :to =&gt; &quot;products#index&quot;
+end
+</pre>
+
+<p>La prima linea del codice riportato di sopra chiama un metodo chiamato routes sulla classe <code>Store::Application</code>, dove <code>Store</code> &egrave; il nome della nostra applicazione. Se guardiamo al file <code>application.rb</code>, vedremo che tale nome dell&rsquo;applicazione &egrave; definito proprio l&agrave;:</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby">
+require File.expand_path(&#x27;../boot&#x27;, __FILE__)
+
+require &#x27;rails/all&#x27;
+
+# If you have a Gemfile, require the gems listed there, including any gems
+# you&#x27;ve limited to :test, :development, or :production.
+Bundler.require(:default, Rails.env) if defined?(Bundler)
+
+module Store
+  class Application &lt; Rails::Application
+     # Configure sensitive parameters which will be filtered from the log file.
+    config.filter_parameters += [:password]
+  end
+end
+</pre>
+
+<p>La classe <code>Store::Application</code> &egrave; dove molte delle configurazioni dell&rsquo;applicazione avvengono e specializza da <code>Rails::Application</code>. Ogni cosa prefissata dal namespace <code>Rails</code> &egrave; tipicamente definita nella cartella <code>railties</code> nel codice sorgente Rails; il codice della classe per <code>Rails::Application</code> &egrave; definito in <code>rails/railties/lib/rails/application.rb</code> e in questo file troveremo il metodo <code>routes</code>:</p>
+
+<p class="codeFilePath">rails/railties/lib/rails/application.rb</p>
+<pre class="ruby">
+def routes
+  @routes ||= ActionDispatch::Routing::RouteSet.new
+end
+</pre>
+
+<p>Questo &egrave; il metodo che viene richiamato nel file di route della nostra applicazione e tutto ci&ograve; che fa &egrave; di creare una nuova <code>ActionDispatch::Routing::RouteSet</code>. Il metodo route restituisce questo nuovo <code>RouteSet</code> e nella prima riga del nostro file di route chiamiamo proprio la <code>draw</code> su questo oggetto. Vediamo ci&ograve; che fa il metodo <code>draw</code>.</p>
+
+<p>Nel codice sorgente di Rails una classe la si pu&ograve; spesso trovare in un file omonimo o dal nome analogo, infatti la classe <code>RouteSet</code> non fa eccezione. All&rsquo;interno della classe troviamo il metodo <code>draw</code>:</p>
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/route_set.rb</p>
+<pre class="ruby">
+def draw(&amp;block)
+  clear! unless @disable_clear_and_finalize
+
+  mapper = Mapper.new(self)
+  if block.arity == 1
+    mapper.instance_exec(DeprecatedMapper.new(self), &amp;block)
+  else
+    mapper.instance_exec(&amp;block)
+  end
+
+   finalize! unless @disable_clear_and_finalize
+
+   nil
+end
+</pre>
+
+<p>Il metodo <code>draw</code> accetta un blocco per argomento. Per prima cosa ripulisce qualsiasi eventuale route gi&agrave; presente, poi crea un nuovo oggetto <code>Mapper</code>, passando ad esso <code>self</code> (il <code>RouteSet</code>). (Approfondiremo la classe <code>Mapper</code> fra poco.) Dopodich&egrave; il metodo controlla l&rsquo;<code>arity</code> del blocco, ossia quanti argomenti sono stati passati ad esso. Se gli &egrave; stato passato un unico argomento, allora significa che il file di routing sta usando una sintassi Rails 2. Tutto ci&ograve; viene fatto ovviamente per avere retrocompatibilit&agrave; con le versioni precedenti a Rails 3, che passano una variabile <code>map</code> al blocco, in questo modo:</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Store::Application.routes.draw do |map|
+  # Instaradamenti a la Rails 2...
+end
+</pre>
+
+<p>A prescindere poi che l&rsquo;applicazione usi una sintassi di routing stile Rails 2 piuttosto che Rails 3, viene chiamata una <code>instance_exec</code>. Nel caso di sintassi Rails 3, si passa direttamente il blocco a tale metodo, mentre invece se si tratta di sintassi Rails 2, viene creato un nuovo oggetto <code>DeprecatedMapper</code> che viene passato come primo argomento oltre al blocco. In entrambi i casi, ci&ograve; far&agrave; s&igrave; che il blocco sia eseguito come se fosse stato definito all&rsquo;interno dell&rsquo;istanza del mapper. La conseguenza di questa azione implica che tutto ci&ograve; che &egrave; definito all&rsquo;interno del blocco nel file di route, viene invocato sull&rsquo;istanza di un oggetto <code>Mapper</code>. Questo trucco ci rende disponibile quella potente sintassi domain-specific dei file di route in Rails 3, nei quali &egrave; possibile chiamare semplicemente dei metodi tipo <code>resources</code> senza la necessit&agrave; di dover esplicitamente farlo su istanze specifiche di una determinata classe, come invece si faceva in Rails 2, quando si usava la <code>map.resources</code>.</p>
+
+<p>L&rsquo;ultima cosa che viene fatta dal metodo draw &egrave; la chiamata al <code>finalize!</code>, che &egrave; definito nella classe <code>RouteSet</code> e che "congela" l&rsquo;insieme dei route.</p>
+
+<h3>Come avviene il mapping di un route</h3>
+
+<p>Ora che sappiamo che tutto quanto si trova dentro al file di route in Rails 3 viene invocato su di un&rsquo;istanza di <code>Mapper</code>, usiamo un semplice route come esempio e vediamo come viene processato:</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Store::Application.routes.draw do
+  match &#x27;products&#x27;, :to =&gt; &#x27;products#index&#x27;
+end
+</pre>
+
+<p>Diamo un&rsquo;occhiata alla classe <code>Mapper</code> per vedere cosa fa il metodo <code>match</code>. Ci sono molti metodi denominati <code>match</code> all&rsquo;interno di quella classe; quello che ci interessa &egrave; nel module <code>Base</code>:</p>
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+<pre class="ruby">
+module Base
+  def initialize(set) #:nodoc:
+    @set = set
+  end
+
+  def root(options = {})
+    match &#x27;/&#x27;, options.reverse_merge(:as =&gt; :root)
+  end
+
+  def match(path, options=nil)
+    mapping = Mapping.new(@set, @scope, path, options || {}).to_route
+    @set.add_route(*mapping)
+    self
+  end
+
+  # other methods
+
+end
+</pre>
+
+<p>Per creare un nuovo oggetto <code>Mapper</code>, dobbiamo passare al costruttore un oggetto <code>RouteSet</code>. Infatti, quando viene invocato il metodo <code>match</code> nel file di route per creare un nuovo route, questo nuovo route viene aggiunto all&rsquo;insieme passato. Tutto ci&ograve; avviene mediante la creazione di un nuovo oggetto di tipo <code>Mapping</code> e la conseguente invocazione su di esso del metodo <code>to_route</code>. Si noti anche il metodo <code>root</code>, che &egrave; molto semplice. Tutto ci&ograve; che fa &egrave; chiamare <code>match</code>, passandogli l&rsquo;URL di root e aggiungendo l&rsquo;opzione <code>:as =&gt; :root</code>, affinch&egrave; diventi un named route. Ogni volta che si definisce nella propria applicazione Rails un URL di root, dietro le quinte viene dunque semplicemente invocato il metodo <code>match</code>.</p>
+
+<p>Ora vediamo pi&ugrave; in dettaglio la classe <code>Mapping</code>, definita nel file <code>mapper.rb</code>:</p> 
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+<pre class="ruby">
+class Mapping #:nodoc:
+  IGNORE_OPTIONS = [:to, :as, :via, :on, :constraints, :defaults, :only, :except, :anchor, :shallow, :shallow_path, :shallow_prefix]
+
+  def initialize(set, scope, path, options)
+    @set, @scope = set, scope
+    @options = (@scope[:options] || {}).merge(options)
+    @path = normalize_path(path)
+    normalize_options!
+  end
+
+  def to_route
+    [ app, conditions, requirements, defaults, @options[:as], @options[:anchor] ]
+  end
+
+  private 
+
+  def normalize_options!
+    path_without_format = @path.sub(/\(\.:format\)$/, &#x27;&#x27;)
+
+    if using_match_shorthand?(path_without_format, @options)
+      to_shorthand    = @options[:to].blank?
+      @options[:to] ||= path_without_format[1..-1].sub(%r{/([^/]*)$}, &#x27;#\1&#x27;)
+      @options[:as] ||= Mapper.normalize_name(path_without_format)
+    end
+
+    @options.merge!(default_controller_and_action(to_shorthand))
+  end
+
+  # other private methods omitted.
+
+end
+</pre>
+
+<p>All&rsquo;atto dell&rsquo;inizializzazione del <code>Mapper</code>, sono impostate alcune variabili di istanza in base ai parametri passati, dopodich&egrave; viene invocato il <code>normalize_options!</code>. Il metodo <code>normalize_options!</code> esegue un controllo per vedere se si sta utilizzando un determinato tipo di sintassi "abbreviata" nel file di route e nel metodo <code>using_match_shorthand?</code> che viene chiamato, osserviamo un interessante escamotage. Esiste un modo rapido per definire le action di un controller in cui si separa il controller e i nomi delle action con uno slash:</p>
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+<pre class="ruby">
+# match &quot;account/overview&quot;
+def using_match_shorthand?(path, options)
+  path &amp;&amp; options.except(:via, :anchor, :to, :as).empty? &amp;&amp; path =~ %r{^/[\w\/]+$}
+end
+</pre>
+
+<p>Se abbiamo definito il nostro route in questo modo, allora le opzioni <code>:to</code> e <code>:as</code> saranno impostate per noi, a seconda del nome dell&rsquo;URL. Verifichiamolo tornando al file di route della nostra applicazione, aggiungendo un altro route che utilizzi la sintassi smart:</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Store::Application.routes.draw do
+  match &#x27;products&#x27;, :to =&gt; &#x27;products#index&#x27;
+  match &#x27;products/recent&#x27;, :to =&gt; &#x27;products#recent&#x27;
+end
+</pre>
+
+<p>Abbiamo fornito un parametro <code>:to</code> a questo nuovo route, ma verrebbe comunque aggiunto automaticamente se non lo avessimo specificato. Il metodo di shortcut crea automaticamente per noi anche un parametro <code>:as</code>, come se avessimo aggiunto <code>:as =&gt; :products_recent</code>.</p>
+
+<h3>Come viene usato Rack nel routing</h3>
+
+<p>Tornando al metodo <code>match</code>, una volta creato un nuovo oggetto <code>Mapping</code>, richiamiamo il metodo <code>to_route</code> su di esso. Questo metodo restituisce un array di opzioni che sono usate per creare un nuovo route:</p>
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+<pre class="ruby">
+def to_route
+  [ app, conditions, requirements, defaults, @options[:as], @options[:anchor] ]
+end
+</pre>
+
+<p>I primi quattro elementi nell&rsquo;array di sopra sono i valori restituiti dalle chiamate ai metodi presenti nella classe <code>Mapper</code>:</p>
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+<pre class="ruby">
+def app
+  Constraints.new(
+    to.respond_to?(:call) ? to : Routing::RouteSet::Dispatcher.new(:defaults =&gt; defaults),
+    blocks,
+    @set.request_class
+  )
+end
+
+def conditions
+  { :path_info =&gt; @path }.merge(constraints).merge(request_method_condition)
+end
+
+def requirements
+  @requirements ||= (@options[:constraints].is_a?(Hash) ? @options[:constraints] : {}).tap do |requirements|
+    requirements.reverse_merge!(@scope[:constraints]) if @scope[:constraints]
+    @options.each { |k, v| requirements[k] = v if v.is_a?(Regexp) }
+   end
+end
+
+def defaults
+  @defaults ||= (@options[:defaults] || {}).tap do |defaults|
+    defaults.reverse_merge!(@scope[:defaults]) if @scope[:defaults]
+    @options.each { |k, v| defaults[k] = v unless v.is_a?(Regexp) || IGNORE_OPTIONS.include?(k.to_sym) }
+  end
+end
+</pre>
+
+<p>La prima opzione &egrave; <code>app</code>; ogniqualvolta vediate un qualcosa chiamato <code>app</code> nel codice sorgente di Rails, &egrave; molto probabile che si faccia riferimento a un&rsquo;applicazione Rack. Questo metodo <code>app</code> restituisce un nuovo oggetto <code>Constraints</code>, per cui vediamo se si tratta effettivamente, in questo caso, di un&rsquo;applicazione Rack.</p>
+
+<p>La classe <code>Constraints</code> &egrave; definita nello stesso file <code>mapper.rb</code>. Accetta una serie di metodi, uno dei quali &egrave; chiamato <code>call</code> e prende in ingresso come parametro un environment:</p>
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+<pre class="ruby">
+def call(env)
+  req = @request.new(env)
+
+  @constraints.each { |constraint|
+    if constraint.respond_to?(:matches?) &amp;&amp; !constraint.matches?(req)
+      return [ 404, {&#x27;X-Cascade&#x27; =&gt; &#x27;pass&#x27;}, [] ]
+    elsif constraint.respond_to?(:call) &amp;&amp; !constraint.call(*constraint_args(constraint, req))
+      return [ 404, {&#x27;X-Cascade&#x27; =&gt; &#x27;pass&#x27;}, [] ]
+    end
+  }
+
+  @app.call(env)
+end
+</pre>
+
+<p>La classe <code>Constraints</code> sembra proprio un&rsquo;applicazione Rack. Una cosa interessante sulla classe <code>Constraints</code>  &egrave; che fa l&rsquo;override del metodo <code>self.new</code>. Potreste domandarvi il perch&egrave;, dal momento che esiste gi&agrave; anche un metodo <code>initialize</code>:</p>
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+<pre class="ruby">
+def self.new(app, constraints, request = Rack::Request)
+  if constraints.any?
+    super(app, constraints, request)
+  else
+    app
+  end
+end
+
+attr_reader :app
+
+def initialize(app, constraints, request)
+  @app, @constraints, @request = app, constraints, request
+end
+</pre>
+
+<p>La ragione dietro a questa scelta &egrave; solo di performance. <code>Constraints</code> &egrave; un pezzo del middleware di Rack; in altri termini, racchiude un&rsquo;altra applicazione Rack. Il primo argomento passato al <code>self.new</code> &egrave; <code>app</code>, che rappresenta un&rsquo;applicazione Rack; quando viene invocato il metodo <code>call</code>, se viene scatenato uno dei constraints, restituisce un errore <code>404</code>, altrimenti scatener&agrave; l&rsquo;applicazione Rack che sta wrappando. Il metodo <code>self.new</code> fa parte di logiche di ottimizzazione di performance e serve affinch&egrave;, quando viene chiamato, Rails non allochi un altro oggetto in memoria, wrappandolo e usandolo, ma piuttosto restituisca semplicemente l&rsquo;applicazione Rack iniziale stessa.</p>
+
+<p>Torniamo ora al codice che richiama tutto ci&ograve;. Si noti che i primi due argomenti sono una applicazione Rack e un array di vincoli. Il tutto viene richiamato nel metodo <code>app</code> della classe <code>Mapping</code>. Quando qui si crea un nuovo vincolo, controlliamo per vedere se il metodo to risponde al <code>call</code>. (Il metodo <code>to</code> restituisce semplicemente l&rsquo;opzione <code>:to</code> che era stata definita per il route.) In caso affermativo, si tratta di un&rsquo;applicazione Rack e viene passata questa; altrimenti si passa un nuovo oggetto <code>RouteSet::Dispatcher</code> con un paio di opzioni di default:</p>
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+<pre class="ruby">
+def app
+  Constraints.new(
+    to.respond_to?(:call) ? to : Routing::RouteSet::Dispatcher.new(:defaults =&gt; defaults),
+    blocks,
+    @set.request_class
+  )
+end
+</pre>
+
+<p>E&rsquo; questo codice a darci la possibilit&agrave; di passare un&rsquo;applicazione Rack ad un route in questa maniera:</p>
+
+<pre class="ruby">
+&nbsp;&nbsp;root&nbsp;:to&nbsp;=&gt;&nbsp;proc&nbsp;{&nbsp;|env|&nbsp;[200,&nbsp;{},&nbsp;[&quot;Welcome&quot;]]&nbsp;}
+</pre>
+
+<p>Ci sono pi&ugrave; approfondimenti sull&rsquo;uso di Rack nei route nell&rsquo;episodio 222 [<a href="http://railscasts.com/episodes/222-rack-in-rails-3">guardalo</a>, <a href="http://it.asciicasts.com/episodes/222-rack-in-rails-3">leggilo</a>]. Poterlo usare nei route ci da molta flessibilit&agrave;.</p>
+
+<p>Se non passiamo un&rsquo;applicazione Rack all&rsquo;opzione <code>:to</code>, allora viene creato un nuovo oggetto <code>RouteSet::Dispatcher</code>. Vediamo ora come viene gestito quest&rsquo;ultimo.</p>
+
+<p>La classe <code>Dispatcher</code> gestisce lo smistamento di una richiesta al controller corretto che dovr&agrave; servirla. Nel suo metodo <code>controller_reference</code> si pu&ograve; vedere il codice dove viene identificato l&rsquo;opportuno controller:</p> 
+ 
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/route_set.rb</p>
+<pre class="ruby">
+def controller_reference(controller_param)
+  unless controller = @controllers[controller_param]
+    controller_name = &quot;#{controller_param.camelize}Controller&quot;
+    controller = @controllers[controller_param] =
+       ActiveSupport::Dependencies.ref(controller_name)
+  end
+  controller.get
+end
+</pre>
+
+<p>Questa classe ha anche dei metodi per fare cose tipo impostare l&rsquo;action di default a <code>index</code> se non ne &egrave; stata definita una e un metodo <code>dispatch</code> che chiama la action stessa e che restituisce un&rsquo;applicazione Rack. Tutto ci&ograve; significa che possiamo prendere uno qualsiasi dei nostri controller, chiamare <code>action</code> su di esso, passandogli il nome della action e ottenendo un&rsquo;applicazione Rack in risposta:</p>
+
+<pre class="terminal">
+ruby-1.9.2-p0 &gt; ProductsController.action(&quot;index&quot;)
+ =&gt; #&lt;Proc:0x00000100ec56c0@/Users/asalicetti/.rvm/gems/ruby-1.9.2-p0/gems/actionpack-3.0.0/lib/action_controller/metal.rb:172&gt;
+</pre> 
+
+<p>Questo &egrave; quel che succede dietro le quinte quando passiamo un file di route tipo questo:</p>
+
+<pre class="ruby">
+match &#x27;products&#x27;, :to =&gt; &#x27;products#index&#x27;
+</pre>
+
+<p>La stringa <code>products#index</code> &egrave; convertita in <code>ProductsController.action(&quot;index&quot;)</code> e questa restituisce un&rsquo;applicazione Rack. La sintassi della stringa &egrave; una banale scorciatoia per fare la stessa cosa.</p>
+
+<p>C&rsquo;&egrave; molto altro in merito al routing che potremmo dire in questo episodio, ma questo sembra anche un buon momento per fermarsi. Ci sono i metodi <code>resources</code> che generano una serie di route, ci sono i vari metodi che permettono di limitare le condizioni a determinati scope e passare blocchi a queste affinch&egrave; sia possibile realizzare un cascade di scope, ma in effetti fin qui c&rsquo;&egrave; abbastanza per incoraggiarvi ad esplorare per conto vostro il codice di routing.</p>
+
+<p>Il routing &egrave; una delle aree pi&ugrave; complicata di Rails, per cui se siete un po&rsquo; intimoriti dalla complessit&agrave; del codice che vi troverete di fronte, non vi preoccupate: &egrave; davvero complesso. Partite con alcune altre parti del codice di Rails prima e fateci il callo prima di affrontare parti pi&ugrave; complesse.</p>

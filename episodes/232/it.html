@@ -1,0 +1,390 @@
+<p>In questo episodio continueremo da dove eravamo rimasti la settimana scorsa e riprenderemo a esaminare il codice interno di Rails 3 deputato al routing. Al termine dello scorso episodio, il file di route appariva pi&ugrave; o meno cos&igrave;:</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Store::Application.routes.draw do
+  match &#x27;products&#x27;, :to =&gt; ProductsController.action(&quot;index&quot;)
+  match &#x27;products/recent&#x27;
+end
+</pre>
+
+<p>L&rsquo;ultima volta abbiamo visto il codice interno del metodo <code>match</code> e abbiamo scoperto cosa accade quando si invoca il <code>match</code> nel file di route, tuttavia ci sono diversi altri metodi che possiamo richiamare che vedremo proprio in questo episodio.</p>
+
+<p>Esaminando il codice sorgente di Rails 3.0, ritroviamo le logiche di routing nella cartella <code>actionpack/lib/actiondispatch/routing</code>. Ci focalizzeremo sulla classe <code>Mapper</code> presente in tale cartella poich&egrave;, come gi&agrave; discusso la volta scorsa, il blocco presente all&rsquo;interno del file di route &egrave; inquadrato nell&rsquo;ambito di questa classe. In altre parole, ogni metodo richiamato all&rsquo;interno del blocco &egrave; chiamato su di un&rsquo;istanza di <code>Mapper</code>, ragion per cui possiamo richiamare un qualsiasi metodo di istanza della classe <code>Mapper</code> all&rsquo;interno del nostro file di route.</p>
+
+<p>Il codice della classe <code>Mapper</code> pu&ograve; apparire un po&rsquo; destabilizzante. Il codice &egrave; tanto, quasi 1000 linee, e complesso, ma la buona notizia &egrave; che si tratta in effetti del file pi&ugrave; verboso per quel che concerne il routing di Rails, per cui se riuscirete ad afferrare le logiche che intercorrono in questo file e a capirle, vi sarete fatti un&rsquo;idea piuttosto buona del funzionamento interno complessivo del routing in Rails.</p>
+
+<p>Al fine di ottenere una buona vista di insieme del codice, collasseremo il corpo dei metodi. In TextMate la pressione dei tasti <code>Command-Option-0</code> causer&agrave; appunto il collassamento di tutto quanto &egrave; collassabile all&rsquo;interno del file. Fatto ci&ograve; espandiamo il module di radice <code>ActionDispatch</code>, il suo sottomodulo <code>Routing</code> ed infine la classe <code>Mapping</code> stessa, per avere un quadro della sua struttura:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/474/original/E232I01.png" width="732" height="798" alt="La struttura della classe Mapper."/>
+</div>
+
+<p>I primi due elementi nella classe <code>Mapper</code> sono la definizione delle classi <code>Constraints</code> e <code>Mapping</code>. Le abbiamo viste entrambe nell&rsquo;ultimo episodio, ma ci&ograve; che &egrave; significativo notare qui &egrave; come queste siano innestate sotto alla classe <code>Mapper</code>. Tutto ci&ograve; potrebbe apparire strano se vi siete appena avvicinati a Ruby e vi potreste giustamente domandare perch&egrave; dovreste aver bisogno di innestare le classi in un modo simile. Nulla di magico: la classe <code>Constraints</code> &egrave; completamente separata dalla classe <code>Mapper</code>. La ragione per cui &egrave; stata realizzata una simile struttura &egrave; che l&rsquo;innestamento delle classi definisce il namespace per le classi <code>Constraints</code> e <code>Mapping</code> in modo tale che queste appaiano sotto il namespace di <code>Mapper</code>. Non c&rsquo;&egrave; alcuna ereditariet&agrave; o condivisione di comportamento quando si realizzano simili innestamenti di classi in Ruby.</p> 
+
+<p>Spostandoci pi&ugrave; in basso, troviamo due metodi di classe, <code>self.normalize_path</code> e <code>self.normalize_name</code>. Si tratta di metodi di utilit&agrave; che sono utilizzati frequentemente all&rsquo;interno della classe. Sotto di questi, c&rsquo;&egrave; un insieme di module:</p>
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+<pre class="ruby">
+module Base...
+
+module HttpHelpers...
+
+module Scoping...
+
+module Resources...
+
+module Shorthand...
+
+include Base
+include HttpHelpers
+include Scoping
+include Resources
+include Shorthand
+</pre>
+
+<p>Questi cinque module sono inclusi nella classe <code>Mapper</code>. Il codice al loro interno &egrave; stato confinato in module semplicemente per pulizia.</p> 
+
+<h3>Base</h3>
+
+<p>Abbiamo visto il primo module, <code>Base</code>, nell&rsquo;ultimo episodio. Contiene il metodo <code>match</code>, il metodo <code>root</code> che utilizza <code>match</code> e anche un metodo <code>mount</code> che fornisce un altro modo di mappare un&rsquo;applicazione Rack ad un URL:</p>
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+<pre class="ruby">
+module Base
+  def initialize(set) #:nodoc:
+
+  def root(options = {})
+    match &#x27;/&#x27;, options.reverse_merge(:as =&gt; :root)
+  end
+
+  def match(path, options=nil)...
+
+  def mount(app, options = nil)...
+
+  def default_url_options=(options)...
+  alias_method :default_url_options, :default_url_options=
+end
+</pre>
+
+<h3>HttpHelpers</h3>
+
+<p>Il module successivo &egrave; <code>HttpHelpers</code>, all&rsquo;interno del quale sono definiti i metodi <code>get</code>, <code>post</code>, <code>put</code> e <code>delete</code>. Questi metodi sono usati per mappare i route a determinati tipi di richieste:</p> 
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+<pre class="ruby">
+module HttpHelpers
+  def get(*args, &amp;block)
+    map_method(:get, *args, &amp;block)
+  end
+
+  def post(*args, &amp;block)
+    map_method(:post, *args, &amp;block)
+  end
+
+  def put(*args, &amp;block)
+    map_method(:put, *args, &amp;block)
+  end
+
+  def delete(*args, &amp;block)
+    map_method(:delete, *args, &amp;block)
+  end
+
+  def redirect(*args, &amp;block)...
+
+  private
+  def map_method(method, *args, &amp;block)
+     options = args.extract_options!
+     options[:via] = method
+     args.push(options)
+     match(*args, &amp;block)
+     self
+   end
+end
+</pre>
+
+<p>Tutti questi metodi al loro interno chiamano il metodo privato <code>map_method</code>. Questo metodo imposta l&rsquo;opzione <code>:via</code> a seconda del metodo passatogli e infine chiama il metodo <code>match</code>. Noterete nel vostro codice di routing che molti dei metodi delegano al metodo <code>match</code>, passandogli e personalizzando a priori determinate opzioni. Per cui, se vogliamo che un certo route risponda solo a una richiesta GET, potremmo scrivere, usando l&rsquo;opzione <code>via</code>:</p>
+
+<pre class="ruby">
+match &#x27;products/recent&#x27;, :via =&gt; :get
+</pre>
+
+<p>All&rsquo;atto pratico, facciamo la stessa cosa usando il metodo pi&ugrave; conciso <code>get</code>, che crea proprio un route con la stessa opzione:</p>
+
+<pre class="ruby">
+get &#x27;products/recent&#x27;
+</pre>
+
+<p>I metodi <code>post</code>, <code>put</code> e <code>delete</code> funzionano in modo analogo al get per gli altri tipi di richieste HTTP. Il metodo <code>redirect</code>, invece, si differenzia dagli altri ed &egrave; interessante perch&egrave; restituisce un&rsquo;applicazione Rack:</p>
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+<pre class="ruby">
+def redirect(*args, &amp;block)
+  options = args.last.is_a?(Hash) ? args.pop : {}
+
+  path      = args.shift || block
+  path_proc = path.is_a?(Proc) ? path : proc { |params| path % params }
+  status    = options[:status] || 301
+
+  lambda do |env|
+    req = Request.new(env)
+
+    params = [req.symbolized_path_parameters]
+    params &lt;&lt; req if path_proc.arity &gt; 1
+
+    uri = URI.parse(path_proc.call(*params))
+    uri.scheme ||= req.scheme
+    uri.host   ||= req.host
+    uri.port   ||= req.port unless req.standard_port?
+
+    body = %(&lt;html&gt;&lt;body&gt;You are being &lt;a href=&quot;#{ERB::Util.h(uri.to_s)}&quot;&gt;redirected&lt;/a&gt;.&lt;/body&gt;&lt;/html&gt;)
+
+    headers = {
+      &#x27;Location&#x27; =&gt; uri.to_s,
+      &#x27;Content-Type&#x27; =&gt; &#x27;text/html&#x27;,
+      &#x27;Content-Length&#x27; =&gt; body.length.to_s
+    }
+
+    [ status, headers, [body] ]
+  end
+end
+</pre>
+
+<p>Il metodo restituisce un&rsquo;applicazione Rack, restituendo un array comprendente uno stato, alcuni elementi di header e un body. Lo stato &egrave; impostato per default a <code>301</code> che impone al browser un semplice redirect <code>301 Moved Permanently</code>. Potremmo usare questo metodo <code>redirect</code> direttamente all&rsquo;interno del nostro file di route se volessimo che un URL ridirigesse ad un altro. Nel nostro file di route abbiamo gi&agrave; un route che utilizza il parametro <code>:to</code> e questo parametro accetta un&rsquo;applicazione Rack:</p>
+
+<pre class="ruby">
+match &#x27;products&#x27;, :to =&gt; ProductsController.action(&quot;index&quot;)
+</pre>
+
+<p>Dato che il metodo <code>redirect</code> restituisce un&rsquo;applicazione Rack, lo possiamo usare in questo caso per fare un redirect a un altro URL in questo modo:</p>
+
+<pre class="ruby">
+match &#x27;products&#x27;, :to =&gt; redirect(&quot;/items&quot;)
+</pre>
+
+<p>Questa funzionalit&agrave; diventa davvero utile nel momento in cui si decide di modificare gli URL dell&rsquo;applicazione, ma si desidera continuare a fornire supporto agli URL vecchi. Si pu&ograve; usare <code>redirect</code> per ridirigere questi URL ai nuovi ad essi corrispondenti.</p>
+
+<h3>Shorthand</h3>
+
+<p>I moduli successivi sarebbero <code>Scoping</code> e <code>Resources</code>, ma li vediamo fra poco. Per ora, focalizziamoci sul module <code>Shorthand</code>. E&rsquo; un module interessante che ridefinisce il metodo <code>match</code>, che era stato precedentemente definito nel module <code>Base</code>. Questo metodo <code>match</code> supporta una sintassi diversa per le opzioni che &egrave; possibile passargli. Il metodo shorthand rappresenta un modo alternativo per scrivere l&rsquo;opzione <code>:to</code> in un route tipo il <code>redirect</code> che abbiamo scritto poc&rsquo;anzi:</p>
+
+<pre class="ruby">
+match &#x27;products&#x27;, :to =&gt; redirect(&#x27;/items&#x27;)
+</pre>
+
+<p>Si tratta di una sintassi comune nei file di route. Il metodo shorthand ci permette di scrivere il route con un semplice hash fatto dal route e da qualunque cosa a cui il route debba puntare. Come si pu&ograve; fare con la sintassi estesa, &egrave; possibile aggiungere parametri in coda al route:</p>
+
+<pre class="ruby">
+match &#x27;products&#x27; =&gt; redirect(&#x27;/items&#x27;)
+</pre>
+
+<p>Il metodo match ridefinito in <code>Shorthand</code> imposta il parametro <code>:to</code> se non &egrave; ancora stato impostato. Poi chiama il <code>super</code>, ma dal momento che <code>Mapper</code> non eredita da un&rsquo;altra classe, cosa comporta, in questo caso, la chiamata a <code>super</code>?</p>
+
+<p class="ruby">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+<pre class="ruby">
+module Shorthand
+  def match(*args)
+    if args.size == 1 &amp;&amp; args.last.is_a?(Hash)
+      options  = args.pop
+      path, to = options.find { |name, value| name.is_a?(String) }
+      options.merge!(:to =&gt; to).delete(path)
+      super(path, options)
+    else
+      super
+    end
+  end
+end
+</pre>
+
+<p>Ogni volta che si usa <code>super</code> in questo modo, Ruby cerca un metodo con lo stesso nome che sia stato definito in un module a monte. Il module <code>Shorthand</code> &egrave; definito come ultimo nella lista di module inclusi nel <code>Mapper</code>, per cui Ruby controller&agrave; nei module precedenti alla ricerca di un metodo <code>match</code> e delegher&agrave; ad esso. In questo caso chiamer&agrave; il <code>match</code> presente nel module Base.</p>
+
+<p>Questa tecnica &egrave; usata spesso nel codice sorgente di Rails 3. Le prime versioni di Rails usavano l&rsquo;<code>alias_method_chain</code> per ridefinire comportamenti specifici, ma ora, in Rails 3, possiamo pi&ugrave; semplicemente usare il <code>super</code>.</p>
+
+<h3>Resources</h3>
+
+<p>Chiuso il discorso sul module <code>Shorthand</code>, ci occuperemo ora del <code>Resources</code>. Come ci si potrebbe aspettare, questo module contiene il metodo <code>resources</code> e tutti i metodi ad esso associati. Usiamo il metodo <code>resources</code> nel nostro file di route per creare route RESTful:</p> 
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+
+<pre class="ruby">
+def resources(*resources, &amp;block)
+  options = resources.extract_options!
+
+  if apply_common_behavior_for(:resources, resources, options, &amp;block)
+    return self
+  end
+
+  resource_scope(Resource.new(resources.pop, options)) do
+    yield if block_given?
+
+    collection_scope do
+      get  :index if parent_resource.actions.include?(:index)
+      post :create if parent_resource.actions.include?(:create)
+    end
+
+    new_scope do
+      get :new
+    end if parent_resource.actions.include?(:new)
+
+    member_scope  do
+      get    :edit if parent_resource.actions.include?(:edit)
+      get    :show if parent_resource.actions.include?(:show)
+      put    :update if parent_resource.actions.include?(:update)
+      delete :destroy if parent_resource.actions.include?(:destroy)
+    end
+  end
+
+  self
+end
+</pre>
+
+<p>Questo metodo &egrave; piuttosto complesso, ma osservandone la struttura generale assume un certo significato. Ci sono un paio di metodi di collezione, <code>get :index</code> e <code>post :create</code>; c&rsquo;&egrave; un metodo <code>get :new</code> e infine <code>get :edit</code>, <code>get :show</code>, <code>put :update</code> e <code>delete :destroy</code>. Dovreste riconoscere questi come le famose sette action RESTful che sono create per un controller quando si dichiara resources per esso nel file di route.</p> 
+
+<p>Si noti la prima linea di codice nel blocco del metodo <code>resource_scope</code>. Se viene passato un blocco al metodo, di conseguenza il metodo far&agrave; <code>yield</code> a tale blocco prima di creare le action RESTful. Tutto ci&ograve; ci consente di creare le nostre action personalizzate nel file di route. Per esempio, potremmo aggiungere un route di collection che restituisce i prodotti in sconto:</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Store::Application.routes.draw do
+  match &#x27;products&#x27;, :to =&gt; redirect(&#x27;/items&#x27;)
+  get &#x27;products/recent&#x27;
+  resources :products do
+    collection do:
+      get :discounted
+    end
+  end
+end
+</pre>
+
+<p>Il codice dentro al blocco passato a <code>resources</code> nel route riportato qui sopra verr&agrave; eseguito dalla chiamata a <code>yield</code> in <code>resource_scope</code> e successivamente verranno definite le action RESTful standard. We can use similar code in the block above to that in the resources method in the Rails source code to define our custom actions.</p>
+
+<p>Looking at the blocks in the routes file above you might think that the object is changing every time we create a new block but this isn&rsquo;t the case. We&rsquo;re still working with the same <code>Mapper</code> object we worked with in the beginning so calling <code>get</code> in the innermost blocks is exactly the same as calling it in the outermost. We are dealing with a different scope, though, and we&rsquo;ll discuss scopes shortly.</p>
+
+<p>If you take another look back at the <code>resources</code> method from Rails&rsquo; source code you&rsquo;ll see that the code uses a <code>collection_scope</code> call when it defines the <code>index</code> and <code>create</code> actions but inside our routes file we just use <code>collection</code>. What&rsquo;s the difference? Well, not much. If we look at the <code>collection</code> method in the <code>Mapper</code> class we&rsquo;ll see that it delegates to <code>collection_scope</code>.</p>
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+<pre class="ruby">
+def collection
+  unless @scope[:scope_level] == :resources
+    raise ArgumentError, &quot;can&#x27;t use collection outside resources scope&quot;
+  end
+
+  collection_scope do
+    yield
+  end
+end
+</pre>
+
+<p>Let&rsquo;s take another quick look at our routes file.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Store::Application.routes.draw do
+  match &#x27;products&#x27;, :to =&gt; redirect(&#x27;/items&#x27;)
+  get &#x27;products/recent&#x27;
+  resources :products do
+    collection do:
+      get :discounted
+    end
+  end
+end
+</pre>
+
+<p>Both calls to get in the code above call the same method but the one inside the <code>collection</code> block will assume some additional behaviour according to how it is scoped inside the <code>resources</code> and <code>collection</code> blocks.</p>
+
+<p>If we take a look back in the <code>Resources</code> module we&rsquo;ll see a familiar-looking method, <code>match</code>. This redefines the <code>match</code> method and adds some additional behaviour based on resources.</p>
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+<pre class="ruby">
+def match(*args)
+  options = args.extract_options!.dup
+  options[:anchor] = true unless options.key?(:anchor)
+
+  if args.length &gt; 1
+    args.each { |path| match(path, options.dup) }
+    return self
+  end
+
+  on = options.delete(:on)
+  if VALID_ON_OPTIONS.include?(on)
+    args.push(options)
+    return send(on){ match(*args) }
+  elsif on
+    raise ArgumentError, &quot;Unknown scope #{on.inspect} given to :on&quot;
+  end
+
+  if @scope[:scope_level] == :resources
+    args.push(options)
+    return nested { match(*args) }
+  elsif @scope[:scope_level] == :resource
+    args.push(options)
+    return member { match(*args) }
+  end
+
+  action = args.first
+  path = path_for_action(action, options.delete(:path))
+
+  if action.to_s =~ /^[\w\/]+$/
+    options[:action] ||= action unless action.to_s.include?(&quot;/&quot;)
+    options[:as] = name_for_action(action, options[:as])
+  else
+    options[:as] = name_for_action(options[:as])
+  end
+
+  super(path, options)
+end
+</pre>
+
+<p>If we look about halfway down the code above you&rsquo;ll see the line that checks the current scope to see if it is <code>resources</code>. If it is some different behaviour is added. The logic is fairly complex; all you need to know is that the <code>Resources</code> module redefines the <code>match</code> method. Note that at the end it calls <code>super</code> so that the <code>match</code> method in <code>Base</code> is called. Remember that <code>get</code> calls <code>match</code> and this is where the additional functionality is located for dealing with <code>get</code> and other methods that are defined within <code>resources</code>.</p>
+
+<h3>Scoping</h3>
+
+<p>We&rsquo;re now down to the last method in our <code>Mapping</code> class: <code>Scoping</code>. Whenever there&rsquo;s a block inside your routes file there&rsquo;s a call to <code>Scoping</code>&rsquo;s <code>scope</code> behind the scenes. That means that it will define some additional behaviour for the code inside that block.</p> 
+
+<p>Along with the scope method there are a number of other methods, all of which delegate to <code>scope</code>.</p>
+
+<p class="codeFilePath">rails/actionpack/lib/action_dispatch/routing/mapper.rb</p>
+<pre class="ruby">
+def initialize(*args) #:nodoc:
+  @scope = {}
+  super
+end
+
+def controller(controller, options={})
+  options[:controller] = controller
+  scope(options) { yield }
+end
+
+def namespace(path, options = {})
+  path = path.to_s
+  options = { :path =&gt; path, :as =&gt; path, :module =&gt; path,
+              :shallow_path =&gt; path, :shallow_prefix =&gt; 			path }.merge!(options)
+  scope(options) { yield }
+end
+
+def constraints(constraints = {})
+  scope(:constraints =&gt; constraints) { yield }
+end
+
+def defaults(defaults = {})
+  scope(:defaults =&gt; defaults) { yield }
+end
+</pre>
+
+<p>These methods are all fairly simple and all delegate to a more generic method having first set some options. For example <code>defaults</code> calls <code>scope</code> after setting some <code>defaults</code> options. and likewise <code>constraints</code> calls scope with some <code>constraints</code> options. The <code>namespace</code> method is a little more complex but does essentially the same thing.  The module also has an <code>initialize</code> method which just creates a <code>@scope</code> instance variable and sets it to be an empty hash. You might be wondering what an <code>initialize</code> method is doing here as modules can&rsquo;t be instantiated. This is true, but in this case we&rsquo;re just overriding a method behaviour. When the <code>Scoping</code> module is included in the <code>Mapper</code> class this <code>initialize</code> method will override the current <code>initialize</code> method, add the <code>@scope</code> variable and then call <code>super</code>.</p> 
+
+<p>Finally we have the <code>scope</code> method itself and this is where all of the work takes place. There&rsquo;s a lot of complexity in this method but all it is essentially doing is filling up the <code>@scope</code> variable with some information based on the options that are being passed into the scope. The method merges the options using the a number of  private methods in the module. All it does is store up the scope information so that it can be used later on inside whatever match call you have. Essentially it adds additional functionality based on the current scope.</p> 
+
+<p>That&rsquo;s basically how blocks inside the routes file work. If we define routes like this:</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+Store::Application.routes.draw do
+  controller :products do
+    match #...
+  end  
+end
+</pre>
+
+<p>Whenever we call <code>match</code> in the <code>controller</code> block above (and remember it delegates to <code>scope</code>) the <code>controller</code> option will automatically be supplied in there.</p>
+
+<p>That&rsquo;s it for this episode. I hope it&rsquo;s given you some idea what&rsquo;s the methods inside the routes file are doing. Even though you have a large number of methods to choose from in the routes file most of them are really simple delegating to either match or scope passing in some additional options.</p>

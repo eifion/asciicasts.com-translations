@@ -1,0 +1,370 @@
+<p>En este episodio se presenta una gema desarrollada por Jos&eacute; Valim llamada <a href="http://github.com/josevalim/inherited_resources">Inherited Resources</a>.  Esta gema extrae la funcionalidad m&aacute;s habitual de los controladores REST para evitar la duplicaci&oacute;n del c&oacute;digo.  No se trata de la primera gema de Rails que trata de ayudarnos con esto, en el <a href="http://railscasts.com/episodes/92-make-resourceful">episodio 92</a> vimos una gema llamada make_resourceful y hay otros <em>plugins</em> disponibles.  Cada uno tiene un enfoque distinto, y vale la pena echarles un vistazo antes de decidirnos por uno u otro.  Nosotros hemos escogido Inherited Resources porque funciona bien con Rails 3.0 y parece estar un poco m&aacute;s actualizado.</p>
+
+<p>La aplicaci&oacute;n Rails sobre la que vamos a trabajar en este episodio es una sencilla tienda electr&oacute;nica.  La aplicaci&oacute;n tiene un listado de productos y cada producto tiene varias rese&ntilde;as.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/461/original/E230I01.png" width="816" height="409" alt="La página de listado de productos."/>
+</div>
+
+<p>Con Inherited Resources vamos a reorganizar el c&oacute;digo de la aplicaci&oacute;n, y veremos que podemos eliminar una gran cantidad de c&oacute;digo de los controladores sin afectar a la funcionalidad.</p>
+
+<h3>Instalaci&oacute;n de Inherited Resources</h3>
+
+<p>El c&oacute;digo de <code>ProductController</code> tiene el siguiente aspecto:</p>
+
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; ApplicationController
+  def index
+    @products = Product.all
+  end
+
+  def show
+    @product = Product.find(params[:id])
+  end
+
+  def new
+    @product = Product.new
+  end
+  
+  def create
+    @product = Product.new(params[:product])
+    if @product.save
+      flash[:notice] = &quot;Successfully created product.&quot;
+      redirect_to @product
+    else
+      render :action =&gt; &#x27;new&#x27;
+    end
+  end
+  
+  def edit
+    @product = Product.find(params[:id])
+  end
+  
+  def update
+    @product = Product.find(params[:id])
+    if @product.update_attributes(params[:product])
+      flash[:notice] = &quot;Successfully updated product.&quot;
+      redirect_to @product
+    else
+      render :action =&gt; &#x27;edit&#x27;
+    end
+  end
+  
+  def destroy
+    @product = Product.find(params[:id])
+    @product.destroy
+    flash[:notice] = &quot;Successfully destroyed product.&quot;
+    redirect_to products_url
+  end
+
+end
+</pre>
+
+<p>Estaremos acostumbrados a escribir c&oacute;digo como este si  en nuestras aplicaciones solemos usar controladores REST, que es la situaci&oacute;n en la que Inherited Resources nos resultar&aacute; m&aacute;s &uacute;til.  Si por el contrario solemos personalizar mucho nuestros controladores, una abstracci&oacute;n como Inherited Resources no se adaptar&aacute; a nuestras necesidades.  El c&oacute;digo de arriba sigue el patr&oacute;n REST con bastante fidelidad por lo que nos servir&aacute; para ver qu&eacute; nos puede dar Inherited Resources.</p>
+
+<p>Nuestra aplicaci&oacute;n de comercio electr&oacute;nico est&aacute; escrita con Rails 3 por lo que a&ntilde;adiremos Inherited Resources a nuestra aplicaci&oacute;n incluyendo la gema en el <code>GemFile</code>.</p>
+	
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.0&#x27;
+
+gem &#x27;sqlite3-ruby&#x27;, :require =&gt; &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;inherited_resources&#x27;
+</pre>
+
+<p>Y la instalaremos, como es habitual, con</p>
+
+<pre class="terminal">
+$ bundle install
+</pre>
+
+<p>Este comando instalar&aacute; la gema junto a un  par de dependencias: <code>has_scope</code> y <code>responders</code>.</p>
+
+<p>Con las gemas instaladas ya podemos actualizar <code>ProductsController</code> para utilizar Inherited Resources.  Para ello hacemos que el controlador herede de <code>InheritedResources::Base</code> en <code>ApplicationController</code>. <code>InheritedResources::Base</code> hereda de <code>ApplicationController</code> por lo que tiene toda su funcionalidad.</p> 
+
+<p>Dado que el controlador <code>ProductsController</code> es un controlador REST normal podemos reemplazar sus m&eacute;todos con el c&oacute;digo heredado de Inherited Resources, con lo que el controlador queda mucho m&aacute;s escueto.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; InheritedResources::Base
+
+end
+</pre>
+
+<p>Tendremos que reiniciar el servidor para que se carguen las nuevas gemas, una vez hecho esto veremos que las p&aacute;ginas relacionadas con productos funcionan exactamente igual que antes.  Podemos incluso crear un nuevo producto y veremos que al hacerlo se muestra el mensaje <em>flash</em> correspondiente</p>
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/462/original/E230I02.png" width="816" height="409" alt="Creación de un producto."/>
+</div>
+
+<h3>Personalizaci&oacute;n de acciones</h3>
+
+<p>Cuando creamos antes un nuevo producto fuimos redirigidos a la p&aacute;gina <code>show</code> de dicho producto, &iquest;c&oacute;mo hacer que en lugar de eso la p&aacute;gina nos lleve a la acci&oacute;n <code>index</code>?   Con Inherited Resources podemos puentear cualquiera de las acciones por defecto simplemente redefiniendo el m&eacute;todo correspondiente del controlador, por lo que podemos escribir un m&eacute;todo <code>create</code> en <code>ProductsController</code> que cree el nuevo producto y luego haga la redirecci&oacute;n a la acci&oacute;n <code>index</code>.</p>
+
+<p>No tenemos, sin embargo, que reescribir por completo la acci&oacute;n <code>create</code> s&oacute;lo para cambiar la redirecci&oacute;n.  Podemos incluir el comportamiento de Inherited Resources simplemente llamando a <code>create!</code> pero pas&aacute;ndole un bloque.  Como cambiar la URL a la que se realizar la redirecci&oacute;n tras crear un nuevo objeto es algo tan com&uacute;n, podemos simplemente devolver la URL que queramos en el bloque.</p>
+
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; InheritedResources::Base
+  def create
+    create! { products_path }
+  end
+end
+</pre>
+
+<p>En el bloque podemos hacer m&aacute;s cosas que podemos consultar en la  <a href="http://github.com/josevalim/inherited_resources#readme">documentaci&oacute;n</a>.</p>
+
+&lt;o&gt;Cuando ahora creemos un nuevo producto seremos llevados a la acci&oacute;n <code>index</code> tal y como quer&iacute;amos.&lt;/o&gt;
+
+<div class="imageWrapper">
+  <img src="/system/photos/463/original/E230I03.png" width="816" height="409" alt="Al añadir un producto nos redirigen al listado."/>
+</div>
+
+<h3>Soporte de m&uacute;ltiples formatos</h3>
+
+<p>Es f&aacute;cil hacer  que nuestro controlador sea capaz de responder a diferentes formatos (por ejemplo para trabajar con XML adem&aacute;s de HTML).  Lo &uacute;nico que hay que hacer es a&ntilde;adir <code>respond_to</code> como har&iacute;amos con cualquier otro controlador de Rails 3.</p>
+
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; InheritedResources::Base
+  respond_to :html, :xml
+
+  def create
+    create! { products_path }
+  end
+end
+</pre>
+
+<p>Esto funciona exactamente igual que en el episodio 224 [<a href="http://railscasts.com/episodes/224-controllers-in-rails-3">verlo</a>, <a href="http://es.asciicasts.com/episodes/224-controladores-en-rails-3">leerlo</a>], si visitamos <code>/products.xml</code> recibiremos el listado de productos en formato XML.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/464/original/E230I04.png" width="819" height="408" alt="Los productos en XML."/>
+</div>
+
+<h3>Recursos anidados</h3>
+
+<p>Ahora que  <code>ProductsController</code> ha quedado m&aacute;s organizado pasemos a <code>ReviewsController</code>.  Las rese&ntilde;as est&aacute;n anidadas dentro de los productos, lo que quiere decir que las rese&ntilde;as de un producto con <code>id</code> igual a <code>1</code> estar&aacute;n en la URL <code>/products/1/review</code>, que se corresponder&aacute; con la acci&oacute;n <code>index</code> de <code>ReviewsController</code>.  De la misma manera, si queremos a&ntilde;adir una rese&ntilde;a, &eacute;sta deber&aacute; estar anidada dentro de un producto.</p>
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/465/original/E230I05.png" width="800" height="406" alt="Las reseñas se anidan bajo los productos."/>
+</div>
+
+<p>El c&oacute;digo de <code>ReviewsController</code> es as&iacute;:</p>
+
+<p class="codeFilePath">/app/controllers/reviews_controller.rb</p>
+<pre class="ruby">
+class ReviewsController &lt; ApplicationController
+  def index
+    @product = Product.find(params[:product_id])
+    @reviews = @product.reviews
+  end
+
+  def new
+    @product = Product.find(params[:product_id])
+    @review = Review.new
+  end
+  
+  def create
+    @product = Product.find(params[:product_id])
+    @review = @product.reviews.build(params[:review])
+    if @review.save
+      flash[:notice] = &quot;Successfully created review.&quot;
+      redirect_to product_reviews_path(@product)
+    else
+      render :action =&gt; &#x27;new&#x27;
+    end
+  end
+
+end
+</pre>
+
+<p>La diferencia obvia entre este controlador y <code>ProductsController</code> es que en este s&oacute;lo tenemos tres en lugar de las siete acciones REST est&aacute;ndar.  La otra diferencia es que, como tiene que gestionar el anidamiento, cada acci&oacute;n recibe el producto a partir de un par&aacute;metro de la URL.</p>
+
+<p>Aunque estemos tratando con un recurso anidado aqu&iacute; el comportamiento de Inherited Resources es fundamentalmente el mismo que en <code>ProductsController</code>.  Podemos eliminar el c&oacute;digo existente en el controlador y cambiar la clase para que herede de <code>InheritedResources::Base</code>.  Lo &uacute;nico que hay que hacer para controlar el anidamiento es utilizar <code>belongs_to</code>, que es un m&eacute;todo proporcionado por Inherited Resources para definir relaciones entre los controladores de la misma manera que se definen entre modelos con lo que Inherited Resources gestionar&aacute; por nosotros la recuperaci&oacute;n del producto correcto sobre el que se definen las rese&ntilde;as.</p>
+
+<p class="codeFilePath">/app/controllers/reviews_controller.rb</p>
+<pre class="ruby">
+class ReviewsController &lt; InheritedResources::Base
+  belongs_to :product
+end
+</pre>
+
+<p>Tal y como est&aacute; el controlador <code>ReviewsController</code> tendr&aacute; las siete famosas acciones REST dado que se trata del comportamiento por defecto de Inherited Resources pero queremos que el controlador tan s&oacute;lo responda a las acciones <code>index</code>, <code>new</code> y <code>create</code>.  Podemos utilizar el m&eacute;todo <code>actions</code> para restringir las acciones disponibles:</p>
+
+<p class="codeFilePath">/app/controllers/reviews_controller.rb</p>
+<pre class="ruby">
+class ReviewsController &lt; InheritedResources::Base
+  belongs_to :product
+  actions :index, :new, :create
+end
+</pre>
+
+<p>Al igual que hicimos en <code>ProducsController</code> queremos cambiar la URL a la que se nos redirige tras crear una nueva rese&ntilde;a.  Dado que en nuestro caso se trata de un recurso anidado podremos usar uno de los m&eacute;todos de ayuda que ofrece Inherited Resources para generar URLs de recursos.  En este caso escogeremos un m&eacute;todo llamado <code>collection_url</code> que nos redirigir&aacute; a la acci&oacute;n <code>index</code> y gestionar&aacute; el anidamiento por nosotros.</p>
+
+<p class="codeFilePath">/app/controllers/reviews_controller.rb</p>
+<pre class="ruby">
+class ReviewsController &lt; InheritedResources::Base
+  belongs_to :product
+  actions :index, :new, :create
+  
+  def create
+    create! { collection_url }
+  end
+end
+</pre>
+
+<p>Podemos hacer la prueba y a&ntilde;adir una rese&ntilde;a.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/466/original/E230I06.png" width="801" height="451" alt="Adding a review."/>
+</div>
+
+<p>Tras el env&iacute;o de la nueva rese&ntilde;a seremos llevados a la p&aacute;gina de rese&ntilde;as del producto, tal y como quer&iacute;amos.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/467/original/E230I07.png" width="801" height="526" alt="Tras añadir una reseña vamos a la página de reseñas del producto."/>
+</div>
+
+<h3>&Aacute;mbitos p&uacute;blicos</h3>
+
+<p>Otra caracter&iacute;stica &uacute;til de Inherited Resources se llama <code>has_scope</code>.  Para usarla tan s&oacute;lo tenemos que a&ntilde;adir una referencia a su gema en el <code>Gemfile</code> y luego ejecutar <code>bundle install</code>.</p>
+
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.0&#x27;
+
+gem &#x27;sqlite3-ruby&#x27;, :require =&gt; &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;inherited_resources&#x27;
+gem &#x27;has_scope&#x27;
+</pre>
+
+<p>Con esto instalado podemos llamar a <code>has_scope</code> en cualquiera de nuestros controladores y pasar el nombre de un &aacute;mbito sobre el modelo relacionado.  En nuestro ejemplo a&ntilde;adiremos el &aacute;mbito <code>limit</code>, que Rails 3 proporciona en todos los modelos, a <code>ProductsController</code>.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; InheritedResources::Base
+  respond_to :html, :xml
+  
+  has_scope :limit
+
+  def create
+    create! { products_path }
+  end
+end
+</pre>
+
+<p>Con esto podemos a&ntilde;adir &aacute;mbitos como p&aacute;rametros a la URL por lo que si pasamos el par&aacute;metro <code>limit</code>  se invocar&aacute; dicho &aacute;mbito y se restringir&aacute; el n&uacute;mero de productos mostrados.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/468/original/E230I08.png" width="800" height="358" alt="Uso de un ámbito en la cadena de la petición."/>
+</div>
+
+<p>Si queremos que siempre se aplique un &aacute;mbito sin necesidad de hacer referencia en la URL de la petici&oacute;n, podemos pasar un valor por defecto.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">
+class ProductsController &lt; InheritedResources::Base
+  respond_to :html, :xml
+  
+  has_scope :limit, :default =&gt; 3
+
+  def create
+    create! { products_path }
+  end
+end
+</pre>
+
+<p>Si ahora no pasamos el par&aacute;metro <code>limit</code> se utilizar&aacute; el valor por defecto y veremos tres productos.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/469/original/E230I09.png" width="800" height="405" alt="Si no pasamos un límite se utiliza el valor por defecto."/>
+</div>
+
+<p>Por supuesto esto tambi&eacute;n funciona con el resto de &aacute;mbitos de la aplicaci&oacute;n.  A&ntilde;adamos un &aacute;mbito al modelo <code>Review</code> para filtrar rese&ntilde;as seg&uacute;n su valoraci&oacute;n.</p>
+
+<p class="codeFilePath">/app/models/review.rb</p>
+<pre class="ruby">
+class Review &lt; ActiveRecord::Base
+  belongs_to :product
+  scope :rating, proc { |rating| where(:rating =&gt; rating) }
+end
+</pre>
+
+<p>Ahora haremos que dicho &aacute;mbito sea p&uacute;blico a&ntilde;adi&eacute;ndolo a  <code>ReviewsController</code>.</p>
+
+<p class="codeFilePath">/app/controllers/reviews_controller.rb</p>
+<pre class="ruby">
+class ReviewsController &lt; InheritedResources::Base
+  belongs_to :product
+  actions :index, :new, :create
+  has_scope :rating
+  
+  def create
+    create! { collection_url }
+  end
+end
+</pre>
+
+<p>Con esto ya podemos usar un par&aacute;metro de valoraci&oacute;n en la URL para restringir a las rese&ntilde;as que tengan esa valoraci&oacute;n.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/470/original/E230I10.png" width="800" height="334" alt="Filtro de reseñas por valoración."/>
+</div>
+
+<p>La gema <code>has_scope</code> tambi&eacute;n se puede usar de forma independiente de Inherited Resources utilizando el m&eacute;todo <code>apply_scopes</code> en la acci&oacute;n <code>index</code>.  Hay m&aacute;s detalles en la <a href="http://github.com/plataformatec/has_scope">documentaci&oacute;n en Github</a>.</p>
+
+<h3>Personalizaci&oacute;n del mensaje <em>flash</em></h3>
+
+<p>Terminaremos este episodio viendo c&oacute;mo personalizar los mensajes <em>flash</em>.  Cuando se crea una nueva rese&ntilde;a el mensaje por defecto es &ldquo;Review was successfully created.&rdquo; pero podemos cambiarlo a lo que queramos modificando los ficheros de internacionalizaci&oacute;n.  Estos archivos son un excelente lugar para almacenar cadenas que se mostrar&aacute;n en la interfaz de usuario aunque nuestra aplicaci&oacute;n no est&eacute; dando soporte a m&uacute;ltiples lenguajes.  Todas las aplicaciones Rails 3 vienen con un fichero de internacionalizaci&oacute;n en ingl&eacute;s en  <code>/config/locales/en.yml</code>.</p>
+
+<p>Para modificar los mensajes <em>flash</em> por defecto de Inherited Resources crearemos una clave <code>flash:</code> bajo la que tendremos otra clave que contendr&aacute; el nombre del controlador (en nuestro caso <code>reviews</code>) y en la que anidaremos una clave para la acci&oacute;n y dentro de esta otra para el nombre del mensaje de <em>flash</em>.  Para nuestro controlador de rese&ntilde;as el fichero de configuraci&oacute;n quedar&aacute; as&iacute;:</p>
+
+<p class="codeFilePath">/config/locales/en.yml</p>
+<pre class="ruby">
+# Sample localization file for English. Add more files in this directory for other locales.
+# See http://github.com/svenfuchs/rails-i18n/tree/master/rails%2Flocale for starting points.
+
+en:
+  flash:
+    reviews:
+      create:
+        notice: &quot;Your review has been created!&quot;
+</pre>
+
+<p>Si no queremos tener que configurar esto en todos los controladores de nuestra aplicaci&oacute;n podemos cambiar el nombre del controlador por <code>actions:</code> para aplicar dichos mensajes a todos los controladores, teniendo en cuenta que la cadena  <code>resource_name</code> ser&aacute; reemplazada por el nombre del modelo.</p>
+
+<p class="codeFilePath">/config/locales/en.yml</p>
+<pre class="ruby">
+# Sample localization file for English. Add more files in this directory for other locales.
+# See http://github.com/svenfuchs/rails-i18n/tree/master/rails%2Flocale for starting points.
+
+en:
+  flash:
+    actions:
+      create:
+        notice: &quot;Your {{resource_name}} has been created!&quot;
+</pre>
+
+<p>Para probarlo crearemos una nueva rese&ntilde;a.  Al enviarla se mostrar&aacute; el mensaje <em>flash</em> personalizado.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/471/original/E230I11.png" width="815" height="334" alt="Al crear la reseña se muestra el mensaje flash personalizado."/>
+</div>
+
+<p>Con esto concluimos el episodio.  Si acabamos escribiendo una y otra vez  el  mismo c&oacute;digo en nuestros controladores  nos interesar&aacute; considerar el uso de Inherited Resources. El fichero  <a href="http://github.com/josevalim/inherited_resources#readme">README</a> es bastante completo y cubre casos que no hemos cubierto aqu&iacute;.  La  <a href="http://wiki.github.com/josevalim/inherited_resources/">p&aacute;gina del wiki</a> tambi&eacute;n es interesante.</p>

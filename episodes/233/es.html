@@ -1,0 +1,136 @@
+<p>Los participantes de la &uacute;ltima edici&oacute;n del concurso Rails Rumble trataron de crear una aplicaci&oacute;n Rails en 48 horas.  La p&aacute;gina de alta del concurso era interesante porque ofrec&iacute;a la posibilidad de registrarse utilizando varios servicios diferentes.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/475/original/E233I01.png" width="804" height="716" alt="Página de inicio de sesión de Rails Rumble."/>
+</div>
+
+<p>Permitir a los usuarios iniciar sesi&oacute;n a trav&eacute;s de diferentes servicios puede ser muy costoso de implementar pero el sitio de Rails Rumble evita esto utilizando Janrain, que proporciona un servicio llamado <a href="http://www.janrain.com/products/engage">Janrain Engage</a> (tambi&eacute;n conocido como RPX). Se trata de un servicio de autenticaci&oacute;n centralizado; una API &uacute;nica que debe implementar una aplicaci&oacute;n para permitir la autenticaci&oacute;n a trav&eacute;s de un gran n&uacute;mero de servicios.  Janrain es un servicio comercial, pero existe un plan b&aacute;sico que es perfecto para los concursantes de una Rails Rumble.</p>
+
+<h3>Alta en Engage</h3>
+
+<p>Es f&aacute;cil darse de alta en el servicio b&aacute;sico de Janrain Engage, una vez hecho esto y  asignado un nombre a nuestro aplicaci&oacute;n iremos a la p&aacute;gina de nuestra cuenta, donde tendremos que apuntar nuestra clave de API y el nombre de la aplicaci&oacute;n, en este caso <code>asciicasts</code>.  Tambi&eacute;n tendremos que configurar los servicios que queremos usar, si hacemos clic en la pesta&ntilde;a &lsquo;Providers&rsquo; iremos a una p&aacute;gina en la que podemos escoger con qu&eacute; servicios podr&aacute;n autenticarse los usuarios de nuestra aplicaci&oacute;n.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/476/original/E233I02.png" width="802" height="582" alt="Los proveedores de autenticación que podemos escoger en nuestra aplicación"/>
+</div>
+
+<p>El plan gratuito s&oacute;lo permite escoger hasta seis proveedores, pero eso nos da  la flexibilidad suficiente.  N&oacute;tese que algunos de ellos requieren una configuraci&oacute;n adicional.  Por ejemplo para usar Twitter tendremos que configurar nuestra aplicaci&oacute;n como cliente de OAuth (lo cual no es complicado)  En nuestro caso nos quedaremos con los cuatro servicios por defecto.</p>
+
+<h3>Modificaciones en la aplicaci&oacute;n para usar Engage</h3>
+
+<p>Una vez que nos hemos dado de alta podemos usar Engage en nuestra aplicaci&oacute;n Rails.  Si tuvi&eacute;semos que implementar desde cero la autenticaci&oacute;n podr&iacute;amos utilizar la gema <a href="http://github.com/grosser/rpx_now">RPXNow</a> que ofrece toda la funcionaidad necesaria para implementar Engage en una aplicaci&oacute;n Rails.  Si por el contrario estamos ya usando Authlogic podemos investigar una gema llamada  <a href="http://github.com/tardate/authlogic_rpx">Authlogic RPX</a>.  Por &uacute;ltimo existe la gema <a href="http://github.com/slainer68/devise_rpx_connectable">RPX Connectable</a> que permite el uso de Engage con Devise.  La aplicaci&oacute;n con la que estamos trabajando en este episodio utiliza Devise por lo que usaremos esta &uacute;ltima gema.  Los que necesiten una introducci&oacute;n a Devise pueden encontrarla en el episodio 209 [<a href="http://railscasts.com/episodes/209-introducing-devise">verlo</a>, <a href="http://es.asciicasts.com/episodes/209-introduccion-a-devise">leerlo</a>].</p>
+
+<p>En nuestra aplicaci&oacute;n ya tenemos los enlaces de registro e inicio de sesi&oacute;n que llevan al usuario a un formuario sencillo que hay que rellenar con una direcci&oacute;n de correo y una clave.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/477/original/E233I03.png" width="802" height="438" alt="La página de inicio de sesión de nuestra aplicación."/>
+</div>
+
+<p>Nuestro plan es cambiar estos enlaces por un &uacute;nico enlace que lleve al usuario a una p&aacute;gina donde se pueden dar de alta a trav&eacute;s de Engage.  Para esto es para lo que utilizaremos la gema RPX Connectable.</p>
+
+<p>Como es habitual, s&oacute;lo tenemos que a&ntilde;adir una referencia en el fichero de gemas:
+	
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.0&#x27;
+gem &#x27;sqlite3-ruby&#x27;, &#x27;1.2.5&#x27;, :require =&gt; &#x27;sqlite3&#x27;
+gem &#x27;devise&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;devise_rpx_connectable&#x27;
+</pre>
+
+<p>Y luego la instalamos con</p>
+
+
+<pre class="terminal">
+$ bundle install
+</pre>
+
+<p>Tenemos que a&ntilde;adir un campo <code>rpx_identifier</code> en la tabla <code>Users</code> de nuestra aplicaci&oacute;n para poder utilizar RPX.  Generaremos para esto una nueva migraci&oacute;n.</p>
+
+<pre class="terminal">
+$ rails g migration add_rpx_to_users rpx_identifier:string
+</pre>
+
+<p>Tras esto ya podemos ejecutar la migraci&oacute;n para a&ntilde;adir el campo</p>
+
+<pre class="terminal">
+$ rake db:migrate
+</pre>
+
+<p>A continuaci&oacute;n tenemos que modificar la llamada a <code>devise</code> en el modelo <code>User</code> de forma que <code>:rpx_connectable</code> aparezca en la lista de m&oacute;dulos.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  devise :database_authenticatable, :registerable, 
+         :recoverable, :rememberable, :trackable, :validatable, :rpx_connectable
+
+  # Setup accessible (or protected) attributes for your model
+  attr_accessible :email, :password, :password_confirmation
+end
+</pre>
+
+<p>Por &uacute;ltimo nos queda  actualizar el fichero de configuraci&oacute;n de Devise de la aplicaci&oacute;n para especificar el nombre que le dimos a la aplicaci&oacute;n cuando la dimos de alta en Engage, as&iacute; como la clave de API privada que se nos di&oacute;:</p>
+
+<p class="codeFilePath">/config/initializers/devise.rb</p>
+<pre class="ruby">
+Devise.setup do |config|
+  # Configure the e-mail address which will be shown in DeviseMailer.
+  config.mailer_sender = &quot;test@example.com&quot;
+  config.rpx_application_name = &#x27;asciicasts&#x27;
+  RPXNow.api_key = &quot;aaabbbcccdddeeefff&quot; # real key goes here.
+end
+</pre>
+
+<p>Con todo esto ya podemos sustituir los enlaces de alta e inicio de sesi&oacute;n de nuestra aplicaci&oacute;n en el fichero de <em>layout</em> de la aplicaci&oacute;n con un enlace a la p&aacute;gina de alta de Engage, pasando la URL a la que queremos volver cuando se termine el inicio de sesi&oacute;n:</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= link_to_rpx &quot;Sign in&quot;, user_session_url %&gt;
+</pre>
+
+<h3>Inicio de sesi&oacute;n</h3>
+
+<p>Ya tenemos el c&oacute;digo para intentar iniciar la sesi&oacute;n.  Cuando hagamos clic en el enlace de inicio de sesi&oacute;n de nuestra aplicaci&oacute;n iremos a una p&aacute;gina en el servidor de Janrain:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/478/original/E233I04.png" width="814" height="444" alt="Ya podemos iniciar la sesión con Engage."/>
+</div>
+
+<p>Podemos iniciar la sesi&oacute;n con una de los servicios anteriores y, suponiendo que hemos introducido correctamente las credenciales, volveremos a la aplicaci&oacute;n.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/479/original/E233I05.png" width="813" height="375" alt="Inicio de sesión correcto con Google."/>
+</div>
+
+<p>Obs&eacute;rvese que ahora tenemos una sesi&oacute;n iniciada en la aplicaci&oacute;n.</p>
+
+<h3>Un inicio de sesi&oacute;n m&aacute;s vistoso</h3>
+
+<p>Si queremos que el panel de inicio de sesi&oacute;n sea una capa JavaScript en lugar de una p&aacute;gina separada podemos incluir la siguiente l&iacute;nea de c&oacute;digo justo antes de cerrar la etiqueta <code>body</code> en la plantilla de <em>layout</em>.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= javascript_include_rpx(user_session_url) %&gt;
+</pre>
+
+<p>Con esto nuestra aplicaci&oacute;n incluir&aacute; el JavaScript necesario para mostrar una capa flotante en el sitio cuando el usuario quiere iniciar la sesi&oacute;n.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/480/original/E233I06.png" width="813" height="413" alt="Inicio de sesión con un panel emergente"/>
+</div>
+
+<p>Tambi&eacute;n se podr&iacute;a, como alternativa, incluir el panel de inicio de sesi&oacute;n utizando un iframe.  Para esto tenemos que a&ntilde;adir la siguiente l&iacute;nea de c&oacute;digo en la vista:</p>
+
+<pre class="ruby">
+&lt;%= embed_rpx user_session_url %&gt;
+</pre>
+
+<p>Es mejor poner este c&oacute;digo cerca de los fomrulario de registro o inicio de seesi&oacute;n para dar una forma alternativa de registrarse.</p>
+
+<p>Todo lo que hemos visto en este episodio se encuentra documentado en el fichero <code>README</code> de Devise RPX Connectable junto con otras opciones que se pueden pasar para requerir informaci&oacute;n adicional sobre los usuarios registrados.</p>

@@ -1,0 +1,206 @@
+<p>Over three years ago episode 26 [<a href="http://railscasts.com/episodes/26-hackers-love-mass-assignment">watch</a>, <a href="http://railscasts.com/episodes/26-hackers-love-mass-assignment">read</a>] covered the subject of mass assignment and how it can cause security vulnerabilities. Rails 3 is now out and has a lot of security features enabled by default but this is one area that isn&rsquo;t. Rails applications&rsquo; models still need to have their attributes protected against mass assignment in order to avoid malicious users updating them by sending POST requests to the server. If you aren&rsquo;t familiar with this problem then take a look at episode 26, but in essence whenever you create or update a model in your controllers by using mass assignment you need to use <code>attr_accessible</code> in the models to protect the attributes you don&rsquo;r want to be updated otherwise users can set any attribute and this can lead to huge security problems.</p>
+
+<p>It seems easy enough to add a call to <code>attr_accessible</code> in every model but there are two potential problems when doing so. The first problem can occur when you&rsquo;re testing your app. Sometimes you want to mass-assign attributes during testing and having models protected with <code>attr_accessible</code> can make this difficult. One solution to this is to use factories, and this was covered in episode 158 [<a href="http://railscasts.com/episodes/158-factories-not-fixtures">watch</a>, <a href="http://railscasts.com/episodes/158-factories-not-fixtures">read</a>].</p>
+
+<p>The second problem is that <code>attr_accessible</code> is not dynamic. The attributes that are specified by it for a given model are hard-coded and if we want to change the attributes that are accessible based on, say, the user&rsquo;s permissions that can be difficult to do. This was the case in Rails 2 but Rails 3 gives us a new way to make dynamic attributes and we&rsquo;ll show you that in this episode.</p>
+
+<h3>Our Wiki Site</h3>
+
+<p>To demonstrate dynamic attributes we&rsquo;ll use a wiki site. This site has has a number of articles and an article can be edited by anyone. On the edit form, along with the name and content fields is a checkbox field that allows a user to mark as an article as &lsquo;important&rsquo;.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/502/original/E237I01.png" width="800" height="446" alt="Editing an article to mark it as important."/>
+</div>
+
+<p>When an article is marked as important its title will appear in red.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/503/original/E237I02.png" width="800" height="366" alt="The page for an important article with a read headline."/>
+</div>
+
+<p>We&rsquo;re going to modify the application so that only administrators can change the importance of articles; non-admin users should not be able to modify the <code>important</code> field. It would be easy enough to modify the form to remove the checkbox so that it is only shown to administrators, but this wouldn&rsquo;t solve our problem as it would still be possible for users to bypass this form and send a POST request that would modify the <code>important</code> field for an article.</p>
+
+<p>The solution to this problem lies in the controller and model layers, specifically the <code>create</code> and <code>update</code> actions in the <code>ArticlesController</code> as it&rsquo;s here that the mass assignment happens. One approach we could take to protect the <code>important</code> attribute would be to remove it from the parameter hash unless the current user is an admin.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">
+def update
+  params[:article].delete(:important) unless admin?
+  @article = Article.find(params[:id])
+  if @article.update_attributes(params[:article])
+    flash[:notice] = &quot;Successfully updated article.&quot;
+    redirect_to @article
+  else
+    render :action =&gt; &#x27;edit&#x27;
+  end
+end
+</pre>
+
+<p>The trouble with this is that we have to remember to do it for every attribute we want to protect. Also there is no correlation with the <code>attr_accessible</code> call in the model. It would be much better if we could instead make <code>attr_accessible</code> dynamic.</p>
+
+<p>We&rsquo;ll take a look at the Rails API documentation to see if we can find anything about <a href="http://api.rubyonrails.org/classes/ActiveModel/MassAssignmentSecurity/ClassMethods.html#method-i-attr_accessible"><code>attr_accessible</code></a> that can help. An interesting thing to note in the documentation is that <code>attr_accessible</code> is now included in the <code>ActiveModel::MassAssignmentSecurity</code> module, not directly in ActiveRecord. This means that it can be included and used within any class and this makes it much more flexible. At the top of the documentation page is an example of <code>ActiveModel::MassAssignmentSecurity</code> used directly within a controller instead of through a model, which is a really good idea. What&rsquo;s really interesting though is a piece of code that shows us how to make <code>attr_accessible</code> dynamic by overriding the <code>mass_assignment_authorizer</code> method.</p>
+
+<pre class="ruby">
+def mass_assignment_authorizer
+  admin ? admin_accessible_attributes : super
+end
+</pre>
+
+<p>The code above changes the behaviour of the application based on whether the user is an admin or not which is exactly what we want to do. By overriding this method in our models we can change the fields that can be modified by mass assignment depending on any condition.</p>
+
+<p>Our <code>Article</code> model currently looks like this:</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">
+class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :important
+end
+</pre>
+
+<p>This is a simple enough class with just an <code>attr_accessible</code> call with three attributes. The <code>:important</code> attribute is the one we want to make dynamic and we can do that by overriding <code>mass_assignment_authorizer</code> in the class.</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">
+class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content
+  
+  private
+  def mass_assignment_authorizer
+    super + [:important]
+  end
+end
+</pre>
+
+<p>By calling super in <code>mass_assignment_authorizer</code> we&rsquo;ll get the default behaviour which returns a whitelist sanitizer. You don&rsquo;t need to be familiar with how this works to use it, you just need to know that you can add more attributes to it as we have done above. Once we&rsquo;ve added this extra parameter here we can remove it from the list of parameters in <code>attr_accessible</code>.</p> 
+
+<p>The changes we&rsquo;ve mades so far won&rsquo;t alter the behaviour of our application at all but we can make the accessibility of <code>:important</code> dynamic now as it&rsquo;s defined in an instance variable rather than at the class level. We&rsquo;ll do this by adding a variable to the class that will contain a list of the attributes we want to be accessible.</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">
+class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content
+  attr_accessor :accessible
+  
+  private
+  def mass_assignment_authorizer
+    super + (accessible || [])
+  end
+end
+</pre>  
+
+<p>Any parameters passed to <code>accessible</code> will now be added to the list of accessible attributes and we can use this in our controllers. We&rsquo;ll modify the update action so that it adds the <code>:important</code> parameter only is the current user is an admin.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">
+def update
+  @article = Article.find(params[:id])
+  @article.accessible = [:important] if admin?
+  if @article.update_attributes(params[:article])
+    flash[:notice] = &quot;Successfully updated article.&quot;
+    redirect_to @article
+  else
+    render :action =&gt; &#x27;edit&#x27;
+  end
+end
+</pre>
+
+<p>We can start up our application now to see if these changes work. If we log in to the application with an account that isn&rsquo;t an administrator and edit an article, marking it as important, when we&rsquo;re redirected back to the article&rsquo;s page the headline is black indicating that the <code>important</code> field hasn&rsquo;t been changed.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/504/original/E237I03.png" width="805" height="412" alt="The article is still not marked as important."/>
+</div>
+
+<p>If we make our account an administrator and edit the article again, this time the important field is updated and the headline changes colour.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/505/original/E237I04.png" width="805" height="412" alt="The articles is now marked as important."/>
+</div>
+
+<p>Ideally admins should be able to edit any of the fields so it would be useful if accessible supported an <code>:all</code> option that would allow us to easily make all of a model&rsquo;s attributes editable. We can do this by modifying <code>mass_assignment_authorizer</code>.</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">
+def mass_assignment_authorizer
+  if accessible == :all
+    self.class.protected_attributes
+  else
+    super + (accessible || [])
+  end
+end
+</pre>
+
+<p>The method now checks to see if <code>accessible</code> is equal to <code>:all</code>. If it is then we need to return something that will make all of the attributes modifiable. It would be good if we could just return an empty array, but unfortunately the object that is returned by <code>mass_assignment_authorizer</code> is a sanitizer object so this won&rsquo;t work. The way we&rsquo;ve have worked around this is a little bit of a hack but it works well enough: we return <code>self.class.protected_attributes</code>. This is used by the <code>MassAssignmentSecurity</code> module to provide a blacklist of attributes that can&rsquo;t be modified. As we&rsquo;re not using <code>attr_protected</code> in this class it will allow all attributes which is just what we want here. We can now modify the <code>ArticlesController</code> to make all of the <code>Article</code>&rsquo;s attributes accessible by passing <code>:all</code>.</p> 
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">
+def update
+  @article = Article.find(params[:id])
+  @article.accessible = :all if admin?
+  if @article.update_attributes(params[:article])
+    flash[:notice] = &quot;Successfully updated article.&quot;
+    redirect_to @article
+  else
+    render :action =&gt; &#x27;edit&#x27;
+  end
+end
+</pre>
+
+<p>If we test this out in the application we&rsquo;ll see that admins can still edit the <code>important</code> attribute.</p>
+
+<p>In the controller we also need to apply the <code>accessible</code> option to the <code>create</code> action. If we just apply it like this then it will not work.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">
+@article = Article.new(params[:article])
+@article.accessible = :all if admin?
+</pre>
+
+<p>The reason that this doesn&rsquo;t work is that the mass assignment happens in the <code>new</code> call so by the time we&rsquo;ve set <code>accessible</code> it&rsquo;s too late. We need to separate creating a new Article from assigning its attributes and slip the call to accessible in between the two.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">
+def create
+  @article = Article.new
+  @article.accessible = :all if admin?
+  @article.attributes = params[:article]
+  if @article.save
+    flash[:notice] = &quot;Successfully created article.&quot;
+    redirect_to @article
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end
+</pre>
+
+<p>You might want to make this behaviour more abstract and remove the duplication in the code in the two actions but this is dependent on how your permission system works so we&rsquo;ll leave this up to you. One change we will make though is to extract the <code>mass_assignment_authorizer</code> method out from the <code>Article</code> model so that it can be used in all of the application&rsquo;s models.</p>
+
+<p>We&rsquo;ll move the method into an initializer. In the <code>/config/initializers</code> directory we&rsquo;ll create a new file called <code>accessible_attributes.rb</code>.</p>
+
+<p class="codeFilePath">/config/initializers/accessible_attributes.rb</p>
+<pre class="ruby">
+class ActiveRecord::Base
+  attr_accessible
+  attr_accessor :accessible
+  
+  private
+  def mass_assignment_authorizer
+    if accessible == :all
+      self.class.protected_attributes
+    else
+      super + (accessible || [])
+    end
+  end
+end
+</pre>
+
+<p>This initializer modifies <code>ActiveRecord::Base</code> so the behaviour will be applied to all models. Note that we still call <code>attr_accessible</code> but with no arguments. This means that the default behaviour will be that no attributes can be set through mass assignment and that you&rsquo;ll need to add another <code>attr_accessible</code> call to each model to make attributes settable. We can now clean up the Article model to this:</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">
+class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content
+end
+</pre>
+
+<p>That&rsquo;s it for this episode. We&rsquo;ve now made <code>attr_accessible</code> completely dynamic and can change its attributes based on a user&rsquo;s permissions. What&rsquo;s good about this approach is that everything is locked down by default and access is only granted where we explicitly specify it in the code. This makes mass assignment security issues a much smaller problem as by default all attributes are secure.</p>

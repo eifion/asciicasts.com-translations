@@ -1,0 +1,269 @@
+<p>Hace un par de semanas, en el episodio 233[<a href="http://railscasts.com/episodes/233-engage-with-devise">verlo</a>, <a href="http://es.asciicasts.com/episodes/233-engage-y-devise">leerlo</a>] tratamos acerca de Janrain Engage, que es un servicio centralizado donde se puede gestionar la autenticaci&oacute;n con credenciales de sitios Twitter, OpenID y Facebook en nuestras aplicaciones.  Se trata de un servicio muy interesante pero tiene como incoveniente que act&uacute;a como intermediario entre nuestra aplicaci&oacute;n y el proveedor de autenticaci&oacute;n.  Ser&iacute;a mucho mejor si existiese una gema o <em>plugin</em> que permitiese incorporar autenticaci&oacute;n de terceras partes en nuestra aplicaci&oacute;n sin requerir de tal servicio externo.</p>
+
+<p>Tal gema ha sido lanzada recientemente y se llama OmniAuth, que proporciona una forma &uacute;nica de autenticar contra diferentes servicios.  Adem&aacute;s, si el servicio contra el cual queremos realizar la autenticaci&oacute;n no est&aacute; incluido en OmniAuth es f&aacute;cil a&ntilde;adir uno nuevo ya que OmniAuth no es sino una colecci&oacute;n de <em>middlewares</em> de Rack, lo que nos da una gran flexibilidad a la hora de usarlo.</p>
+
+<p>En el blog de Rails Rumble hay una  <a href="http://blog.railsrumble.com/blog/2010/10/08/intridea-omniauth">interesante anotaci&oacute;n</a> donde se explica con detalle c&oacute;mo crear la autenticaci&oacute;n desde cero.  Nosotros aqu&iacute; veremos c&oacute;mo integrar OmniAuth en una aplicaci&oacute;n donde ya existe una soluci&oacute;n de autenticaci&oacute;n (Devise en nuestro caso, pero podemos integrarlo igual de f&aacute;cilmente con Authlogic u otro esquema de autenticaci&oacute;n).</p>
+
+<h3>Inclusi&oacute;n de OmniAuth en la aplicaci&oacute;n</h3>
+
+<p>Trabajaremos con la aplicaci&oacute;n que escribimos en el episodio 209 y que es una sencilla aplicaci&oacute;n de lista de tareas que utiliza Devise para autenticar a los usuarios.  Los enlaces de registro y de inicio de sesi&oacute;n llevan al usuario a una p&aacute;gina donde puede suministrar un nombre de usuario y una clave.  Comenzaremos con el inicio de sesi&oacute;n en una cuenta ya existente.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/487/original/E235I01.png" width="800" height="426" alt="Sesión iniciada en la aplicación."/>
+</div>
+
+<p>OmniAuth es una gema, por lo que podemos incluirlo en la aplicaci&oacute;n de la manera habitual modificando el fichero <code>Gemfile</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.0&#x27;
+
+gem &#x27;sqlite3-ruby&#x27;, :require =&gt; &#x27;sqlite3&#x27;
+gem &#x27;devise&#x27;, &#x27;1.1.3&#x27;
+
+gem &#x27;omniauth&#x27;
+</pre>
+
+<p>Tras esto podemos ejecutar <code>bundle install</code> (o &uacute;nicamente <code>bundle</code>) para instalar la gema as&iacute; como sus dependencias, tarea de la que se ocupar&aacute; bundler.</p>
+
+<p>El siguiente paso es ir al directorio <code>/config/initializers</code> de la aplicaci&oacute;n y crear un nuevo archivo que llamaremos <code>omniauth.rb</code>, si bien el nombre no es realmente importante.  En este fichero a&ntilde;adiremos  <code>OmniAuth::Builder</code> a los <em>middlewares</em> de la aplicaci&oacute;n y definiremos los servicios contra los que permitiremos autenticar a nuestros usuarios.</p>
+
+<p class="codeFilePath">/config/initializers/omniauth.rb</p>
+<pre class="ruby">
+Rails.application.config.middleware.use OmniAuth::Builder do
+  provider :twitter, &#x27;CONSUMER_KEY&#x27;, &#x27;CONSUMER_SECRET&#x27;
+  provider :facebook, &#x27;APP_ID&#x27;, &#x27;APP_SECRET&#x27;
+  provider :linked_in, &#x27;CONSUMER_KEY&#x27;, &#x27;CONSUMER_SECRET&#x27;
+end
+</pre>
+
+<p>En esta aplicaci&oacute;n s&oacute;lo vamos a utilizar Twitter por lo que podemos eliminar las otras dos l&iacute;neas.  Para soportar la autenticaci&oacute;n de usuarios a trav&eacute;s de Twitter tendremos que dar de alta nuestra aplicaci&oacute;n en Twitter visitando la <a href="http://dev.twitter.com">p&aacute;gina para desarrolladores</a> y procediendo all&iacute; al registro.  El formulario de registro es sencillo, y una vez finalizado el proceso recibiremos la clave y el secreto que tendremos que pegar en el fichero de inicializaci&oacute;n.</p>
+
+<p class="codeFilePath">/config/initializers/omniauth.rb</p>
+<pre class="ruby">
+Rails.application.config.middleware.use OmniAuth::Builder do
+  provider :twitter, &#x27;s3dXXXXXXXXXXXX&#x27;, &#x27;lR23XXXXXXXXXXXXXXXXXXXX&#x27;
+end
+</pre>
+
+<p>Si arrancamos el servidor podremos ver OmniAuth en acci&oacute;n.  Si visitamos la URL <code>auth/twitter</code> seremos redirigidos a Twitter, donde se nos preguntar&aacute; si queremos dar acceso a esta aplicaci&oacute;n.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/488/original/E235I02.png" width="802" height="468" alt="La página de Twitter solicita permiso para autenticar usando la aplicación de asciicasts"/>
+</div>
+
+<p>Si hacemos clic en &ldquo;Allow&rdquo; seremos llevados de vuelta a la aplicaci&oacute;n con la URL <code>/auth/twitter/callback</code>.  Nuestra aplicaci&oacute;n tendr&aacute; que manejar esta URL para decidir qu&eacute; hacer cuando un usuario ha iniciado la sesi&oacute;n.  En nuestro caso crearemos un recurso separado para gestionar la respuesta al que llamaremos <code>Authentication</code>.</p>
+
+<p>Se puede crear dicho modelo y su controlador por separado pero para que las cosas sean m&aacute;s f&aacute;ciles usaremos el generador Nifty Scaffold de Ryan Bates para crear el modelo, la vista y el controlador de una tacada.  El recurso  <code>Authentication</code> tendr&aacute; una columna <code>user_id</code>, una columna  <code>provider</code> que almacenar&aacute; el nombre del proveedor de autenticaci&oacute;n (esto es, Twitter, Facebook, etc.)  y un <code>uid</code> que contendr&aacute; el identificador del usuario en el proveedor.  Para el controlador querremos tener las acciones  <code>index</code>, <code>create</code> y <code>destroy</code>.</p>
+
+<pre class="terminal">
+$ rails g nifty:scaffold authentication user_id:integer
+provider:string uid:string index create destroy
+</pre>
+
+<p>Una vez completado el comando tendremos que ejecutar la migraci&oacute;n de base de datos.</p>
+
+<pre class="terminal">
+$ rake db:migrate
+</pre>
+
+<p>A continuaci&oacute;n tenemos que configurar la relaci&oacute;n entre los modelos <code>User</code> y <code>Authentication</code>. Un usuario podr&aacute; autenticarse de varias maneras distintas, por lo que un usuario tendr&aacute; muchas autenticaciones.</p>
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  has_many :authentications
+  # Include default devise modules. Others available are:
+  # :token_authenticatable, :lockable, :timeoutable and :activatable
+  # :confirmable,
+  devise :database_authenticatable, :registerable, 
+         :recoverable, :rememberable, :trackable, :validatable
+
+  # Setup accessible (or protected) attributes for your model
+  attr_accessible :email, :password, :password_confirmation
+end
+</pre>
+
+<p>Igualmente, una <code>Authentication</code> pertenecer&aacute; a un <code>User</code>.</p>
+
+<p class="codeFilePath">/app/models/authentication.rb</p>
+<pre class="ruby">
+class Authentication &lt; ActiveRecord::Base
+  belongs_to :user
+end
+</pre>
+
+<p>El generador autom&aacute;ticamente ha creado un controlador llamado <code>AuthenticationsController</code> que podemos usar para gestionar la respuesta de OmniAuth.  Mapearemos la URL de respuesta a la acci&oacute;n <code>create</code> del controlador modificando el archivo de rutas.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+ProjectManage::Application.routes.draw do |map|
+  match &#x27;/auth/:provider/callback&#x27; =&gt; &#x27;authentications#create&#x27;
+  devise_for :users
+  resources :projects
+  resources :tasks
+  resources :authentications
+  root :to =&gt; &#x27;projects#index&#x27;
+end
+</pre>
+
+<p>N&oacute;tense los dos puntos en la cadena del m&eacute;todo <code>match</code>.  Esto quiere decir que podemos aceptar cualquier proveedor y recibirlo como par&aacute;metro.</p>
+
+<p>En la acci&oacute;n <code>create</code> podemos recuperar los detalles de autenticaci&oacute;n con una llamada a
+ <code>request.env[&quot;rack.auth&quot;]</code> (en futuras versiones de OmniAuth ser&aacute; <code>request.env[&quot;omniauth.auth&quot;]</code>). Por  ahora simplemente visualizaremos esta informaci&oacute;n como texto para que podamos ver su contenido.</p>
+
+<p class="codeFilePath">/app/controllers/authentication_controller.rb</p>
+<pre class="ruby">
+class AuthenticationsController &lt; ApplicationController
+  def index
+  end
+  
+  def create
+    render :text =&gt; request.env[&quot;rack.auth&quot;].to_yaml
+  end
+  
+  def destroy
+  end
+end
+</pre>
+
+<p>Si ahora visitamos <code>/auth/twitter</code> y nos autenticamos en Twitter veremos que disponemos de una gran cantidad de informaci&oacute;n.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/489/original/E235I03.png" width="798" height="558" alt="La respuesta de autenticación recibida de Twitter"/>
+</div>
+
+<p>La informaci&oacute;n devuelta es un <em>hash</em> compuesto de m&aacute;s <em>hashes</em> anidados.  En la parte superior est&aacute;n los campos <code>provider</code> y <code>uid</code> que son los que nos interesan para guardarlos en nuestro modelo <code>Authentication</code>. Al final del archivo hay algo de informaci&oacute;n que podr&iacute;a interesarnos guardar en el modelo <code>User</code>.</p>
+
+<pre class="terminal">
+user_info: 
+  nickname: eifion
+  name: Eifion
+  location: North Wales
+  image: http://a1.twimg.com/profile_images/434158309/Adium_Icon_normal.png
+  description: Web developer using .Net and Windows by day and Ruby and Rails on OS X the rest of the time. I run http://asciicasts.com
+  urls: 
+    Website: http://asciicasts.com
+</pre>
+
+<h3>Almacenamiento de la informaci&oacute;n de autenticaci&oacute;n</h3>
+
+<p>Tendremos que modificar la acci&oacute;n <code>create</code> para cambiar su comportamiento seg&uacute;n el estado actual del usuario pero antes tendremos que contemplar el caso m&aacute;s simple: si un usuario tiene una sesi&oacute;n iniciada y escoge vincular su cuenta con Twitter queremos guardar esta nueva autenticaci&oacute;n en los datos de este usuario.</p>
+
+<p class="codeFilePath">/app/controllers/authentications_controller.rb</p>
+<pre class="ruby">
+def create
+  auth = request.env[&quot;rack.auth&quot;] current_user.authentications.create(:provider =&gt; auth [&#x27;provider&#x27;], :uid =&gt; auth[&#x27;uid&#x27;])
+  flash[:notice] = &quot;Authentication successful.&quot;
+  redirect_to authentications_url
+end
+</pre>
+
+<p>En la acci&oacute;n <code>create</code> recuperamos la informaci&oacute;n de autenticaci&oacute;n en un <em>hash</em>&nbsp;y luego creamos una nueva <code>Authentication</code> para el usuario bas&aacute;ndonos en dos de los par&aacute;metros de la informaci&oacute;n devuelta por el proveedor de autenticaci&oacute;n.  A continuaci&oacute;n crearemos el mensaje de <em>flash</em> y volveremos a redigir a la acci&oacute;n <code>index</code>.</p>
+
+<p>Si visitamos <code>/auth/twitter</code> y nos autenticamos ahora seremos redirigidos a la p&aacute;gina de <code>index</code> donde veremos los detalles de la nueva autenticaci&oacute;n que acabamos de a&ntilde;adir con el proveedor correcto y el <code>uid</code>.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/490/original/E235I04.png" width="801" height="292" alt="Inicio de sesión con éxito."/>
+</div>
+
+<h3>Mejora del aspecto de la p&aacute;gina principal</h3>
+
+<p>Hay una util&iacute;sima cuenta de GitHub llamada  <a href="http://github.com/intridea/authbuttons">Authbuttons</a> que ofrece iconos para muchos servicios diferentes de autenticaci&oacute;n.  Podemos utilizarlos para mejorar el aspecto de la p&aacute;gina donde el usuario escoge el m&eacute;todo de autenticaci&oacute;n para iniciar sesi&oacute;n.  Por comodidad vamos a gestionar todo esto dentro de la acci&oacute;n <code>index</code> de <code>AuthenticationsController</code> pero en una aplicaci&oacute;n de producci&oacute;n pondr&iacute;amos todo esto en una p&aacute;gina separada.</p>
+
+<p>Sin embargo antes de hacer esto, tendremos que hacer un cambio en la acci&oacute;n <code>index</code>.  El c&oacute;digo generado autom&aacute;ticamente recuperar&aacute; todas las autenticaciones por lo que lo cambiaremos para que s&oacute;lo recupere las autenticaciones del usuario actual.</p>
+
+
+<p class="codeFilePath">/app/controllers/authentications_controller.rb</p>
+<pre class="ruby">
+def index
+  @authentications = current_user.authentications if current_user
+end
+</pre>
+
+<p>Es tambi&eacute;n un buen momento para hacer un cambio parecido en la acci&oacute;n <code>destroy</code> de forma que no se puedan eliminar autenticaciones que no pertenezcan al usuario actual.</p>
+
+<p class="codeFilePath">/app/controllers/authentications_controller.rb</p>
+<pre class="ruby">
+def destroy
+  @authentication = current_user.authentications.find(params[:id])
+  @authentication.destroy
+  flash[:notice] = &quot;Successfully destroyed authentication.&quot;
+  redirect_to authentications_url
+end
+</pre>
+
+<p>Lo siguiente que haremos ser&aacute; cambiar el c&oacute;digo de la vista.  Es un poco extenso, pero no es nada complicado.</p>
+
+<p class="codeFilePath">/app/views/authentications/index.html.erb</p>
+<pre class="ruby">
+&lt;% title &quot;Sign In&quot; %&gt;
+&lt;% if @authentications %&gt;
+ &lt;% unless @authentications.empty? %&gt;
+  &lt;p&gt;&lt;strong&gt;You can sign in to this account using:&lt;/strong&gt;&lt;/p&gt;
+   &lt;div class=&quot;authentications&quot;&gt;
+    &lt;% for authentication in @authentications %&gt;
+     &lt;div class=&quot;authentication&quot;&gt;
+      &lt;%= image_tag &quot;#{authentication.provider}_32.png&quot;, &crarr;
+      :size =&gt; &quot;32x32&quot; %&gt;
+      &lt;div class=&quot;provider&quot;&gt;&lt;%= authentication.provider.titleize&crarr;   
+      %&gt;&lt;/div&gt;
+      &lt;div class=&quot;uid&quot;&gt;&lt;%= authentication.uid %&gt;&lt;/div&gt;
+       &lt;%= link_to &quot;X&quot;, authentication, :confirm =&gt; &crarr;
+      &#x27;Are you sure you want to remove this authentication &crarr; 
+      option?&#x27;, :method =&gt; :delete, :class =&gt; &quot;remove&quot; %&gt;
+     &lt;/div&gt;
+     &lt;% end %&gt;
+     &lt;div class=&quot;clear&quot;&gt;&lt;/div&gt;
+    &lt;/div&gt;
+   &lt;% end %&gt;
+   &lt;p&gt;&lt;strong&gt;Add another service to sign in with:&lt;/strong&gt;&lt;/p&gt;
+  &lt;% else %&gt;
+  &lt;p&gt;&lt;strong&gt;Sign in through one of these services:&lt;/strong&gt;&lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;a href=&quot;/auth/twitter&quot; class=&quot;auth_provider&quot;&gt;
+  &lt;%= image_tag &quot;twitter_64.png&quot;, :size =&gt; &quot;64x64&quot;, &crarr;
+  :alt =&gt; &quot;Twitter&quot; %&gt;Twitter&lt;/a&gt;
+&lt;a href=&quot;/auth/facebook&quot; class=&quot;auth_provider&quot;&gt;
+  &lt;%= image_tag &quot;facebook_64.png&quot;, :size =&gt; &quot;64x64&quot;, &crarr;
+  :alt =&gt; &quot;Facebook&quot; %&gt;Facebook&lt;/a&gt;
+&lt;a href=&quot;/auth/google_apps&quot; class=&quot;auth_provider&quot;&gt;
+  &lt;%= image_tag &quot;google_64.png&quot;, :size =&gt; &quot;64x64&quot;, &crarr;
+  :alt =&gt; &quot;Google&quot; %&gt;Google&lt;/a&gt;
+&lt;a href=&quot;/auth/open_id&quot; class=&quot;auth_provider&quot;&gt;
+  &lt;%= image_tag &quot;openid_64.png&quot;, :size =&gt; &quot;64x64&quot;, &crarr;
+  :alt =&gt; &quot;OpenID&quot; %&gt;OpenID&lt;/a&gt;
+&lt;div class=&quot;clear&quot;&gt;&lt;/div&gt;
+</pre>
+
+<p>La p&aacute;gina de autenticaciones tendr&aacute; un aspecto mucho mejor cuando la recarguemos.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/491/original/E235I05.png" width="804" height="433" alt="La página de autenticación tras añadir los iconos."/>
+</div>
+
+<p>Por supuesto nuestra aplicaci&oacute;n todav&iacute;a no soporta todos los servicios mostrados pero el pantallazo nos muestra el aspecto que tendr&iacute;a si lo hiciera.  Pero la p&aacute;gina, a pesar de tener mejor aspecto, tiene un <em>bug</em> oculto.  Si tenemos la sesi&oacute;n iniciada y autenticada v&iacute;a Twitter e intentamos vincular otra vez nuestra cuenta con Twitter se crear&aacute; un segundo registro de autenticaci&oacute;n cuando deber&iacute;a usar el ya existente.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/492/original/E235I06.png" width="802" height="483" alt="La aplicación se ha autenticado incorrectamente dos veces con el mismo proveedor."/>
+</div>
+
+<p>Es un problema muy f&aacute;cil de resolver.  S&oacute;lo tenemos que modificar la acci&oacute;n <code>create</code> del controlador <code>AuthenticationController</code> para que utilice <code>find_or_create_by_</code> para ver si ya existe una autenticaci&oacute;n antes de crear una nueva instancia del modelo.</p>
+
+<p class="codeFilePath">/app/controllers/authentication_controller.rb</p>
+<pre class="ruby">
+def create
+  auth = request.env[&quot;rack.auth&quot;]
+  current_user.authentications.find_or_create_by_provder_and_uid&crarr;
+  (auth[&#x27;provider&#x27;], auth[&#x27;uid&#x27;])
+  flash[:notice] = &quot;Authentication successful.&quot;
+  redirect_to authentications_url
+end
+</pre>
+
+<p>Si eliminamos manualmente la segunda autenticaci&oacute;n y luego nos autenticamos por Twitter otra vez veremos que el usuario sigue teniendo una &uacute;nica autenticaci&oacute;n asociada.</p>
+
+<p>Un requisito importante que todav&iacute;a no hemos acometido es la autenticaci&oacute;n cuando el usuario todav&iacute;a no ha iniciado sesi&oacute;n.  En la acci&oacute;n <code>create</code> hemos asumido que tenemos disponible un usuario que ha iniciado la sesi&oacute;n normalmente.  &iquest;Qu&eacute; ocurre cuando alguien llega al sitio por primera vez e intenta iniciar la sesi&oacute;n mediante Twitter?  Veremos esta problem&aacute;tica en el siguiente episodio.</p>

@@ -1,0 +1,198 @@
+<p>&Eacute;ste episodio cubrir&aacute; autorizaci&oacute;n, m&aacute;s especificamente autorizaci&oacute;n basada en roles. A trav&eacute;s de esto, se le puede asignar un rol a un usuario, el cu&aacute;l le proporciona ciertos permisos dentro de la aplicaci&oacute;n. La autorizaci&oacute;n es un tema dif&iacute;cil de cubrir, m&aacute;s al exisitir <a href="http://steffenbartsch.com/blog/2008/08/rails-authorization-plugins/">tantos plugins y gemas diferentes</a>. Otro problema es que la mejor soluci&oacute;n de autorizaci&oacute;n depende del tipo de aplicaci&oacute;n que est&aacute;s desarrollando.</p>
+
+<p>En este episodio nos enfocaremos en <a href="http://github.com/stffn/declarative_authorization">declarative authorization</a> que es una de las soluciones m&aacute;s avanzadas. Al principio puede aparentar ser bastante complicada, pero con poco esfuerzo descubir&aacute;s que proporciona una poderosa funcionalidad y puede manejar una amplia gama de necesidades de autorizaci&oacute;n.</p>
+
+<h3>Agregando Autorizaci&oacute;n a Nuestra Aplicaci&oacute;n</h3>
+
+<p>En este episodio estaremos trabajando en una aplicaci&oacute;n de blogging. La p&aacute;gina principal de la aplicaci&oacute;n muestra una lista de art&iacute;culos y cada art&iacute;culo puede tener un n&uacute;mero de comentarios que son mostrados en la p&aacute;gina de cada uno.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/235/original/E188I01.png" width="824" height="523" alt="La p&aacute;gina principal de nuestra aplicaci&oacute;n de blogging."/>
+</div>
+
+<p>En su estado actual cualquier usuario que visita el sitio puede editar o eliminar cualquier art&iacute;culo o comentario, que es algo que obviamente no queremos, por lo que modificaremos la aplicaci&oacute;n para dar a cada usuario un diferente nivel de funcionalidad dependiendo de su rol. Ya tenemos configurada la autenticaci&oacute;n en nuestro sitio y hay enlaces en el cabezal de cada p&aacute;gina que permiten a los usuarios loguearse o registrarse. Para esto utilizamos Authlogic, que fue cubierto en el episodio 160 [<a href="http://railscasts.com/episodes/160-authlogic">ver</a>, <a href="http://asciicasts.com/episodes/160-authlogic">leer</a>].</p> 
+
+<p>Para agregar roles vamos a crear un modelo llamado <code>Role</code> el cual tendr&aacute; un atributo llamado <code>name</code>. Los modelos <code>Role</code> y <code>User</code> estar&aacute;n vinculados por una relaci&oacute;n <code>has_many :through</code> a trav&eacute;s de un modelo de join llamado <code>Assignment</code>.</p>
+
+<p>Para asignar roles a un usuario modificaremos el formulario de registro para que el usuario pueda seleccionar sus roles. Esto se realiza con una serie de checkboxes usando una t&eacute;cnica descrita en el episodio 17 [<a href="http://asciicasts.com/episodes/160-authlogic">ver</a>, <a href="http://asciicasts.com/episodes/17-habtm-checkboxes">leer</a>]. Obviamente en una aplicaci&oacute;n del mundo real no permitir&iacute;amos al usuario seleccionar sus propios roles, pero para mantener este ejemplo simple lo haremos.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/236/original/E188I02.png" width="824" height="523" alt="La p&aacute;gina de registro mostrando los checkboxes de rol."/>
+</div>
+
+<p>Nuestros tres roles tendr&aacute;n diferentes permisos: a los miembros del rol admin se les permite crear, editar y eliminar cualquier elemento dentro de la aplicaci&oacute;n; a los moderadores se les permite editar los comentarios de cualquier usuario, pero no art&iacute;culos; los autores podr&aacute;n crear art&iacute;culos y editar cualquier art&iacute;culo que hayan creado, finalmente los usuarios sin un rol asignado podr&aacute;n crear y editar sus comentarios.</p>
+
+<h3>Primeros Pasos Con Declarative Authorization</h3>
+
+<p>Ahora que sabemos lo que queremos hacer, comenzemos con los primeros pasos. Declarative authorization est&aacute; disponible como una gema de Gemcutter por lo que el primer paso que debemos tomar es obtenerla y agregar una referencia en el archivo <code>/config/environment.rb</code> de nuestra aplicaci&oacute;n.</p>
+<pre class="ruby">
+config.gem &quot;declarative_authorization&quot;, :source =&gt; &quot;http://gemcutter.org&quot;
+</pre>
+<p>Luego, para asegurarnos que la gema est&aacute; instalada corremos</p>
+<pre class="terminal">
+sudo rake gems:install
+</pre>
+<p>Definiremos los permisos para cada rol en un nuevo archivo llamado <code>authorization_rules.rb</code> en el directorio <code>/config</code>. Declarative Authorization provee su propio DSL para definir roles y permisos y as&iacute; es como lo usaremos para definir los permisos para el usuario admin.</p>
+<pre class="ruby">
+authorization do
+  role :admin do
+    has_permission_on [:articles, :comments], :to =&gt; [:index, :show, :new, :create, :edit, :update, :destroy]
+  end
+end
+</pre>
+<p>Los roles son definidos dentro de un bloque <code>authorization</code>. Cada rol tiene un nombre y tambi&eacute;n toma un bloque en el cu&aacute;l son seteados los permisos. Usamos el m&eacute;todo <code>has_permission_on</code> para definir el permiso el cu&aacute;l toma dos par&aacute;metros. El primero es una lista de los modelos al que el rol puede acceder y le sigue el par&aacute;metro <code>:to</code> que tiene una lista de acciones permitidas sobre los modelos.</p>
+
+<p>Definiremos los otros roles luego y probaremos lo que hemos hecho hasta ahora. Antes de avanzar sin embargo, necesitamos hacer un cambio m&aacute;s debido a que declarative authorization no conoce como nuestros roles son definidos. Necesitamos hacer un cambio a nuestro modelo <code>User</code>, agregando el m&eacute;todo <code>role_symbols</code> que retorna la lista de roles que tiene el usuario como un array de s&iacute;mbolos. Si, por ejemplo, nuestro modelo <code>Usuario</code> ten&iacute;a un atributo <code>admin</code> podemos escribir el m&eacute;todo de este modo para que el usuario pertenezca al role <code>:admin</code>.</p>
+<pre class="ruby">
+def role_symbols
+  [:admin] if admin?
+end
+</pre>
+
+<p>Nuestra aplicaci&oacute;n es diferente debido a que tiene una relacion many-to-many entre <code>User</code> y <code>Role</code> y los roles de un usuario son definidos cuando se registra, a trav&eacute;s de los checkboxes que vimos anteriormente. Por lo que en <code>role_symbols</code> convertiremos los roles del usuario actual en un array de s&iacute;mbolos de la siguiente forma:</p>
+<pre class="ruby">
+def role_symbols
+  roles.map do |role|
+    role.name.underscore.to_sym
+  end
+end
+</pre>
+<p>Declarative authorization podr&aacute; ahora mapear los roles del usuario a los roles que estamos definiendo en el archivo <code>authorization_rules</code>.</p>
+
+<p>Hay un par de pasos que a&uacute;n debemos tomar. Uno es setear un filtro <code>before_filter</code> en nuestro <code>ApplicationController</code> para decirle a declarative authorization cu&aacute;l es el usuario actual. </p>
+<pre class="ruby">
+class ApplicationController &lt; ActionController::Base
+  helper :all
+  protect_from_forgery
+  before_filter { |c| Authorization.current_user = c.current_user }
+end
+</pre>
+<p>Finalmente debemos ir dentro de cada controlador y agregar un filtro <code>before_filter</code> para restringir el acceso. Hacemos esto llamando a un m&eacute;todo llamado <code>filter_resource_access</code> que provee declarative authorization. Este m&eacute;todo agrega before filters a los controladores de tipo RESTful y adem&aacute;s realiza otra tarea: cuando <code>filter_resource_access</code> es llamado carga el modelo de recurso para que pueda chequear el acceso a &eacute;l. Esto significa que en cada una de las acciones <code>show</code>, <code>new</code>, <code>create</code>, <code>edit</code>, <code>update</code> y <code>delete</code> podemos quitar la l&iacute;nea que carga el modelo. Podemos hacer esto en <code>ArticlesController</code> y <code>CommentsController</code> en nuestra aplicaci&oacute;n. Si cualquiera de tus controladores no sigue la convenci&oacute;n RESTful puedes consultar la documentaci&oacute;n por los detalles de como manejarlo.</p>
+
+<h3>Probando Lo Que Hemos Hecho</h3>
+
+<p>Ha tomado un poco de trabajo llegar a este punto pero finalmente estamos en la etapa donde podemos probar que hemos hecho hasta ahora. Si nos logueamos como un usuario con rol admin podemos ver que los art&iacute;culos y los enlaces de editar o eliminar art&iacute;culo y comentarios est&aacute;n visibles. Hasta ahora todo esta bien, pero cuando hacemos log out vemos algo inesperado:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/237/original/E188I03.png" width="803" height="280" alt="La p&aacute;gina de error mostrada cuando tratamos de acceder a una acci&oacute;n no autorizada."/>
+</div>
+
+<p>Esto pasa porque la aplicaci&oacute;n redirige a la p&aacute;gina principal, la acci&oacute;n index de los art&iacute;culos, cuando hacemos log out y como invitado no tenemos permisos para ver esta acci&oacute;n. Para arreglar esto necesitamos agregar el permiso para el invitado en el archivo <code>authorization_rules</code>. El rol invitado es un rol especial reservado para usuarios que no se han registrado, logueado o no tiene un rol.</p>
+<pre class="ruby">
+authorization do
+  role :admin do
+    has_permission_on [:articles, :comments], :to =&gt; [:index, :show, :new, :create, :edit, :update, :destroy]
+  end
+  
+  role :guest do
+    has_permission_on :articles, :to =&gt; [:index, :show]
+    has_permission_on :comments, :to =&gt; [:new, create]
+  end
+end
+</pre>
+<p>En el rol de invitado le damos permiso para acceder a las acciones index y show de art&iacute;culos y para las acciones new y create de comentarios. Con estos cambios en su sitio recargamos la p&aacute;gina y podemos ver la lista de art&iacute;culos nuevamente.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/238/original/E188I04.png" width="824" height="302" alt="Ahora podemos ver la p&aacute;gina principal nuevamente."/>
+</div>
+
+<h3>Ocultando Enlaces a Acciones Prohibidas</h3>
+
+<p>A pesar que los usuarios invitados no pueden editar ni eliminar art&iacute;culos ni comentarios, los enlaces a estas acciones a&uacute;n se muestran. Nuestro siguiente paso es quitar estos enlaces para los usuarios que no tengan permiso para ejecutar las acciones que representan. Debemos modificar el c&oacute;digo de la vista para hacer esto utilizando el m&eacute;todo <code>permitted_to?</code> que brinda declarative authorization.</p>
+
+<p>En el c&oacute;digo de la vista para la acci&oacute;n show de <code>ArticleController</code> utilizaremos <code>permitted_to?</code> para ocultar los enlaces a editar o eliminar un art&iacute;culo a menos que el usuario actual tenga los permisos apropiados.</p>
+<pre class="ruby">
+&lt;p&gt;
+  &lt;% if permitted_to? :edit, @article %&gt;
+    &lt;%= link_to &quot;Edit&quot;, edit_article_path(@article) %&gt; |
+  &lt;% end %&gt;
+  &lt;% if permitted_to? :destroy, @article %&gt;
+    &lt;%= link_to &quot;Destroy&quot;, @article, :method =&gt; :delete, :confirm =&gt; &quot;Are you sure?&quot; %&gt; |
+  &lt;% end %&gt;
+  &lt;%= link_to &quot;Back to Articles&quot;, articles_path %&gt;
+&lt;/p&gt;
+</pre>
+<p>El m&eacute;todo <code>permitted_to?</code> toma dos par&aacute;metros: el nombre de una acci&oacute;n y un modelo. M&aacute;s abajo en el mismo archivo haremos una modificaci&oacute;n similar de modo que los enlaces no se muestren a menos que el usuario pueda editar o eliminar un comentario.</p>
+<pre class="ruby">
+&lt;p&gt;
+  &lt;% if permitted_to? :edit, comment %&gt;
+    &lt;%= link_to &quot;Edit&quot;, edit_comment_path(comment) %&gt; |
+  &lt;% end %&gt;
+  &lt;% if permitted_to? :destroy, comment %&gt;
+    &lt;%= link_to &quot;Destroy&quot;, comment, :method =&gt; :delete, :confirm =&gt; &quot;Are you sure?&quot; %&gt;
+  &lt;% end %&gt;
+&lt;/p&gt;
+</pre>
+<p>Tambi&eacute;n necesitamos realizar un cambio similar en la vista index para ocultar el enlace a nuevo art&iacute;culo.</p>
+<pre class="ruby">
+&lt;% if permitted_to? :create, Article.new %&gt;
+  &lt;p&gt;&lt;%= link_to &quot;New Article&quot;, new_article_path %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+</pre>
+<p>Nota que no necesitamos una instancia de art&iacute;culo en la acci&oacute;n index, utilizamos <code>Article.new</code> en su lugar.</p>
+
+<p>Cuando recargamos la p&aacute;gina ahora los enlaces de editar y eliminar estar&aacute;n ocultos a menos que el usuario tenga los permisos apropiados.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/239/original/E188I05.png" width="823" height="431" alt="Los enlaces a editar y eliminar est&aacute;n ocultos."/>
+</div>
+
+<h3>Agregando M&aacute;s Roles y Reglas</h3>
+
+<p>Ahora que tenemos todo funcionando, todo lo que necesitamos hacer para alterar el acceso a diferentes partes del sitio es realizar cambios al archivo <code>authorization_rules</code>. El DSL que provee nos permite crear reglas bastante avanzadas. Por ejemplo si queremos permitir a usuarios logueados que no tienen rol asignado poder editar sus propios comentarios, podemos agregar la siguiente regla al rol <code>:guest</code>.</p>
+<pre class="ruby">
+role :guest do
+  has_permission_on :articles, :to =&gt; [:index, :show]
+  has_permission_on :comments, :to =&gt; [:new, :create]
+  has_permission_on :comments, :to =&gt; [:edit, :update] do
+    if_attribute :user =&gt; is { user }
+  end
+end
+</pre>
+<p>Declarative authorization provee un m&eacute;todo <code>if_attribute</code> que puede ser utilizado para agregar condiciones a un permiso. En la nueva regla, el permiso es dado s&oacute;lo si el atributo <code>:user</code>, el usuario al que pertenece el comentario, es el usuario actualmente logueado.</p>
+
+<p>Si ahora nos logueamos como un usuario sin roles y agregamos un comentario a un art&iacute;culo veremos que tenemos el enlace edit en nuestro comentario pero no en los realizados por otros.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/240/original/E188I06.png" width="823" height="552" alt="El usuario invitado puede ahora editar los comentarios que realiz&oacute;."/>
+</div>
+
+<p>Todo lo que debimos hacer para habilitar &eacute;sto fue realizar un cambio en el archivo <code>authorization_rules</code> lo que demuestra cu&aacute;n f&aacute;cil es agregar nuevas reglas.</p>
+
+<h3>Agregando Permisos Para Otros Roles</h3>
+
+<p>Hemos definido tres roles en nuestra aplicaci&oacute;n pero por ahora solo definimos permisos para uno de ellos (asi como para el rol invitado). Ahora agregaremos permisos para esos roles.</p>
+<pre class="ruby">
+role :moderator do
+  includes :guest
+  has_permission_on :comments, :to =&gt; [:edit,:update]
+end
+  
+role :author do
+  includes :guest
+  has_permission_on :articles, :to =&gt; [:new, :create]
+  has_permission_on :articles, :to =&gt; [:edit, :update] do
+    if_attribute :user =&gt; is { user }
+  end
+end
+</pre>
+<p>Nota que hemos utilizado un metodo <code>includes</code> aqu&iacute; para darle a un rol el permiso de otro. Cualquier usuario en el rol moderador puede hacer todo lo que hacer un usuario invitado y tambi&eacute;n editar y actualizar los comentarios de cualquiera. Similarmente los autores pueden hacer todo lo que hace un invitado pero tambi&eacute;n pueden crear art&iacute;culos y actualizar cualquier art&iacute;culo que hayan escrito.</p>
+
+<h3>Un Mejor Mensaje de Error</h3>
+
+<p>Para finalizar este episodio haremos un &uacute;ltimo cambio en nuestra aplicaci&oacute;n. Si alguien viendo nuestro sitio intenta visitar una acci&oacute;n a la cual no tienen permiso ver&aacute; una p&aacute;gina de error b&aacute;sica con un mensaje diciendo que no est&aacute;n autorizados a hacer eso.</p>
+
+<p>Podemos mejorar esto modificando nuestro <code>ApplicationController</code>. Si agregamos un m&eacute;todo llamado <code>permission_denied</code> ser&aacute; ejecutado cuando se intenta llamar a una acci&oacute;n no autorizada. Por lo que en lugar de mostrar un error b&aacute;sico haremos que nuestra aplicaci&oacute;n nos rediriga a la p&aacute;gina principal con un mensaje flash.</p>
+<pre class="ruby">
+def permission_denied
+  flash[:error] = &quot;Sorry, you not allowed to access that page.&quot;
+  redirect_to root_url
+end
+</pre>
+<p>Ahora cuando intentamos acceder a una acci&oacute;n que no estamos autorizados seremos redireccionados a la p&aacute;gina principal y veremos un mejor mensaje de error.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/241/original/E188I07.png" width="823" height="296" alt="Ahora vemos un error personalizado cuando tratamos de acceder a una acci&oacute;n no autorizada."/>
+</div>
+
+<p>Eso es todo por este episodio. Declarative authorization provee una soluci&oacute;n pura y poderosa para la autorizaci&oacute;n en aplicaciones Rails y s&oacute;lo hemos rasgado la superficie en cuanto lo que podemos hacer. Las <a href="http://github.com/stffn/declarative_authorization">p&aacute;ginas de documentaci&oacute;n</a> proveen mucho m&aacute;s detalles y bien vale la pena leer si quieres profundizar un poco.</p>

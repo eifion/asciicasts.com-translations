@@ -1,0 +1,387 @@
+<p>En el episodio anterior [<a href="http://railscasts.com/episodes/235-omniauth-part-1">verlo</a>, <a href="http://es.asciicasts.com/episodes/235-omniauth-part-1">leerlo</a>] vimos c&oacute;mo en una aplicaci&oacute;n Rails se pueden a&ntilde;adir diferentes servicios de autenticaci&oacute;n a una cuenta de usuario usando OmniAuth.  Al terminar el episodio, los usuarios que ya se hab&iacute;an registrado en nuestra aplicaci&oacute;n con un nombre y una clave ya se pod&iacute;an autenticar a trav&eacute;s de terceros servicios como Twitter.  En este episodio seguiremos estudiando OmniAuth y extenderemos la aplicaci&oacute;n para que pueda aceptar usuarios sin sesi&oacute;n iniciada e incluso usuarios que nunca se hayan registrado.</p>
+
+<h3>Actualizaci&oacute;n de OmniAuth</h3>
+
+<p>Tras el &uacute;ltimo episodio se ha publicado una nueva versi&oacute;n de OmniAuth que incluye importantes correcciones.  Para actualizar la aplicaci&oacute;n y que utilice esta nueva versi&oacute;n tan s&oacute;lo tenemos que ejecutar</p>
+
+
+<pre class="terminal">
+$ bundle update
+</pre>
+
+<p>desde el directorio de la aplicaci&oacute;n.  En esta nueva versi&oacute;n de OmniAuth cambia el nombre del entorno de la petici&oacute;n, que pasa de llamarse <code>rack.auth</code> a <code>omniauth.auth</code>, por lo que tambi&eacute;n tendremos que cambiar la aplicaci&oacute;n para reflejar esto:</p>
+
+<p class="codeFilePath">/app/controllers/authentications_controller.rb</p>
+<pre class="ruby">
+def create
+  auth = request.env[&quot;ominauth.auth&quot;]
+  current_user.authentications.find_or_create_by_provder_and_uid&crarr; 
+    (auth[&#x27;provider&#x27;], auth[&#x27;uid&#x27;])
+  flash[:notice] = &quot;Authentication successful.&quot;
+  redirect_to authentications_url
+end
+</pre>
+
+<h3>Inicio de sesi&oacute;n con OmniAuth</h3>
+
+<p>El primer cambio que vamos a hacer en la aplicaci&oacute;n servir&aacute; para permitir que los usuarios ya existentes puedan iniciar la sesi&oacute;n a trav&eacute;s de Twitter.  Tal y como est&aacute; ahora si intentamos hacerlo iremos a Twitter pero cuando nos autentiquemos all&iacute; seremos redirigidos de vuelta a nuestra aplicaci&oacute;n, que nos recibir&aacute; con un mensaje de error.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/493/original/E236I01.png" width="803" height="389" alt="Este es el error que aparece cuando un usuario ya existente intenta iniciar sesión vía Twitter."/>
+</div>
+
+<p>El motivo por el que ocurre este error es que la acci&oacute;n <code>create</code> de  <code>AuthenticationController</code> espera que ya exista un usuario con sesi&oacute;n iniciada e intenta buscar o crear una nueva autenticaci&oacute;n para dicho usuario.  Dado que estamos intentando autenticar a un usuario que todav&iacute;a no ha iniciado la sesi&oacute;n con su nombre y clave, la variable <code>current_user</code> valdr&aacute; <code>nil</code>.</p>
+
+<p class="codeFilePath">/app/controllers/authentications_controller.rb</p>
+<pre class="ruby">
+def create
+  auth = request.env[&quot;ominauth.auth&quot;]
+  current_user.authentications.find_or_create_by_provder_and_uid&crarr; 
+    (auth[&#x27;provider&#x27;], auth[&#x27;uid&#x27;])
+  flash[:notice] = &quot;Authentication successful.&quot;
+  redirect_to authentications_url
+end
+</pre>
+
+<p>Tenemos que hacer un cambio para que intente localizar la autenticaci&oacute;n apropiada y su usuario asociado.  Si la encuentra, iniciar&aacute; la sesi&oacute;n para dicho usuario y de lo contrario crear&aacute; una.  Todav&iacute;a tenemos que controlar el escenario en el que no existe ninguna autenticaci&oacute;n para un usuario nuevo, pero eso lo dejamos para m&aacute;s adelante.</p>
+
+<p class="codeFilePath">/app/controllers/authentications_controller.rb</p>
+<pre class="ruby">
+def create
+  omniauth = request.env[&quot;omniauth.auth&quot;]
+  authentication = Authentication.find_by_provder_and_uid &crarr;
+    (omniauth[&#x27;provider&#x27;], omniauth[&#x27;uid&#x27;])
+  if authentication
+    flash[:notice] = &quot;Signed in successfully.&quot;
+    sign_in_and_redirect(:user, authentication.user)
+  else
+    current_user.authentications.create(:provider =&gt; omniauth &crarr;
+      [&#x27;provider&#x27;], :uid =&gt; omniauth[&#x27;uid&#x27;])
+    flash[:notice] = &quot;Authentication successful.&quot;
+    redirect_to authentications_url
+  end
+end
+</pre>
+
+<p>El m&eacute;todo <code>create</code> busca ahora una <code>Authentication</code> bas&aacute;ndose en los par&aacute;metros <code>uid</code> y  <code>provider</code> de la variable de entorno <code>omniauth.auth</code>.  Si encuentra uno, entonces queremos que se establezca la sesi&oacute;n para dicho usuario, para lo cual usaremos el m&eacute;todo <code>sign_in_and_redirect</code> de Devise para iniciar la sesi&oacute;n del usuario asociado a dicha autenticac&oacute;n.  Si no se encuentra ninguna autenticaci&oacute;n, crearemos una nueva instancia de autenticaci&oacute;n para el usuario que tenga la sesi&oacute;n iniciada.</p>
+
+<p>Esto se puede comprobar visitando la p&aacute;gina de autenticaciones sin haber iniciado la sesi&oacute;n, y log&aacute;ndonos a trav&eacute;s de Twitter.  Deber&iacute;amos terminar con la sesi&oacute;n iniciada en la aplicaci&oacute;n tras ser redirigidos a la p&aacute;gina principal.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/494/original/E236I02.png" width="800" height="312" alt="Sesión iniciada a través de Twitter."/>
+</div>
+
+<h3>Gesti&oacute;n de altas de usuarios</h3>
+
+<p>A continuaci&oacute;n vamos a modificar nuestra aplicaci&oacute;n para que gestione las altas de usuarios que llegan a nuestro sitio y quieran autenticarse con sus credenciales de Twitter.  Tal y como est&aacute; ahora nuestra aplicaci&oacute;n no permitir&aacute; el registro de usuarios a trav&eacute;s de Twitter porque el c&oacute;digo de la acci&oacute;n <code>create</code> sigue esperando un <code>current_user</code> cuando no encuentra la autenticaci&oacute;n correspondiente.</p>
+
+<p>Podemos ver lo que ocurre en este caso saliendo tanto de Twitter como de nuestra aplicaci&oacute;n y luego iniciando la sesi&oacute;n con una cuenta distinta de Twitter.  Twitter nos redirige de vuelta a la aplicaci&oacute;n pero vemos un mensaje de error porque el c&oacute;digo en la acci&oacute;n <code>create</code> intenta recuperar las autenticaciones asociadas a un <code>current_user</code> que no existe.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/495/original/E236I03.png" width="796" height="294" alt="El alta de usuario a través de Twitter devuelve un error."/>
+</div>
+
+<p>Para corregirlo a&ntilde;adiremos otra condici&oacute;n en la acci&oacute;n <code>create</code> para que pueda controlar esta situaci&oacute;n.</p>
+
+<p class="codeFilePath">/app/controllers/authentications_controller.rb</p>
+<pre class="ruby">
+def create
+  omniauth = request.env[&quot;omniauth.auth&quot;]
+  authentication = Authentication.find_by_provider_and_uid &crarr;
+    (omniauth[&#x27;provider&#x27;], omniauth[&#x27;uid&#x27;])
+  if authentication
+    flash[:notice] = &quot;Signed in successfully.&quot;
+    sign_in_and_redirect(:user, authentication.user)
+  elsif current_user
+    current_user.authentications.create(:provider =&gt; omniauth  &crarr;
+      [&#x27;provider&#x27;], :uid =&gt; omniauth[&#x27;uid&#x27;])
+    flash[:notice] = &quot;Authentication successful.&quot;
+    redirect_to authentications_url
+  else
+    user = User.new
+    user.authentications.build(:provider =&gt; omniauth &crarr;
+      [&#x27;provider&#x27;], :uid =&gt; omniauth[&#x27;uid&#x27;])
+    user.save!
+    flash[:notice] = &quot;Signed in successfully.&quot;
+    sign_in_and_redirect(:user, user)
+  end
+end
+</pre>
+
+<p>Este m&eacute;todo gestiona ya tres condiciones distintas.   Si se encuentra una autenticaci&oacute;n inicia la sesi&oacute;n para el usuario asociado. Si no es as&iacute; pero ya existe un usuario con sesi&oacute;n iniciada, entonces asigna una nueva autenticaci&oacute;n para este usuario.  Por &uacute;ltimo, si no hay un usuario con sesi&oacute;n iniciada se crear&aacute; un nuevo usuario, se iniciar&aacute; su sesi&oacute;n y por &uacute;ltimo se le asignar&aacute; la autenticaci&oacute;n recibida.</p>
+
+<p>Si ahora intentamos iniciar la sesi&oacute;n como un nuevo usuario a trav&eacute;s de Twitter veremos un mensaje de error diferente cuando Twitter nos redirija de vuelta</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/496/original/E236I04.png" width="802" height="375" alt="Hay errores de validación cuando registramos al usuario a través de Twitter."/>
+</div>
+
+<p>La aplicaci&oacute;n anuncia que ha fallado una validaci&oacute;n que comprueba que el email y la clave de un usuario no pueden ser vac&iacute;os.  Devise devuelve estos errores de validaci&oacute;n sobre el modelo <code>User</code> porque asume que estos dos campos deben existir en el modelo.</p>
+
+<p>En el modelo <code>User</code> hemos incluido <code>:validatable</code> en la lista de opciones que hemos pasado al m&eacute;todo <code>devise</code>, y es ah&iacute; donde se producen las validaciones de correo y clave.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  has_many :authentications
+  # Include default devise modules. Others available are:
+  # :token_authenticatable, :lockable, :timeoutable 
+  # :confirmable and :activatable
+  devise :database_authenticatable, :registerable, 
+         :recoverable, :rememberable, :trackable, :validatable
+
+  # Setup accessible (or protected) attributes for your model
+  attr_accessible :email, :password, :password_confirmation
+end
+</pre>
+
+<p>La forma m&aacute;s sencilla de corregir esto ser&iacute;a eliminar la opci&oacute;n <code>:validatable</code>, lo que nos servir&iacute;a si s&oacute;lo quisi&eacute;ramos implementar la autenticaci&oacute;n v&iacute;a Twitter pero no podemos tomar esta opci&oacute;n porque seguimos queriendo tener la posibiliad de que la gente se registre de la forma habitual con un nombre de usuario y una clave.  Alternativamente, podr&iacute;amos guardar al usuario sin validarlo cambiando</p>
+
+<pre class="ruby">
+user.save!
+</pre>
+
+<p>tal y como figura en la acci&oacute;n <code>create</code> por</p>
+
+<pre class="ruby">
+user.save(:validate =&gt; false)
+</pre>
+
+<p>Esto puentear&iacute;a la validaci&oacute;n cuando guardemos el usuario en la base de datos pero por supuesto significar&iacute;a que terminar&iacute;amos con datos no v&aacute;lidos en la base de datos.  El modelo <code>User</code> tiene un campo <code>username</code> que queremos que sea &uacute;nico, y si aqu&iacute; nos saltamos la validaci&oacute;n podr&iacute;amos facilmente tener usuarios con nombres duplicados.</p>
+
+<p>Por desgracia no hay una forma f&aacute;cil de corregir esto.  Lo que haremos ser&aacute; mantener la validaci&oacute;n y redirigir al usuario a un formulario donde puedan corregir cualquier problema si la validaci&oacute;n falla cuando se intente guardar al usuario.  Cambiaremos el c&oacute;digo de la acci&oacute;n <code>create</code> de forma que si la validaci&oacute;n falla cuando se intenta guardar un usuario se les redirija a la p&aacute;gina de registro de nuevo usuario.  No queremos perder la informaci&oacute;n recibida de OmniAuth, por lo que la guardaremos en la sesi&oacute;n. El <em>hash</em> de OmniAuth a veces puede contener demasiados datos como para caber en la sesi&oacute;n basada en <em>cookies</em> por lo que eliminaremos la clave <code>extra</code>, que almacena gran cantidad de informaci&oacute;n que no nos es necesaria para registrar al usuario, as&iacute; que podemos obviarla.</p>
+
+<p class="codeFilePath">/app/controllers/authentications_controller.rb</p>
+<pre class="ruby">
+user = User.new
+user.authentications.build(:provider =&gt; omniauth[&#x27;provider&#x27;], &crarr;
+  :uid =&gt; omniauth[&#x27;uid&#x27;])
+if user.save
+  flash[:notice] = &quot;Signed in successfully.&quot;
+  sign_in_and_redirect(:user, user)
+else
+  session[:omniauth] = omniauth.except(&#x27;extra&#x27;)
+  redirect_to new_user_registration_url
+end
+</pre>
+
+<p>A continuaci&oacute;n vamos a modificar el comportamiento del controlador de registro, redefini&eacute;ndolo mediante la creaci&oacute;n de un nuevo controlador de registro.</p>
+
+<pre class="terminal">
+$ rails g controller registrations
+</pre>
+
+<p>Nos har&aacute;n falta vistas para este controlador, por lo que podemos copiar las que ya usa Devise con el generador <code>devise:views</code>.</p>
+
+<pre class="terminal">
+$ rails g devise:views
+</pre>
+
+<p>Esto copia las vistas desde Devise al directorio <code>/app/views/devise</code> de nuestra aplicaci&oacute;n.  En este directorio existe un directorio <code>registrations</code> que contine dos archivos <code>erb</code>.  Vamos a mover ambos archivos a <code>/app/views/registrations</code> para que funcionen con nuestro nuevo controlador.</p>
+
+<p>A continuaci&oacute;n cambiaremos el archivo de rutas para decirle a Devise que utilice nuestro controlador para los registros en lugar del controlador por defecto.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">
+ProjectManage::Application.routes.draw do |map|
+  match &#x27;/auth/:provider/callback&#x27; =&gt; &#x27;authentications#create&#x27;
+  devise_for :users, :controllers =&gt; { :registrations =&gt; &crarr; 
+    &#x27;registrations&#x27; }
+  resources :projects
+  resources :tasks
+  resources :authentications
+  root :to =&gt; &#x27;projects#index&#x27;
+end
+</pre>
+
+<p>En este nuevo controlador que acabamos de generar queremos redefinir parte de la funcionalidad del controlador de registros de Devise, por lo que lo modificaremos para que herede de <code>Devise::RegistrationsController</code> en lugar de <code>ApplicationController</code>.  La clase <code>RegistrationsController</code> de Devise tiene un m&eacute;todo llamado <code>build_resource</code> que construye un modelo <code>User</code> en las aciones <code>new</code> y <code>create</code>.  Si redefinimos este m&eacute;todo podremos personalizar el comportamiento del modelo de usuario que se crea y a&ntilde;adir una autenticaci&oacute;n asociada bas&aacute;ndonos en la informaci&oacute;n almacenada en la variable de sesi&oacute;n con datos de OmniAuth.  Lo que haremos aqu&iacute; ser&aacute; muy parecido a lo que hacemos en la acci&oacute;n <code>create</code> del controlador <code>AuthenticationsController</code>, as&iacute; que extraeremos esta funcionalidad a un nuevo m&eacute;todo del modelo <code>User</code> al que llamaremos <code>apply_omniauth</code>.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">
+def apply_omniauth(omniauth)
+  authentications.build(:provider =&gt; omniauth[&#x27;provider&#x27;], &crarr;
+    :uid =&gt; omniauth[&#x27;uid&#x27;])
+end
+</pre>
+
+<p>Ya podemos usar este m&eacute;todo en la accion <code>create</code> de <code>AutenthicationController</code>.</p>
+
+<p class="codeFilePath">/app/controllers/authentications_controller.rb</p>
+<pre class="ruby">
+user = User.new
+user.apply_omniauth(omniauth)
+if user.save
+  flash[:notice] = &quot;Signed in successfully.&quot;
+  sign_in_and_redirect(:user, user)
+else
+  session[:omniauth] = omniauth.except(&#x27;extra&#x27;)
+  redirect_to new_user_registration_url
+end
+</pre>
+
+<p>Y tambi&eacute;n en nuestro flamante <code>RegistrationsControler</code>.</p>
+
+<p class="codeFilePath">/app/controllers/registrations_controller.rb</p>
+<pre class="ruby">
+class RegistrationsController &lt; Devise::RegistrationsController
+  private
+  def build_resource(*args)
+    super
+    if session[:omniauth]
+      @user.apply_omniauth(session[:omniauth])
+      @user.valid?
+    end
+  end
+end
+</pre>
+
+<p>Esto s&oacute;lo lo queremos hacer si ya existe la variable de sesi&oacute;n por lo que primero comprobaremos su existencia.  Tambi&eacute;n validaremos el usuario para que los errores de validacion aparezcan en la acci&oacute;n <code>new</code> a la que se redirigir&aacute; al usuario.</p>
+
+<p>Veamos si funciona este nuevo c&oacute;digo.  Si visitamos la aplicaci&oacute;n sin tener sesi&oacute;n iniciada y nos autenticamos v&iacute;a Twitter volveremos a la p&aacute;gina de registro porque a&uacute;n no tenemos una cuenta de usuario y veremos los errores de validaci&oacute;n.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/497/original/E236I05.png" width="800" height="605" alt="Ahora en el formulario de registor aparecen los errores de validación."/>
+</div>
+
+<p>No queremos validar la clave cuando el usuario ya tiene su propia forma de autenticaci&oacute;n por lo que en el modelo <code>User</code> desactivaremos las validaciones sobre el campo <code>password</code>.  Devise proporciona una forma de hacerlo redefiniendo el m&eacute;todo <code>password_required?</code>.  S&oacute;lo queremos validar la clave cuando el usuario no tenga otra autenticaci&oacute;n o cuando est&eacute; intentado cambiar su clave. Tambi&eacute;n queremos delegar a <code>super</code> para que se aplique tambi&eacute;n el comportamiento que estamos tratando de ampliar.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">
+def password_required?
+  (authentications.empty? || !password.blank?) &amp;&amp; super
+end
+</pre>
+
+<p>Queremos que los campos de clave del formulario de alta no aparezca cuando no sea estrictamente necesario, para lo que podemos usar <code>password_required?</code> en el c&oacute;digo de la vista.</p>
+
+<p class="codeFilePath">/app/views/registrations/new.html.erb</p>
+<pre class="ruby">
+&lt;h2&gt;Sign up&lt;/h2&gt;
+
+&lt;%= form_for(resource, :as =&gt; resource_name, :url =&gt; registration_path(resource_name)) do |f| %&gt;
+  &lt;%= devise_error_messages! %&gt;
+
+  &lt;p&gt;&lt;%= f.label :email %&gt;&lt;br /&gt;
+  &lt;%= f.text_field :email %&gt;&lt;/p&gt;
+
+&lt;% if @user.password_required? %&gt;
+  &lt;p&gt;&lt;%= f.label :password %&gt;&lt;br /&gt;
+  &lt;%= f.password_field :password %&gt;&lt;/p&gt;
+
+  &lt;p&gt;&lt;%= f.label :password_confirmation %&gt;&lt;br /&gt;
+  &lt;%= f.password_field :password_confirmation %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Sign up&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;%= render :partial =&gt; &quot;devise/shared/links&quot; %&gt;
+</pre>
+
+<p>Si ahora recargamos el formulario veremos que s&oacute;lo aparece un error de validaci&oacute;n, y que no se muestran los campos de clave.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/498/original/E236I06.png" width="801" height="463" alt="Sólo se muestra el campo de la dirección de correo y un error de validación."/>
+</div>
+
+<p>S&oacute;lo nos queda una cosa pendiente en el controlador <code>RegistrationsController</code>, que es eliminar los datos de OmniAuth de la sesi&oacute;n una vez que el usuario ha sido dado de alta correctamente.  Lo haremos redefiniendo la acci&oacute;n <code>create</code>.</p>
+
+<p class="codeFilePath">/app/controllers/registration_controllers.rb</p>
+<pre class="ruby">
+def create
+  super
+  session[:omniauth] = nil unless @user.new_record? 
+end
+</pre>
+
+<p>A partir de ahora se borrar&aacute;n los datos de OmniAuth de la sesi&oacute;n cuando el nuevo usuario sea creado.  Si rellenamos una direcci&oacute;n de correo en el formulario podremos registrarnos y si volvemos a la p&aacute;gina de autenticaciones veremos que aparece nuestra autenticaci&oacute;n de Twitter.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/499/original/E236I07.png" width="800" height="477" alt="El nuevo usuario tiene disponible la autenticación de Twitter."/>
+</div>
+
+<h3>A&ntilde;adir un servicio a OmniAuth</h3>
+
+<p>Terminaremos viendo lo f&aacute;cil que es a&ntilde;adir un nuevo servicio de autenticaci&oacute;n a OmniAuth, en este caso OpenID.  Nuestra aplicaci&oacute;n est&aacute; usando WEBrick en modo de desarrollo y sabemos que las URLs largas que utiliza OpenID pueden provocar problemas, por lo que pasaremos a usar Mongrel.</p>
+
+<p>Para ello tan s&oacute;lo tenemos que poner una referencia a Mongrel en el fichero <code>Gemfile</code> de nuestra aplicaci&oacute;n. Especificaremos la versi&oacute;n <code>1.2.0.pre</code>, que es la que funciona con Rails.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+gem &#x27;mongrel&#x27;, &#x27;1.2.0.pre2&#x27;
+</pre>
+
+<p>A continuaci&oacute;n tenemos que modificar nuestro fichero de configuraci&oacute;n de OmniAuth y a&ntilde;adir OpenID a la lista de proveedores.</p>
+
+<p class="codeFilePath">/config/initializers/omniauth.rb</p>
+<pre class="ruby">
+require &#x27;openid/store/filesystem&#x27;
+Rails.application.config.middleware.use OmniAuth::Builder do
+  provider :twitter, &#x27;s3dXXXXXXXX&#x27;, &#x27;lR23XXXXXXXXXXXXXXXXXX&#x27;
+  provider :open_id, OpenID::Store::Filesystem.new(&#x27;/tmp&#x27;)
+end
+</pre>
+
+<p>Vamos a usar almacenamiento en el sistema de archivos con OpenID.  Si nuestro alojamiento no proporciona esta posibilidad, podemos utilizar el almacenamiento basado en memcached o ActiveRecord, pero en todo caso OpenID exige el uso de un almac&eacute;n de persistencia.  N&oacute;tese que OpenID no incluye autom&aacute;ticamente la persistencia basada en archivos por lo que tendremos que hacer el <code>require</code> nosotros.</p>
+
+<p>Por &uacute;ltimo tenemos que ir al modelo <code>User</code> y cambiar el funcionamiento del m&eacute;todo <code>apply_omniauth</code>.  OpenID proporciona un par&aacute;metro de email y lo usaremos en el modelo <code>User</code> salvo que el usuario ya una direcci&oacute;n de correo.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">
+def apply_omniauth(omniauth)
+  self.email = omniauth[&#x27;user_info&#x27;][&#x27;email&#x27;] if email.blank?
+  authentications.build(:provider =&gt; omniauth[&#x27;provider&#x27;], &crarr;
+    :uid =&gt; omniauth[&#x27;uid&#x27;])
+end
+</pre>
+
+<p>Podemos probar esto iniciando la sesi&oacute;n con una cuenta de OpenID.  Cuando seamos redirigidos a la web de nuestro proveedor de OpenID, podemos autenticarnos all&iacute; y luego seremos redirigidos de vuelta a la aplicaci&oacute;n, con la sesi&oacute;n iniciada y con la direcci&oacute;n de correo de nuestra cuenta de OpenID autom&aacute;ticamente asignada a nuestra cuenta en la aplicaci&oacute;n.</p>
+
+<p>We can
+<div class="imageWrapper">
+  <img src="/system/photos/500/original/E236I08.png" width="800" height="337" alt="Registro usando OpenID."/>
+</div>
+
+<p>Si miramos en la p&aacute;gina de autenticaciones veremos la autenticaci&oacute;n OpenID.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/501/original/E236I09.png" width="800" height="488" alt="El usuario tiene asignada la auteticación de OpenID."/>
+</div>
+
+<p>El t&iacute;tulo de la autenticaci&oacute;n OpenID de la p&aacute;gina anterior es incorrecto, as&iacute; que lo arreglaremos de inmediato. El t&iacute;tulo de cada autenticaci&oacute;n se muestra utilizando el siguiente c&oacute;digo:</p>
+
+<p class="codeFilePath">/app/views/authentications/index.html.erb</p>
+<pre class="ruby">
+&lt;div class=&quot;provider&quot;&gt;
+  &lt;%= authentication.provider.titleize %&gt;
+&lt;/div&gt;
+</pre>
+
+<p>El m&eacute;todo <code>titleize</code> no funciona en este caso, por lo que utilizaremos un nuevo m&eacute;todo en la clase <code>Authentication</code>, que ser&aacute; el que utilizaremos.</p>
+
+<p class="codeFilePath">/app/views/authentications/index.html.erb</p>
+<pre class="ruby">
+&lt;div class=&quot;provider&quot;&gt;
+  &lt;%= authentication.provider_name %&gt;
+&lt;/div&gt;
+</pre>
+
+<p>El m&eacute;todo <code>provider_name</code> es inmediato:</p>
+
+<p class="codeFilePath">/app/models/authentication.rb</p>
+<pre class="ruby">
+class Authentication &lt; ActiveRecord::Base
+  belongs_to :user
+  
+  def provider_name
+    if provider == &#x27;open_id&#x27;
+      &quot;OpenID&quot;
+    else
+      provider.titleize
+    end
+  end
+end
+</pre>
+
+<p>Esto es todo lo que nos quedaba por hacer en este episodio.  OmniAuth es una gema impresioante, especialmente si tenemos en cuenta el n&uacute;mero de servicios a los que se puede conectar.  Una vez que tengamos establecidas las bases es muy f&aacute;cil a&ntilde;adir nuevos servicios seg&uacute;n nos haga falta.  A&ntilde;adir este tipo de comportamiento sobre un sistema de autenticaci&oacute;n ya existente es un poco complejo, y de hecho no hemos cubierto todos los detalles, pero con esto deber&iacute;a ser necesario para empezar a utilizar OmniAuth con Devise.</p>

@@ -1,0 +1,337 @@
+<p>Back in episode 228 [<a href="http://railscasts.com/episodes/228-sortable-table-columns">watch</a>, <a href="http://asciicasts.com/episodes/228-sortable-table-columns">read</a>] we created a table of products that could be sorted by clicking a link at the top of each column. In this episode we&rsquo;ll take this idea further and add searching and pagination. As well as that we&rsquo;ll add unobtrusive JavaScript to make all of the functionality work with AJAX so that the table can be sorted, searched and paginated without reloading the whole page.</p>
+
+<p>We&rsquo;ve covered each of these topics individually in previous episodes, but it can be difficult sometimes to bring all of these features together, especially if we want an application to be Rails 3 compatible and the functionality to work through AJAX. As the most complex part of this is creating a table with sortable columns and we have already done this we&rsquo;ll start with the code from episode 228. You can get the code for this episode from <a href="https://github.com/ryanb/railscasts-episodes/tree/master/episode-228/">Ryan Bates&rsquo; Github pages</a> and when the application runs it looks like this. Note that there is no pagination or searching and that the sorting is done by reloading the page, with the sort parameters in the query string.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/513/original/E240I01.png" width="800" height="515" alt="The table of products."/>
+</div>
+
+<h3>Adding Pagination and Searching</h3>
+
+<p>The first change we&rsquo;ll make is to add pagination and searching. Initially we&rsquo;ll do this without AJAX. Once we know that the new features work we&rsquo;ll add the JavaScript that will make it work without a page reload.</p>
+
+<p>We&rsquo;ll add pagination first. The <a href="https://github.com/mislav/will_paginate/wiki/">will_paginate gem</a> makes this easy to do, although only the pre-release version, currently <code>3.0.pre2</code>,  works with Rails 3 so we&rsquo;ll need to specify the version number when we add will_paginate to our application&rsquo;s Gemfile.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem &#x27;will_paginate&#x27;, &#x27;3.0.pre2&#x27;</pre>
+
+<p>As ever we&rsquo;ll need to run <code>bundle install</code> after we&rsquo;ve modified the <code>Gemfile</code> to make sure that the gem has been installed. Once Bundler has run we&rsquo;ll modify our <code>ProductsController</code>&rsquo;s <code>index</code> action to add pagination to the list of products that it  returns by adding the <code>paginate</code> method to the end of the query. This method takes two parameters: the first is the number of items we want on each page, which we&rsquo;ll set to <code>5</code>; the second is the page number which we can get from the page parameter in the query string.</p> 
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def index
+  @products = Product.order(sort_column + &#x27; &#x27; + sort_direction).paginate(:per_page =&gt; 5, :page =&gt; params[:page])
+end</pre>
+
+<p>In the <code>index</code> view we&rsquo;ll add the following line below the table of products so that the page has pagination links.</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">&lt;%= will_paginate @products %&gt;</pre>
+
+<p>When we reload the page now the table has pagination links and we can page through the list of products five at a time.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/514/original/E240I02.png" width="800" height="436" alt="The table now has pagination."/>
+</div>
+
+<p>The pagination is now in place, but doesn&rsquo;t yet work via AJAX. Let&rsquo;s take a look next at searching. There have been a <a href="http://railscasts.com/episodes?search=search">number of Railscasts episodes that cover searching</a>, the first, <a href="http://railscasts.com/episodes/37-simple-search-form">&ldquo;Simple Search Form&rdquo;</a> is over 3 years old now, but is still applicable here and we can copy and paste some of the example code from it into our application with a few minor changes. First we&rsquo;ll add the search form to our products list.</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">&lt;%= form_tag products_path, :method =&gt; &#x27;get&#x27; do %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag &quot;Search&quot;, :name =&gt; nil %&gt;
+  &lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>To make the example code from episode 37 work here we&rsquo;ve had to change <code>projects_path</code> to <code>products_path</code> in the opening <code>form_tag</code> and also add an equals sign to the opening tag for <code>form_tag</code> to make it Rails 3 compatible.</p>
+
+<p>In the controller we need to call <code>search</code> on the model in the <code>index</code> action.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def index
+  @products = Product.search(params[:search]).order(sort_column + &#x27; &#x27; + sort_direction).paginate(:per_page =&gt; 5, :page =&gt; params[:page])
+end</pre>
+
+<p>Note that we call <code>search</code> before <code>order</code> so we need to make sure that <code>search</code> returns a scope rather than an array of records. We&rsquo;ll add the <code>search</code> class method to the <code>Product</code> model. We&rsquo;ll have to make a few changes to the code from episode 37 here for this code to work with Rails 3. Here&rsquo;s the original code:</p>
+
+<pre class="ruby">def self.search(search)
+  if search
+    find(:all, :conditions =&gt; [&#x27;name LIKE ?&#x27;, &quot;%#{search}%&quot;])
+  else
+    find(:all)
+  end
+end</pre>
+
+<p>The code above uses <code>find(:all)</code> which returns an array of records rather than a scope. (Also it is deprecated in Rails 3.0.) Instead we&rsquo;ll use <code>where</code>. In the <code>else</code> condition where the code returns all of the records we could use <code>all</code>, but this will also return an array of records rather than a scope so we&rsquo;ll use <code>scoped</code> which will perform an empty scope on the products and allow us to add on other queries afterwards. With these changes in place our <code>Product</code> model now looks like this:</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">class Product &lt; ActiveRecord::Base
+  attr_accessible :name, :price, :released_at
+
+  def self.search(search)
+    if search
+      where(&#x27;name LIKE ?&#x27;, &quot;%#{search}%&quot;)
+    else
+      scoped
+    end
+  end
+end</pre>
+
+<p>Note that we&rsquo;re just running a simple search against the <code>name</code> field here. For a more complex application that was going to go into production we could use a full-text search engine such as <a href="http://sphinxsearch.com">Sphinx</a>. If you&rsquo;re thinking of doing this then it&rsquo;s worth taking a look at <a href="http://railscasts.com/episodes/120-thinking-sphinx">the episode on Thinking Sphinx</a>.</p>
+
+<p>If we reload the products page again we&rsquo;ll see the search field and if we search for, say &ldquo;video&rdquo; we&rsquo;ll get a filtered list of products returned.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/515/original/E240I03.png" width="800" height="371" alt="The table with searching implemented."/>
+</div>
+
+<p>This is good but there are a few issues that need to be fixed. When we click one of the columns to sort the filtered results the search term is forgotten and we see all of the results. Another problem is that if we sort by, say, price and then search for something the sorting reverts to the default of searching by name. We&rsquo;ll have to modify sorting and searching so that they take note of each other&rsquo;s settings.</p>
+
+<p>To get the sorting persisting when we perform a search we&rsquo;ll need to pass in the sort parameters as hidden fields to the search form. We can do this by just adding a couple of hidden fields to the form that store the sort and direction fields from the query string.</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">&lt;%= form_tag products_path, :method =&gt; &#x27;get&#x27; do %&gt;
+  &lt;%= hidden_field_tag :direction, params[:direction] %&gt;
+  &lt;%= hidden_field_tag :sort, params[:sort] %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag &quot;Search&quot;, :name =&gt; nil %&gt;
+  &lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>Next we need to get the search to persist when the sort field changes. To do that we&rsquo;ll have to change the code that generates the sort links. We wrote this code back in episode 228 and it lives in a <code>sortable</code> method in the application helper.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def sortable(column, title = nil)
+    title ||= column.titleize
+    css_class = (column == sort_column) ? &quot;current &crarr; 
+      #{sort_direction}&quot; : nil
+    direction = (column == sort_column &amp;&amp; sort_direction == &crarr; 
+      &quot;asc&quot;) ? &quot;desc&quot; : &quot;asc&quot;
+    link_to title, {:sort =&gt; column, :direction =&gt; direction}, &crarr;
+      {:class =&gt; css_class}
+  end
+end</pre>
+
+<p>The link is created in the last line of the method and to get the search term to persist we need to add the search term as a parameter to the link. This means, however, that if we add any other search parameters then we&rsquo;re going to have to change this method every time. In Rails 2 we could make use of <code>overwrite_params</code> here, but this was removed in Rails 3 so we&rsquo;ll need to find a different solution. What we can do is use <code>params.merge</code> instead.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">link_to title, params.merge(:sort =&gt; column, :direction =&gt; &crarr;
+  direction), {:class =&gt; css_class}</pre>
+  
+<p>This way all of the parameters that are outside of the parameters used for sorting will be carried across. That said we don&rsquo;t want the page number to be included as we always want sorting to start at page one when we change the sort field or direction so we&rsquo;ll pass in a <code>nil</code> page parameter.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">link_to title, params.merge(:sort =&gt; column, :direction =&gt; direction, :page =&gt; nil), {:class =&gt; css_class}</pre>
+
+<p>We can try this out now. If we sort the list by price and then search for &ldquo;video&rdquo; then the sorting will now persist.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/516/original/E240I04.png" width="800" height="374" alt="Sorting now persists when a search is made."/>
+</div>
+
+<p>If we change the sort order the search term will now be persisted too.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/517/original/E240I05.png" width="800" height="374" alt="The search term is persisted when the sorting changes too."/>
+</div>
+
+<h3>Adding AJAX</h3>
+
+<p>Now that we have searching, sorting and pagination working let&rsquo;s add some AJAX so that it all happens without the page reloading. Before you do this in one of your own applications it&rsquo;s worth asking yourself if using AJAX will really improve the user experience. Often it&rsquo;s best just to stop at this point as adding AJAX makes it difficult to keep the browser&rsquo;s back button and bookmarks working as expected. If your application&rsquo;s UI really will benefit from AJAX then read on.</p>
+
+<p>We&rsquo;re going to use jQuery to help us with this. The easiest way to add jQuery to a Rails application is to use a gem called jquery-rails so we&rsquo;ll add this gem to our application and then run <code>bundle install</code> again.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem &#x27;jquery-rails&#x27;</pre>
+
+<p>To install the jQuery files into our application we run the <code>jquery:install</code> command.</p>
+
+<pre class="terminal">$ rails g jquery:install</pre>
+
+<p>When you run this command you may see an error. This error is fixed in the latest version of jquery-rails so if you see if then you&rsquo;l have to specify the version number explicitly. Anything greater than version 0.2.5 should work.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem &#x27;jquery-rails&#x27;, &#x27;&gt;=0.2.5&#x27;</pre>
+
+<p>Rerun <code>bundle</code> to install the new version of the gem and all should be fine. You&rsquo;ll get a file conflict for the <code>rails.js</code> file but you can safely overwrite it.</p>
+
+<p>Now that we have jQuery installed we can add some AJAX to our page. The first thing we need to do is to identify the part of the page that we want to update. In this case it&rsquo;s the table that displays the list of products and so we&rsquo;ll move it from the <code>index</code> view into a partial.</p>
+
+<p class="codeFilePath">/app/views/products/_products.html.erb</p>
+<pre class="ruby">&lt;table class=&quot;pretty&quot;&gt;
+  &lt;tr&gt;
+    &lt;th&gt;&lt;%= sortable &quot;name&quot; %&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;%= sortable &quot;price&quot; %&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;%= sortable &quot;released_at&quot;, &quot;Released&quot; %&gt;&lt;/th&gt;
+  &lt;/tr&gt;
+  &lt;% for product in @products %&gt;
+  &lt;tr&gt;
+    &lt;td&gt;&lt;%= product.name %&gt;&lt;/td&gt;
+    &lt;td class=&quot;price&quot;&gt;&lt;%= number_to_currency(product.price, :unit =&gt; &quot;&amp;pound;&quot;) %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= product.released_at.strftime(&quot;%B %e, %Y&quot;) %&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;% end %&gt;
+&lt;/table&gt;</pre>
+
+<p>We&rsquo;ll wrap the partial in a <code>div</code> with an <code>id</code> so that we can identify it from JavaScript.</p>
+
+<p class="codeFilePath">app/views/products/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Products&quot; %&gt;
+
+&lt;%= form_tag products_path, :method =&gt; &#x27;get&#x27; do %&gt;
+  &lt;%= hidden_field_tag :direction, params[:direction] %&gt;
+  &lt;%= hidden_field_tag :sort, params[:sort] %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag &quot;Search&quot;, :name =&gt; nil %&gt;
+  &lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;div id=&quot;products&quot;&gt;&lt;%= render &#x27;products&#x27; %&gt;&lt;/div&gt;
+
+&lt;%= will_paginate @products %&gt;
+&lt;p&gt;&lt;%= link_to &quot;New Product&quot;, new_product_path %&gt;&lt;/p&gt;</pre>
+
+<p>We&rsquo;re ready now to write the JavaScript code that adds the AJAX functionality.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(&#x27;#products th a&#x27;).live(&#x27;click&#x27;, function () {
+    $.getScript(this.href);
+    return false;
+  });
+})</pre>
+
+<p>This code starts with jQuery&rsquo;s <code>$</code> function. If this function is passed a function as an argument then that function will be run once the page&rsquo;s DOM has loaded. The code inside the function uses a jQuery selector to find all of the anchor tags within the table&rsquo;s header cells and adds a <code>click</code> event to them. We use jQuery&rsquo;s <code>live</code> function here rather than just <code>click</code> to attach the events so that when the table is reloaded the events stay live and don&rsquo;t need to be reattached.</p>
+
+<p>When one of the links is clicked jQuery&rsquo;s <code>$.getScript</code> function is called which will load and run JavaScript file from the server. The file we want to load has the same URL as the link so we can pass in the <code>href</code> of the link as the argument. Finally the function returns <code>false</code> so that the link itself isn&rsquo;t fired.</p>
+
+<p>If we reload the page now and try clicking the links at the top of the table they won&rsquo;t work. This is because we haven&rsquo;t yet written a JavaScript template for the <code>index</code> action that the links are calling. We&rsquo;ll do that now.</p>
+
+<p>We want the code in this template to update the products <code>div</code> with the output from the <code>_products</code> partial and it doesn&rsquo;t take much code to do this at all.</p>
+
+<p class="codeFilePath">/app/views/products/index.js.erb</p>
+<pre class="javascript">$(&#x27;#products&#x27;).html(&#x27;&lt;%= escape_javascript(render(&quot;products&quot;)) %&gt;&#x27;);</pre>
+
+<p>Now when we reload the page the sort links work and the table is re-sorted without the page having to be reloaded. Obviously this is difficult to show here but if we open the page in Firefox and use Firebug to show the XMLHTTP requests we can see the requests and the response that is returned.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/518/original/E240I06.png" width="821" height="624" alt="Sorting now works through AJAX."/>
+</div>
+
+<p>Now that we&rsquo;ve done this it&rsquo;s easy to make the pagination links use AJAX too. All we need to do is add those links to the list of elements that trigger the AJAX call.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(&#x27;#products th a, #products .pagination a&#x27;).live(&#x27;click&#x27;, &crarr; 
+    function () {
+      $.getScript(this.href);
+      return false;
+    }
+  );
+});</pre>
+
+<p>That&rsquo;s it. The pagination will now work without reloading the page.</p>
+
+<h3>The Search Form</h3>
+
+<p>The final part of the page that we need to get working via AJAX is the search form.  The first thing we&rsquo;ll have to do is give the form element an <code>id</code> so that we can easily select it with jQuery.</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">&lt;%= form_tag products_path, :method =&gt; &#x27;get&#x27;, :id =&gt; &crarr;
+  &quot;products_search&quot; do %&gt;
+  &lt;%= hidden_field_tag :direction, params[:direction] %&gt;
+  &lt;%= hidden_field_tag :sort, params[:sort] %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag &quot;Search&quot;, :name =&gt; nil %&gt;
+  &lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>Now we need to add a little more JavaScript in to the <code>application.js</code> file.</p>
+
+<p class="codeFilePath">/public/application.js</p>
+<pre class="javascript">$(function () {
+  // Sorting and pagination links.
+  $(&#x27;#products th a, #products .pagination a&#x27;).live(&#x27;click&#x27;, 
+    function () {
+      $.getScript(this.href);
+      return false;
+    }
+  );
+  
+  // Search form.
+  $(&#x27;#products_search&#x27;).submit(function () {
+    $.get(this.action, $(this).serialize(), null, &#x27;script&#x27;);
+    return false;
+  });
+});</pre>
+
+<p>The new code selects the search form and listens for its <code>submit</code> event. The function that&rsquo;s called when the form is submitted uses jQuery&rsquo;s <code>$.get</code> function to make an AJAX request. We pass in the form&rsquo;s action as the URL for the AJAX request, the form&rsquo;s data by using <code>$(this).serialize</code>, <code>null</code> as we don&rsquo;t want a callback function and then <code>&#x27;script&#x27;</code> so that the response is evaluated as JavaScript. After that we return <code>false</code> so that the form isn&rsquo;t submitted.</p>
+
+<p>When we reload the page now we can submit a search and the table will filter the results without reloading the page. Against, this is difficult to demonstrate here but if we use Firefox and Firebug again we can see the AJAX request and the response.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/519/original/E240I07.png" width="822" height="556" alt="Searching now works with AJAX too."/>
+</div>
+
+<p>We can even easily change the JavaScript to make the search &lsquo;live&rsquo; so that the results automatically update with each keypress. Note that this is only a quick demo and isn&rsquo;t the best way to do this. There are several jQuery plugins that you can use if you do something like this in a production app. To do this we&rsquo;ll replace the JavaScript that we used to submit the form through AJAX with this.</p>
+
+<p class="codeFilePath">/public/application.js</p>
+<pre class="javascript">$(&#x27;#products_search input&#x27;).keyup(function () {
+  $.get($(&#x27;#products_search&#x27;).attr(&#x27;action&#x27;), &crarr; 
+    $(&#x27;#products_search&#x27;).serialize(), null, &#x27;script&#x27;);
+  return false;
+});</pre>
+
+<p>Now, every time we enter a character into the text box the AJAX request is made and the table is updated.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/520/original/E240I08.png" width="822" height="556" alt="The searching is now 'live'."/>
+</div>
+
+<p>There&rsquo;s one bug that we&rsquo;ve introduced by adding AJAX to the search form. When we make a search the ordering reverts back to the default of searching by name. This is because the hidden fields on the form that store the sort field and direction are not automatically updated when the AJAX call is made. To fix this we need to move these fields into the products partial.</p>
+
+<p class="codeFilePath">/app/views/products/_products.html.erb</p>
+<pre class="ruby">&lt;%= hidden_field_tag :direction, params[:direction] %&gt;
+&lt;%= hidden_field_tag :sort, params[:sort] %&gt;
+&lt;table class=&quot;pretty&quot;&gt;
+  &lt;tr&gt;
+    &lt;th&gt;&lt;%= sortable &quot;name&quot; %&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;%= sortable &quot;price&quot; %&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;%= sortable &quot;released_at&quot;, &quot;Released&quot; %&gt;&lt;/th&gt;
+  &lt;/tr&gt;
+  &lt;% for product in @products %&gt;
+  &lt;tr&gt;
+    &lt;td&gt;&lt;%= product.name %&gt;&lt;/td&gt;
+    &lt;td class=&quot;price&quot;&gt;&lt;%= number_to_currency(product.price, :unit =&gt; &quot;&amp;pound;&quot;) %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= product.released_at.strftime(&quot;%B %e, %Y&quot;) %&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;% end %&gt;
+&lt;/table&gt;
+&lt;%= will_paginate @products %&gt;</pre>
+
+<p>We&rsquo;ll also move the partial into the form.</p>
+
+<p class="codeFilePath">/app/view/products/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Products&quot; %&gt;
+
+&lt;%= form_tag products_path, :method =&gt; &#x27;get&#x27;, :id =&gt; &quot;products_search&quot; do %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag &quot;Search&quot;, :name =&gt; nil %&gt;
+  &lt;/p&gt;
+ &lt;div id=&quot;products&quot;&gt;&lt;%= render &#x27;products&#x27; %&gt;&lt;/div&gt;
+&lt;% end %&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;New Product&quot;, new_product_path %&gt;&lt;/p&gt;</pre>
+
+<p>Now when we search the sort order is maintained.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/521/original/E240I09.png" width="800" height="406" alt="Everything now works as we want."/>
+</div>
+
+<p>That&rsquo;s it, we&rsquo;re done. We now have a nice interface with sorting, searching and pagination all done through AJAX.</p>

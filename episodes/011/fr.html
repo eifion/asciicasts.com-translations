@@ -1,0 +1,160 @@
+<p>Dans l'<a href="http://fr.asciicasts.com/episodes/10-refactorisation-premiere">épisode précédent</a> nous avons parlé de refactorisation et comment déplacer le code d'une vue dans un modèle dans l'idée de réduire la duplication. Le code dans notre modèle <code>User</code> pourrait pourtant être encore amélioré.</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  def full_name
+    name = first_name + ' '
+    name += "#{middle_initial}. " unless middle_initial.nil?
+    name += last_name
+  end
+end
+</pre>
+<p class="title">Notre modèle <code>User</code> comme il était à la fin du dernier épisode..</p>
+
+<h3>Tester</h3>
+<p>Avant de refactoriser notre modèle <code>User</code>, intéressons nous aux tests. Les tests et la refactorisation vont main dans la main, du fait que la refactorisation a pour but d'améliorer notre code sans modifier son comportement. Une bonne couverture de test assure que notre refactorisation n'affecte pas ce que le code fait. Quand un modèle est créé dans une application Rails, un fichier de test pour ce modèle est automatiquement créé. Regardons un peu le fichier <code>user_test.rb</code> dans le répertoire <code>/test/unit</code><a href="#fn1"><sup>1</sup></a>.</p>
+<pre class="ruby">
+require 'test_helper'
+
+class UserTest &lt; ActiveSupport::TestCase
+  # Replace this with your real tests.
+  test "the truth" do
+    assert true
+  end
+end
+</pre>
+<p class="title">Le test par défaut soumis par Rails.</p>
+<p>Il y a un test soumis par défaut dans le code ci-dessus qui affirme simplement que <code>true == true</code>. Nous allons le remplacer avec le premier test de notre cru, en créant un utilisateur sans initiale et en vérifiant que le nom complet que nous attendons est bien celui renvoyé.</p>
+<pre class="ruby">
+test "full name without middle initial" do
+  user = User.new(:first_name =&gt; "John", :last_name =&gt; "Smith")
+  assert_equal 'John Smith', user.full_name
+end
+</pre>
+<p class="title">Notre premier test contrôle un nom sans initiale.</p>
+
+<p>Pour exécuter nos tests nous pouvons lancer la commande <code>rake test</code> depuis un terminal à partir du dossier de notre application mais nous allons utiliser AutoTest<a href="#fn2"><sup>2</sup></a>. Pour l'utiliser, installez la gem ZenTest (<code>sudo gem install ZenTest</code>). AutoTest a l'avantage de continuellement exécuter nos tests ce qui fait qu'il est facile de voir quand nous cassons quelque chose. Nous allons lancer <code>autotest</code> et voir les résultats que nous obtenons.</p>
+<pre class="terminal">
+Laa-Laa:ep11 eifion$ autotest
+loading autotest/rails
+/usr/local/bin/ruby -I.:lib:test -rtest/unit -e "%w[test/functional/users_controller_test.rb test/unit/user_test.rb].each { |f| require f }" | unit_diff -u
+Loaded suite -e
+Started
+.
+Finished in 0.046945 seconds.
+
+1 tests, 1 assertions, 0 failures, 0 errors
+</pre>
+<p class="title">Sortie d'AutoTest</p>
+<p>Notre premier test est passé ! Maintenant nous allons créer un autre test pour un nom avec une initial en ajoutant la méthode ci-dessous à notre classe <code>UserTest</code>.</p>
+<pre class="ruby">
+test "full name with middle initial" do
+  user = User.new(:first_name =&gt; "Paul", :middle_initial =&gt; "P", :last_name =&gt; "Hughes")
+  assert_equal 'Paul P. Hughes', user.full_name
+end
+</pre>
+<p>Quand vous enregistrer le fichier test, AutoTest devrait automatiquement ré-exécuter les tests. Tous les tests devraient réussir.</p>
+
+<h3>Refactorisation</h3>
+<p>Maintenant que nous savons que notre méthode <code>full_name</code> se comporte comme voulu nous pouvons commencer à la remanier. L'utilisation de la variable locale dans la méthode et la concaténation de chaine ne semble pas nécessaire donc nous allons l'enlever. À la place, nous pourrions mettre chaque partie du nom de l'utilisateur dans un tableau et les relier avec un espace.</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  def full_name
+    [first_name, middle_initial, last_name].join(' ')
+  end
+end
+</pre>
+<p class="title">Première refactorisation de notre classe <code>User</code>.</p>
+
+<p>Quand nous enregistrons le fichier, les tests devraient être exécutés automatiquement et nous pouvons voir qu'ils échouent tous deux.</p>
+<pre class="terminal">
+  1) Failure:
+  test_full_name_with_middle_initial(UserTest)
+  [./test/unit/user_test.rb:11:in `test_full_name_with_middle_initial'
+  /usr/local/lib/ruby/gems/1.8/gems/activesupport-2.2.2/lib/active_support/testing/setup_and_teardown.rb:60:in `run']:
+  --- /var/folders/yD/yDkhXjIsHAqkCTKsBbUlC++++TI/-Tmp-/expect31666.0    2009-01-04 11:23:35.000000000 +0000
+  +++ /var/folders/yD/yDkhXjIsHAqkCTKsBbUlC++++TI/-Tmp-/butwas31666.0    2009-01-04 11:23:35.000000000 +0000
+  @@ -1 +1 @@
+  -Paul P. Hughes
+  +Paul P Hughes
+
+  2) Failure:
+  test_full_name_without_middle_initial(UserTest)
+  [./test/unit/user_test.rb:6:in `test_full_name_without_middle_initial'
+  /usr/local/lib/ruby/gems/1.8/gems/activesupport-2.2.2/lib/active_support/testing/setup_and_teardown.rb:60:in `run']:
+  --- /var/folders/yD/yDkhXjIsHAqkCTKsBbUlC++++TI/-Tmp-/expect31666.1    2009-01-04 11:23:35.000000000 +0000
+  +++ /var/folders/yD/yDkhXjIsHAqkCTKsBbUlC++++TI/-Tmp-/butwas31666.1    2009-01-04 11:23:35.000000000 +0000
+  @@ -1 +1 @@
+  -John Smith
+  +John  Smith
+
+  2 tests, 2 assertions, 2 failures, 0 errors
+</pre>
+<p class="title">Rendu d'AutoTest montrant les échecs des tests unitaires.</p>
+
+<p>Le premier test échoue parce qu'il n'y pas de point après l'initiale; Le second échoue parce qu'il y a deux espaces entre le prénom et le nom. Nous allons essayer de réparer le deuxième test d'abord. Il y a deux espaces parce que l'initiale vaut <code>nil</code> et que nous joignons chaque partie du tableau avec un espace. Nous pouvons réparer ça en appelant la méthode <code>compact</code> sur le tableau avant de joindre chaque partie. (<code>compact</code> supprime toutes les valeurs <code>nil</code> d'un tableau.)</p>
+<pre class="ruby">
+def full_name
+  [first_name, middle_initial, last_name].compact.join(' ')
+end
+</pre>
+<p>Maintenant, uniquement notre premier test échoue : nous avons besoins du point après l'initiale. Nous allons corriger en créant une nouvelle méthode dans la classe <code>User</code> que l'on nommera <code>middle_initial_with_full_stop</code>.</p>
+<pre class="ruby">
+def full_name
+  [first_name, middle_initial_with_full_stop, last_name].compact.join(' ')
+end  
+
+def middle_initial_with_full_stop
+  "#{middle_initial}." unless middle_initial.blank?
+end
+</pre>
+<p>Nos tests passent maintenant mais il y a une condition que nous n'avons pas testé. Que ce passe-t'il si l'initiale est une chaine vide (donc différente de <code>nil</code>) ? On peut écrire un test pour ça et voir ce qui se passe.</p>
+<pre class="ruby">
+test "full name with empty middle initial" do
+  user = User.new(:first_name =&gt; "John", :middle_initial =&gt; "", :last_name =&gt; "Jones")
+  assert_equal 'John Jones', user.full_name
+end
+</pre>
+<p>Ça passe également. La méthode <code>blank?</code> pour une chaine retournera <code>true</code> pour une valeur <code>nil</code> ou une chaine vide, donc notre nom avec une initiale vide retourne toujours le résultat attendu.</p>
+
+<p>Le code de notre modèle <code>User</code> a meilleure allure qu'auparavant. Il y a toujours quelque duplication dans le code de test pourtant. Nous verrons ça dans le prochain épisode.</p>
+
+<h3>Code final</h3>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  def full_name
+    [first_name, middle_initial_with_full_stop, last_name].compact.join(' ')
+  end  
+
+  def middle_initial_with_full_stop
+    "#{middle_initial}." unless middle_initial.blank?
+  end
+end
+</pre>
+<p class="title">La classe <code>User</code> après refactorisation.</p>
+<pre class="ruby">
+  require 'test_helper'
+  class UserTest &lt; ActiveSupport::TestCase
+    test "full name without middle initial" do
+      user = User.new(:first_name =&gt; "John", :last_name =&gt; "Smith")
+      assert_equal 'John Smith', user.full_name
+    end
+
+    test "full name with middle initial" do
+      user = User.new(:first_name =&gt; "Paul", :middle_initial =&gt; "P", :last_name =&gt; "Hughes")
+      assert_equal 'Paul P. Hughes', user.full_name
+    end
+
+    test "full name with empty middle initial" do
+      user = User.new(:first_name =&gt; "John", :middle_initial =&gt; "", :last_name =&gt; "Jones")
+      assert_equal 'John Jones', user.full_name
+    end
+  end
+</pre>
+<p class="title">Les tests pour la classe <code>User</code>.</p>
+
+<h3>Notes</h3>
+<ol class="footnotes">
+  <li id="fn1">Le RailsCast de cet épisode est basé sur Rails 1. Le code ci-dessus a été écrit pour Rails 2.2.</li>
+  <li id="fn2"><a href="http://rubyforge.org/projects/zentest/">http://rubyforge.org/projects/zentest/</a></li>
+</ol>
+

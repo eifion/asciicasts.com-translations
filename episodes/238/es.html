@@ -1,0 +1,359 @@
+<p>Hace unos meses, en el episodio 194 [<a href="http://railscasts.com/episodes/194-mongodb-and-mongomapper">verlo</a>, <a href="http://es.asciicasts.com/episodes/194-mongodb-y-mongomapper">leerlo</a>], repas&aacute;bamos MongoDB y MongoMapper.  MongoMapper es una gema muy &uacute;til pero ahora existe una nueva alternativa llamada <a href="http://mongoid.org/">Mongoid</a> que nos puede resultar interesante si estamos pensando en usar MongoDB con  nuestra aplicaci&oacute;n Rails.  Mongoid destaca, entre otras cosas, por el cuidado aspecto de su sitio web y por lo detallado de su documentaci&oacute;n.  Muchos otros proyectos de c&oacute;digo abierto podr&iacute;an tomar nota en este aspecto.</p>
+
+<h3>Instalaci&oacute;n de MongoDB</h3>
+
+
+<p>Si a&uacute;n no hemos instalado MongoDB en nuestro sistema lo primero que tendremos que hacer es visitar la <a href="http://www.mongodb.org/downloads">p&aacute;gina de descargas de MongoDB</a> para descargar los archivos apropiados.  Si estamos usando Mac OS X podemos, en vez de esto, instalar MongoDB utilizando <a href="http://mxcl.github.com/homebrew/">Homebrew</a>.  Una vez que est&eacute; instalado podemos comprobar que MongoDB est&aacute; arrancado visitando <code><a href="http://localhost:28017">http://localhost:28017</a></code>.  Si vemos una p&aacute;gina como la siguiente podemos estar seguros de que todo est&aacute; funcionando correctamente.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/506/original/E238I01.png" width="805" height="561" alt="La p&aacute;gina que se ve cuando MongoDB est&aacute; en ejecuci&oacute;n."/>
+</div>
+
+<h3>Una nueva aplicaci&oacute;n Rails con Mongoid</h3>
+
+
+<p>Una vez que tenemos MongoDB instalado, vamos a crear una aplicaci&oacute;n Rails 3 con Mongoid.  Siguiendo la tradici&oacute;n de las aplicaciones Rails de ejemplo, haremos un blog.</p>
+
+<pre class="terminal">$ rails new blog</pre>
+
+<p>Lo primero que tenemos que hacer es a&ntilde;adir la gema Mongoid al <code>Gemfile</code>.  Como a d&iacute;a de hoy la versi&oacute;n de Mongoid que soporta Rails 3 es la versi&oacute;n 2 y est&aacute; todav&iacute;a en beta, tendremos que especificar el n&uacute;mero de versi&oacute;n.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.1&#x27;
+gem &#x27;sqlite3-ruby&#x27;, :require =&gt; &#x27;sqlite3&#x27;
+
+gem &#x27;mongoid&#x27;, &#x27;2.0.0.beta.19&#x27;
+gem &#x27;bson_ext&#x27;
+</pre>
+
+<p>Tambi&eacute;n tenemos que a&ntilde;adir la gema <a href="http://rubygems.org/gems/bson_ext"><code>bson_ext</code></a>. BSON es una versi&oacute;n binaria de JSON, y esta gema instala varias extensiones en C para acelerar la serializaci&oacute;n de BSON en Ruby.  Podemos luego instalar las gemas de la forma habitual.</p>
+
+<pre class="terminal">$ bundle</pre>
+
+<p>Una vez instaladas las gemas tenemos que ejecutar el generador de configuraci&oacute;n de Mongoid para que pueda crear el fichero YAML de configuraci&oacute;n.</p>
+
+
+<pre class="terminal">$ rails g mongoid:config</pre>
+
+<p>A continuaci&oacute;n se muestra el fichero por defecto. Podemos dejarlo tal cual mientras desarrollamos la aplicaci&oacute;n.</p>
+
+
+<p class="codeFilePath">/config/mongoid.yml</p>
+<pre class="ruby">
+defaults: &amp;defaults
+  host: localhost
+  # slaves:
+  #   - host: slave1.local
+  #     port: 27018
+  #   - host: slave2.local
+  #     port: 27019
+
+development:
+  &lt;&lt;: *defaults
+  database: blog_development
+
+test:
+  &lt;&lt;: *defaults
+  database: blog_test
+
+# set these environment variables on your prod server
+production:
+  host: &lt;%= ENV[&#x27;MONGOID_HOST&#x27;] %&gt;
+  port: &lt;%= ENV[&#x27;MONGOID_PORT&#x27;] %&gt;
+  username: &lt;%= ENV[&#x27;MONGOID_USERNAME&#x27;] %&gt;
+  password: &lt;%= ENV[&#x27;MONGOID_PASSWORD&#x27;] %&gt;
+  database: &lt;%= ENV[&#x27;MONGOID_DATABASE&#x27;] %&gt;
+</pre>
+
+<p>Ya tenemos todo en su sitio para empezar a desarrollar nuestra aplicaci&oacute;n.  Empezaremos creando el modelo <code>Article</code> con los campos <code>name</code> y <code>content</code> y utilizaremos el andamiaje de Rails para crear el c&oacute;digo de la vista y el controlador asociados.</p>
+
+<pre class="terminal">$ rails g scaffold article name:string content:text
+    invoke  mongoid
+    create    app/models/article.rb</pre>
+
+<p>Cuando creamos un modelo se invoca el generador propio de Mongoid, no el de ActiveRecord.  Si abrimos el fichero del modelo veremos que se trata de una simple clase que incluye <code>Mongoid::Document</code>.</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">
+class Article
+  include Mongoid::Document
+  field :name, :type =&gt; String
+  field :content, :type =&gt; String
+end
+</pre>
+
+<p>Una diferencia entre esta clase y un modelo de ActiveRecord normal es que cada campo tiene que ser expl&iacute;citamente definido junto con su tipo.  El tipo por defecto es <code>String</code> por lo que en este caso particular podemos omitir los tipos.</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">
+class Article
+  include Mongoid::Document
+  field :name
+  field :content
+end
+</pre>
+
+<p>Nuestra aplicaci&oacute;n est&aacute; lista para ejecutarse.  No tenemos que lanzar  ninguna migraci&oacute;n en la base de datos porque MongoDB no necesita esquema y podemos pasar todos los campos que queramos a un documento.  Si visitamos la p&aacute;gina <code>/articles</code> veremos la conocida p&aacute;gina generada autom&aacute;ticamente por el generador de andamiajes y podremos crear un nuevo <code>Article</code> igual que si estuvi&eacute;ramos trabajando con ActiveRecord.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/507/original/E238I02.png" width="801" height="280" alt="The articles page after a new article has been created."/>
+</div>
+
+<h3>M&aacute;s campos</h3>
+
+<p>Una de las ventajas de utilizar una base de datos sin esquema es que es muy sencillo a&ntilde;adir campos a un modelo.  Supongamos que nos olvidamos de a&ntilde;adir un campo para la fecha de publicaci&oacute;n de un <code>Article</code>.  Para a&ntilde;adirlo tan s&oacute;lo tenemos que modificar la clase del modelo.</p>
+
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article
+  include Mongoid::Document
+  field :name
+  field :content
+  field :published_on, :type =&gt; Date
+end</pre>
+
+<p>Para poder ver y modificar esta nueva fecha de publicaci&oacute;n tendremos que modificar el c&oacute;digo de vista y a&ntilde;adir el nuevo campo al formulario.</p>
+
+
+<p class="codeFilePath">/app/views/articles/_form.html.erb</p>
+<pre class="ruby">
+ &lt;div class=&quot;field&quot;&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= f.label :published_on %&gt;&lt;br /&gt;
+    &lt;%= f.date_select :published_on %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= f.label :content %&gt;&lt;br /&gt;
+    &lt;%= f.text_area :content %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;actions&quot;&gt;
+    &lt;%= f.submit %&gt;
+  &lt;/div&gt;
+</pre>  
+
+<p>Tambi&eacute;n en la vista de la acci&oacute;n <code>show</code>.</p>
+
+<p class="codeFilePath">/app/views/articles/show.html.erb</p>
+<pre class="ruby">
+&lt;p id=&quot;notice&quot;&gt;&lt;%= notice %&gt;&lt;/p&gt;
+
+&lt;p&gt;
+  &lt;b&gt;Name:&lt;/b&gt;
+  &lt;%= @article.name %&gt;
+&lt;/p&gt;
+
+&lt;p&gt;
+  &lt;b&gt;Content:&lt;/b&gt;
+  &lt;%= @article.content %&gt;
+&lt;/p&gt;
+
+&lt;p&gt;
+  &lt;b&gt;Published:&lt;/b&gt;
+  &lt;%= @article.published_on %&gt;
+&lt;/p&gt;
+
+
+&lt;%= link_to &#x27;Edit&#x27;, edit_article_path(@article) %&gt; |
+&lt;%= link_to &#x27;Back&#x27;, articles_path %&gt;
+</pre>
+
+<p>Ya podemos editar el art&iacute;culo que ha sido reci&eacute;n creado y a&ntilde;adir  una fecha de publicaci&oacute;n.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/508/original/E238I03.png" width="815" height="299" alt="Edici&oacute;n de la fecha de publicaci&oacute;n de un art&iacute;culo."/>
+</div>
+
+<h3>Validaciones</h3>
+
+<p>Mongoid se apoya en ActiveModel, lo que quiere decir que tenemos disponible mucha de la funcionalidad a la que estamos acostumbrados con ActiveRecord: validaciones, <em>callbacks</em>, seguimiento de atributos modificados, <code>attr_accessible</code>, etc.  Esto hace que en Mongoid sea tan f&aacute;cil a&ntilde;adir validaciones a los modelos como en ActiveRecord.</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article
+  include Mongoid::Document
+  field :name
+  field :content
+  field :published_on, :type =&gt; Date
+  validates_presence_of :name
+end</pre>
+
+<p>Si ahora intentamos crear el art&iacute;culo sin nombre recibiremos los mismos errores de validaci&oacute;n que ver&iacute;amos en un modelo ActiveRecord equivalente.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/509/original/E238I04.png" width="816" height="350" alt="Validation errors work just as they do with ActiveRecord models."/>
+</div>
+
+<h3>Asociaciones</h3>
+
+<p>Todo <em>blog</em> necesita  comentarios, por lo que  crearemos un modelo <code>Comment</code> con su asociaci&oacute;n para que cada art&iacute;culo pueda tener varios comentarios.  En Mongoid hay dos maneras de definir asociaciones.  La primera es a trav&eacute;s de una asociaci&oacute;n mediante referencia.  Se comporta de forma similar a las relaciones entre tablas en ActiveRecord y las bases de datos relacionales en que hay dos regitros separados que se relacionan mediante una columna <code>id</code>.  La otra forma es mediante una asociaci&oacute;n embebida que podr&iacute;a significar en nuestro caso que los comentarios se encuentran embebidos dentro del mismo documento que el art&iacute;culo.</p>
+
+<p>Para decidirnos por uno u otro enfoque deber&iacute;amos preguntarnos si alguna vez nos har&aacute; falta disponer de los registros asociados por s&iacute; mismos, o si siempre accederemos a ellos desde el modelo padre.  En este caso s&oacute;lo vamos a recuperar los comentarios a trav&eacute;s del art&iacute;culo asociado por lo que usaremos una asociaci&oacute;n embebida.  Definiremos la relaci&oacute;n en la clase <code>Article</code> utilizando el m&eacute;todo <code>embeds_many</code>.</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article
+  include Mongoid::Document
+  field :name
+  field :content
+  field :published_on, :type =&gt; Date
+  validates_presence_of :name
+  embeds_many :comments
+end</pre>
+
+<p>A continuaci&oacute;n generaremos el modelo <code>Comment</code>.</p>
+
+<pre class="terminal">$ rails g model comment name:string content:text</pre>
+
+<p>En esta nueva clase <code>Comment</code> podemos definir la relaci&oacute;n con <code>Article</code></code>.</p>
+
+<p class="codeFilePath">/app/models/comment.rb</p>
+<pre class="ruby">class Comment
+  include Mongoid::Document
+  field :name
+  field :content
+  embedded_in :article, :inverse_of =&gt; :comments
+end</pre>
+
+<p><code>embedded_in</code> se usa para definir la relaci&oacute;n de comentarios con un art&iacute;culo. La opci&oacute;n <code>inverse_of</code> es necesaria para que Mongoid sepa a trav&eacute;s de qu&eacute; relaci&oacute;n debe embeberse el comentario.</p>
+
+<p>Para crear comentarios para cada art&iacute;culo y verlos deberemos crear un controlador llamado <code>CommentsController</code> y sus vistas, pero antes de eso vamos a alterar el fichero de rutas.  En el caso de asociaciones embebidas como estas por lo general nos interesar&aacute; usar rutas anidadas porque siempre se accede al objeto hijo a trav&eacute;s de su padre: anidaremos el recurso de los comentarios debajo de los art&iacute;culos.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Blog::Application.routes.draw do
+  resources :articles do
+    resources :comments
+  end
+end</pre>
+
+<p>Luego generaremos el controlador.</p>
+
+<pre class="terminal">$ rails g controller comments</pre>
+
+<p>En el controlador vamos a escribir una acci&oacute;n <code>create</code> para que podamos crear nuevos comentarios para un art&iacute;culo.  Esta acci&oacute;n encontrar&aacute; el art&iacute;culo bas&aacute;ndose en el par&aacute;metro <code>article_id</code>, le a&ntilde;adir&aacute; el nuevo comentario y luego redirigir&aacute; a la p&aacute;gina del  art&iacute;culo.</p>
+
+<p class="codeFilePath">/app/controllers/comments_controller.rb</p>
+<pre class="ruby">CommentsController &lt; ApplicationController
+  def create
+    @article = Article.find(params[:article_id])
+    @comment = @article.comments.create!(params[:comment])
+    redirect_to @article, :notice =&gt; &quot;Comment created!&quot;  
+  end
+end</pre>
+
+<p>Finalmente a&ntilde;adiremos algo de c&oacute;digo a la vista de <code>show</code> del art&iacute;culo para que muestre los comentarios de un art&iacute;culo y permita a&ntilde;adir comentarios.</p>
+
+<p class="codeFilePath">/app/views/articles/show.html.erb</p>
+<pre class="ruby">&lt;% if @article.comments.size &gt; 0 %&gt;
+  &lt;h2&gt;Comments&lt;/h2&gt;
+  &lt;% for comment in @article.comments %&gt;
+    &lt;h3&gt;&lt;%= comment.name %&gt;&lt;/h3&gt;
+    &lt;p&gt;&lt;%= comment.content %&gt;&lt;/p&gt;
+  &lt;% end %&gt;
+&lt;% end %&gt;
+
+&lt;h2&gt;New Comment&lt;/h2&gt;
+
+&lt;%= form_for [@article, Comment.new] do |f| %&gt;
+  &lt;p&gt;&lt;%= f.label :name %&gt; &lt;%= f.text_field :name %&gt;&lt;/p&gt;
+  &lt;p&gt;&lt;%= f.text_area :content, :rows =&gt; 10 %&gt;&lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>Si ahora visitamos la p&aacute;gina de un art&iacute;culo podremos crear un nuevo comentario y tras enviarlo aparecer&aacute; debajo del art&iacute;culo.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/510/original/E238I05.png" width="800" height="621" alt="Comentarios a un art&iacute;culo."/>
+</div>
+
+<p>Si miramos el <em>log</em> de desarrollo veremos las consultas a MongoDB.  Esta es la consulta que se hizo cuando creamos el comentario anterior.</p>
+
+<pre class="terminal">
+MONGODB blog_development[&#x27;articles&#x27;].update({&quot;_id&quot;=&gt;BSON::ObjectId(&#x27;4cd01fa4a74209eacc000003&#x27;)}, 
+{&quot;$push&quot;=&gt;{&quot;comments&quot;=&gt;{&quot;_id&quot;=&gt;BSON::ObjectId(&#x27;4cd04c74a74209ecb4000002&#x27;), 
+  &quot;name&quot;=&gt;&quot;Eifion&quot;, &quot;content&quot;=&gt;&quot;I agree.&quot;}}})</pre>
+
+<p>La consulta actualiza el modelo del art&iacute;culo y le a&ntilde;ade un atributo de comentario (recordemos que los comentarios no se almacenan de forma separada).  Esto quiere decir que si abrimos la consola de Rails y contamos todos los comentarios daremos con resultado inesperado.</p>
+
+
+<pre class="terminal">&gt; Comment.count
+ =&gt; 0</pre> 
+
+<p>Los comentarios que hemos embebido en los art&iacute;culos no est&aacute;n disponibles a nivel global.  Para acceder a ellos tenemos que hacerlo siempre a trav&eacute;s del art&iacute;culo al que est&aacute;n asociados.</p>
+
+
+<pre class="terminal">&gt;   Article.first.comments.count
+ =&gt; 1</pre>
+
+<p>Como en nuestra aplicaci&oacute;n los comentarios son registros embebidos, para llegar a los atributos de un comentario siempre tendremos que recuperar dicho comentario a trav&eacute;s de la asociaci&oacute;n.</p> 
+
+<h3>Asociaciones referenciales</h3>
+
+<p>Si queremos que los registros asociados tambi&eacute;n est&eacute;n disponibles como documentos separados tendremos que crear una asociaci&oacute;n basada en referencias.  Demostraremos su uso modificando nuestra aplicaci&oacute;n para poder asociar cada art&iacute;culo con su autor. Primero generaremos un andamiaje para el modelo <code>Author</code>.</p>
+
+<pre class="terminal">$ rails g scaffold author name:string</pre>
+
+<p>Antes de demostrar el uso de estas asociaciones le vamos a echar un vistazo a una caracter&iacute;stica interesante de Mongoid.  Si a&ntilde;adimos el m&eacute;todo <code>key</code> a una clase de modelo de Mongoid, dicha clave se utilizar&aacute; como el <code>id</code> para identificar dicho modelo.  Haremos que el atributo <code>name</code> sea la clave de <code>Author</code>.</p>
+
+<p class="codeFilePath">/app/models/author.rb</p>
+<pre class="ruby">class Author
+  include Mongoid::Document
+  field :name
+  key :name
+end</pre>
+
+<p>Si ahora creamos un autor seremos redirigidos a la p&aacute;gina de dicho autor, donde veremos el <code>id</code> en la URL.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/511/original/E238I06.png" width="800" height="280" alt="La p&aacute;gina de un autor muestra el nombre coo su id."/>
+</div>
+
+<p>Si vamos a usar esta funcionalidad tendremos que asegurarnos de que el campo escogido como clave no sea editable de forma que el documento tenga como <code>id</code> una cadena permanente que no cambie durante el per&iacute;odo de vida del documento.</p>
+
+<p>Volvamos a las asociaciones.  En la clase <code>Author</code> utilizaremos <code>references_many</code> para definir las relaciones con los art&iacute;culos.</p>
+
+<p class="codeFilePath">/app/models/author.rb</p>
+<pre class="ruby">class Author
+  include Mongoid::Document
+  field :name
+  key :name
+  references_many :articles
+end</pre>
+
+<p>Luego en el modelo <code>Article</code> utilizaremos <code>referenced_in</code>.</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article
+  include Mongoid::Document
+  field :name
+  field :content
+  field :published_on, :type =&gt; Date
+  validates_presence_of :name
+  embeds_many :comments
+  referenced_in :author
+end</pre>
+
+<p>Ya podemos utilizar dicha asociaci&oacute;n igual que har&iacute;amos con ActiveRecord.  En nuestro formulario para editar un art&iacute;culo podemos a&ntilde;adir  un <code>collection_select</code> para poder escoger un autor cuando creemos o actualicemos un art&iacute;culo.</p>
+
+
+<p class="codeFilePath">/app/views/articles/_form.html.erb</p>
+<pre class="ruby">&lt;div class=&quot;field&quot;&gt;
+  &lt;%= f.label :author_id %&gt;&lt;br /&gt;
+  &lt;%= f.collection_select :author_id, Author.all, :id, :name %&gt;
+&lt;/div&gt;</pre>
+
+<p>Si ahora modificamos nuestro art&iacute;culo y escogemos un autor podremos ver cuando lo examinemos por consola que  el <code>id</code> del autor queda embebido en el art&iacute;culo.</p>
+
+<pre class="terminal">&gt; Article.first
+ =&gt; #&lt;Article _id: 4cd01fa4a74209eacc000003, name: &quot;Mongoid&quot;, content: &quot;it&#x27;s awesome!&quot;, published_on: 2010-11-02 00:00:00 UTC, author_id: &quot;eifion-bedford&quot;&gt;</pre> 
+
+<p>Sin embargo, al contrario que con la asociaci&oacute;n de los comentarios, podemos acceder a los autores de manera separada.</p>
+
+<pre class="terminal">&gt; Author.first
+ =&gt; #&lt;Author _id: eifion-bedford, name: &quot;Eifion Bedford&quot;&gt;</pre>
+
+<p>Con esto concluimos este episodio dedicado a Mongoid.  Por supuesto todav&iacute;a nos queda mucho por ver, pero la documentaci&oacute;n es bastante completa y en ella podremos encontrar todo lo que necesitaremos conocer para utilizar Mongoid y MongoDB en nuestras aplicaciones Rails.</p>

@@ -1,0 +1,196 @@
+<p>In episode 240 [<a href="http://railscasts.com/episodes/240-search-sort-paginate-with-ajax">watch</a>, <a href="http://asciicasts.com/episodes/240-search-sort-paginate-with-ajax">read</a>] we showed you how to use AJAX to add sorting, pagination and searching to a table of products. One of the problems with using AJAX like this is that the page&rsquo;s URL doesn&rsquo;t change when we sort or filter the table. This means that we can&rsquo;t use the back button to go back through the changes we&rsquo;ve made to the table, nor can we bookmark a sorted or filtered page so that we can come back to the same results we had before.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/536/original/E246I01.png" width="800" height="374" alt="The sortable and searchable table of products."/>
+</div>
+
+<p>This is a common problem when AJAX functionality is added to a site and it would be useful if we could find a solution. We&rsquo;ll show you how to do this in this episode.</p>
+
+<h3>Introducing the history.pushState method</h3>
+
+<p>We covered this topic in episode 175 [<a href="http://railscasts.com/episodes/175-ajax-history-and-bookmarks">watch</a>, <a href="http://asciicasts.com/episodes/175-ajax-history-and-bookmarks">read</a>] where we added history and bookmarking to an AJAX-enabled app by changing the URL. In that episode when we paged through the results an anchor was added to the URL so that for, say, page 3, the URL was <code>http://localhost:3000/#page=3</code>. This enables us to bookmark pages and makes the back button work as expected. This approach works well but quickly becomes complicated in more complex scenarios such as we have here where we&rsquo;re sorting and searching as well as paging through results.</p>
+
+<p>The technique we&rsquo;re going to use here is used by GitHub in its file browser. When we click on a folder in a GitHub repository in a browser the page updates through AJAX and the whole URL is updated by JavaScript, not just the anchor tag. This is a much nicer solution and it means that we can reload or bookmark the page. Also the page is added to the browser&rsquo;s history so the back button will work as we expect it to.</p>
+
+<p><a href="https://github.com/blog/760-the-tree-slider">GitHub blogged about this</a> and the post is well worth reading to see how this was implemented. To see it in action you&rsquo;ll need a recent version of Safari, Chrome or Firefox, but it&rsquo;s a technique definitely worth making use of when you can. The &ldquo;magic&rdquo; that makes this work are the <code>history</code> object&rsquo;s <code>pushState</code> and <code>replaceState</code> functions and the <code>popstate</code> event. There are several useful links on the GitHub blog post that give more details about these functions and demos showing them in use.</p>
+
+<p>Let&rsquo;s see how easy it is to add this functionality to our simple shopping application so that it works when we sort, page or search the table of products. The JavaScript we added to the original application looks like this:</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(&#x27;#products th a, #products .pagination a&#x27;).live(&#x27;click&#x27;,
+    function () {
+      $.getScript(this.href);
+      return false;
+    }
+  );
+  
+  $(&#x27;#products_search input&#x27;).keyup(function () {
+    $.get($(&#x27;#products_search&#x27;).attr(&#x27;action&#x27;), $(&#x27;#products_search&#x27;).serialize(), null, &#x27;script&#x27;);
+    return false;
+  });
+})</pre>
+
+<p>If the code above contains things that you don&rsquo;t find familiar then it&rsquo;s worth taking a look at episode 240 for more details. We&rsquo;re using jQuery here but this technique will work with Prototype too as far as using <code>pushState</code> and <code>replaceState</code> go.</p>  
+
+<p>The first part of the code above handles the AJAX functionality for sorting and pagination. We&rsquo;ll add a call to <code>history.pushState</code> in this code so that the URL is added to the history when one of the sorting or pagination links is clicked.</p> 
+
+<p>There is some <a href="https://developer.mozilla.org/en/DOM/Manipulating_the_browser_history#Adding_and_modifying_history_entries">useful documentation about <code>pushState</code></a> on Mozilla&rsquo;s developer site which shows that it takes three parameters. The first is a state object, which can be anything and which will be returned when the popState event is fired. The second argument is a title, while the third is a URL. Now that we know this we can add the <code>pushState</code> call.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(&#x27;#products th a, #products .pagination a&#x27;).live(&#x27;click&#x27;, 
+  function () {
+    $.getScript(this.href);
+    history.pushState(null, &quot;&quot;, this.href);
+    return false;
+  });</pre>
+
+<p>We don&rsquo;t need to store any state here so we pass <code>null</code> as the first parameter. Likewise we don&rsquo;t need a title so we pass in an empty string. For the URL we pass in <code>this.href</code> which is the URL of the link that is clicked.</p>
+
+<p>If we reload the page now and click one of the AJAX sorting or pagination links the table will update without the page reloading, but now each time we click a link the URL will change in the address bar to whatever we passed into the <code>pushState</code> function and the URL is added to the browser&rsquo;s history.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/537/original/E246I02.png" width="801" height="474" alt="The URL now changes when we change the sort column."/>
+</div>
+
+<p>So, now we can sort and paginate the table and bookmark it and when we come back to it or reload it the pagination and sorting are preserved, even though the page is being update dynamically through AJAX. The back button, however, does not work as we&rsquo;d expect yet as we&rsquo;re not listening for the <code>popstate</code> event. We can fix this by firing a function when the <code>popstate</code> event fires.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  // Other functions omitted.
+  $(window).bind(&quot;popstate&quot;, function () {
+    $.getScript(location.href);
+  });
+})</pre>
+
+<p>By the time the <code>popstate</code> event fires the URL will have already changed back to the previous one in the history and so we can update the products table by calling <code>$.getScript</code> and passing in the current URL.</p>
+
+<p>If we reload the page now and sort or paginate the table a few times we&rsquo;ll find that the back button now works and that we can navigate back through the changes we have made.</p>
+
+<h3>Searching</h3>
+
+<p>We&rsquo;ll take a look at the search functionality next. If we search for a product with our application now, it will filter the results, but the URL won&rsquo;t change so if we bookmark or reload the page after making a search we lose the search.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/538/original/E246I03.png" width="801" height="474" alt="The search is lost when we reload the page."/>
+</div>
+
+<p>The JavaScript for the AJAX searching is this:</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  // Other functions omitted.
+  $(&#x27;#products_search input&#x27;).keyup(function () {
+    $.get($(&#x27;#products_search&#x27;).attr(&#x27;action&#x27;), $(&#x27;#products_search&#x27;).serialize(), null, &#x27;script&#x27;);
+    return false;
+  });
+})</pre>
+
+<p>We&rsquo;ll use <code>pushState</code> here in the same way we did when we modified the sorting code.</p> 
+
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  // Other functions omitted.
+  $(&#x27;#products_search input&#x27;).keyup(function () {
+    var action = $(&#x27;#products_search&#x27;).attr(&#x27;action&#x27;);
+    var formData = $(&#x27;#products_search&#x27;).serialize();
+    $.get(action, formData, null, &#x27;script&#x27;);
+    history.pushState(null, &quot;&quot;, action + &quot;?&quot; + formData);
+    return false;
+  }); 
+})</pre>
+
+<p>The URL that <code>pushState</code> will record here is a combination of the search form&rsquo;s <code>action</code> and the serialized form data, joined together with a question mark to make a valid URL.</p> 
+
+<p>When we reload the page now we&rsquo;ll see that the URL now changes every time we type a key in the search field. When we hit the back button, however, there&rsquo;s a page in the history for each key we&rsquo;ve entered in the search term, which is not ideal. This is because we&rsquo;re calling <code>pushState</code> every time a key is pressed. It would be better if we could replace the current state each time a key is pressed rather than adding a new state. Fortunately we can do this very simply by changing <code>pushState</code> in the code above with <code>replaceState</code>. This will replace the current state instead of adding another one each time the function is called.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  // Other functions omitted.
+  $(&#x27;#products_search input&#x27;).keyup(function () {
+    var action = $(&#x27;#products_search&#x27;).attr(&#x27;action&#x27;);
+    var formData = $(&#x27;#products_search&#x27;).serialize();
+    $.get(action, formData, null, &#x27;script&#x27;);
+    history.replaceState(null, &quot;&quot;, action + &quot;?&quot; + formData);
+    return false;
+  }); 
+})</pre>
+
+<p>If we open the products page in a new window now and search for something we&rsquo;ll see that the URL changes but that the changes aren&rsquo;t added to the browser&rsquo;s history.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/539/original/E246I04.png" width="801" height="474" alt="The search term is now added to the URL."/>
+</div>
+
+<p>This isn&rsquo;t quite the functionality we want as ideally we&rsquo;d use <code>pushState</code> when the user starts searching and then <code>replaceState</code> subsequently so that the search term is added to the history. This is a little outside the scope of this episode, however, so we won&rsquo;t be covering that here.</p>
+
+<h3>Adding a Title To Each State</h3>
+
+<p>If we sort the products a few different ways and then click and hold the back button to see the browser&rsquo;s history it will show each page&rsquo;s URL which can make it difficult to choose the page we want to go back to. It would make the history more usable if a title was displayed for each page instead. We can do this by setting the second argument in each <code>pushState</code> call to be the page&rsquo;s title.</p>
+
+<p>How do we set the page title to be something useful? What we&rsquo;ll do is set the title for each page and then use that title in <code>pushState</code>. We can do that by setting a title in the <code>index.js.erb</code> file that sends back the updated table when an AJAX call is made.</p>
+
+<p class="codeFilePath">/app/views/products/index.js.erb</p>
+<pre class="javascript">$(&#x27;#products&#x27;).html(&#x27;&lt;%= escape_javascript(render(&quot;products&quot;)) %&gt;&#x27;);
+document.title = &quot;&lt;%= escape_javascript(&quot;#{params[:search].to_s.titleize} Products by #{(params[:sort] || &#x27;name&#x27;).titleize} - Page #{(params[:page] || 1)}&quot;) %&gt;&quot;</pre>
+
+<p>We&rsquo;ll set the title so that it shows the search and sort terms and the current page so that all the relevant information is available. We can then update the calls to <code>pushState</code> and <code>replaceState</code> so that they set the title to the page&rsquo;s title.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(&#x27;#products th a, #products .pagination a&#x27;).live(&#x27;click&#x27;, function () {
+    $.getScript(this.href);
+    history.pushState(null, document.title, this.href);
+    return false;
+  });
+  
+  $(&#x27;#products_search input&#x27;).keyup(function () {
+    var action = $(&#x27;#products_search&#x27;).attr(&#x27;action&#x27;);
+    var formData = $(&#x27;#products_search&#x27;).serialize();
+    $.get(action, formData, null, &#x27;script&#x27;);
+    history.replaceState(null, document.title, action + &quot;?&quot; + formData);
+    return false;
+  });
+  
+  $(window).bind(&quot;popstate&quot;, function () {
+    $.getScript(location.href);
+  });
+})</pre>
+
+<p>Now, each time we search or sort the table of products the page&rsquo;s title will change and if we look at the browser history we&rsquo;ll see a list of titles rather than URLs.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/540/original/E246I05.png" width="801" height="476" alt="Each page&rsquo;s title now shows in the history."/>
+</div>
+
+<h3>Handling Older Browsers</h3>
+
+<p>Our application&rsquo;s new functionality works pretty well but we&rsquo;ve been assuming that the <code>history.pushState</code> method is available in the user&rsquo;s browser which, given that only the newest versions of Safari, Chrome and Firefox support it is quite likely.  To handle all browsers we should first check that the browser supports pushState and modify our application&rsquo;s behaviour to suit.</p>
+
+<p>What we&rsquo;ll do is check that the <code>history</code> object and <code>history.pushState</code> method exist and if not we&rsquo;ll disable all of the AJAX functionality so that the application falls back gracefully to using HTML links.</p> 
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">if (history &amp;&amp; history.pushState) {
+  $(function () {
+    $(&#x27;#products th a, #products .pagination a&#x27;).live(&#x27;click&#x27;, function () {
+      $.getScript(this.href);
+      history.pushState(null, document.title, this.href);
+      return false;
+    });
+  
+    $(&#x27;#products_search input&#x27;).keyup(function () {
+      var action = $(&#x27;#products_search&#x27;).attr(&#x27;action&#x27;);
+      var formData = $(&#x27;#products_search&#x27;).serialize();
+      $.get(action, formData, null, &#x27;script&#x27;);
+      history.replaceState(null, document.title, action + &quot;?&quot; + formData);
+      return false;
+    });
+  
+    $(window).bind(&quot;popstate&quot;, function () {
+      $.getScript(location.href);
+    });
+  })
+}</pre>
+
+<p>That&rsquo;s it for this episode. While it hasn&rsquo;t been Rails-specific it has dealt with issues that you&rsquo;ll encounter when dealing with AJAX in Rails applications. Being able to change the URL like this enables us to treat AJAX links at the same level as traditional HTML ones.</p>

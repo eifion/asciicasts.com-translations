@@ -1,0 +1,52 @@
+<p><img src="/system/photos/13/original/E017I01.png" width="392" height="402" alt="Le formulaire d'édition avec les cases à cocher ajoutées." style="float: right;"/>Dans notre application pour cette épisode, nous avons deux modèles, <code>Product</code> et <code>Category</code>, chacun avec une relation <code>has_and_belongs_to_many</code> avec l'autre. Ce que nous voudrions être capable de faire est de modifier les catégories d'un produit en utilisant une liste de cases à cocher dans le formulaire d'édition de ce produit.</p>
+
+<h3>Ajouter les cases à cocher</h3>
+<p>Le formulaire d'édition de ce produit a actuellement des champs pour le nom du produit et le prix mais il n'y a aucun moyen de modifier les catégories de ce produit. Il y a deux méthodes pour ajouter une case à cocher à un formulaire, <code>check_box</code> et <code>check_box_tag</code>. Nous allons utiliser <code>check_box_tag</code> puisque cette méthode nous donne le contrôle dont nous avons besoin à propos du nom de la case. Le code que nous ajouterons au formulaire est indiqué ci-dessous (<code>products/edit.html.erb</code>).</p>
+
+<pre class="ruby" style="clear: both;">
+&lt;% for category in Category.find(:all) %&gt;
+    &lt;div&gt;
+      &lt;%= check_box_tag &quot;product[category_ids][]&quot;, category.id, @product.categories.include?(category) %&gt;
+      &lt;%= category.name %&gt;
+    &lt;/div&gt;
+&lt;% end %&gt;
+</pre>
+
+<p><code>check_box_tag</code> prend trois paramètres : le nom de la case, la valeur de la case et une valeur  booléenne qui détermine si la case doit être cochée. Le nom que nous avons utilisé parait un peu étrange mais vous allez voir pourquoi cette méthode est plus courte. Nous déterminons si chaque case de catégorie doit être cochée ou pas en regardant si le produit est dans cette catégorie en utilisant <code>@product.categories.include?(category)</code>.
+
+<h3>Regardons si ça marche</h3>
+<img src="/system/photos/14/original/E017I02.png" width="800" height="500" alt="Le formulaire de modification avec les cases à cocher ajoutées."/>
+<p class="title">Le formulaire de modification avec les cases à cocher ajoutées.</p>
+<p>Si nos rafraichissons le formulaire et le testons, nous voyons que ça marche et que les catégories du produit sont mises à jour quand nous cochons quelques unes des cases à cocher et cliquons sur &lsquo;submit&rsquo;. Comment fait Rails pour savoir comment mettre à jour le produit correctement ? Le log de développement à la réponse.</p>
+
+<pre class="terminal">
+Processing ProductsController#update (for 127.0.0.1 at 2009-01-15 20:57:56) [PUT]
+Parameters: {&quot;commit&quot;=&gt;&quot;Edit&quot;, &quot;authenticity_token&quot;=&gt;&quot;31b711f2c24ae7cea5abf3f758eef46b472eebf3&quot;, &quot;product&quot;=&gt;{&quot;price&quot;=&gt;&quot;99.0&quot;, &quot;name&quot;=&gt;&quot;Television Stand&quot;, &quot;category_ids&quot;=&gt;[&quot;2&quot;, &quot;4&quot;]}, &quot;id&quot;=&gt;&quot;1&quot;}
+</pre>
+<p>Quand nous soumettons, le formulaire transmet les paramètres de catégories dans le hash du produit en tant que tableau. Ca se passe comme ça à cause du nom que nous avons donné au cases à cocher, <code>product[category_ids][]</code>. La première partie du nom dit à Rails de transmettre category_ids comme une partie du hash produit, alors que les accolades vides lui disent de transmettre les valeurs dans un tableau. Mais d'où vient la méthode <code>category_ids</code>, qui est appelée quand les paramètres du produit sont modifiés ? La réponse est que c'est généré par la méthode <code>has_and_belongs_to_many</code> dans le modèle <code>Product</code>. Nous pouvons tester en ouvrant <code>script/console</code> et en mettant un produit à jour manuellement.</p>
+
+<pre class="terminal">
+&gt;&gt; p = Product.first
+=&gt; #&lt;Product id: 1, name: &quot;Television Stand&quot;, price: 99.0, created_at: &quot;2009-01-11 21:32:12&quot;, updated_at: &quot;2009-01-11 21:32:12&quot;&gt;
+&gt;&gt; p.category_ids
+=&gt; [2, 3]
+&gt;&gt; p.category_ids = [1,4]
+=&gt; [1, 4]
+&gt;&gt; 
+</pre>
+
+<p>Quand nous faisons ça, Rails génère la requête SQL suivante pour mettre à jour les catégories d'un produit :</p>
+<pre class="sql">
+DELETE FROM &quot;categories_products&quot; WHERE product_id = 1 AND category_id IN (2,3)
+INSERT INTO &quot;categories_products&quot; (&quot;product_id&quot;, &quot;id&quot;, &quot;category_id&quot;) VALUES (1, 1, 1)
+INSERT INTO &quot;categories_products&quot; (&quot;product_id&quot;, &quot;id&quot;, &quot;category_id&quot;) VALUES (1, 4, 4)
+</pre>
+
+<h3>Une petite chose à corriger</h3>
+<p>Il y a toujours un problème avec notre méthode de mise à jour. Si nous décochons toutes les cases de catégories d'un produit, la mise à jour échouera. Ceci se produit parce qu'une case à cocher d'un formulaire HTML ne renverra pas ses valeurs si elle est décochée et donc aucun <code>category_ids</code> n'apparaitra dans le hash des paramètres du produit, ce qui implique que les <code>category_ids</code> ne sont pas mis à jour.</p>
+
+<p>Pour corriger ceci, nous allons modifier le contrôleur des produits pour définir le paramètre <code>category_ids</code> comme étant un tableau vide si il n'est pas transmis à l'action de mise à jour. On peut faire ceci en Ruby en utilisant l'opérateur <code>||=</code> et ajouter ceci au début de notre action.</p>
+<code class="ruby">
+params[:product][:category_ids] ||= []
+</code>
+<p>Ceci assurera que si aucune case à cocher n'est sélectionnée, alors le produit est mis à jour correctement  et que donc, il n'est dans aucune catégorie.</p>

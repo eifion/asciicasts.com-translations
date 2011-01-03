@@ -1,0 +1,284 @@
+<p>La mayor&iacute;a de desarrolladores estar&aacute;n familiarizados hasta cierto punto con Rake.  Rake fu&eacute; escrito originalmente como alternativa al comando <code>make</code> pero en Rails se usa por lo general para ejecutar <em>scripts</em> de tareas administrativas, cosa para la que Rake puede resultar un poco limitado.  Por ejemplo pasar argumentos a una tarea Rake no es elegante y por lo general hay que recurrir a pasarlas como variables de entorno.  Otro problema con Rake es que no es f&aacute;cil que las tareas sean globales, siempre son locales al proyecto en el que estemos.  Herramientas como <a href="http://rubygems.org/gems/sake">Sake</a> vienen a solucionar este problema pero ya nos obligan a utilizar una herramienta adicional.</p>
+
+<p>En este episodio le daremos un repaso a <a href="https://github.com/wycats/thor">Thor</a>. Se trata de una alternativa a Rake que no tiene las limitaciones anteriores.  Viene incluido como dependencia de Rails por lo que si tenemos Rails instalado entonces Thor ya se encuentra en nuestro sistema porque los generadores de Rails hacen uso de esta herramienta.  Nos ser&aacute; de gran ayuda, por tanto, dominar Thor si queremos aprender a crear nuestros propios generadores.</p>
+
+<p>Se trabaja con Thor desde la l&iacute;nea de &oacute;rdenes: si ejecutamos <code>thor help</code> veremos una lista de las opciones que soporta.</p>
+
+
+<pre class="terminal">$ thor help
+Tasks:
+  thor help [TASK]     # Describe available tasks or one specific task
+  thor install NAME    # Install an optionally named Thor file into your system tasks
+  thor installed       # List the installed Thor modules and tasks
+  thor list [SEARCH]   # List the available thor tasks (--substring means .*SEARCH)
+  thor uninstall NAME  # Uninstall a named Thor module
+  thor update NAME     # Update a Thor file from its original location
+  thor version         # Show Thor version</pre>  
+
+<p>A&uacute;n no tenemos ning&uacute;n <em>script</em> propio.  Pasemos a escribir uno a continuaci&oacute;n.</p>
+
+<h3>Una tarea para copiar ficheros de configuraci&oacute;n</h3>
+
+<p>Puestos a crear nuestro primer <em>script</em> de Thor, mejor escribir uno que haga algo &uacute;til.  Es costumbre en las aplicaciones Rails no poner bajo control de versiones ciertos ficheros de configuraci&oacute;n porque contienen contrase&ntilde;as y otros datos sensibles.  Vamos a poner ciertos archivos de configuraci&oacute;n de ejemplo en un subdirectorio <code>examples</code> y luego crearemos un <em>script</em> de Thor que copiar&aacute; estos ficheros al directorio <code>config</code>.</p>
+
+<p>Los <em>scripts</em> de Thor se pueden poner en el directorio <code>lib/tasks</code> de una aplicaci&oacute;n (igual que las tareas de Rake), por lo que crearemos en este directorio un nuevo fichero llamado <code>setup.thor</code>.  Un <em>script</em> de Thor se define como una clase que hereda de <code>thor</code>, y el nombre de la clase determinar&aacute; el espacio de nombres para las &oacute;rdenes, mientras que cada m&eacute;todo en la clase que tenga una descripci&oacute;n se convertir&aacute; en una orden.  Estas descripciones se definen con el m&eacute;todo <code>desc</code>, que recibe dos argumentos: el nombre de la orden y su descripci&oacute;n.  Empezaremos creando una orden sencilla llamada <code>config</code> que mostrar&aacute; una l&iacute;nea de texto.</p>
+
+
+<p class="codeFilePath">/lib/tasks/setup.thor</p>
+<pre class="ruby">class Setup &lt; Thor
+  
+  desc &quot;config&quot;, &quot;copy configuration files&quot;
+  def config
+    puts &quot;running config&quot;
+  end
+end</pre>
+
+<p>Podemos lanzar esta orden ejecutando <code>thor setup:config</code>, que llamar&aacute; al m&eacute;todo <code>config</code> y veremos la salida en la ventana del terminal.</p>
+
+<pre class="terminal">$ thor setup:config
+running config</pre>
+
+<p>Podemos escribir <code>thor list</code> para ver el listado de &oacute;rdenes disponibles.</p>
+
+<pre class="terminal">$ thor list
+setup
+-----
+thor setup:config  # copy configuration files</pre>
+
+<p>Vemos que en la salida aparece el comando reci&eacute;n creado junto con su descripci&oacute;n.</p>
+
+<h3>Copiado  de archivos</h3>
+
+<p>Hagamos que la orden <code>config</code> haga algo realmente &uacute;til.  El c&oacute;digo de debajo se recorre todos los archivos del directorio <code>config/examples</code> y los va copiando a <code>/config</code>, salt&aacute;ndose los archivos que ya existan en este &uacute;ltimo.</p>
+
+<p class="codeFilePath">/lib/tasks/setup.thor</p>
+<pre class="ruby">class Setup &lt; Thor
+  
+  desc &quot;config&quot;, &quot;copy configuration files&quot;
+  def config
+    Dir[&quot;config/examples/*&quot;].each do |source|
+      destination = &quot;config/#{File.basename(source)}&quot;
+      if File.exist?(destination)
+        puts &quot;Skipping #{destination} because it already exists&quot;
+      else
+        puts &quot;Generating #{destination}&quot;
+        FileUtils.cp(source, destination)
+      end
+    end
+  end
+end</pre>
+
+<p>Si ahora ejecutamos la orden <code>config</code> una vez m&aacute;s, deber&iacute;a copiar todos los archivos.</p>
+
+
+<pre class="terminal">$ thor setup:config
+Generating config/database.yml
+Generating config/private.yml</pre>
+
+<p>Si volvemos a ejecutar la orden se saltar&aacute; estos archivos porque ya existen en el directorio <code>config</code>.</p>
+
+
+<pre class="terminal">$ thor setup:config
+Skipping config/database.yml because it already exists
+Skipping config/private.yml because it already exists</pre>
+
+<p>Resultar&iacute;a &uacute;til poder pasar la opci&oacute;n <code>--force</code> de forma que se sobreescriban los archivos aunque &eacute;stos ya existan en el fichero de destino.  Esto puede hacerse ejecutando <code>method_options</code> para declarar las opciones antes de la definici&oacute;n del m&eacute;todo.</p>
+
+<p class="codeFilePath">/lib/tasks/setup.thor</p>
+<pre class="ruby">class Setup &lt; Thor
+  
+  desc &quot;config&quot;, &quot;copy configuration files&quot;
+  method_options :force =&gt; :boolean
+  def config
+    Dir[&quot;config/examples/*&quot;].each do |source|
+      destination = &quot;config/#{File.basename(source)}&quot;
+      FileUtils.rm(destination) if options[:force]
+      if File.exist?(destination)
+        puts &quot;Skipping #{destination} because it already exists&quot;
+      else
+        puts &quot;Generating #{destination}&quot;
+        FileUtils.cp(source, destination)
+      end
+    end
+  end
+end</pre>
+
+<p>Podemos a&ntilde;adir todas las opciones que queramos y se soportan varios tipos diferentes: cadenas, n&uacute;meros, etc.  Para recuperar el valor asignado a una opci&oacute;n dada se invoca a <code>options</code>: en el c&oacute;digo anterior hemos utilizado <code>options[:force]</code> para leer la opci&oacute;n <code>:force</code> y borrar el archivo si dicha opci&oacute;n est&aacute; armada.</p>
+
+<p>Si ahora ejecutamos la orden con la opci&oacute;n <code>--force</code> se sobreescribir&aacute;n los archivos ya existentes.</p>
+
+
+<pre class="terminal">$ thor setup:config --force
+Generating config/database.yml
+Generating config/private.yml</pre>
+
+<h3>M&aacute;s opciones</h3>
+
+<p>Todos los argumentos adicionales que se le pasen a <code>thor</code> ser&aacute;n tambi&eacute;n pasados al m&eacute;todo.  Supongamos que queremos una forma de especificar qu&eacute; archivos son los  que se copian de forma que si s&oacute;lo queremos copiar el archivo <code>private.yml</code> tendr&iacute;amos que ejecutar</p>
+
+
+<pre class="terminal">$ thor setup:config private.yml</pre>
+
+<p>Este argumento ser&aacute; pasado al m&eacute;todo <code>config</code>.  No queremos forzar que se tenga que especificar un nombre de archivo por lo que haremos que el argumento tenga por defecto el valor <code>&quot;*&quot;</code> para que se copien todos los archivos.  Es buena idea tratar de mantener la documentaci&oacute;n actualizada por lo que tambi&eacute;n actualizaremos la descripci&oacute;n para que mencione el argumento <code>NAME</code>.</p>
+
+<p class="codeFilePath">/lib/tasks/setup.thor</p>
+<pre class="ruby">class Setup &lt; Thor
+  
+  desc &quot;config [NAME]&quot;, &quot;copy configuration files&quot;
+  method_options :force =&gt; :boolean
+  def config(name = &quot;*&quot;)
+    Dir[&quot;config/examples/#{name}&quot;].each do |source|
+      destination = &quot;config/#{File.basename(source)}&quot;
+      FileUtils.rm(destination) if options[:force]
+      if File.exist?(destination)
+        puts &quot;Skipping #{destination} because it already exists&quot;
+      else
+        puts &quot;Generating #{destination}&quot;
+        FileUtils.cp(source, destination)
+      end
+    end
+  end
+end</pre>
+
+<p>Invoquemos la orden con este nuevo argumento para ver si funciona.</p>
+
+<pre class="terminal">$ thor setup:config private.yml
+Skipping <code>config/private.yml</code> because it already exists</pre>
+
+<p>Funciona, y tambi&eacute;n lo har&aacute; si le pasamos un nombre junto con la opci&oacute;n <code>--force</code>.</p>
+
+<pre class="terminal">$ thor setup:config  private.yml --force
+Generating config/private.yml</pre>
+
+<h3>Instalaci&oacute;n global de &oacute;rdenes</h3>
+
+<p>Este <em>script</em> es tan &uacute;til que nos gustar&iacute;a poder usarlo desde otras aplicaciones Rails.  Thor hace que esto sea sencillo, lo &uacute;nico que hay que hacer es ejecutar <code>thor install &lt;ruta_del_archivo&gt;</code> y esto instalar&aacute; dicha orden en la biblioteca de &oacute;rdenes de Thor del sistema.</p>
+
+
+<pre class="terminal">$ thor install lib/tasks/setup.thor
+Your Thorfile contains:
+class Setup &lt; Thor
+  
+  desc &quot;config [NAME]&quot;, &quot;copy configuration files&quot;
+  method_options :force =&gt; :boolean
+  def config(name = &quot;*&quot;)
+    Dir[&quot;config/examples/#{name}&quot;].each do |source|
+      destination = &quot;config/#{File.basename(source)}&quot;
+      FileUtils.rm(destination) if options[:force]
+      if File.exist?(destination)
+        puts &quot;Skipping #{destination} because it already exists&quot;
+      else
+        puts &quot;Generating #{destination}&quot;
+        FileUtils.cp(source, destination)
+      end
+    end
+  end
+end
+Do you wish to continue [y/N]? y
+Please specify a name for lib/tasks/setup.thor in the system repository [setup.thor]: 
+Storing thor file in your system repository</pre>
+
+<p>Una vez instalado podemos ejecutar <code>thor list</code> desde cualquier directorio y veremos que nuestra orden ya aparecer&aacute;.</p>
+
+<pre class="terminal">$ cd ~
+$ thor list
+setup
+-----
+thor setup:config [NAME]  # copy configuration files</pre>
+
+<p>Como se ve, ya podemos ejecutar esta nueva orden desde cualquiera de nuestras aplicaciones Rails.</p>
+
+<h3>Acceso a una aplicaci&oacute;n Rails desde Thor</h3>
+
+<p>Hay m&aacute;s cosas que queremos demostrar de Thor.  Para esto, vamos a crear una nueva orden en nuestra clase &lt;ocde&gt;Setup&lt;/ocde&gt;.  Esta nueva orden generar&aacute; algunos registros en la base de datos, por lo que la bautizaremos como <code>populate</code>.  Se trata de nuestra aplicaci&oacute;n de bit&aacute;cora que tiene un modelo <code>Article</code>, y haremos que cree diez art&iacute;culos autom&aacute;ticamente.</p>
+
+<p class="codeFilePath">/lib/tasks/setup.thor</p>
+<pre class="ruby">class Setup &lt; Thor
+  
+  desc &quot;config [NAME]&quot;, &quot;copy configuration files&quot;
+  method_options :force =&gt; :boolean
+  def config(name = &quot;*&quot;)
+	# Se ha omitido la definicion del metodo config
+  end
+  
+  desc &quot;populate&quot;, &quot;generate records&quot;
+  def populate
+    10.times do |num|
+      puts &quot;Generating article #{num}&quot;
+      Article.create!(:name =&gt; &quot;Article #{num}&quot;)
+    end
+  end
+end</pre>
+
+<p>Al ejecutar esta orden recibiremos un mensaje de error diciendo que la clase <code>Article</code> no est&aacute; definida.  Esto es as&iacute; porque el <em>script</em> no ha cargado los modelos de la aplicaci&oacute;n, y Thor no carga por defecto el entorno de Rails as&iacute; que tenemos que cargar la aplicaci&oacute;n antes de que la orden intente crear una instancia del modelo.  Por suerte esto es muy f&aacute;cil, tan s&oacute;lo tenemos que requerir el fichero <code>config/environment</code>.</p>
+
+<p class="codeFilePath">/lib/tasks/setup.thor</p>
+<pre class="ruby">class Setup &lt; Thor
+  
+  desc &quot;config [NAME]&quot;, &quot;copy configuration files&quot;
+  method_options :force =&gt; :boolean
+  def config(name = &quot;*&quot;)
+	# Se ha omitido la definicion del metodo config
+  end
+  
+  desc &quot;populate&quot;, &quot;generate records&quot;
+  def populate
+    require &lsquo;./config/environment&rsquo;
+    10.times do |num|
+      puts &quot;Generating article #{num}&quot;
+      Article.create!(:name =&gt; &quot;Article #{num}&quot;)
+    end
+  end
+end</pre>
+
+<p>Si ahora ejecutamos la orden otra vez deber&iacute;a crear diez art&iacute;culos tras un peque&ntilde;o lapso de tiempo durante el que se produce la carga del entorno.</p>
+
+<pre class="terminal">$ thor setup:populate
+Generating article 0
+Generating article 1
+Generating article 2
+Generating article 3
+Generating article 4
+Generating article 5
+Generating article 6
+Generating article 7
+Generating article 8
+Generating article 9</pre>
+
+<p>Podr&iacute;a ser muy &uacute;til que fuese configurable el n&uacute;mero de articulos a crear, para poder crear cuantos art&iacute;culos queramos.  Podemos hacerlo con <code>method_options</code> igual que hicimos con la orden <code>config</code>.</p>
+
+<p class="codeFilePath">/lib/tasks/setup.thor</p>
+<pre class="ruby">class Setup &lt; Thor
+  
+  desc &quot;config [NAME]&quot;, &quot;copy configuration files&quot;
+  method_options :force =&gt; :boolean
+  def config(name = &quot;*&quot;)
+	# Se ha omitido la definicion del metodo config
+  end
+  
+  desc &quot;populate&quot;, &quot;generate records&quot;
+  method_options :count =&gt; 10
+  def populate
+    require &#x27;./config/environment&#x27;
+    options[:count].times do |num|
+      puts &quot;Generating article #{num}&quot;
+      Article.create!(:name =&gt; &quot;Article #{num}&quot;)
+    end
+  end
+end</pre>
+
+<p>Esta vez, en lugar de especificar un tipo para las opciones hemos pasado un valor por defecto a partir del cual Thor deducir&aacute; el tipo.  Si ahora pasamos un <code>count</code> de <code>5</code> se crear&aacute;n cinco art&iacute;culos.</p>
+
+<pre class="terminal">$ thor setup:populate --count 5
+Generating article 0
+Generating article 1
+Generating article 2
+Generating article 3
+Generating article 4</pre>
+
+<p>Con esto cerramos este episodio dedicado a Thor.  Para m&aacute;s informaci&oacute;n al respecto, la
+  <a href="https://github.com/wycats/thor#readme">documentaci&oacute;n</a> es un buen sitio por donde empezar especialmente para aprender m&aacute;s acerca del paso de opciones.</p>
+
+
+<p>La gran pregunta es: &iquest;cu&aacute;ndo deber&iacute;amos usar Rake y cu&aacute;ndo usar Thor?  Si estamos creando una aplicaci&oacute;n Rails sencilla es mejor seguir usando Rake porque se trata de la herramienta m&aacute;s popular y conocida, mientras que si tenemos que crear muchas tareas administrativas en nuestras aplicaciones Rails entonces merecer&aacute; m&aacute;sSe ha omitido la definicion del m&eacute;todo config la pena considerar el uso de Thor.</p>
+

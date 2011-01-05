@@ -1,0 +1,264 @@
+<p>Ryan Bates y su equipo crearon la aplicaci&oacute;n <a href="http://govsgo.com/">Go vs Go</a> para la edici&oacute;n de este a&ntilde;o de la <a href="http://railsrumble.com/">Rails Rumble</a>.  Se trata de una aplicaci&oacute;n que sirve para jugar en l&iacute;nea al juego de Go, donde se pueden disputar partidas contra otro jugador o contra la aplicaci&oacute;n.  Cuando uno juega contra la m&aacute;quina, hay un peque&ntilde;o retardo desde que se pone la pieza hasta que el ordenador juega.  Este intervalo de tiempo  puede llegar a ser grande porque al programa le lleva un tiempo calcular su pr&oacute;ximo movimiento, tiempo durante el cual habr&aacute; un proceso Rails bloqueado.  Para evitar este problema se movi&oacute; la inteligencia artificial del juego a una tarea as&iacute;ncrona.  Hay varias formas de encolar este tipo de tareas en una aplicaci&oacute;n Rails y el equipo de Go vs Go decidi&oacute; utilizar  <a href="http://kr.github.com/beanstalkd/">Beanstalk</a>. En este episodio veremos Beanstalk y su gema hermana Stalker.</p>
+
+<h3>C&oacute;mo empezar con Beanstalk</h3>
+
+<p>Si estamos ejecutando OSX la forma m&aacute;s sencilla de instalar Beanstalk es mediante <a href="http://github.com/mxcl/homebrew">Homebrew</a>, en cuyo caso tan s&oacute;lo tenemos que ejecutar</p>
+
+<pre class="terminal">$ brew install beanstalkd</pre>
+
+<p>Tras la instalaci&oacute;n de Beanstalk podemos arrancar el servidor ejecutando la orden <code>beanstalkd</code>.  Para ejecutarlo como demonio podemos a&ntilde;adir la opci&oacute;n <code>-d</code>.</p>
+
+<pre class="terminal">$ beanstalkd -d</pre>
+
+<p>Tenemos que instalar la <a href="http://rubygems.org/gems/beanstalk-client">gema cliente de Beanstalk</a> para poder trabajar con Beanstalk, lo que se hace como con cualquier otra gema.</p>
+
+<pre class="terminal">$ gem install beanstalk-client</pre>
+
+<p>En la <a href="http://kr.github.com/beanstalkd/">p&aacute;gina de Beanstalk</a> hay instrucciones acerca del uso de Beanstalk con Ruby.  Tenemos que crear una nueva instancia de <code>Beanstalk::Pool</code> y usar el m&eacute;todo <code>put</code> para a&ntilde;adir tareas a la cola.  Para recuperar luego un elemento de la cola puede usarse el m&eacute;todo <code>reserve</code>, que esperar&aacute; hasta que aparezca una tarea libre en la cola y la devolver&aacute;.  Tras esto podemos procesar la tarea y cuando hayamos terminado con ella usar <code>delete</code> para eliminarla de la cola.</p>
+
+<p>Vamos a demostrar esto con dos sesiones de <code>irb</code>.  En cada una de elllas crearemos una nueva cola en <code>localhost:11300</code>.</p>
+
+<p class="codeFilePath">Top Window</p>
+<pre class="terminal">$ irb
+ruby-1.9.2-p0 &gt; require &#x27;beanstalk-client&#x27;
+ =&gt; true 
+ruby-1.9.2-p0 &gt; beanstalk = Beanstalk::Pool.new([&#x27;localhost:11300&#x27;])
+ =&gt; #&lt;Beanstalk::Pool:0x00000100a9f8e8 @addrs=[&quot;localhost:11300&quot;], @watch_list=[&quot;default&quot;], @default_tube=nil, @connections={&quot;localhost:11300&quot;=&gt;#&lt;Beanstalk::Connection:0x00000100a9f7f8 @mutex=#&lt;Mutex:0x00000100a9f780&gt;, @waiting=false, @addr=&quot;localhost:11300&quot;, @socket=#&lt;TCPSocket:fd 3&gt;, @last_used=&quot;default&quot;, @watch_list=[&quot;default&quot;]&gt;}&gt; 
+ruby-1.9.2-p0 &gt;</pre>
+
+<p class="codeFilePath">Bottom Window</p>
+<pre class="terminal">$ irb
+ruby-1.9.2-p0 &gt; require &#x27;beanstalk-client&#x27;
+ =&gt; true 
+ruby-1.9.2-p0 &gt; beanstalk = Beanstalk::Pool.new([&#x27;localhost:11300&#x27;])
+ =&gt; #&lt;Beanstalk::Pool:0x00000101919bf8 @addrs=[&quot;localhost:11300&quot;], @watch_list=[&quot;default&quot;], @default_tube=nil, @connections={&quot;localhost:11300&quot;=&gt;#&lt;Beanstalk::Connection:0x00000101919978 @mutex=#&lt;Mutex:0x000001019198d8&gt;, @waiting=false, @addr=&quot;localhost:11300&quot;, @socket=#&lt;TCPSocket:fd 3&gt;, @last_used=&quot;default&quot;, @watch_list=[&quot;default&quot;]&gt;}&gt; 
+ruby-1.9.2-p0 &gt;</pre>
+
+<p>A&ntilde;adamos una tarea a la cola en la ventana superior utilizando <code>put</code>.</p>
+
+<p class="codeFilePath">Top Window</p>
+<pre class="erb">ruby-1.9.2-p0 &gt; beanstalk.put &quot;hello&quot;
+ =&gt; 1</pre>
+
+<p>En la otra ventana podemos capturar esta tarea con <code>reserve</code>.</p>
+
+<p class="codeFilePath">Bottom Window</p>
+<pre class="erb">ruby-1.9.2-p0 &gt; job = beanstalk.reserve
+ =&gt; (job server=localhost:11300 id=1 size=5)</pre>
+
+<p>Podemos inspeccionar el atributo <code>body</code> de la tarea y sacarla de la cola.</p>
+
+<p class="codeFilePath">Bottom Window</p>
+<pre class="erb">ruby-1.9.2-p0 &gt; job.body
+ =&gt; &quot;hello&quot; 
+ruby-1.9.2-p0 &gt; job.delete
+ =&gt; false</pre>
+ 
+<p>Si ahora intentamos reservar otra tarea nos quedaremos esperando porque no existen m&aacute;s tareas en la cola.</p>
+
+<p class="codeFilePath">Bottom Window</p>
+<pre class="erb">ruby-1.9.2-p0 &gt; job = beanstalk.reserve</pre>
+
+<p>El proceso se desbloquear&aacute; inmediatamente en cuanto a&ntilde;adamos una nueva tarea a la cola.</p>
+
+
+<p class="codeFilePath">Top Window</p>
+<pre class="erb">ruby-1.9.2-p0 &gt; beanstalk.put &quot;bacon&quot;
+ =&gt; 2</pre>
+ 
+<p class="codeFilePath">Bottom Window</p>
+<pre class="erb">ruby-1.9.2-p0 &gt; job = beanstalk.reserve
+ =&gt; (job server=localhost:11300 id=2 size=5)</pre>
+
+<p>No se est&aacute; realizando ning&uacute;n tipo de sondeo peri&oacute;dico sino que la nueva tarea se procesa de forma inmediata, en cuanto est&aacute; disponible.  Esto mejora la velocidad percibida de la aplicaci&oacute;n Go vs Go porque la m&aacute;quina responde tan pronto como le es posible.</p>
+
+<h3>C&oacute;mo usar Beanstalk en una aplicaci&oacute;n Rails</h3>
+
+<p>Veamos c&oacute;mo usar Beanstalk en nuestras aplicaciones Rails.  Tenemos una aplicaci&oacute;n muy sencilla que nos permite crear ciudades.  Lo &uacute;nico que tenemos que hacer es introducir un c&oacute;digo postal y se crear&aacute; una ciudad cuyo nombre se obtendr&aacute; de una aplicaci&oacute;n externa.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/528/original/E243I01.png" width="800" height="348" alt="Nuestra aplicación Rails."/>
+</div>
+
+<p>Aunque el proceso de recuperar el nombre de la ciudad es por lo general lo suficientemente r&aacute;pido, puede ser que en alg&uacute;n momento la respuesta sea lenta por lo que hemos decidido que lo vamos a mover a un proceso separado.</p>
+
+
+<p>Si bien en Rails podemos trabajar directamente con la gema cliente de Beanstalk,  nosotros preferimos usar otra gema llamada <a href="https://github.com/adamwiggins/stalker">Stalker</a>, que es un recubrimiento de la gema cliente que proporciona un interfaz m&aacute;s c&oacute;moda.  Para usar Stalker tan s&oacute;lo tenemos que a&ntilde;adir la gema al <code>Gemfile</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;sqlite3-ruby&#x27;, :require =&gt; &#x27;sqlite3&#x27;
+gem &#x27;stalker&#x27;</pre>
+
+<p>Despu&eacute;s de esto ya podemos instalar la gema con <code>bundle</code>.</p>
+
+<p>Ya podemos pasar a mover el c&oacute;digo que recupera los nombres de ciudades a su propio proceso.  La acci&oacute;n <code>create</code> ahora mismo guarda la nueva ciudad y luego llama a un m&eacute;todo del modelo <code>City</code> llamado <code>fetch_name</code> para establecer el nombre de la ciudad.  Este m&eacute;todo invoca a una API externa que obtiene el nombre de la ciudad y que es exactamente lo que queremos mover a la tarea as&iacute;ncrona.</p>
+
+<p class="codeFilePath">/app/controllers/cities_controller.rb</p>
+<pre class="ruby">def create
+  @city = City.new(params[:city])
+  if @city.save
+    @city.fetch_name
+    redirect_to city_path(@city), :notice =&gt; &quot;Successfully &crarr;
+      created city.&quot;
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end</pre>
+
+<p>Modificaremos el c&oacute;digo para que en lugar de llamar a <code>@city.fetch_name</code> se a&ntilde;ada una tarea a la cola, con <code>Stalker.enqueue</code>.  A la nueva tarea tenemos que darle un identificador, que ser&aacute; <code>city.fetchname</code>.  A la tarea le podemos pasar cualquier otra opci&oacute;n que deseemos, por ejemplo el  <code>id</code> de la ciudad que hemos acabado de crear.</p>
+
+<p class="codeFilePath">/app/controllers/cities_controller.rb</p>
+<pre class="ruby">def create
+  @city = City.new(params[:city])
+  if @city.save
+    Stalker.enqueue(&quot;city.fetch_name&quot;, :id =&gt; @city.id)
+    redirect_to city_path(@city), :notice =&gt; &quot;Successfully &crarr;
+      created city.&quot;
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end</pre>
+
+<p>A continuaci&oacute;n debemos crear una tarea de Stalker para gestionar esto.  Crearemos un archivo llamado <code>jobs.rb</code> en el directorio <code>/config</code> de nuestra aplicaci&oacute;n.</p>
+
+<p>La API de Stalker para gestionar tareas es muy sencilla.  Tan s&oacute;lo tenemos que llamar al m&eacute;todo <code>job</code> y pasarle un identificador.  Este m&eacute;todo recibe un bloque que tiene como argumentos los mismos que se le han pasado <code>Stalker.enqueue</code>.  En este bloque encontramos la instancia de <code>City</code> que tiene el <code>id</code> correspondiente e invocamos el m&eacute;todo <code>fetch_name</code> sobre ella.    Stalker no es espec&iacute;fico de Rails, por lo que el entorno de Rails no est&aacute; cargado por defecto.  Para ello requeriremos el fichero <code>config/environment.rb</code> en la primera l&iacute;nea.</p>
+
+<p class="codeFilePath">/config/jobs.rb</p>
+<pre class="ruby">require File.expand_path(&quot;../environment&quot;, __FILE__)
+
+job &quot;city.fetch_name&quot; do |args|
+  City.find(args[&quot;id&quot;]).fetch_name
+end</pre>
+
+<p>Para ejecutar nuestras tareas podemos ejecutar la orden <code>stalk</code> y pasarle el nombre del fichero que queremos ejecutar.</p>
+
+<pre class="terminal">$ stalk ./config/jobs.rb</pre>
+
+<p>Podemos hacer la prueba ya porque a&uacute;n tenemos <code>beanstalkd</code> en ejecuci&oacute;n.  Si creamos una nueva ciudad el nombre estar&aacute; vac&iacute;o.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/529/original/E243I02.png" width="802" height="343" alt="La nueva ciudad tiene el nombre en blanco."/>
+</div>
+
+<p>Pero si refrescamos la p&aacute;gina uno o dos segundos despu&eacute;s, aparecer&aacute; el nombre.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/530/original/E243I03.png" width="802" height="343" alt="Si refrescamos la página ya aparece el nombre de la ciudade."/>
+</div>
+
+<p>Si miramos en la traza de la aplicaci&oacute;n veremos que la tarea se ha ejecutado.</p>
+
+<pre class="terminal">[2010-12-09 19:04:49 +0000] -&gt; city.fetch_name (id=2)
+[2010-12-09 19:04:50 +0000] -&gt; city.fetch_name finished in 374ms</pre>
+
+<h3>Optimizaci&oacute;n del proceso as&iacute;ncrono</h3>
+
+<p>El problema que tiene nuestra tarea es que carga todo el entorno de Rails.  Esto har&aacute; que si  queremos lanzar varios agentes para procesar m&uacute;ltiples tareas a la vez tengamos que emplear mucha memoria. Es muy c&oacute;modo tener el entorno de Rails cargado, pero no es imprescindible.  Podemos hacer que el c&oacute;digo de la tarea sea mucho m&aacute;s eficiente si cambiamos el c&oacute;digo de la tarea para que acceda a la base de datos directamente en lugar de usar ActiveRecord.</p>
+
+<p class="codeFilePath">/config/jobs.rb</p>
+<pre class="ruby">require &#x27;sqlite3&#x27;
+require &#x27;json&#x27;
+require &#x27;net/http&#x27;
+
+RAILS_ENV = ENV[&quot;RAILS_ENV&quot;] || &quot;development&quot;
+
+db = SQLite3::Database.new(File.expand_path( &crarr;
+  &quot;../../db/#{RAILS_ENV}.sqlite3&quot;, __FILE__))
+
+job &quot;city.fetch_name&quot; do |args|
+  postcode = db.get_first_value(&quot;SELECT postcode FROM &crarr;
+    cities WHERE id=?&quot;, args[&quot;id&quot;])
+  url = &quot;http://ws.geonames.org/postalCodeLookupJSON?  &crarr;
+    postalcode=#{CGI.escape(postcode)}&amp;country=GB&quot;
+  json = Net::HTTP.get_response(URI.parse(url)).body
+  name = JSON.parse(json)[&quot;postalcodes&quot;].first[&quot;placeName&quot;]
+  db.execute(&quot;UPDATE cities SET name=? WHERE id=?&quot;, &crarr;
+    args[&quot;id&quot;], name)
+end</pre>
+
+<p>En el c&oacute;digo anterior recuperamos de la base de datos el c&oacute;digo postal de la ciudad y luego obtenemos el nombre de la ciudad a partir del JSON devuelto por la API, por &uacute;ltimo actualizamos el registro apropiado en la base de datos.  Todo esto sin usar el modelo <code>City</code>, lo que har&aacute; que la tarea sea mucho m&aacute;s ligera.</p>
+
+<h3>Gesti&oacute;n de errores</h3>
+
+<p>&iquest;Qu&eacute; pasa si se eleva una excepci&oacute;n al intentar obtener el nombre de una ciudad?  En estos casos Stalker trazar&aacute; el error e intentar&aacute; ejecutar una funci&oacute;n de manejo de errores.  Podemos hacerlo creando el m&eacute;todo <code>error</code>.</p>
+
+
+<p class="codeFilePath">/config/jobs.rb</p>
+<pre class="ruby">error do |exception|
+  # Code to handle the error.
+end</pre>
+
+<p>Cuando esto ocurra Stalker <em>enterrar&aacute;</em> la tarea, lo que significa que Beanstalk no intentar&aacute; ejecutarla de nuevo a no ser que la resucitemos <em>de una patada</em>.  Para hacerlo tenemos que hacer telnet directamente a Beanstalk.</p>
+
+<pre class="terminal">$ telnet localhost 11300
+Trying ::1...
+Connected to localhost.
+Escape character is &#x27;^]&#x27;.</pre>
+
+<p>Una vez que estemos conectados podemos ejecutar la orden <code>kick</code> pasando el n&uacute;mero de tareas que queremos meter de nueva en la cola.</p>
+
+
+<pre class="terminal">kick 10
+KICKED 0</pre>
+
+<p>Ahora mismo no tenemos tareas enterradas por lo que hemos recibido la respuesta <code>KICKED 0</code>.</p>
+
+<p>Queda claro que podemos controlar las excepciones que ocurran dentro de una tarea pero &iquest;qu&eacute; pasa si el proceso muere repentinamente?  Para estas contingencias deber&iacute;amos monitorizar dicho proceso con una herramienta como  <a href="http://god.rubyforge.org">God</a>, que vimos en detalle en el <a href="http://railscasts.com/episodes/130-monitoring-with-god">episodio 130</a> por lo que si no estamos familiarizados con este tipo de herramientas merece una pena leer ese episodio.  A continuaci&oacute;n se muestra un fichero de configuraci&oacute;n para tareas de Stalker.  Una ventaja de esta t&eacute;cnica es que el proceso se demoniza autom&aacute;ticamente por lo que no nos tendremos que preocupar por eso.</p>
+
+<p>En el fichero de configuraci&oacute;n podremos ver que se invoca la orden <code>stalk</code> pasando como par&aacute;metro nuestro fichero <code>jobs.rb</code>.  El resto del fichero son las condiciones habituales que se usan para garantizar que el proceso est&aacute; levantado y que no usa demasiada memoria o CPU.</p>
+
+<p class="codeFilePath">/config/god.rb</p>
+<pre class="ruby"># run with: god -c config/god.rb
+RAILS_ROOT = File.expand_path(&quot;../..&quot;, __FILE__)
+
+God.watch do |w|
+  w.name = &quot;anycity-worker&quot;
+  w.interval = 30.seconds
+  w.env = {&quot;RAILS_ENV&quot; =&gt; &quot;production&quot;}
+  w.start = &quot;/usr/bin/stalk #{RAILS_ROOT}/config/jobs.rb&quot;
+  w.log = &quot;#{RAILS_ROOT}/log/stalker.log&quot;
+
+  w.start_if do |start|
+    start.condition(:process_running) do |c|
+      c.running = false
+    end
+  end
+
+  w.restart_if do |restart|
+    restart.condition(:memory_usage) do |c|
+      c.above = 50.megabytes
+      c.times = [3, 5] # 3 out of 5 intervals
+    end
+
+    restart.condition(:cpu_usage) do |c|
+      c.above = 50.percent
+      c.times = 5
+    end
+  end
+
+  w.lifecycle do |on|
+    on.condition(:flapping) do |c|
+      c.to_state = [:start, :restart]
+      c.times = 5
+      c.within = 5.minute
+      c.transition = :unmonitored
+      c.retry_in = 10.minutes
+      c.retry_times = 5
+      c.retry_within = 2.hours
+    end
+  end
+end</pre>
+
+<h3>Persistencia</h3>
+
+<p>Debe tenerse en cuenta que por defecto Beanstalk no es persistente.  Si intentamos ejecutarlo con la opci&oacute;n <code>-d</code> y el proceso muere por cualquier motivo, se pereder&aacute;n todas las tareas encoladas que estaban esperando a ser ejecutadas.  Para que el servidor Beanstalk utilice colas persistentes hay que ejecutarlo con la opci&oacute;n <code>-b</code> y pasar la ruta de un directorio para guardar los archivos binarios.</p>
+
+<pre class="terminal">beanstalkd -d -b /Users/eifion/binlog</pre>
+
+<p>De esta forma se puede recuperar la cola si el proceso tiene alg&uacute;n fallo catastr&oacute;fico.</p>

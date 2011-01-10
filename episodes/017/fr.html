@@ -1,0 +1,52 @@
+<p><img src="/system/photos/13/original/E017I01.png" width="392" height="402" alt="Le formulaire d&rsquo;&eacute;dition avec les cases &agrave; cocher ajout&eacute;es." style="float: right;"/>Dans notre application pour cette &eacute;pisode, nous avons deux mod&egrave;les, <code>Product</code> et <code>Category</code>, chacun avec une relation <code>has_and_belongs_to_many</code> avec l&#x27;autre. Ce que nous voudrions &ecirc;tre capable de faire est de modifier les cat&eacute;gories d&#x27;un produit en utilisant une liste de cases &agrave; cocher dans le formulaire d&#x27;&eacute;dition de ce produit.</p>
+
+<h3>Ajouter les cases &agrave; cocher</h3>
+<p>Le formulaire d&#x27;&eacute;dition de ce produit a actuellement des champs pour le nom du produit et le prix mais il n&#x27;y a aucun moyen de modifier les cat&eacute;gories de ce produit. Il y a deux m&eacute;thodes pour ajouter une case &agrave; cocher &agrave; un formulaire, <code>check_box</code> et <code>check_box_tag</code>. Nous allons utiliser <code>check_box_tag</code> puisque cette m&eacute;thode nous donne le contr&ocirc;le dont nous avons besoin &agrave; propos du nom de la case. Le code que nous ajouterons au formulaire est indiqu&eacute; ci-dessous (<code>products/edit.html.erb</code>).</p>
+
+<pre class="ruby" style="clear: both;">
+&lt;% for category in Category.find(:all) %&gt;
+    &lt;div&gt;
+      &lt;%= check_box_tag &quot;product[category_ids][]&quot;, category.id, @product.categories.include?(category) %&gt;
+      &lt;%= category.name %&gt;
+    &lt;/div&gt;
+&lt;% end %&gt;
+</pre>
+
+<p><code>check_box_tag</code> prend trois param&egrave;tres : le nom de la case, la valeur de la case et une valeur  bool&eacute;enne qui d&eacute;termine si la case doit &ecirc;tre coch&eacute;e. Le nom que nous avons utilis&eacute; parait un peu &eacute;trange mais vous allez voir pourquoi cette m&eacute;thode est plus courte. Nous d&eacute;terminons si chaque case de cat&eacute;gorie doit &ecirc;tre coch&eacute;e ou pas en regardant si le produit est dans cette cat&eacute;gorie en utilisant <code>@product.categories.include?(category)</code>.</p>
+
+<h3>Regardons si &ccedil;a marche</h3>
+<img src="/system/photos/14/original/E017I02.png" width="800" height="500" alt="Le formulaire de modification avec les cases &agrave; cocher ajout&eacute;es."/>
+<p class="title">Le formulaire de modification avec les cases &agrave; cocher ajout&eacute;es.</p>
+<p>Si nos rafraichissons le formulaire et le testons, nous voyons que &ccedil;a marche et que les cat&eacute;gories du produit sont mises &agrave; jour quand nous cochons quelques unes des cases &agrave; cocher et cliquons sur &lsquo;submit&rsquo;. Comment fait Rails pour savoir comment mettre &agrave; jour le produit correctement ? Le log de d&eacute;veloppement &agrave; la r&eacute;ponse.</p>
+
+<pre class="terminal">
+Processing ProductsController#update (for 127.0.0.1 at 2009-01-15 20:57:56) [PUT]
+Parameters: {&quot;commit&quot;=&gt;&quot;Edit&quot;, &quot;authenticity_token&quot;=&gt;&quot;31b711f2c24ae7cea5abf3f758eef46b472eebf3&quot;, &quot;product&quot;=&gt;{&quot;price&quot;=&gt;&quot;99.0&quot;, &quot;name&quot;=&gt;&quot;Television Stand&quot;, &quot;category_ids&quot;=&gt;[&quot;2&quot;, &quot;4&quot;]}, &quot;id&quot;=&gt;&quot;1&quot;}
+</pre>
+<p>Quand nous soumettons, le formulaire transmet les param&egrave;tres de cat&eacute;gories dans le hash du produit en tant que tableau. Ca se passe comme &ccedil;a &agrave; cause du nom que nous avons donn&eacute; au cases &agrave; cocher, <code>product[category_ids][]</code>. La premi&egrave;re partie du nom dit &agrave; Rails de transmettre category_ids comme une partie du hash produit, alors que les accolades vides lui disent de transmettre les valeurs dans un tableau. Mais d&#x27;o&ugrave; vient la m&eacute;thode <code>category_ids</code>, qui est appel&eacute;e quand les param&egrave;tres du produit sont modifi&eacute;s ? La r&eacute;ponse est que c&#x27;est g&eacute;n&eacute;r&eacute; par la m&eacute;thode <code>has_and_belongs_to_many</code> dans le mod&egrave;le <code>Product</code>. Nous pouvons tester en ouvrant <code>script/console</code> et en mettant un produit &agrave; jour manuellement.</p>
+
+<pre class="terminal">
+&gt;&gt; p = Product.first
+=&gt; #&lt;Product id: 1, name: &quot;Television Stand&quot;, price: 99.0, created_at: &quot;2009-01-11 21:32:12&quot;, updated_at: &quot;2009-01-11 21:32:12&quot;&gt;
+&gt;&gt; p.category_ids
+=&gt; [2, 3]
+&gt;&gt; p.category_ids = [1,4]
+=&gt; [1, 4]
+&gt;&gt; 
+</pre>
+
+<p>Quand nous faisons &ccedil;a, Rails g&eacute;n&egrave;re la requ&ecirc;te SQL suivante pour mettre &agrave; jour les cat&eacute;gories d&#x27;un produit :</p>
+<pre class="sql">
+DELETE FROM &quot;categories_products&quot; WHERE product_id = 1 AND category_id IN (2,3)
+INSERT INTO &quot;categories_products&quot; (&quot;product_id&quot;, &quot;id&quot;, &quot;category_id&quot;) VALUES (1, 1, 1)
+INSERT INTO &quot;categories_products&quot; (&quot;product_id&quot;, &quot;id&quot;, &quot;category_id&quot;) VALUES (1, 4, 4)
+</pre>
+
+<h3>Une petite chose &agrave; corriger</h3>
+<p>Il y a toujours un probl&egrave;me avec notre m&eacute;thode de mise &agrave; jour. Si nous d&eacute;cochons toutes les cases de cat&eacute;gories d&#x27;un produit, la mise &agrave; jour &eacute;chouera. Ceci se produit parce qu&#x27;une case &agrave; cocher d&#x27;un formulaire HTML ne renverra pas ses valeurs si elle est d&eacute;coch&eacute;e et donc aucun <code>category_ids</code> n&#x27;apparaitra dans le hash des param&egrave;tres du produit, ce qui implique que les <code>category_ids</code> ne sont pas mis &agrave; jour.</p>
+
+<p>Pour corriger ceci, nous allons modifier le contr&ocirc;leur des produits pour d&eacute;finir le param&egrave;tre <code>category_ids</code> comme &eacute;tant un tableau vide si il n&#x27;est pas transmis &agrave; l&#x27;action de mise &agrave; jour. On peut faire ceci en Ruby en utilisant l&#x27;op&eacute;rateur <code>||=</code> et ajouter ceci au d&eacute;but de notre action.</p>
+<code class="ruby">
+params[:product][:category_ids] ||= []
+</code>
+<p>Ceci assurera que si aucune case &agrave; cocher n&#x27;est s&eacute;lectionn&eacute;e, alors le produit est mis &agrave; jour correctement  et que donc, il n&#x27;est dans aucune cat&eacute;gorie.</p>

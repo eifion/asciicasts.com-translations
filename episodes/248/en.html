@@ -1,0 +1,293 @@
+<p>In this episode we&rsquo;ll conclude our short series on creating an offline web application. In the first part we used the <a href="https://github.com/wycats/rack-offline">rack-offline gem</a> to create a cache manifest file.  When we visit a site that has a manifest file the browser will download and cache the files listed in it along with any files that reference it, such as our application&rsquo;s home page. This means that once we&rsquo;ve visited our application while online we&rsquo;ll be able to use it offline too.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/548/original/E248I01.png" width="800" height="305" alt="Our grocery list application."/>
+</div>
+
+<h3>Handling Offline Updates</h3>
+
+<p>One of the main problems with offline applications is handling pages with dynamic content, such as the list of groceries in the page above. If we try to update the list by adding a new item while our application is in production mode the cache manifest won&rsquo;t be updated and so the browser won&rsquo;t know that the page has changed. When we add a new item it appears in the list, but this only works because adding an item makes a POST request to the server. If we refresh the page after adding the new item the browser displays the cached version of the page and the new item will disappear from the list. As the browser doesn&rsquo;t know that the cache is now stale we can refresh the page as much as we like and it will have no effect.</p>
+
+<p>One solution to this would be to update the cache every time the dynamic content changes. If we update the hash in the cache manifest it will force the browser to flush the cache. The problem with this approach is that it will cause the browser to download all of the cached files from the server and if we expect the dynamic content to change frequently then this isn&rsquo;t very efficient. This approach also means that the application wouldn&rsquo;t work offline. A better approach is to move the dynamic content out of the cache manifest.</p>
+
+<p>We&rsquo;re going to modify our application so that the list of items isn&rsquo;t populated directly from the server. Instead the items page will be static and the list of items will be populated by making an AJAX call to the server once the static page as loaded. To do this we&rsquo;ll be writing quite a lot of JavaScript and as we&rsquo;re using jQuery the rest of this episode will be jQuery-specific.</p>
+
+<p>There is an excellent plugin for jQuery called <a href="https://github.com/jquery/jquery-tmpl">jQuery Templates</a> that makes it easy to generate dynamic HTML from JSON objects and we&rsquo;ll use that here to create the grocery list. We can copy the plugin&rsquo;s JavaScript file to our application by running the following <code>curl</code> command from our application&rsquo;s directory.</p>
+
+<pre class="terminal">$ curl https://github.com/jquery/jquery-tmpl/raw/master/ 
+  jquery.tmpl.js &gt; public/javascripts/jquery.tmpl.js</pre>
+
+<p>Before we start applying this to the application we need to change our development configuration file. In the last episode we set <code>config.cache_classes</code> to true to simulate production mode. We&rsquo;ll change it back to <code>false</code> so that we can work on developing our application.</p>
+
+<p class="codeFilePath">/config/environments/development.rb</p>
+<pre class="ruby">config.cache_classes = false</pre>
+
+<h3>Using jQuery Template</h3>
+
+<p>The first step we need to make is to add a reference to the jQuery Templates file in our application&rsquo;s layout file.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= javascript_include_tag :defaults, &quot;jquery.tmpl&quot; %&gt;</pre>
+
+<p>If we look at our items index page we can see the erb code that generates the list of items.</p>
+
+<p class="codeFilePath">/app/views/items/index.html.erb</p>
+<pre class="ruby">&lt;ol id=&quot;items&quot; &gt;
+  &lt;% @items.each do |item| %&gt;
+  &lt;li&gt;&lt;%= item.name %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ol&gt;</pre>
+
+<p>We need to populate this content through JavaScript on the client instead of with erb on the server so we&rsquo;ll write a jQuery Template to do this.</p>
+
+<p>We&rsquo;ll place the template within a <code>&lt;script&gt;</code> element with a type of <code>text/html</code> and give it an <code>id</code> so that we can identify it with JavaScript. Instead of using erb to determine where the dynamic content goes we use the jQuery Template&rsquo;s scripting language and place the content within <code>${}</code>, in this case we&rsquo;ll be displaying each item&rsquo;s name just as we did in the erb code.</p>
+
+<p class="codeFilePath">/app/views/items/index.html.erb</p>
+<pre class="ruby">&lt;script type=&quot;text/html&quot; id=&quot;item_template&quot;&gt;
+  &lt;li&gt;${item.name}&lt;/li&gt;
+&lt;/script&gt;
+
+&lt;ol id=&quot;items&quot;&gt;
+&lt;/ol&gt;</pre>
+
+<p>Note that we keep the empty <code>&lt;ol&gt;</code> element where it is so that we can add the dynamic content to it later. In our <code>application.js</code> file we can now populate that list of items using jQuery Template. Before we fill it with real data we&rsquo;ll try it out with a hard-coded test item.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(window.applicationCache).bind(&#x27;error&#x27;, function () {
+    alert(&#x27;There was an error when loading the cache manifest.&#x27;);
+  });
+
+  $(&quot;#items&quot;).html($(&quot;#item_template&quot;).tmpl({&quot;item&quot;:{&quot;name&quot;:&quot;cake&quot;}}));  
+});</pre>
+
+<p>In the code above we get the <code>&lt;ol&gt;</code> element by its <code>id</code> then call the jQuery function <code>html</code> on it to replace its contents. That content comes from the template and so we get the template by its <code>id</code>, <code>item_template</code>, and call <code>tmpl</code> on it. The <code>tmpl</code> function takes either a JavaScript object or an array of objects as an argument and in this case we pass it a literal object with a <code>name</code> property.</p>
+
+<p>If we reload the page a couple of times now we&rsquo;ll see the item listed, generated by jQuery Template.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/549/original/E248I02.png" width="800" height="299" alt="Adding an item while offline."/>
+</div>
+
+<p>Of course we want the items in the list to show the items from the database too and we&rsquo;ll get them by making an AJAX request to the server that returns the items from the database as JSON.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(window.applicationCache).bind(&#x27;error&#x27;, function () {
+    alert(&#x27;There was an error when loading the cache manifest.&#x27;);
+  });
+  
+  $.getJSON(&quot;/items.json&quot;, function(data) {
+    $(&quot;#items&quot;).html($(&quot;#item_template&quot;).tmpl(data));    
+  });
+});</pre>
+
+<p>We&rsquo;ll have to modify our <code>ItemsController</code>&rsquo;s <code>index</code> action so that it can return JSON and we can make use of Rails 3&rsquo;s <code>respond_to</code> method to do that.</p>
+
+<p class="codeFilePath">/app/controllers/items_controller.rb</p>
+<pre class="ruby">class ItemsController &lt; ApplicationController
+  respond_to :html, :json
+  
+  def index
+    @items = Item.all
+    respond_with(@items)
+  end
+  
+  def create
+    @item = Item.new(params[:item])
+    @item.save
+    redirect_to items_path
+  end
+
+end</pre>
+
+<p>When we call <code>/items.json</code> now the server will return a list of items in JSON.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/550/original/E248I03.png" width="801" height="280" alt="The items from the database rendered as JSON."/>
+</div>
+
+<p>This page is not listed in the cache manifest so it won&rsquo;t be cached. Therefore we don&rsquo;t need to worry about the results not being updated. If we visit the items page now we&rsquo;ll see the list of items from the <code>items</code> table in the database, populated from the data from the JSON request.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/551/original/E248I04.png" width="801" height="314" alt="The list of items populated from the JSON data."/>
+</div>
+
+<h3>Storing Items Locally</h3>
+
+<p>The next step is to get our application working offline. What happens if we turn off the Rails server and reload the page?</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/552/original/E248I05.png" width="801" height="314" alt="The items can&rsquo;t be fetched while the application is offline."/>
+</div>
+
+<p>The items aren&rsquo;t listed now as the browser cannot fetch them from the server. To fix this we can bring another jQuery plugin into use: <a href="https://github.com/wycats/jquery-offline">jQuery-Offline</a>. This plugin stores the JSON data by using the browser&rsquo;s <a href="https://developer.mozilla.org/en/dom/storage"><code>localStorage</code></a> so that it will be available offline. To use it we just need to copy the two files from the plugin&rsquo;s <code>lib</code> directory, <code>jquery.offline.js</code> and <code>json.js</code>, into our application&rsquo;s <code>/public/javascripts</code> directory. We can do that by running two <code>curl</code> commands.</p>
+
+<pre class="terminal">$ curl https://github.com/wycats/jquery-offline/raw/master/lib 
+  jquery.offline.js &gt; public/javascripts/jquery.offline.js</pre>
+
+<pre class="terminal">$ curl https://github.com/wycats/jquery-offline/raw/master/lib/ 
+  json.js &gt; public/javascripts/json.js</pre>
+  
+<p>Next we&rsquo;ll need to include these files in the application&rsquo;s layout file.</p> 
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= javascript_include_tag :defaults, &quot;jquery.tmpl&quot;, &quot;json&quot;,  
+  &quot;jquery.offline&quot; %&gt;</pre>
+
+<p>In the <code>application.js</code> file we can now replace <code>getJSON</code> with <code>retrieveJSON</code>. The <code>retrieveJSON</code> function acts much like <code>getJSON</code> does but also stores the retrieved JSON in the browser&rsquo;s <code>localStorage</code>.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(window.applicationCache).bind(&#x27;error&#x27;, function () {
+    alert(&#x27;There was an error when loading the cache manifest.&#x27;);
+  });
+  
+  $.retrieveJSON(&quot;/items.json&quot;, function(data) {
+    $(&quot;#items&quot;).html($(&quot;#item_template&quot;).tmpl(data));    
+  });
+});</pre>
+
+<p>If we start up the server now and visit the items page we&rsquo;ll see the list of items again. If we then stop the server and reload the page the items will still be listed as they&rsquo;re stored in the <code>localStorage</code> and <code>retrieveJSON</code> will try to retrieve items from there if there&rsquo;s no online connection.</p>
+
+<h3>Adding Items While Offline</h3>
+
+<p>Our application can now list its items even when there is no Internet connection but we can&rsquo;t add items while offline. If we try to the browser will make a normal POST request to the server which will of course fail. We&rsquo;ll make some changes so that if an item is added while the application is offline the item will be shown on the page and stored in a list of pending items. When the application comes back online it will  submit the pending items to the server so they can be stored in the database.</p>
+
+<p>Unfortunately jQuery Offline mainly works with fetching items from the server and not with submitting items. We&rsquo;ll have to do this in a more manual way, which means that we&rsquo;re going to have to write more JavaScript than we would if there was a plugin available.</p>
+
+<p>We&rsquo;ll need to store the pending items in the browser so we&rsquo;ll create a new object in the <code>localStorage</code> store called pendingItems. When we render the list of items we want to see both the items that originally came from the server and the pending items and so we&rsquo;ll concatenate the pending items to the items that originally came from the server in the <code>retrieveJSON</code> call.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(window.applicationCache).bind(&#x27;error&#x27;, function () {
+    alert(&#x27;There was an error when loading the cache manifest.&#x27;);
+  });
+  
+  if (!localStorage[&quot;pendingItems&quot;]) {
+    localStorage[&quot;pendingItems&quot;] = JSON.stringify([]);
+  }
+  
+  $.retrieveJSON(&quot;/items.json&quot;, function(data) {
+    var pendingItems = $.parseJSON(localStorage[&quot;pendingItems&quot;]);
+    $(&quot;#items&quot;).html($(&quot;#item_template&quot;).tmpl(data.concat(pendingItems)));    
+  });
+});</pre>
+
+<p>When someone submits the form to add a new item we want to capture that event in JavaScript and add the new item to the pending items list. The code to do this will go immediately after the <code>$.retrieveJSON</code> function above.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(&#x27;#new_item&#x27;).submit(function (e) {
+  var pendingItems = $.parseJSON(localStorage[&quot;pendingItems&quot;]);
+  var item = {&quot;data&quot;:$(this).serialize(), &quot;item&quot;:{&quot;name&quot;:$(&quot;#item_name&quot;).val()}};
+  $(&quot;#item_template&quot;).tmpl(item).appendTo(&quot;#items&quot;);
+  pendingItems.push(item);
+  localStorage[&quot;pendingItems&quot;] = JSON.stringify(pendingItems);
+  $(&quot;#item_name&quot;).val(&quot;&quot;);
+  e.preventDefault();
+});</pre>
+
+<p>The code above traps the form&rsquo;s <code>submit</code> event. When the form is submitted the function that is called first gets the list of pending items from the <code>localStorage</code>. It then creates a new item. This item will have two attributes: the first, <code>data</code>,  is the serialized form data. This will allow us to submit the item to the server later on. The second is <code>item</code> and this has its own <code>name</code> attribute, much like the items we get from the call to <code>/items.json</code>. That means that we can then use this new item to populate our template and add it to the list of items.</p> 
+
+<p>We do this in the third line in the function where we fetch the template, call <code>tmpl</code> on it, passing in the new item, and append the result to the list of items. We then add the new item to the list, put the updated list back into the <code>localStorage</code> and then clear the form&rsquo;s text box. Finally we call <code>preventDefault</code> to prevent the form from being submitted back to the server.</p>
+
+<p>Let&rsquo;s see if it works. We have the server running and we&rsquo;ll reload the page a couple of times to make sure that we get the latest version. When we enter a new item in the textbox, for example &ldquo;cake&rdquo;, and press the button the item is added to the list immediately and is also added to the list of pending items.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/553/original/E248I06.png" width="841" height="355" alt="The new item is added to the list immediately."/>
+</div>
+
+<h3>Saving Pending Items Back To The Server</h3>
+
+<p>The items we add this way will only be stored on the browser they are added on so if we look at the page in another browser we&rsquo;ll only see three items. We&rsquo;ll need to submit a POST request for each pending item whenever our application comes back online. We&rsquo;ll add the following code to <code>application.js</code> to do this.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+   
+   // Other functions omitted.
+   function sendPending() {
+    if (window.navigator.onLine) {
+      var pendingItems = $.parseJSON(localStorage[&quot;pendingItems&quot;]);
+      if (pendingItems.length &gt; 0) {
+        var item = pendingItems[0];
+        $.post(&quot;/items&quot;, item.data, function (data) {
+          var pendingItems = $.parseJSON(localStorage[&quot;pendingItems&quot;]);
+          pendingItems.shift();
+          localStorage[&quot;pendingItems&quot;] = JSON.stringify(pendingItems);
+          setTimeout(sendPending, 100);
+        });
+      }
+    }
+  }
+  sendPending();
+});</pre>
+
+<p>The <code>sendPending</code> function first checks to see if the browser is online using <code>navigator.onLine</code>. It then fetches the pending items out of <code>localStorage</code> and checks to see how many items there are. If there are any it fetches the first and then submits a POST request to <code>/items</code>, passing in the serialized form data that we stored when we entered the item in the form. When the response returns we get the pending items again, in case any more have been added in the meantime, remove the first item and then put the list back into <code>localStorage</code>. We then wait for a tenth of a second before calling the function again so that the next item in the list can be POSTed back to the server. We call <code>sendPending</code> as soon as the page loads so that the page can try to send any pending items then.</p> 
+
+<p>With our application online we can now refresh the page a couple of times to make sure that the updated JavaScript is loaded. If we then open another browser we&rsquo;ll see the item that we added while offline now listed.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/554/original/E248I07.png" width="804" height="340" alt="The item added while offline now shows in another browser."/>
+</div>
+
+<h3>Some Final Tweaks</h3>
+
+<p>Our application is now working as we want it to but there are a couple of changes we can to make to the JavaScript file to improve it. The first is to call <code>sendPending</code> as soon as an item is added to the pending items so that we can attempt to send it to the server straightaway.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(&#x27;#new_item&#x27;).submit(function (e) {
+    var pendingItems = $.parseJSON(localStorage[&quot;pendingItems&quot;]);
+    var item = {&quot;data&quot;:$(this).serialize(),  &quot;item&quot;:{&quot;name&quot;:$(&quot;#item_name&quot;).val()}};
+    $(&quot;#item_template&quot;).tmpl(item).appendTo(&quot;#items&quot;);
+    pendingItems.push(item);
+    localStorage[&quot;pendingItems&quot;] = JSON.stringify(pendingItems);
+    $(&quot;#item_name&quot;).val(&quot;&quot;);
+    sendPending();
+    e.preventDefault();
+  });</pre>
+
+<p>Another change we can make it to bind the <code>sendPending</code> function to the <code>online</code> event. If you&rsquo;re on a mobile device and moving around then your device may well be constantly going online and offline. When it comes online this event will be triggered so by binding <code>sendPending</code> to it the browser can attempt to send any pending messages as soon as the device comes back online.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(window).bind(&quot;online&quot;, sendPending);</pre>
+
+<p>We&rsquo;ll also change the <code>alert</code> message that shows whenever there&rsquo;s an error with the <code>applicationCache</code> so that it displays in the console instead.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(window.applicationCache).bind(&#x27;error&#x27;, function () {
+  console.log(&#x27;There was an error when loading the cache manifest.&#x27;);
+});
+</pre>
+
+<p>Finally we&rsquo;ll make one more change to the JavaScript file. Not all browsers support <code>localStorage</code> so we&rsquo;ll wrap the code in an <code>if</code> statement and show a message that tells the user to upgrade their browser if theirs doesn&rsquo;t.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  if ($.support.localStorage)
+  {
+	// Other code omitted.
+  }
+  else {
+    alert(&quot;Time to upgrade your browser.&quot;)
+  }
+});</pre>
+
+<p>Back in the items list template file we&rsquo;ll add a default item in the list that says that the items are loading so that if the browser is a little slow the user at least sees something.</p>
+
+<p class="codeFilePath">/app/views/items/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Grocery List&quot; %&gt;
+
+&lt;%= form_for Item.new do |f| %&gt;
+ &lt;%= f.text_field :name %&gt;
+ &lt;%= f.submit &quot;Add Another Item&quot; %&gt;
+&lt;% end %&gt;
+
+&lt;script type=&quot;text/html&quot; id=&quot;item_template&quot;&gt;
+  &lt;li&gt;${item.name}&lt;/li&gt;
+&lt;/script&gt;
+
+&lt;ol id=&quot;items&quot;&gt;
+  &lt;li&gt;&lt;em&gt;Loading items...&lt;/em&gt;&lt;/li&gt;
+&lt;/ol&gt;</pre>
+
+<p>That&rsquo;s it for this episode. It was mostly JavaScript-based which is unusual, but the ability to create applications that can work offline is fairly awesome. If you have an iPhone or other mobile device then you can test this application out by calling its IP address in your browser and then putting your phone in Airplane mode and trying it out offline.</p>

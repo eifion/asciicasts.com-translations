@@ -1,0 +1,112 @@
+<p>Below is a screenshot from a small Rails application that shows a list of products that can be sorted and paginated. In order to see how responsive this application is we want to see how long each request is taking to load and store this information in the database so that we can calculate some metrics about the application&rsquo;s performance.</p>
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/555/original/E249I01.png" width="800" height="498" alt="Our products application."/>
+</div>
+
+<p>There are a number of ways that we could gather this information. One solution would be to parse the application&rsquo;s log file and extract the information from there. If we wanted to calculate average load times or each page or other similar statistics it would be much easier to do this if the data was stored in a database. We could, of course, use a third-party tool such as <a href="http://newrelic.com/">NewRelic&rsquo;s RPM</a> but in this case we want something really simple that just records the amount of time that each request takes.</p>
+
+<h3>Notifications</h3>
+
+<p>We&rsquo;ll implement this by using a feature that was introduced in Rails 3: <code><a href="http://api.rubyonrails.org/classes/ActiveSupport/Notifications.html">ActiveSupport::Notifications</a></code>. We can use notifications to create instruments. An instrument takes a block of code and when the block finishes executing it will send out a notification event. Any notifications that are subscribed to this event will then be triggered. A typical request in a Rails 3 application sends out several of these notifications and we can subscribe to any of them. Before we write our own instrument let&rsquo;s try subscribing to some of the built-in ones to get a feel for how they work.</p>
+
+<p>The first thing we&rsquo;ll need to do is create a new file in our application&rsquo;s <code>/config/initalizers</code> directory that we&rsquo;ll call <code>notifications.rb</code> and in this file we&rsquo;ll write the code to subscribe to some notifications. To do this we need to call <code>ActiveSupport::Notifications.subscribe</code>. If we pass an argument to this method we can filter the notifications that we subscribe to. We want to see all of the notifications that our application is sending out for each request so we won&rsquo;t pass one in. The method also takes a block which takes five arguments: the <code>name</code> of the notification, a <code>start</code> and <code>finish</code> time, an <code>id</code> and finally a <code>payload</code> which contains a hash of information about the notification. We&rsquo;ll take this information and send it out to the debugger.</p>
+
+<p class="codeFilePath">/config/initializers/notifications.rb</p>
+<pre class="ruby">ActiveSupport::Notifications.subscribe do |name, start, finish, id, payload|
+  Rails.logger.debug([&quot;notification:&quot;, name, start, finish, id, payload].join(&quot; &quot;))
+end</pre>
+<p>If we start up the Rails server now and reload the application&rsquo;s home page we&rsquo;ll see the notifications that were made during that request. Here is the first one.</p>
+<pre class="terminal">notification: start_processing.action_controller 2011-01-19 21:51:40 +0000 2011-01-19 21:51:40 +0000 bac10ab8b439502ce5ba {:controller=&gt;&quot;ProductsController&quot;, :action=&gt;&quot;index&quot;, :params=&gt;{&quot;controller&quot;=&gt;&quot;products&quot;, &quot;action&quot;=&gt;&quot;index&quot;}, :formats=&gt;[:html], :method=&gt;&quot;GET&quot;, :path=&gt;&quot;/products&quot;}</pre>
+
+<p>In the notification above we can see the parameters that were passed in: the <code>name</code>, <code>start</code> and <code>finish</code> times, the <code>id</code> and finally the <code>payload</code> hash. The notifications that were fired during this request were:</p>
+
+<pre class="terminal">start_processing.action_controller
+notification: sql.active_record
+notification: sql.active_record
+notification: sql.active_record
+notification: !render_template.action_view
+notification: !render_template.action_view
+notification: render_template.action_view
+notification: process_action.action_controller</pre>
+
+<p>The notifications listed include ones for ActiveRecord queries which means that we could subscribe to those to see how long each database query takes. The final one is the one we&rsquo;re going to focus on as it fires when the request has completed and so we can use it to determine how long the request took to process.</p>
+
+<pre class="terminal">notification: process_action.action_controller 2011-01-19 21:51:40 +0000 2011-01-19 21:51:41 +0000 bac10ab8b439502ce5ba {:controller=&gt;&quot;ProductsController&quot;, :action=&gt;&quot;index&quot;, :params=&gt;{&quot;controller&quot;=&gt;&quot;products&quot;, &quot;action&quot;=&gt;&quot;index&quot;}, :formats=&gt;[:html], :method=&gt;&quot;GET&quot;, :path=&gt;&quot;/products&quot;, :status=&gt;200, :view_runtime=&gt;208.36210250854492, :db_runtime=&gt;80.30999999999999}</pre>
+
+<p>This notification includes other useful information such as the <code>params</code>, the <code>path</code>, the <code>status</code>, the <code>view_runtime</code> and the <code>db_runtime</code>. We&rsquo;ll make use of some of these later.</p>
+
+<p>We want to track this information in the database so that we can work out which pages are running slowly. If we were using this in a production application then it would be better to use a memory-based store which would be more efficient but for this application we&rsquo;ll store the data in a normal model.</p>
+
+<p>We have Ryan Bates&rsquo; <a href="https://github.com/ryanb/nifty-generators">Nifty Generators</a> installed in our application so we&rsquo;ll use the nifty:scaffold generator to create the model, along with an associated controller and view. The model will have a path field to store the path and three duration fields for the durations of various parts of the request.</p>
+
+<pre class="terminal">$ rails g nifty:scaffold page_request rails g nifty:scaffold page_request path:string page_duration:float view_duration:float db_duration:float index</pre>
+
+<p>When the command completes we&rsquo;ll to migrate the database to create the new table.</p>
+
+<pre class="terminal">$ rake db:migrate</pre>
+
+<p>We now have a model in which we can store information about each request. We&rsquo;ll need to note the name of the notification, <code>process_action.action_controller</code>, so that we can subscribe to just that notification. We&rsquo;ll also need to note the names of the fields in the payload we want to extract information from.</p>
+
+<p>Back in our <code>notifications.rb</code> file we&rsquo;ll pass an argument to the call to <code>ActiveSupport::Notifications.support</code> so that we can limit the notifications we subscribe to. One way to do this is to pass in a regular expression so to subscribe to all notifications that contain <code>action_controller</code> in their name we can do the following:</p>
+
+<p class="codeFilePath">/config/initializers/notifications.rb</p>
+<pre class="ruby">ActiveSupport::Notifications.subscribe /action_controller/ do |name, start, finish, id, payload|
+  Rails.logger.debug([&quot;notification:&quot;, name, start, finish, id, payload].join(&quot; &quot;))
+end</pre>
+
+<p>Alternatively we can pass in a string to match a single notification and that&rsquo;s what we&rsquo;ll do. Instead of just logging the notification we&rsquo;ll create a new <code>PageRequest</code> and save it to the database.</p> 
+
+<p class="codeFilePath">/config/initializers/notifications.rb</p>
+<pre class="ruby">ActiveSupport::Notifications.subscribe &quot;process_action.action_controller&quot; do |name, start, finish, id, payload|
+  PageRequest.create! do |page_request|
+    page_request.path = payload[:path]
+    page_request.page_duration = (finish - start) * 1000
+    page_request.view_duration = payload[:view_runtime]
+    page_request.db_duration = payload[:db_runtime]
+  end
+end</pre>
+
+<p>If we restart our Rails server, visit a few pages and then visit <code>/page_requests</code> we&rsquo;ll see the list of page requests and the durations for each page that are stored in the database. We can use this information to work out which pages are the slowest, draw graphs to see performance over time and so on.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/556/original/E249I02.png" width="808" height="355" alt="The list of page requests with their execution times."/>
+</div>
+
+<h3>Creating Notifications</h3>
+
+<p>The notification events that Rails sends internally are primarily used for metrics which is how we&rsquo;re using them here. We can use notifications in our own applications for any purpose and we&rsquo;ll create an instrument in our store application to show this.</p>
+
+<p>Our application allows users to search for products and we want to log the search terms that are entered. In our <code>Product</code> model we have a <code>search</code> class method which is where the search takes place and which is the ideal place to log the search terms. We don&rsquo;t really want our model to be burdened with logging search terms so instead we&rsquo;ll raise a notification in this class that contains the information about this search and which we can then subscribe to anywhere else in our application&rsquo;s code.</p>
+
+<p>To create a notification we have to create a new instrument and we do that by calling <code>ActiveSupport::Notifications.instrument</code>. This takes two arguments: the first is the name that we want to give the notification, the second can be anything we want and will passed to the payload. The second argument is usually a hash of arguments and for this notification it will be the search term.</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">class Product &lt; ActiveRecord::Base
+  def self.search(search)
+    if search
+      ActiveSupport::Notifications.instrument(&quot;products.search&quot;, :search =&gt; search)
+      where(&#x27;name LIKE ?&#x27;, &quot;%#{search}%&quot;)
+    else
+      scoped
+    end
+  end
+end</pre>
+
+<p>If we pass a block to <code>instrument</code> then the start and finish times passed to the notification will be the time that the code in the block began and finished executing. As we&rsquo;re using scopes here that information isn&rsquo;t very valuable as the database query doesn&rsquo;t take place in the <code>search</code> method so we won&rsquo;t do that. This will mean that the start and finish times will be the same.</p>
+
+<p>In our notifications initializer file we can subscribe to our new notification and handle it however we want. As an example we&rsquo;ll log the search term to the log file.</p>
+
+<p class="codeFilePath">/config/initializers/notifications.rb</p>
+<pre class="ruby">ActiveSupport::Notifications.subscribe &quot;products.search&quot;  do |name, start, finish, id, payload|
+  Rails.logger.debug &quot;SEARCH: #{payload[:search]}&quot;
+end</pre>
+
+<p>We subscribe to our own notification the same way we do to one of Rails built-in notifications and we can read the search term from the payload and pass it to the log message. If we restart our server now and search for &ldquo;milk&rdquo; we&rsquo;ll see the search term logged.</p>
+<pre class="terminal">SEARCH: milk</pre>
+
+<p>Of course we could create a database table to store this information in the same way we did with the metric information earlier.</p>
+
+<p>That&rsquo;s how we can use notifications in Rails 3 to move logic outside of a class and handle it elsewhere. We can add as many subscribers as we like to handle a notification in separate places. We need to be careful with the notification pattern in our applications, however as it can be overused. For example lets say that we have a <code>User</code> model in our application and we want to send an email  when a new user registers. We could use notifications here but it&rsquo;s not a good use of them. Notifications are best used for logging and for code that doesn&rsquo;t modify the application&rsquo;s core behaviour. When using notifications there is a risk of scattering the application&rsquo;s core logic into various places. Anything can listen to a notification and so the logic could be anywhere in the application&rsquo;s code. This can make the code much harder to read and debug so it really is best to only use notifications for things that aren&rsquo;t part of your application&rsquo;s core logic.</p>
+
+<p>That&rsquo;s it for this episode. Be sure to check out the core documentation for further information on notifications.</p>

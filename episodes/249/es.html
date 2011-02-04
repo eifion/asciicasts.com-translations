@@ -1,0 +1,118 @@
+<head><base href='http://asciicasts.com'></head>
+
+<p>A continuaci&oacute;n se muestra una captura de pantalla de una peque&ntilde;a aplicaci&oacute;n Rails  que muestra un listado de productos que se pueden ser ordenar y paginar.  Queremos saber lo que tarda cada petici&oacute;n en cargar para ver c&oacute;mo de eficiente es la aplicaci&oacute;n y guardar estq informaci&oacute;n en la base de datos para as&iacute; poder calcular m&eacute;tricas de rendimiento.</p>
+
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/555/original/E249I01.png" width="800" height="498" alt="Our products application."/>
+</div>
+
+<p>Podemos recopilar esta informaci&oacute;n de varias maneras.  Una soluci&oacute;n ser&iacute;a analizar el fichero de trazas de la aplicaci&oacute;n y extraer de ah&iacute; la informaci&oacute;n que buscamos, pero si lo que queremos hacer es calcular tiempos medios de carga de cada p&aacute;gina u otras estad&iacute;sticas similares ser&aacute; m&aacute;s sencillo guardar estos datos en la base de datos .  Tambi&eacute;n podr&iacute;amos utilizar, por supuesto, una herramienta como <a href="http://newrelic.com">RPM de NewRelic</a>, pero en este caso queremos algo muy sencillo que simplemente almacene el tiempo empleado en cada petici&oacute;n.</p>
+
+<h3>Notificaciones</h3>
+
+<p>Implementaremos esto mediante el uso de una nueva funcionalidad de Rails 3:  <code><a href="http://api.rubyonrails.org/classes/ActiveSupport/Notifications.html">ActiveSupport::Notifications</a></code>.  Estas notificaciones se pueden usar para crear nuestros propios instrumentos, que reciben un bloque de c&oacute;digo y cuando este bloque termine su ejecuci&oacute;n enviar&aacute; un evento que activar&aacute; a toda notificaci&oacute;n que est&eacute; suscrita a &eacute;l. Una aplicaci&oacute;n Rails 3, durante una petici&oacute;n t&iacute;pica, env&iacute;a varias notificaciones a las que podemos suscribirnos.  Antes de escribir nuestro propio instrumental vamos a intentar suscribirnos a uno de estos eventos ya existentes para ver c&oacute;mo funcionan.</p>
+
+<p>Lo primero que hay que hacer es crear un nuevo fichero en el directorio <code>config/initializers</code> de nuestra aplicaci&oacute;n en el que escribiremos el c&oacute;digo necesario para suscribirnos a la notificaci&oacute;n, invocando a <code>ActiveSupport::Notification.subscribe</code>.  Si se le pasa un argumento a este m&eacute;todo podemos filtrar a qu&eacute; notificaciones nos queremos suscribir, pero esto no nos interesa ahora porque queremos ver todas las notificaciones que nuestra aplicaci&oacute;n env&iacute;a durante la petici&oacute;n.  El m&eacute;todo tambi&eacute;n recibe un bloque con cinco argumentos: <code>name</code> es el nombre de la notificaci&oacute;n, <code>start</code> y <code>finish</code> indican un tiempo de inicio,  <code>payload</code>  contiene un diccionario con informaci&oacute;n sobre la notificaci&oacute;n y por &uacute;ltimo <code>id</code> es el identificador.  Mostremos esta informaci&oacute;n.</p>
+
+<p class="codeFilePath">/config/initializers/notifications.rb</p>
+<pre class="ruby">ActiveSupport::Notifications.subscribe do |name, start, finish, id, payload|
+  Rails.logger.debug([&quot;notification:&quot;, name, start, finish, id, payload].join(&quot; &quot;))
+end</pre>
+
+<p>Si arrancamos el servidor Rails y volvemos a cargar la p&aacute;gina principal de la aplicaci&oacute;n veremos las notificaciones que se han hecho durante esta petici&oacute;n.  Esta es la primera:</p>
+
+<pre class="terminal">notification: start_processing.action_controller 2011-01-19 21:51:40 +0000 2011-01-19 21:51:40 +0000 bac10ab8b439502ce5ba {:controller=&gt;&quot;ProductsController&quot;, :action=&gt;&quot;index&quot;, :params=&gt;{&quot;controller&quot;=&gt;&quot;products&quot;, &quot;action&quot;=&gt;&quot;index&quot;}, :formats=&gt;[:html], :method=&gt;&quot;GET&quot;, :path=&gt;&quot;/products&quot;}</pre>
+
+<p>En la traza de la notificaci&oacute;n anterior podemos ver qu&eacute; par&aacute;metros  se le han pasado: el nombre, los tiempos de inicio y de fin, el identificador de la notificaci&oacute;n y por &uacute;ltimo el diccionario <code>payload</code>.  Estas son todas las notificaciones que se ejecutaron durante la petici&oacute;n:</p>
+
+<pre class="terminal">start_processing.action_controller
+notification: sql.active_record
+notification: sql.active_record
+notification: sql.active_record
+notification: !render_template.action_view
+notification: !render_template.action_view
+notification: render_template.action_view
+notification: process_action.action_controller</pre>
+
+<p>Las notificaciones anteriores parece que incluyen las consultas de ActiveRecord, por lo que podr&iacute;amos suscribirnos a ellas para ver cu&aacute;nto tiempo tarda cada consulta a la base dedatos, pero nosotros nos vamos a centrar en la &uacute;ltima porque es la que se activa cuando la petici&oacute;n ha terminado y por tanto es la que podemos usar para determinar el tiempo total de procesamiento de la petici&oacute;n.</p>
+
+<pre class="terminal">notification: process_action.action_controller 2011-01-19 21:51:40 +0000 2011-01-19 21:51:41 +0000 bac10ab8b439502ce5ba {:controller=&gt;&quot;ProductsController&quot;, :action=&gt;&quot;index&quot;, :params=&gt;{&quot;controller&quot;=&gt;&quot;products&quot;, &quot;action&quot;=&gt;&quot;index&quot;}, :formats=&gt;[:html], :method=&gt;&quot;GET&quot;, :path=&gt;&quot;/products&quot;, :status=&gt;200, :view_runtime=&gt;208.36210250854492, :db_runtime=&gt;80.30999999999999}</pre>
+
+<p>La notificaci&oacute;n  trae adem&aacute;s otros datos interesantes como <code>params</code>, <code>path</code>, <code>status</code>, <code>view_runtime</code> y <code>db_runtime</code>.  M&aacute;s adelante usaremos alguno de estos.</p>
+
+<p>Queremos guardar esta informaci&oacute;n en la base de datos para poder averiguar cu&aacute;les son las p&aacute;ginas que van m&aacute;s lentas.  Si estuvi&eacute;ramos con una aplicaci&oacute;n de producci&oacute;n ser&iacute;a recomendable, por motivos de eficiencia, usar un almacenamiento basado en memoria pero en nuestro caso nos bastar&aacute; con guardar estos datos en un modelo normal.</p>
+
+<p>Tenemos los <a href="https://github.com/ryanb/nifty-generators">Nifty Generators</a> de Ryan Bates instalados en nuestra aplicaci&oacute;n, por lo que usaremos el generador <code>nifty:scaffold</code> para crear este modelo, as&iacute; como su controlador y sus vistas.  El modelo tendr&aacute; un campo <code>path</code> para guardar la URL y tres campos de duraci&oacute;n para guardar el tiempo empleado en las diferentes partes que componen una petici&oacute;n.</p>
+
+<pre class="terminal">$ rails g nifty:scaffold page_request rails g nifty:scaffold page_request path:string page_duration:float view_duration:float db_duration:float index</pre>
+
+<p>Tras esto ejecutaremos la migraci&oacute;n para crear la nueva tabla.</p>
+
+<pre class="terminal">$ rake db:migrate</pre>
+
+<p>Ya tenemos un modelo en el que podemos almacenar la informaci&oacute;n que recuperemos acerca de cada petici&oacute;n.  Tendremos que tener en cuenta el nombre de la notificaci&oacute;n (<code>process_action.action_controller</code>) para  suscribirnos s&oacute;lo a dicha notificaci&oacute;n.  Tambi&eacute;n tendremos que anotar los nombres de los campos de <code>payload</code> de los que queremos extraer informaci&oacute;n.</p>
+
+<p>De vuelta en nuestra archivo <code>notifications.rb</code> pasaremos un argumento a la llamada a <code>ActiveSupport::Notifications.support</code> para filtrar a qu&eacute; notificaciones nos queremos suscribir.  Una forma de hacerlo es pasando una expresi&oacute;n regular: por ejemplo, para suscribirnos a todas las notificaciones que contienen <code>action_controller</code> en su nombre podemos ejecutar lo siguiente:</p>
+
+<p class="codeFilePath">/config/initializers/notifications.rb</p>
+<pre class="ruby">ActiveSupport::Notifications.subscribe /action_controller/ do |name, start, finish, id, payload|
+  Rails.logger.debug([&quot;notification:&quot;, name, start, finish, id, payload].join(&quot; &quot;))
+end</pre>
+
+<p>Alternativamente podemos pasar una cadena para dejar pasar una &uacute;nica notificaci&oacute;n, que es lo que haremos.  En lugar de s&oacute;lo trazar los datos de la notificaci&oacute;n los usaremos para construir una nueva instancia de <code>PageRequest</code> que guardaremos en la base de datos.</p>
+
+<p class="codeFilePath">/config/initializers/notifications.rb</p>
+<pre class="ruby">ActiveSupport::Notifications.subscribe &quot;process_action.action_controller&quot; do |name, start, finish, id, payload|
+  PageRequest.create! do |page_request|
+    page_request.path = payload[:path]
+    page_request.page_duration = (finish - start) * 1000
+    page_request.view_duration = payload[:view_runtime]
+    page_request.db_duration = payload[:db_runtime]
+  end
+end</pre>
+
+<p>Si ahora reiniciamos nuestro servidor Rails, visitamos unas cuantas p&aacute;ginas y luego cargamos <code>/page_request</code> podemos ver el listado de peticiones que hemos hecho as&iacute; como la duraci&oacute;n de cada una, que han sido almacenadas en la base de datos.  Podemos usar esta informaci&oacute;n para averiguar cu&aacute;les son las p&aacute;ginas m&aacute;s lentas, trazar gr&aacute;ficas de rendimiento a lo largo del tiempo, etc.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/556/original/E249I02.png" width="808" height="355" alt="Listado de peticiones así como su tiempos de ejecución."/>
+</div>
+
+<h3>Creaci&oacute;n de notificaciones</h3>
+
+<p>Los eventos que Rails env&iacute;a internamente se utilizan por lo general para recopilar m&eacute;tricas, como en el caso anterior.  Pero tambi&eacute;n podemos usar las notificaciones para cualquier otro prop&oacute;sito, y para ver c&oacute;mo se hace crearemos un instrumento en nuestra aplicaci&oacute;n de tienda.</p>
+
+<p>Nuestra aplicaci&oacute;n permite que los usuarios busquen productos, y queremos guardar los t&eacute;rminos de b&uacute;squeda que se van introduciendo.  En nuestro modelo <code>Product</code> tenemos una m&eacute;todo de clase <code>search</code> que es donde tiene lugar la busqueda propiamente dicha y que es el sitio ideal para guardar los t&eacute;rminos de b&uacute;squeda.  No queremos recargar nuestro modelo con la tarea de guardar los t&eacute;rminos de b&uacute;squeda en una tabla de la base de datos por lo que en su lugar desde esta clase lanzaremos una notificaci&oacute;n que contiene la informaci&oacute;n de esta b&uacute;squeda, y a la que nos podemos suscribir en cualquier punto del c&oacute;digo de nuestra aplicaci&oacute;n.</p>
+
+<p>Para crear la notificaci&oacute;n tenemos que crear primero una nueva instrumentaci&oacute;n, lo que se hace invocando a 
+  <code>ActiveSupport::Notifications.instrument</code>, que recibe dos argumentos: el primero es el nombre que le queremos dar a la notificaci&oacute;n y el segundo cualquier cosa que queramos que se pase por <code>payload</code>.  El segundo argumento por lo general es un <em>hash</em> de par&aacute;metros, en nuestro caso  el t&eacute;rmino de b&uacute;squeda.</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">class Product &lt; ActiveRecord::Base
+  def self.search(search)
+    if search
+      ActiveSupport::Notifications.instrument(&quot;products.search&quot;, :search =&gt; search)
+      where(&#x27;name LIKE ?&#x27;, &quot;%#{search}%&quot;)
+    else
+      scoped
+    end
+  end
+end</pre>
+
+<p>Si <code>instrument</code> recibe un bloque los tiempos de inicio y fin que marque la notificaci&oacute;n ser&aacute;n los tiempos en los que se inici&oacute; y termin&oacute; la ejecuci&oacute;n del bloque.  Como estamos usando &aacute;mbitos esta informaci&oacute;n no resulta muy &uacute;til, porque la consulta a base de datos no tiene lugar en el m&eacute;todo <code>search</code>, por tanto los omitiremos y los tiempos de inicio y fin ser&aacute;n el mismo.</p>
+
+<p>En el fichero de inicializaci&oacute;n de nuestras notificaciones podemos suscribirnos a nuestra nueva notificaci&oacute;n y gestionarla como queramos.  Por ejemplo, nos limitaremos a trazar el t&eacute;rmino de b&uacute;squeda.</p>
+
+<p class="codeFilePath">/config/initializers/notifications.rb</p>
+<pre class="ruby">ActiveSupport::Notifications.subscribe &quot;products.search&quot;  do |name, start, finish, id, payload|
+  Rails.logger.debug &quot;SEARCH: #{payload[:search]}&quot;
+end</pre>
+
+<p>Nos suscribimos a nuestra propia notificaci&oacute;n de la misma manera que lo har&iacute;amos con las notificaciones incorporadas en Rails, y podemos recuperar el t&eacute;rmino de b&uacute;squeda del <em>hash</em> de <code>payload</code> y trazarlo.  Si reiniciamos el servidor y buscamos  &ldquo;milk&rdquo; veremos que se traza el t&eacute;rmino de b&uacute;squeda.</p>
+<pre class="terminal">SEARCH: milk</pre>
+
+<p>Por supuesto podr&iacute;amos crear una tabla en la base de datos para guardar esta informaci&oacute;n igual que hicimos con las m&eacute;tricas que recopilamos anteriormente.</p>
+
+<p>As&iacute; es como podemos utilizar las notificaciones en Rails 3 para sacar l&oacute;gica de una clase y gestionarla en otro sitio.  Los suscriptores de una notificaci&oacute;n pueden estar en diferentes sitios, y podemos tener todos los suscriptores que queramos.  Tan s&oacute;lo tenemos que tener cuidado con el patr&oacute;n de notificaci&oacute;n porque es f&aacute;cil abusar de &eacute;l.  Por ejemplo, supongamos que tenemos un modelo <code>User</code> en nuestra aplicaci&oacute;n y queremos enviar un correo cuando se registra un nuevo usuario.   En este escenario podr&iacute;amos utilizar las notificaciones pero no ser&iacute;a un buen uso,  lo mejor es limitarnos a utilizar las notificaciones para trazas y otro c&oacute;digo que no forma parte del n&uacute;cleo de la aplicaci&oacute;n ya que corremos el riesgo de desperdigar la l&oacute;gica de nuestra aplicaci&oacute;n por sitios dispares lo que complicar&iacute;a el c&oacute;digo de la aplicaci&oacute;n: cualquiera puede estar escuchando la notificaci&oacute;n desde cualquier sitio.</p>
+
+<p>Con esto cerramos este episodio.  Se puede encontrar m&aacute;s informaci&oacute;n sobre las notificaciones en Rails en la documentaci&oacute;n oficial.</p>

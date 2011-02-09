@@ -1,0 +1,214 @@
+<p>下の図は、product(商品)の一覧を表示する簡単なRails 3アプリケーションのスクリーンショットです。このページには、商品を名前で絞り込むための検索フォームがあります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/562/original/E251I01.png" width="800" height="381" alt="「video」を検索"/>
+</div>
+
+<p>検索は<code>ProductsController</code>内の<code>index</code>アクションで実行されます。コードは以下のようになります。</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def index
+  @products = Product.where("name LIKE ?", "%#{params[:search]}%")
+end</pre>
+
+<p>SQL句を含むwhereメソッドで、商品テーブルで名前が"<code>LIKE</code> (検索語)"の条件に一致するものを検索します。 検索条件がイコールよりも複雑なため、単純に条件をハッシュで渡すことができません。同じことが「より小さい」「より大きい」などの比較演算を行う場合にも当てはまります。ActiveRecordの場合、これらすべてでSQL句が必要になります。</p>
+
+<p>そのような場合に、もしコードの中にSQL句を埋め込みたくないということであれば、<a href="http://metautonomo.us/projects/metawhere/">MetaWhere</a>というgemが役に立つかも知れません。MetaWhereでは、条件句に渡される引数の中に演算子のメソッドを使えるので、 検索式をこのように書くことができます。</p>
+
+<pre class="ruby">Article.where(:title.matches =&gt; 'Hello%', :created_at.gt =&gt; 3.days.ago)</pre>
+  
+<p>MetaWhereは、このコードから次のSQL文を生成します。</p>
+
+<pre class="sql">SELECT "articles".* FROM "articles" 
+WHERE ("articles"."title" LIKE 'Hello%')
+AND ("articles"."created_at" &gt; '2010-04-12 18:39:32.592087')</pre>
+
+<p>MetaWhereを使えば、検索式にSQL句を使わずにハッシュ形式で条件を指定することができます。このアプローチはDataMapperとMongoidのしくみと似ています。これをActiveRecordで利用できることで利便性が向上します。MetaWhereを使うのがいかに簡単かを見るために、productアプリケーションを修正して検索機能を組み込むことにしましょう。</p>
+
+<p>まずアプリケーションの<code>Gemfile</code>にgemの情報を追加します。</p> 
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby"># Edit this Gemfile to bundle your application's dependencies.
+source 'http://gemcutter.org'
+
+gem "rails", "3.0.3"
+gem "sqlite3-ruby", :require =&gt; "sqlite3"
+gem "meta_where"</pre>
+
+<p><code>bundle</code>コマンドを実行し、 gemがインストールされたことを確認します。インストールができたら、ProductsControllerの検索条件のSQL句を書き換えます。</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def index
+  @products = Product.where(:name.matches =&gt; ↵
+    "%#{params[:search]}%")
+end</pre>
+
+<p>この変更を行った後もアプリケーションの動作は以前と変わらず、与えられた条件に対して同じ検索結果を返します。</p> 
+
+<p>次にコンソール画面で、より複雑な例を見てみましょう。例として、価格が5ポンド未満の全ての商品を検索します。</p>
+
+<pre class="terminal">ruby-1.9.2-p0 &gt; Product.where(:price.lt =&gt; 5)
++----+-----------------------+--------+-------------+------------+
+| id | name                  | price  | released_at | updated_at |
++----+-----------------------+--------+-------------+------------+
+| 6  | 1 Pint of Milk        | 0.49   | 2010-06-06  | 2011-01-31 |
+| 7  | Porridge Oats         | 1.99   | 2010-07-07  | 2011-01-31 |
++----+-----------------------+--------+-------------+------------+
+2 rows in set</pre>
+
+<p>さらにパイプ記号で区切られた複数のハッシュを使って <code>OR</code>条件を追加できます。以下の検索では、価格が5ポンド未満か、あるいは名前に「video」の文字列を含む全ての商品を表示しています。</p>
+
+<pre class="terminal">ruby-1.9.2-p0 &gt; Product.where({:price.lt =&gt; 5} | ↵
+  {:name.matches =&gt; "%video%"})
++----+-----------------------+--------+-------------+------------+
+| id | name                  | price  | released_at | updated_at |
++----+-----------------------+--------+-------------+------------+ 
+| 6  | 1 Pint of Milk        | 0.49   | 2010-06-06  | 2011-01-31 |
+| 7  | Porridge Oats         | 1.99   | 2010-07-07  | 2011-01-31 |
+| 8  | Video Game Console    | 299.95 | 2010-08-08  | 2011-01-31 |
+| 9  | Video Game Disc       | 29.95  | 2010-09-09  | 2011-01-31 |
++----+-----------------------+--------+-------------+------------+ 
+4 rows in set</pre>
+
+<p>MetaWhereは、その他にもorderメソッドにいくつか便利な機能を追加します。商品をreleased_atの日付でソートして最新の商品を最初に表示したい場合、次のように記述します。</p>
+
+<pre class="terminal">ruby-1.9.2-p0 &gt; Product.order(:released_at.desc)
++----+-----------------------+--------+-------------+------------+
+| id | name                  | price  | released_at | updated_at |
++----+-----------------------+--------+-------------+------------+ 
+| 9  | Video Game Disc       | 29.95  | 2010-09-09  | 2011-01-31 |
+| 8  | Video Game Console    | 299.95 | 2010-08-08  | 2011-01-31 |
+| 7  | Porridge Oats         | 1.99   | 2010-07-07  | 2011-01-31 |
+| 6  | 1 Pint of Milk        | 0.49   | 2010-06-06  | 2011-01-31 |
+| 5  | Oak Coffee Table      | 279.99 | 2010-05-05  | 2011-01-31 |
+| 4  | Black Leather Sofa    | 499.99 | 2010-04-04  | 2011-01-31 |
+| 3  | Stereolab T-Shirt     | 12.49  | 2010-03-03  | 2011-01-31 |
+| 2  | DVD Player            | 79.99  | 2010-02-02  | 2011-01-31 |
+| 1  | All-New Log For Girls | 29.95  | 2010-01-01  | 2011-01-31 |
++----+-----------------------+--------+-------------+------------+
+9 rows in set</pre>
+
+<p>検索条件に別の記法を使うこともできます。これを使用できるように設定を有効化します。次のように指定します。</p>
+
+<pre class="ruby">MetaWhere.operator_overload!</pre>
+
+<p>この設定が有効になっていれば、<code>gt</code>や<code>lt</code>というメソッドの代わりに標準のRubyの演算子を使用できます。この記法を使って価格が5ポンド未満の全ての商品を検索するには、以下のように指定します。</p>
+
+<pre class="terminal">ruby-1.9.2-p0 &gt; Product.where(:price &lt; 5)
++----+-----------------------+--------+-------------+------------+
+| id | name                  | price  | released_at | updated_at |
++----+-----------------------+--------+-------------+------------+
+| 6  | 1 Pint of Milk        | 0.49   | 2010-06-06  | 2011-01-31 |
+| 7  | Porridge Oats         | 1.99   | 2010-07-07  | 2011-01-31 |
++----+-----------------------+--------+-------------+------------+
+2 rows in set</pre>
+
+<p>この方法で、検索条件を簡単を指定できるようになります。</p>
+
+<p>MetaWhere gemには他にも多くの機能があります。詳しくは<a href="http://metautonomo.us/projects/metawhere/">ドキュメントを読む</a>ことをおすすめします。</p>
+
+<h3>MetaSearch</h3>
+
+<p>今回のエピソードの後半では、同じ作者によるもう一つのgemであるMetaSearchを見てみましょう。このgemは、フォームを介してモデルに対して簡単に検索を行う方法を提供します。モデルのsearchメソッドを呼び出し、フォームから入力された検索条件を渡します。それによって条件に一致するレコードを取り出すことができます。一つの例を下に示します。</p>
+
+<pre class="ruby">def index
+  @search = Article.search(params[:search])
+  @articles = @search.all
+end</pre>
+
+<p>ビューのコードでは、各フィールドの名前が検索機能を定義しています。例えばフォームの<code>title_contains</code>というテキストフィールドは、<code>title</code>に指定された値が含まれているレコードを検索することを意味しています。</p>
+
+<p>では今回のアプリケーションで、現状の検索フォームを、MetaSearchを使うように置き換えてみましょう。最初に、MetaWhereのときと同様に、<code>Gemfile</code>にgemの情報を追加します。</p> 
+
+<pre class="codeFilePath">/Gemfile</pre>
+<pre class="ruby"># Edit this Gemfile to bundle your application's dependencies.
+source 'http://gemcutter.org'
+
+gem "rails", "3.0.3"
+gem "sqlite3-ruby", :require =&gt; "sqlite3"
+gem "meta_where"
+gem "meta_search"</pre>
+
+<p><code>bundle</code>コマンドを実行してgemをインストールします。次に<code>ProductsController</code>の検索用のコードを対応するMetaSearchのコードに置き換えます。元のコードは次のとおりです。</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def index
+  @products = Product.where(:name.matches =&gt; ↵
+    "%#{params[:search]}%")
+end</pre>
+
+<p>これを次のように書き換えます。</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def index
+  @search = Product.search(params[:search])
+  @products = @search.all
+end</pre>
+
+<p><code>Product.search</code>を呼び出してフォームからの引数を渡し、searchインスタンスを生成します。次に<code>@search.all</code>を呼び出して、一致する商品のリストを得ます。これがSQL文を使って商品を検索します。条件を追加したい場合は、<code>all</code>の代わりに<code>relation</code>を使用するとスコープが返されます。自動改ページが必要な場合は<code>paginate</code>を使えますが、今回はallで十分です。</p>
+
+<p><code>index</code>テンプレートで、検索フォームを書き換えてMetaSearchに必要なフィールド名を指定します。元のフォームでは<code>form_tag</code>が使われていますが、それを<code>form_for</code>に置き換えてsearchオブジェクトを指定します。検索語が名前(name)に含まれる(contains)商品を検索したいので、フォームに追加するフィールドの名称は<code>name_contains</code>とします。</p>
+
+<p class="codeFilePath">/app/views/products/index.html</p>
+<pre class="ruby">&lt;%= form_for @search do |f| %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name_contains %&gt;
+    &lt;%= f.text_field :name_contains %&gt;
+  &lt;/p&gt;
+  &lt;p class="button"&gt;&lt;%= f.submit "Search" %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>ここでproductページをリロードすると、新しいフォームが表示され、前と同じ検索を行うと同じ結果が返ってきます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/563/original/E251I02.png" width="800" height="420" alt="同じ商品がMetaWhereから返される"/>
+</div>
+
+<p>この方法が便利な点は、モデルやコントローラを修正することなくビュー上でフィールドをいくつでも追加できるところです。例えば、値段の範囲も指定できるようにしたい場合、次のようにフォームに<code>price_gte</code>と<code>price_lte</code>という２つのフィールドを追加するだけです。</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">&lt;%= form_for @search do |f| %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name_contains %&gt;
+    &lt;%= f.text_field :name_contains %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :price_gte, "Price ranges from" %&gt;
+    &lt;%= f.text_field :price_gte, :size =&gt; 8 %&gt;
+    &lt;%= f.label :price_lte, "to" %&gt;
+    &lt;%= f.text_field :price_lte, :size =&gt; 8 %&gt;
+  &lt;/p&gt;
+  &lt;p class="button"&gt;&lt;%= f.submit "Search" %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>再度ページをリロードすると、2つの新しいフィールドが表示されます。これで、商品を値段の範囲で検索するか、名前と値段の両方を指定して検索できるようになりました。名前に「video」が含まれて値段が10ポンドから30ポンドまでの商品をすると、該当する1件の商品が検索されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/564/original/E251I03.png" width="800" height="406" alt="商品名と値段の範囲で検索する"/>
+</div>
+
+<p>ここでのポイントは、フォーム上のフィールドの名前で、検索の条件が決められるという点です。フォームに設定するフィールドには他にも多くのオプションを使用できます。詳しくは<a href="https://github.com/ernie/meta_search#readme">documentation</a>を参照してください。</p>
+
+<p>MetaSearchのもう一つの機能として、指定したフィールドで結果を並び替えることができます。<code>sort_link</code>メソッドが使えるので、これを利用します。このメソッドは2つの引数(searchオブジェクトとコラム名)を取るので、次のようにソートのためのフィールドを追加します。</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">&lt;p&gt;
+  Sort by:
+  &lt;%= sort_link @search, :name %&gt;
+  &lt;%= sort_link @search, :price %&gt;
+  &lt;%= sort_link @search, :released_at %&gt;
+&lt;/p&gt;</pre>
+
+<p>ページをリロードするとリンクが表示され、クリックすると商品をソートできます。ソートと同時に検索による絞り込みもできます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/565/original/E251I04.png" width="800" height="491" alt="商品を値段でソートする"/>
+</div>
+
+<h3>セキュリティ</h3>
+
+<p>MetaSearchを利用するときに留意する点として、フォームを書き換えることでデータベーステーブルのすべての列が検索可能になってしまうということがあげられます。これは連結先のレコードにも当てはまるため、重要なデータを含む連結レコードがある場合にMetaSearchを使用する際には注意が必要です。</p> 
+
+<p>この問題を解決するために、モデルにセキュリティ関連のメソッドを追加して、検索対象とするフィールドを制限することができます。これについては、ここではこれ以上触れませんが、<a href="http://metautonomo.us/projects/metasearch/#security">MetaSearchのサイト</a>で詳細を見ることができます。MetaSearchを一般公開されているサイトで使用している場合は、ぜひこの方法をおすすめします。</p> 
+
+<p>MetaWhereとMetaSearchの紹介は以上です。同じような機能を持つSearchlogicというgemもありますが、Rails 3には対応していません。Searchlogicの機能が気に入っているがRails 3で動作するものがほしいという場合、MetaWhereとMetaSearchは一見の価値があるでしょう。</p>

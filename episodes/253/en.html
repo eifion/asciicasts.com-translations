@@ -1,0 +1,184 @@
+<p>Let&rsquo;s say that we are building a site that allows artists to upload their paintings and display them in a gallery. Part of the site is already built: there is a page that lists the galleries, with a link to each gallery and a page that shows a gallery&rsquo;s pictures.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/574/original/E253I01.png" width="800" height="482" alt="The Galleries application."/>
+</div>
+
+<p>Each painting has a name and a placeholder for an image but no image. If we try to add a new painting to the gallery we&rsquo;ll see that there&rsquo;s a text box for the name field but no way of uploading an image.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/575/original/E253I02.png" width="800" height="351" alt="We can only add a name to a new painting."/>
+</div>
+
+<p>How should we implement the functionality to attach an image to a painting? The Paperclip gem, which was covered back in episode 134 [<a href="http://railscasts.com/episodes/134-paperclip">watch</a>, <a href="http://railscasts.com/episodes/134-paperclip">read</a>], can handle file attachment fields in Rails models but this time we&rsquo;re going to use a new gem called <a href="https://github.com/jnicklas/carrierwave">CarrierWave</a> instead.</p>
+
+<p>CarrierWave is more flexible than Paperclip. It is based on Rack, which means that it works with Rails, Sinatra and other Rack-based Ruby applications, and it supports a variety of ORMs including ActiveRecord, DataMapper, Mongoid. Another significant difference between CarrierWave and Paperclip is that CarrierWave keeps everything in a separate Uploader class so that all of the file attachments and the processing logic belongs there. This way file attachments don&rsquo;t end up mixed with the application&rsquo;s model classes.</p>
+
+<h3>Installing CarrierWave</h3>
+
+<p>The first step is to add the CarrierWave gem to our application. The gem is installed in the usual way by adding a reference to it in the application&rsquo;s <code>Gemfile</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem &#x27;carrierwave&#x27;</pre>
+
+<p>We&rsquo;ll need to run bundle to make sure that the gem is installed on our system. Once it has installed the first thing we&rsquo;ll need to do is generate an uploader class. CarrierWave provides a generator called <code>uploader</code> to do this to which we pass the name we want to give our uploader, in this case <code>image</code>.</p>
+
+<pre class="terminal">$ rails g uploader image
+      create  app/uploaders/image_uploader.rb</pre>
+
+<p>The generator creates a new directory called <code>uploaders</code> under the <code>app</code> directory and in it a file called <code>image_uploader.rb</code>. In this file are a number of comments explaining how to customize the uploader. For example there is code to change the upload location, perform processing on the image after uploading and to restrict the type of files that can be uploaded. We&rsquo;ll leave the defaults as they are for now and come back and make some customizations later.</p>
+
+<p>Next we&rsquo;ll need to add the uploader to the <code>Painting</code> model. We&rsquo;ll need a column in the <code>paintings</code> table to store it in so we&rsquo;ll generate a migration to do add it.</p>
+
+<pre class="terminal">$ rails g migration add_image_to_paintings image:string</pre>
+
+<p>Note that the new column is a string and has the same name as we gave the uploader when we generated it. We&rsquo;ll need to run <code>rake db:migrate</code> to update the database.</p>
+
+<p>Next we&rsquo;ll add the uploader to the <code>Painting</code> model which is done by calling the <code>mount_uploader</code> method, passing in the column name that we generated above and the class for the uploader. We also need to add the <code>image</code> column to the list in the <code>attr_accessible</code> call so that it can be accessed from the controllers.</p>
+
+<p class="codeFilePath">/app/models/painting.rb</p>
+<pre class="ruby">class Painting &lt; ActiveRecord::Base
+  attr_accessible :gallery_id, :name, :image
+  belongs_to :gallery
+  mount_uploader :image, ImageUploader
+end</pre>
+
+<p>With this in place we can modify the form for adding or modifying a painting so that it has a file upload field. While we&rsquo;re doing this we&rsquo;ll need to modify the form so that it can handle file attachments by adding a <code>:html</code> option to <code>form_for</code>.</p>
+
+<p class="codeFilePath">/app/views/paintings/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for @painting, :html =&gt; {:multipart =&gt; true} do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= f.hidden_field :gallery_id %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.file_field :image %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<h3>Viewing The Uploaded Images</h3>
+
+<p>When we go to edit a painting now there is a file upload field on the form and we can upload an image file. When we do we&rsquo;ll see a message telling us that the upload was successful, but we won&rsquo;t see the photo we&rsquo;ve uploaded in the gallery.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/576/original/E253I03.png" width="800" height="526" alt="The image has uploaded but isn't visible."/>
+</div>
+
+<p>We need to show the uploaded image where the placeholder is. In the <code>GalleryController</code>&rsquo;s show template there is some code that loops through each painting in the gallery and this outputs an image placeholder <code>div</code>. We&rsquo;ll replace this with the image itself, using <code>image_tag</code>, which will link to each painting&rsquo;s <code>image_url</code>. This will return <code>nil</code> for pictures without images and so we&rsquo;ll call <code>to_s</code> on it so that it works with <code>image_tag</code>.</p>
+
+<p class="codeFilePath">/app/views/show.html.erb</p>
+<pre class="ruby">&lt;div id=&quot;paintings&quot;&gt;
+  &lt;% @gallery.paintings.each do |painting| %&gt;
+    &lt;div class=&quot;painting&quot;&gt;
+      &lt;%= image_tag painting.image_url.to_s %&gt;
+      &lt;div class=&quot;name&quot;&gt;&lt;%= painting.name %&gt;&lt;/div&gt;
+      &lt;div class=&quot;actions&quot;&gt;
+        &lt;%= link_to &quot;edit&quot;, edit_painting_path(painting) %&gt; |
+        &lt;%= link_to &quot;remove&quot;, painting, :confirm =&gt; &#x27;Are you sure?&#x27;, :method =&gt; :delete %&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+  &lt;div class=&quot;clear&quot;&gt;&lt;/div&gt;
+&lt;/div&gt;</pre>
+
+<p>If we reload the page now we&rsquo;ll see the uploaded image but it will be bigger than the placeholder.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/577/original/E253I04.png" width="800" height="526" alt="The image is now shown, but at too large a size."/>
+</div>
+
+<p>It would be useful if we could resize images to fit. If we look in the <code>ImageUploader</code> class that was generated earlier we&rsquo;ll see some commented-out code for processing images.</p> 
+
+<p class="codeFilePath">/app/uploaders/image_uploader.rb</p>
+<pre class="ruby">  # Process files as they are uploaded:
+  # process :scale =&gt; [200, 300]</pre>
+  
+<p>We don&rsquo;t want to resize the original image, instead we want to make a separate thumbnail image and display a link to the original full-sized image. The <code>ImageUploader</code> class has a <code>version</code> method we can call that will do this for us. This method takes a block in which we can call <code>process</code> to perform some processing on the thumbnail version. The <code>process</code> method is fairly flexible and takes a hash of options. It will then loop through each key in the hash, looking for a method with the same name as that key and pass in that key&rsquo;s values as a parameter. To create a thumbnail image we can write something like this.</p>
+
+<p class="codeFilePath">/app/uploaders/image_uploader.rb</p>
+<pre class="ruby"># Create different versions of your uploaded files:
+version :thumb do
+  process :scale =&gt; [50, 50]
+end
+  
+def scale(width, height)
+  # do something
+end</pre>
+
+<p>We don&rsquo;t want to have to write the scaling method manually and thankfully we don&rsquo;t have to, we can use RMagick to do the scaling for us. CarrierWave has a <code>CarrierWave::RMagick</code> module we can include that will enable RMagick. If we look at the <a href="http://rubydoc.info/gems/carrierwave/0.5.1/CarrierWave/RMagick">documentation for the RMagick module</a> we can see the methods that will be included when we include the module. These include several methods for resizing an image, including one called <code>resize_to_limit</code> which will resize an image while maintaining its aspect ratio. To use it we just need to uncomment the following line in the uploader class.</p>
+
+<p class="codeFilePath">/app/uploaders/image_uploader.rb</p>
+<pre class="ruby">include CarrierWave::RMagick</pre>
+
+<p>We can then uncomment the version method and call <code>process :resize_to_limit</code> in the block. This method takes a maximum width and height as arguments and we&rsquo;ll restrict the thumbnails to a maximum of 200 x 200 pixels.</p>
+
+<p class="codeFilePath">/app/uploaders/image_uploader.rb</p>
+<pre class="ruby">version :thumb do
+ process :resize_to_limit =&gt; [200, 200]
+end</pre>
+
+<p>For the resizing to work we&rsquo;ll need to include the RMagick gem in the <code>Gemfile</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem &quot;rmagick&quot;</pre>
+
+<p>As always we&rsquo;ll need to run <code>bundle</code> to make sure that the gem is installed. RMagick depends on ImageMagick so make sure you have the latest version of that installed before trying to install the RMagick gem. If you&rsquo;re using OS X then you can install ImageMagick via HomeBrew or MacPorts.</p> 
+
+<p>To render the thumbnail image in the view instead of the full-sized one we can specify the version we want by passing it as an argument to <code>image_url</code>.</p>
+
+<p class="codeFilePath">/app/views/show.html.erb</p>
+<pre class="ruby">&lt;%= image_tag painting.image_url(:thumb).to_s %&gt;</pre>
+
+<p>To try this out we&rsquo;ll need to upload the image again so that the thumbnail is processed. When we do so we&rsquo;ll see the thumbnail image displayed in the gallery.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/578/original/E253I05.png" width="800" height="526" alt="The image is now shown at the correct size."/>
+</div>
+
+<h3>Uploading Images via a URL</h3>
+
+<p>Another feature that CarrierWave provides is the ability to add photographs via a URL instead of uploading them directly. We can do this by adding another field to the upload form called <code>remote_image_url</code>. The name is important, when CarrierWave sees a field with that name it knows that it has to fetch the image from a URL.</p>
+
+<p class="codeFilePath">/app/views/paintings/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for @painting, :html =&gt; {:multipart =&gt; true} do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= f.hidden_field :gallery_id %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.file_field :image %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :remote_image_url, &quot;or image URL&quot; %&gt;
+    &lt;%= f.text_field :remote_image_url %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>As we&rsquo;ve added a field to the <code>painting</code> form we&rsquo;ll need to add it to the list of <code>attr_accessible</code> fields in the <code>Painting</code> model.</p>
+
+<p class="codeFilePath">/app/models/painting.rb</p>
+<pre class="ruby">class Painting &lt; ActiveRecord::Base
+  attr_accessible :gallery_id, :name, :image, :remote_image_url
+  belongs_to :gallery
+  mount_uploader :image, ImageUploader
+end</pre>
+
+<p>Now in the form we&rsquo;ll have a <code>remote_image_url</code> field and we can enter a URL in that field to add an image to the painting without uploading it manually.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/579/original/E253I06.png" width="801" height="327" alt="Uploading an image by entering a URL."/>
+</div>
+
+<p>When we submit the form the remote image is fetched and its thumbnail is processed.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/580/original/E253I07.png" width="800" height="526" alt="The remote image is added and processed like the one that was uploaded."/>
+</div>
+
+<p>That&rsquo;s all for this episode but there&rsquo;s much more to CarrierWave and you&rsquo;re encouraged to look at the documentation for it. One useful feature is the ability to  make image uploads persist across form redisplays. If we add a hidden <code>:image_cache</code> field to the form and there is a validation error in the model when the form is submitted the uploaded file will persist when the form reloads. We can also add a checkbox field to the form to allow users to remove an image, and alter the storage options to store the uploaded images on Amazon&rsquo;s S3 service.</p>

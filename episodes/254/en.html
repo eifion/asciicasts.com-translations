@@ -1,0 +1,175 @@
+<p>Below is a screenshot from a Rails 3 application that shows a long list of products. Rather than show the items as a single list we&rsquo;d like to use pagination.</p>
+ 
+<div class="imageWrapper">
+  <img src="system/photos/581/original/E254I01.png" width="815" height="432" alt="The Long List of Products."/>
+</div>
+
+<p>The first-choice gem for pagination in Rails is <a href="https://github.com/mislav/will_paginate/wiki">will_paginate</a>, but the currently released version doesn&rsquo;t support Rails 3. There is a pre-release version available that works but it hasn&rsquo;t been updated for several months. If will_paginate is no longer in active development are there any other gems we could use?</p>
+
+<p>One alternative is <a href="https://github.com/amatsuda/kaminari">Kaminari</a>. This seems to provide a cleaner implementation of pagination and offers several improved features, too, so let&rsquo;s try it in our application instead. Kaminari is installed in the usual way: first by adding a reference to it in the application&rsquo;s <code>Gemfile</code> and then running bundle to make sure that the gem is installed on our system.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem &quot;kaminari&quot;</pre>
+
+<h3>Using Kaminari</h3>
+
+<p>Kaminari provides a scope called page that can be applied to any ActiveRecord model. We can use it in the <code>ProductsController</code>&rsquo;s <code>index</code> action to page the list of products, passing in the page we want to view. We&rsquo;ll pass in the page parameter from the query string.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def index
+  @products = Product.all.page(params[:page])
+end</pre>
+
+<p>Inside the <code>index</code> template where we&rsquo;re rendering the list of products we can call the <code>paginate</code> helper method that Kaminari provides, passing in the list we&rsquo;re paginating.</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Products&quot; %&gt;
+&lt;%= paginate @products %&gt;
+&lt;div id=&quot;products&quot;&gt;
+  &lt;%= render @products %&gt;
+&lt;/div&gt;
+&lt;p&gt;&lt;%= link_to &quot;New Product&quot;, new_product_path %&gt;&lt;/p&gt;</pre>
+
+<p>If we reload the page now we&rsquo;ll see the pagination links at the top of the page.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/582/original/E254I02.png" width="815" height="432" alt="The paginated list."/>
+</div>
+
+<p>Kaminari will show 25 items per page by default but we can easily change that by calling another scope called <code>per</code>. We&rsquo;ll use this now to change the number of items per page to 5.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def index
+  @products = Product.order(&quot;name&quot;).page(params[:page]).per(5)
+end</pre>
+
+<p>Now we have five items per page.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/583/original/E254I03.png" width="808" height="530" alt="There are now five items per page."/>
+</div>
+
+<p>This syntax flows nicely with the new ActiveRecord queries in Rails 3. We could move the <code>order</code> call anywhere within the query and it would work just the same as all we&rsquo;re doing is chaining scopes against our model. We could even move the <code>page</code> and <code>per</code> calls into other named scopes in the model and it would work as expected. One exception to this is that <code>per</code> needs to be called after <code>page</code>. The reason for this is that <code>page</code> adds the <code>per</code> scope. If we call <code>per</code> before <code>page</code> we&rsquo;ll get an undefined method error as it won&rsquo;t have been added yet.</p>
+
+<h3>Changing The Look</h3>
+
+<p>There are several ways to change the way that the pagination looks. We want to change the words &ldquo;prev&rdquo; and &ldquo;next&rdquo; in the list of pages and the arrows that go with them and we can do so by adding entries into the localization file. This makes it easy to alter these items, especially if your application needs to support multiple languages. The items we need to add go under <code>views/pagination</code> and we can change the previous and next text by setting the <code>previous</code> and <code>next</code> keys. To change the text that displays when the list of pages is truncated we set the <code>truncate</code> key. Note that we have to escape the HTML here as it isn&rsquo;t escaped when shown on the page.</p>
+
+<p class="codeFilePath">/config/locales/en.yml</p>
+<pre class="ruby">en:
+  hello: &quot;Hello world&quot;
+  views:
+    pagination:
+      previous: &quot;&amp;lt; Previous&quot;
+      next: &quot;Next &amp;gt;&quot;
+      truncate: &quot;&amp;hellip;&rdquo;</pre>
+      
+<p>When we reload the page we&rsquo;ll see the changed text.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/584/original/E254I04.png" width="815" height="309" alt="The text in the page list has now changed."/>
+</div>
+
+<p>We can make additional changes by adding some CSS for the classes that the different parts of the navigation use. One thing worth noting is that the navigation uses the HTML 5 <code>nav</code> element.</p>
+
+<pre class="erb">&lt;nav class=&#x27;pagination&#x27;&gt;
+  &lt;span class=&quot;prev&quot;&gt;
+    &lt;a href=&quot;/products&quot; class=&quot;prev&quot; rel=&quot;prev&quot;&gt;&amp;lt; Previous&lt;/a&gt;
+  &lt;/span&gt;
+  &lt;span class=&quot;page first&quot;&gt;
+    &lt;a href=&quot;/products&quot;&gt;1&lt;/a&gt;
+  &lt;/span&gt;
+  &lt;span class=&quot;page current&quot;&gt;2&lt;/span&gt;
+  ...</pre>
+
+<p>While we can change the appearance of the navigation quite a bit with CSS there are some changes that can&rsquo;t be done this way. For example we might want the &ldquo;Previous&rdquo; link to be visible on the first page, but greyed-out and disabled, rather than being hidden as it is by default.</p>
+
+<p>Kaminari is a Rails Engine and it comes with a number of view files which can be customized to suit our application. To help with this we can use a generator provided by Kaminari. We need to pass in the name of a theme to this generator as an argument. If we use default it will use the theme that Kaminari comes with.</p>
+
+<pre class="terminal">$ rails g kaminari:views default
+      create  app/views/kaminari/_current_page.html.erb
+      create  app/views/kaminari/_first_page_link.html.erb
+      create  app/views/kaminari/_last_page_link.html.erb
+      create  app/views/kaminari/_next_link.html.erb
+      create  app/views/kaminari/_next_span.html.erb
+      create  app/views/kaminari/_page_link.html.erb
+      create  app/views/kaminari/_paginator.html.erb
+      create  app/views/kaminari/_prev_link.html.erb
+      create  app/views/kaminari/_prev_span.html.erb
+      create  app/views/kaminari/_truncated_span.html.erb</pre>
+
+<p>There are other themes listed at the <a href="https://github.com/amatsuda/kaminari_themes">Kaminari Themes project</a> on GitHub. Only a couple are available at the time of writing but more will no doubt appear soon as there is enough there to get started and to develop your own themes.</p>
+
+<p>The generator creates a new <code>kaminari</code> directory under <code>app/views</code> and puts a number of partial files there. We can modify these files to customize the behaviour of the pagination. The main file is <code>_paginator.html.erb</code> and while it looks complicated at first, it&rsquo;s fairly easy to understand and modify.</p>
+
+<pre class="codeFilePath">/app/views/kaminari/_paginator.html.erb</pre>
+<pre class="ruby">&lt;%# The container tag
+  - available local variables
+    current_page:  the page number of currently displayed page
+    num_pages:     total number of pages
+    per_page:      number of items to fetch per page
+    remote:        data-remote
+    paginator:     the paginator that renders the pagination tags inside
+-%&gt;
+&lt;%= paginator.render do -%&gt;
+  &lt;nav class=&#x27;pagination&#x27;&gt;
+    &lt;%= current_page &gt; 1 ? prev_link_tag : prev_span_tag %&gt;
+    &lt;% each_page do |page| -%&gt;
+      &lt;% if page.current? -%&gt;
+        &lt;%= current_page_tag %&gt;
+      &lt;% elsif page.left_outer? || page.right_outer? || page.inside_window? -%&gt;
+        &lt;% if page.first? -%&gt;
+          &lt;%= first_page_link_tag %&gt;
+        &lt;% elsif page.last? -%&gt;
+          &lt;%= last_page_link_tag %&gt;
+        &lt;% else -%&gt;
+          &lt;%= page_link_tag %&gt;
+        &lt;% end -%&gt;
+      &lt;% elsif !page.was_truncated? -%&gt;
+        &lt;%= truncated_span_tag %&gt;
+      &lt;% end -%&gt;
+    &lt;% end -%&gt;
+    &lt;%=num_pages &gt; current_page ? next_link_tag : next_span_tag %&gt;
+  &lt;/nav&gt;
+&lt;% end -%&gt;</pre>
+
+<p>It&rsquo;s easy to see the <code>nav</code> element on the page and the code immediately below it that renders the &ldquo;previous&rdquo; link. This code will call either <code>prev_link_tag</code> or <code>prev_span_tag</code> depending on whether the current page is the first page. Each of these methods calls a partial file. We want to change what happens on the first page so we&rsquo;ll take a look at <code>_prev_span.html.erb</code>.</p>
+
+<p class="codeFilePath">/app/view/kaminari/_prev_span.html.erb</p>
+<pre class="ruby">&lt;%# &quot;Previous&quot; without link
+  - available local variables
+    current_page:  the page number of currently displayed page
+    num_pages:     total number of pages
+    per_page:      number of items to fetch per page
+    remote:        data-remote
+-%&gt;
+&lt;span class=&quot;prev&quot;&gt;&lt;/span&gt;</pre>
+
+<p>All we need to do is add some code inside the <code>span</code> element. If we look in <code>_prev_link.html.erb</code> we&rsquo;ll see that it renders a link. We can copy the code that generates the text for that link and paste it into the <code>span</code> element.</p>
+
+<p class="codeFilePath">/app/view/kaminari/_prev_span.html.erb</p>
+<pre class="ruby">&lt;%# &quot;Previous&quot; without link
+  - available local variables
+    current_page:  the page number of currently displayed page
+    num_pages:     total number of pages
+    per_page:      number of items to fetch per page
+    remote:        data-remote
+-%&gt;
+&lt;span class=&quot;prev disabled&quot;&gt;
+  &lt;%= raw(t &#x27;views.pagination.previous&#x27;) %&gt;
+&lt;/span&gt;</pre>
+
+<p>The code that renders the text uses the <code>t</code> method to get a piece of localized text from the localizations that we modified earlier and that text is passed to <code>raw</code> so that it isn&rsquo;t escaped. We&rsquo;ve also added a <code>disabled</code> class to the span so that we can show it greyed out by adding the following CSS.</p>
+
+<p class="codeFilePath">/public/stylesheets/application.css</p>
+<pre class="css">.disabled { color: #999; }</pre>
+
+<p>When we load the first page of products now we&rsquo;ll see the greyed-out text.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/585/original/E254I05.png" width="801" height="376" alt="The &ldquo;previous&rdquo; link is now shown as we want it."/>
+</div>
+
+<p>Obviously we&rsquo;d want to do the same for the &ldquo;Next&rdquo; link on the last page of items but we won&rsquo;t show that here.</p>
+
+<p>That&rsquo;s it for our look at the Kaminari gem. If you need pagination in a Rails 3 application it&rsquo;s well worth taking a look at. We haven&rsquo;t covered the various options that can be passed in to the paginate helper method, such as the ability to change the way that the list of pages is displayed, adding parameters to the pagination links&rsquo; URLs or making the links work via AJAX.</p>

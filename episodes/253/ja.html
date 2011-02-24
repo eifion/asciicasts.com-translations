@@ -1,0 +1,184 @@
+<p>アーティストが絵をアップロードしてギャラリーに展示できるサイトを作っているとしましょう。一部はすでにできています。ギャラリーを一覧表示するページがあり、リンク先のギャラリーで絵を見ることができます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/574/original/E253I01.png" width="800" height="482" alt="ギャラリーアプリケーション"/>
+</div>
+
+<p>それぞれの絵は、タイトルと画像保存用のフィールドを持っていますが、絵そのものはありません。ギャラリーに新規に絵を追加しようとしても、タイトルを入れるテキストフィールドがあるのはわかりますが、画像をアップロードする方法がありません。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/575/original/E253I02.png" width="800" height="351" alt="新しい絵にタイトルをつけるだけ"/>
+</div>
+
+<p>絵の画像を添付する機能を実装するにはどうすればいいでしょう？Paperclip gemについてエピソード134[<a href="http://railscasts.com/episodes/134-paperclip">動画を見る</a>, <a href="http://railscasts.com/episodes/134-paperclip">読む</a>]で紹介しました。このgemを使うとRailsのモデルでファイル添付用のフィールドを扱うことができました。今回は、同様の機能を提供する<a href="https://github.com/jnicklas/carrierwave">CarrierWave</a>というgemを使ってみます。</p>
+
+<p>CarrierWaveはPaperclipと比較してより柔軟な機能を提供します。Rackに対応しているため、Rails、SinatraなどRackベースのRubyアプリケーションで動作し、ActiveRecord、DataMapper、 Mongoidなど多くのORMをサポートしています。もうひとつCarrierWaveとPaperclipの大きな違いとして、CarrierWaveは添付ファイルとその処理ロジックを別のUploaderクラス内に持ちます。このため、添付ファイルがアプリケーションのモデルクラスと混ざって混乱するということがありません。</p>
+
+<h3>CarrierWaveのインストール</h3>
+
+<p>最初にCarrierWave gemをアプリケーションに追加します。gemはいつものようにGemfileに参照情報を追加してインストールします。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem 'carrierwave'</pre>
+
+<p>bundleコマンドを実行し、 gemがインストールされたことを確認します。インストールが成功したら、まずuploaderクラスを作成します。CarrierWaveでは<code>uploader</code>というジェネレータが提供されるので、ここでは<code>image</code>という名前でクラスを生成します。</p>
+
+<pre class="terminal">$ rails g uploader image
+      create  app/uploaders/image_uploader.rb</pre>
+
+<p>ジェネレータが、<code>app</code>内に<code>uploaders</code>というディレクトリとその下に<code>image_uploader.rb</code>というファイルを生成します。このファイル内には、アップローダのカスタマイズ方法を解説したコメントがいくつか入っています。例えば、アップロード先を変更する、アップロード後に画像に処理を行う、アップロードできるファイルタイプを制限する、などの処理をカスタマイズできます。今はデフォルトのままにしておいて、後でカスタマイズを行うことにします。</p>
+
+<p>次に<code>Painting</code>モデルにアップローダを追加します。<code>paintings</code>テーブルに列を追加するため、migrationを生成します。</p>
+
+<pre class="terminal">$ rails g migration add_image_to_paintings image:string</pre>
+
+<p>作成する列はstring型で、uploaderクラスに付けたのと同じ名前にすることに注意してください。<code>rake db:migrate</code>コマンドを実行し、データベースを更新します。</p>
+
+<p>次に<code>Painting</code>モデルにアップローダを追加します。具体的には、<code>mount_uploader</code>メソッドを、引数として上で作成した列名とアップローダクラスを指定して、呼び出します。<code>attr_accessible</code>の定義リストにも<code>image</code>列を追加し、コントローラからアクセスできるように設定します。</p>
+
+<p class="codeFilePath">/app/models/painting.rb</p>
+<pre class="ruby">class Painting &lt; ActiveRecord::Base
+  attr_accessible :gallery_id, :name, :image
+  belongs_to :gallery
+  mount_uploader :image, ImageUploader
+end</pre>
+
+<p>これらを設定することで、絵の追加・修正用のフォームにファイルアップロード用のフィールドを持つことができます。合わせて<code>form_for</code>に<code>:html</code>オプションを追加して、フォームで添付ファイルを扱えるように修正します。</p>
+
+<p class="codeFilePath">/app/views/paintings/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for @painting, :html =&gt; {:multipart =&gt; true} do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= f.hidden_field :gallery_id %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.file_field :image %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<h3>アップロードされた画像を見る</h3>
+
+<p>絵の登録のための編集画面を開くと、フォームにファイルアップロード用のフィールドが表示され、画像をアップロードすることができます。実行すると、アップロード成功のメッセージが表示されますが、ギャラリーにアップロードした絵は表示されていません。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/576/original/E253I03.png" width="800" height="526" alt="画像はアップロードされたが見えない"/>
+</div>
+
+<p>ここでアップロードされた画像をプレースホルダーがある場所に表示させる必要があります。<code>GalleryController</code>のshowテンプレートには、ギャラリー内の絵ごとに繰り返し処理で保存場所を出力するコードが記述されていて、画像のプレースホルダーの<code>div</code>を出力します。これを、<code>image_tag</code>を使って画像そのものに置き換え、それぞれの絵の<code>image_url</code>にリンクさせます。これでは、画像がない絵の場合に<code>nil</code>を返すので、<code>to_s</code>を呼び出して<code>image_tag</code>が正しく動作するようにします。</p>
+
+<p class="codeFilePath">/app/views/show.html.erb</p>
+<pre class="ruby">&lt;div id="paintings"&gt;
+  &lt;% @gallery.paintings.each do |painting| %&gt;
+    &lt;div class="painting"&gt;
+      &lt;%= image_tag painting.image_url.to_s %&gt;
+      &lt;div class="name"&gt;&lt;%= painting.name %&gt;&lt;/div&gt;
+      &lt;div class="actions"&gt;
+        &lt;%= link_to "edit", edit_painting_path(painting) %&gt; |
+        &lt;%= link_to "remove", painting, :confirm =&gt; 'Are you sure?', :method =&gt; :delete %&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+  &lt;div class="clear"&gt;&lt;/div&gt;
+&lt;/div&gt;</pre>
+
+<p>ページを再表示すると、アップロードされた画像が表示されますが大きすぎてプレースホルダーの枠を超えてしまいます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/577/original/E253I04.png" width="800" height="526" alt="画像が表示されたがサイズが大きすぎる"/>
+</div>
+
+<p>画像が枠に正しく収まるようにリサイズできるといいでしょう。前に生成された<code>ImageUploader</code>クラスを見てみると、コメントアウトされている画像処理のコードがあります。</p> 
+
+<p class="codeFilePath">/app/uploaders/image_uploader.rb</p>
+<pre class="ruby">  # Process files as they are uploaded:
+  # process :scale =&gt; [200, 300]</pre>
+  
+<p>元の画像をリサイズしない方がいいので、別にサムネイル画像を作成しフルサイズの元画像へのリンクを表示します。<code>ImageUploader</code>クラスの<code>version</code>メソッドを呼び出すことでこれを作ることができます。このメソッドはブロックをとり、<code>process</code>を呼び出してサムネイルのバージョンの処理を行います。<code>process</code>メソッドは柔軟で、オプションをハッシュ形式で指定します。ハッシュ内の各キーをループし、そのキーと同じ名前のメソッドを探してそのキーの値を引数をとして渡します。サムネイルを生成するために以下のように記述します。</p>
+
+<p class="codeFilePath">/app/uploaders/image_uploader.rb</p>
+<pre class="ruby"># Create different versions of your uploaded files:
+version :thumb do
+  process :scale =&gt; [50, 50]
+end
+  
+def scale(width, height)
+  # do something
+end</pre>
+
+<p>サイズを個別に指定しなくてはいけないというのは面倒ですし、幸いその必要はありません。RMagickを使えば自動的にサイズを設定できます。CarrierWaveに<code>CarrierWave::RMagick</code>モジュールをincludeすることでRMagickを有効化できます。<a href="http://rubydoc.info/gems/carrierwave/0.5.1/CarrierWave/RMagick">RMagickモジュールのドキュメント</a>を見ると、モジュールをincludeすると利用できるメソッドを参照できます。これらの中には画像をリサイズするためのメソッドがいくつか含まれ、その中の<code>resize_to_limit</code>を用いて、アスペクト比を保ったままリサイズすることができます。この機能を利用するため、uploaderクラスの次の行を非コメント化します。</p>
+
+<p class="codeFilePath">/app/uploaders/image_uploader.rb</p>
+<pre class="ruby">include CarrierWave::RMagick</pre>
+
+<p>次にversionメソッドを非コメント化し、ブロックの<code>process :resize_to_limit</code>を呼び出します。このメソッドは幅と高さの最大値を引数としてとるので、サムネイルの最大値を200 x 200ピクセルに制限します。</p>
+
+<p class="codeFilePath">/app/uploaders/image_uploader.rb</p>
+<pre class="ruby">version :thumb do
+ process :resize_to_limit =&gt; [200, 200]
+end</pre>
+
+<p>リサイズ機能を有効化させるために<code>Gemfile</code>にRMagick gemの情報を追加します。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem "rmagick"</pre>
+
+<p>いつものように<code>bundle</code>コマンドを実行し、 gemがインストールされたことを確認します。RMagickはImageMagickに依存するため、 RMagick gemをインストールする前に最新バージョンのImageMagickがインストールされていることを確認します。OS Xを使用している場合は、HomeBrewかMacPortsからImageMagickをインストールできます。</p> 
+
+<p>ビューにフルサイズの画像の代わりにサムネイルを表示させるために、<code>image_url</code>の引数としてバージョンを特定します。</p>
+
+<p class="codeFilePath">/app/views/show.html.erb</p>
+<pre class="ruby">&lt;%= image_tag painting.image_url(:thumb).to_s %&gt;</pre>
+
+<p>ここでサムネイルを生成させるために再度画像をアップロードします。これによってギャラリーにサムネイル画像が表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/578/original/E253I05.png" width="800" height="526" alt="画像が正しいサイズで表示される"/>
+</div>
+
+<h3>URL経由で画像をアップロードする</h3>
+
+<p>CarrierWaveのもう一つの機能として、画像を直接アップロードする代わりにURLを介して画像を追加することもできます。このために、アップロード用フォームに<code>remote_image_url</code>というフィールドを追加します。この名前が重要で、CarrierWaveがこの名前のフィールドを認識してURLから画像を取得します。</p>
+
+<p class="codeFilePath">/app/views/paintings/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for @painting, :html =&gt; {:multipart =&gt; true} do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= f.hidden_field :gallery_id %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.file_field :image %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :remote_image_url, "or image URL" %&gt;
+    &lt;%= f.text_field :remote_image_url %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p><code>painting</code>フォームに入力フィールドを追加したので、<code>Painting</code>モデルの<code>attr_accessible</code>で指定するフィールドのリストにも追加します。</p>
+
+<p class="codeFilePath">/app/models/painting.rb</p>
+<pre class="ruby">class Painting &lt; ActiveRecord::Base
+  attr_accessible :gallery_id, :name, :image, :remote_image_url
+  belongs_to :gallery
+  mount_uploader :image, ImageUploader
+end</pre>
+
+<p>フォームに<code>remote_image_url</code>フィールドができたので、そこにURLを入力すれば、手でアップロードすることなく画像を追加できます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/579/original/E253I06.png" width="801" height="327" alt="URLを入力して画像をアップロード"/>
+</div>
+
+<p>フォームを送信すると、別のサーバにある画像を取得してサムネイルが生成されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/580/original/E253I07.png" width="800" height="526" alt="別のサーバにある画像が追加され、アップロードされたファイルと同じように処理される"/>
+</div>
+
+<p>今回のエピソードはここまでですが、CarrierWaveにはまだ紹介していない機能も多くあるのでドキュメントを参照することをお勧めします。便利な機能として、フォームを再表示してもアップロードした画像をそのまま保持します。フォームにhiddenの状態で<code>:image_cache</code>フィールドを追加して、フォームが送信されたときにモデルで検証エラーが発生した場合は、フォームが再表示された場合もアップロードされたファイルはそのまま保持されます。また、フォームにチェックボックスを追加してユーザが画像を削除できるようにしたり、保存場所オプションを変更して、アップロードされた画像をAmazon S3に保存することもできます。</p>

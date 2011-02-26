@@ -6,7 +6,7 @@ A central place where everyone is welcome to add, review, discuss and (of course
 How it works
 ------------
 
-This repository is basically really simple: In the folder episodes, you'll find a subfolder for each episode that has at least one translation. The folder name for each episode is simply the episode's number. Inside those episode folders there is a single HTML file for each translation named after the ISO 639 language code. For example 'fr' for French or 'de' for German. Eifion will always try to keep the English versions of each episode up-to-date so they can serve as template for translations. If, however, a folder doesn't exist for a specific episode, there are simply no translations for that episode yet.
+This repository is basically really simple: In the folder episodes, you'll find a subfolder for each episode that has at least one translation. The folder name for each episode is simply the episode's number. Inside those episode folders there is a single HTML file for each translation named after the [ISO 639 language code](http://en.wikipedia.org/wiki/List_of_ISO_639-1_codes). For example 'fr' for French or 'de' for German. Eifion will always try to keep the English versions of each episode up-to-date so they can serve as template for translations. If, however, a folder doesn't exist for a specific episode, there are simply no translations for that episode yet.
 
 Contributing
 ------------

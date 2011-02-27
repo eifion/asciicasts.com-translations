@@ -6,19 +6,17 @@ A central place where everyone is welcome to add, review, discuss and (of course
 How it works
 ------------
 
-This repository is basically really simple: In the folder episodes, you'll find a subfolder for each episode that has at least one translation. The folder name for each episode is simply the episode's number. Inside those episode folders there is a single HTML file for each translation named after the ISO 639-1 language code. For example 'fr' for French or 'de' for German. Eifion will always try to keep the English versions of each episode up-to-date so they can serve as template for translations. If, however, a folder doesn't exist for a specific episode, there are simply no translations for that episode yet.
+This repository is basically really simple: In the folder episodes, you'll find a subfolder for each episode that has at least one translation. The folder name for each episode is simply the episode's number. Inside those episode folders there is a single HTML file for each translation named after the [ISO 639 language code](http://en.wikipedia.org/wiki/List_of_ISO_639-1_codes). For example 'fr' for French or 'de' for German. Eifion will always try to keep the English versions of each episode up-to-date so they can serve as template for translations. If, however, a folder doesn't exist for a specific episode, there are simply no translations for that episode yet.
 
 Contributing
 ------------
 
 Contributing is easy: You can point out typos or translation errors by simply opening up tickets under the *Issues* section of this repository and mark it with the **Found typos or errors** label so someone can take care of the issue. Or you can fork the repository and submit your own translations. Simply use the *Fork* button to create your own version of this repository that you can clone to your computer and push your submits to. If you have submitted something, please use the *Pull request* button in your repository to notify the collaborators of the original.
 
-Organizing
-----------
+Organization
+------------
 
-If you plan to submit a new translation, it's recommended that you create a ticket here in this repository's issue tracking system and label it with the **Translation in Progress** label. This way, others can see that you're currently already working on that specific language of that specific episode so no one ends up spending redundant work. If you're satisfied with your translation and want to submit it, you can use the **Closes #xx.** notation to automatically close the issue. For example, when I committed my German translation of episode 201 for which I had the issue #3 open, I typed:
-
->  git commit -m "Added German translation of Episode 201. Closes #3."
+If you want to participate, simply head over to the [Wiki](https://github.com/defaude/asciicasts.com-translations/wiki) and look up any episode in your prefered language that's not marked **pending** or **translated**. When you start working on your translation, please update the wiki entry for that specific episode in your language as **pending** so others can avoid doing redundant work.
 
 Project Structure
 -----------------

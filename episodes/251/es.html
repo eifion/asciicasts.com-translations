@@ -1,0 +1,220 @@
+<p>A continuaci&oacute;n se muestra una captura de pantalla de una aplicaci&oacute;n sencilla en Rails 3 que muestra un listado de productos.  La p&aacute;gina tiene un buscador que filtra los productos por nombre.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/562/original/E251I01.png" width="800" height="381" alt="A search for &lsquo;video&rsquo;"/>
+</div>
+
+<p>La b&uacute;squeda se lleva a cabo en la acci&oacute;n <code>index</code> del controlador <code>ProductsController</code>, cuyo c&oacute;digo tiene el siguiente aspecto:</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def index
+  @products = Product.where(&quot;name LIKE ?&quot;, &quot;%#{params[:search]}%&quot;)
+end</pre>
+
+<p>Se utiliza el m&eacute;todo <code>where</code> con un fragmento de SQL para encontrar todos los productos cuyo nombre es similar al t&eacute;rmino de b&uacute;squeda.  Dado que la condici&oacute;n de b&uacute;squeda es m&aacute;s compleja que una mera igualdad no podemos pasarla en un <em>hash</em> de condiciones, y lo mismo pasar&iacute;a si estuvi&eacute;semos haciendo una comparaci&oacute;n del tipo &quot;mayor o menor que&quot;, porque ActiveRecord s&oacute;lo admite cadenas SQL para este tipo de consultas.</p>
+
+<p>Si no nos convence la idea de usar fragmentos de SQL en nuestro c&oacute;digo existe una gema llamada <a href="http://metautonomo.us/projects/metawhere/">MetaWhere</a> que puede sernos &uacute;til.  MetaWhere  permite invocar m&eacute;todos sobre los s&iacute;mbolos de los argumentos que se le pasan a <code>where</code>, por lo que podemos hacer consulta tales como:</p>
+
+
+<pre class="ruby">Article.where(:title.matches =&gt; &#x27;Hello%&#x27;, :created_at.gt =&gt; 3.days.ago)</pre>
+
+<p>A partir del c&oacute;digo anterior MetaWhere generar&aacute; la siguiente consulta SQL:</p>
+
+<pre class="sql">SELECT &quot;articles&quot;.* FROM &quot;articles&quot; 
+WHERE (&quot;articles&quot;.&quot;title&quot; LIKE &#x27;Hello%&#x27;)
+AND (&quot;articles&quot;.&quot;created_at&quot; &gt; &#x27;2010-04-12 18:39:32.592087&#x27;)</pre>
+
+<p>Con MetaWhere se elimina la necesidad de utilizar fragmentos de SQL en nuestras consultas y podemos usar condiciones en un <em>hash</em>.  Este enfoque es similar a como funcionan DataMapper o Mongoid, y es una opci&oacute;n interesante con ActiveRecord.  Para ver lo f&aacute;cil que es utilizar MetaWhere vamos a modificar, a modo de ejemplo, esta aplicaci&oacute;n.</p>
+
+<p>Lo primero que tenemos que hacer es a&ntilde;adir una referencia a la gema en el <code>Gemfile</code> de la aplicaci&oacute;n.</p>
+
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby"># Edit this Gemfile to bundle your application&#x27;s dependencies.
+source &#x27;http://gemcutter.org&#x27;
+
+gem &quot;rails&quot;, &quot;3.0.3&quot;
+gem &quot;sqlite3-ruby&quot;, :require =&gt; &quot;sqlite3&quot;
+gem &quot;meta_where&quot;</pre>
+
+<p>Tenemos que ejecutar la orden <code>bundle</code> para instalar la gema.  Tras esto podemos modificar el c&oacute;digo de b&uacute;squeda en <code>ProductsController</code> y eliminar el fragmento SQL.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def index
+  @products = Product.where(:name.matches =&gt; &crarr;
+    &quot;%#{params[:search]}%&quot;)
+end</pre>
+
+<p>Con este cambio tan sencillo la aplicaci&oacute;n se comportar&aacute; igual que antes, devolviendo los mismos resultados.</p>
+
+<p>Veamos a continuaci&oacute;n algunos ejemplos m&aacute;s complejos ejecutados en consola.  Por ejemplo podemos recuperar todos los prodcutos cuyo precio es inferior a cinco libras.</p>
+
+<pre class="terminal">ruby-1.9.2-p0 &gt; Product.where(:price.lt =&gt; 5)
++----+-----------------------+--------+-------------+------------+
+| id | name                  | price  | released_at | updated_at |
++----+-----------------------+--------+-------------+------------+
+| 6  | 1 Pint of Milk        | 0.49   | 2010-06-06  | 2011-01-31 |
+| 7  | Porridge Oats         | 1.99   | 2010-07-07  | 2011-01-31 |
++----+-----------------------+--------+-------------+------------+
+2 rows in set</pre>
+
+<p>Tambi&eacute;n podemos a&ntilde;adir condiciones <code>OR</code> con m&uacute;ltiples <em>hashes</em> de condiciones separados por la barra vertical.  La siguiente b&uacute;squeda muestra todos los prodcutos que  cuestan menos de cinco libras o cuyo t&iacute;tulo incluye la palabra  &ldquo;video&rdquo; .</p>
+
+<pre class="terminal">ruby-1.9.2-p0 &gt; Product.where({:price.lt =&gt; 5} | &crarr;
+  {:name.matches =&gt; &quot;%video%&quot;})
++----+-----------------------+--------+-------------+------------+
+| id | name                  | price  | released_at | updated_at |
++----+-----------------------+--------+-------------+------------+ 
+| 6  | 1 Pint of Milk        | 0.49   | 2010-06-06  | 2011-01-31 |
+| 7  | Porridge Oats         | 1.99   | 2010-07-07  | 2011-01-31 |
+| 8  | Video Game Console    | 299.95 | 2010-08-08  | 2011-01-31 |
+| 9  | Video Game Disc       | 29.95  | 2010-09-09  | 2011-01-31 |
++----+-----------------------+--------+-------------+------------+ 
+4 rows in set</pre>
+
+<p>Con MetaWhere  tambi&eacute;n disponemos de algunas extensiones &uacute;tiles en el metodo <code>order</code>.  Si queremos ordenar los productos por su fecha <code>released_at</code>  para que nos muestre los productos m&aacute;s recientes, podemos hacerlo con el siguiente c&oacute;digo.</p>
+
+<pre class="terminal">ruby-1.9.2-p0 &gt; Product.order(:released_at.desc)
++----+-----------------------+--------+-------------+------------+
+| id | name                  | price  | released_at | updated_at |
++----+-----------------------+--------+-------------+------------+ 
+| 9  | Video Game Disc       | 29.95  | 2010-09-09  | 2011-01-31 |
+| 8  | Video Game Console    | 299.95 | 2010-08-08  | 2011-01-31 |
+| 7  | Porridge Oats         | 1.99   | 2010-07-07  | 2011-01-31 |
+| 6  | 1 Pint of Milk        | 0.49   | 2010-06-06  | 2011-01-31 |
+| 5  | Oak Coffee Table      | 279.99 | 2010-05-05  | 2011-01-31 |
+| 4  | Black Leather Sofa    | 499.99 | 2010-04-04  | 2011-01-31 |
+| 3  | Stereolab T-Shirt     | 12.49  | 2010-03-03  | 2011-01-31 |
+| 2  | DVD Player            | 79.99  | 2010-02-02  | 2011-01-31 |
+| 1  | All-New Log For Girls | 29.95  | 2010-01-01  | 2011-01-31 |
++----+-----------------------+--------+-------------+------------+
+9 rows in set</pre>
+
+<p>Existe tambi&eacute;n una sintaxis alternativa para las condiciones de <code>find</code> pero primero tenemos que activarla con</p>
+
+<pre class="ruby">MetaWhere.operator_overload!</pre>
+
+<p>Una vez tengamos esta opci&oacute;n activada podemos utilizar los operadores est&aacute;ndar de Ruby en lugar de los m&eacute;todos <code>gt</code> y <code>lt</code>.  Por tanto ahora podemos ejecutar lo siguiente para encontrar los productos que cuestan menos de 5 libras:</p>
+
+<pre class="terminal">ruby-1.9.2-p0 &gt; Product.where(:price &lt; 5)
++----+-----------------------+--------+-------------+------------+
+| id | name                  | price  | released_at | updated_at |
++----+-----------------------+--------+-------------+------------+
+| 6  | 1 Pint of Milk        | 0.49   | 2010-06-06  | 2011-01-31 |
+| 7  | Porridge Oats         | 1.99   | 2010-07-07  | 2011-01-31 |
++----+-----------------------+--------+-------------+------------+
+2 rows in set</pre>
+
+<p>De esta forma resulta m&aacute;s c&oacute;modo definir condiciones de b&uacute;squeda.</p>
+
+<p>Por supuesto podemos hacer muchas m&aacute;s cosas con la gema MetaWhere, por lo que merece la pena
+ <a href="http://metautonomo.us/projects/metawhere/">leer la documentaci&oacute;n</a> para averiguar m&aacute;s.</p>
+
+<h3>MetaSearch</h3>
+
+<p>Dedicaremos el resto de este episodio a explorar otra gema del mismo autor:  <a href="http://metautonomo.us/projects/metasearch/">MetaSearch</a>. Esta gema a&ntilde;ade una forma muy &uacute;til de realizar b&uacute;squedas sobre un modelo desde un formulario que consiste en llamar a un m&eacute;todo llamado <code>search</code> sobre cualquier modelo pas&aacute;ndole los par&aacute;metros de b&uacute;squeda, tras lo que podemos recuperar los registros que casan con dicha consulta.  Se muestra un ejemplo a continuaci&oacute;n.</p>
+
+
+<pre class="ruby">def index
+  @search = Article.search(params[:search])
+  @articles = @search.all
+end</pre>
+
+<p>En el c&oacute;digo de la vista el nombre de cada campo define la funcionalidad de b&uacute;squeda.  Por ejemplo un campo de texto llamado <code>title_contains</code> quiere decir que se buscar&aacute;n los registros cuyo <code>title</code> contenga el valor introducido por el usuario en dicho campo.</p>
+
+<p>Prob&eacute;moslo en nuestra aplicaci&oacute;n cambiando nuestro formulario de b&uacute;squeda por uno que utilice MetaSearch.  El primer paso, como en MetaWhere, es a&ntilde;adir una referencia a la gema en el <code>Gemfile</code>.</p>
+
+
+<pre class="codeFilePath">/Gemfile</pre>
+<pre class="ruby"># Edit this Gemfile to bundle your application&#x27;s dependencies.
+source &#x27;http://gemcutter.org&#x27;
+
+gem &quot;rails&quot;, &quot;3.0.3&quot;
+gem &quot;sqlite3-ruby&quot;, :require =&gt; &quot;sqlite3&quot;
+gem &quot;meta_where&quot;
+gem &quot;meta_search&quot;</pre>
+
+<p>Tendremos otra vez que ejecutar <code>bundle</code> para instalar la gema.  A continuaci&oacute;n podemos cambiar el c&oacute;digo de b&uacute;squeda en <code>ProductsController</code> por el c&oacute;digo MetaSearch equivalente.  El c&oacute;digo tiene el siguiente aspecto:</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def index
+  @products = Product.where(:name.matches =&gt; &crarr;
+    &quot;%#{params[:search]}%&quot;)
+end</pre>
+
+<p> Y lo cambiaremos por:</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def index
+  @search = Product.search(params[:search])
+  @products = @search.all
+end</pre>
+
+<p>Creamos la b&uacute;squeda invocando a <code>Product.search</code>, pas&aacute;ndole los par&aacute;metros del formulario.  A continuaci&oacute;n invocamos a <code>@search.all</code> para recuperar la lista de productos correspondiente, que usar&aacute; una cosnulta SQL de forma inmediata.  Si queremos a&ntilde;adir condiciones extra podemos usar <code>relation</code> en lugar de <code>all</code>, que devolver&aacute; un &aacute;mbito.  Aunque en este caso no nos hace falta, si necesitamos paginar podemos utilizar <code>paginate</code>.</p>
+
+<p>Tenemos que modificar el formulario de b&uacute;squeda de la plantilla <code>index</code> para usar los nombres de campo que necesita MetaSearch (el formulario utilizaba <code>form_tag</code>, pero ahora tendremos que usar <code>form_for</code> con el objeto devuelto por el m&eacute;todo <code>search</code>).  Queremos buscar productos cuyo atributo <code>name</code> contenga el t&eacute;rmino de b&uacute;squeda, por lo que el campo de texto en el formulario se tiene que llamar <code>name_contains</code>.</p>
+
+<p class="codeFilePath">/app/views/products/index.html</p>
+<pre class="ruby">&lt;%= form_for @search do |f| %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name_contains %&gt;
+    &lt;%= f.text_field :name_contains %&gt;
+  &lt;/p&gt;
+  &lt;p class=&quot;button&quot;&gt;&lt;%= f.submit &quot;Search&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>Si cargamos nuevamente la p&aacute;gina de productos veremos el nuevo formulario, y si buscamos otra vez el mismo t&eacute;rmino de antes obtendremos los mismos resultados.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/563/original/E251I02.png" width="800" height="420" alt="MetaWhere devuelve los mismos productos que antes."/>
+</div>
+
+<p>Lo m&aacute;s &uacute;til de esto es que se pueden expandir las opciones de b&uacute;squeda simplemente a&ntilde;adiendo m&aacute;s campos en la vista, no hace falta modificar nada ni en el modelo ni en el controlador.  Si, por ejemplo, queremos a&ntilde;adir la posibilidad de buscar por un rango de precios s&oacute;lo tenemos que cambiar el formulario para a&ntilde;adir los campos llamados <code>price_gte</code> y <code>price_lte</code> tal y como sigue:</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">&lt;%= form_for @search do |f| %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name_contains %&gt;
+    &lt;%= f.text_field :name_contains %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :price_gte, &quot;Price ranges from&quot; %&gt;
+    &lt;%= f.text_field :price_gte, :size =&gt; 8 %&gt;
+    &lt;%= f.label :price_lte, &quot;to&quot; %&gt;
+    &lt;%= f.text_field :price_lte, :size =&gt; 8 %&gt;
+  &lt;/p&gt;
+  &lt;p class=&quot;button&quot;&gt;&lt;%= f.submit &quot;Search&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>Al volver a cargar la p&aacute;gina veremos los dos nuevos campos.  Podemos buscar los productos por rango de precios o por nombre y precio, por lo que si buscamos productos cuyo nombre contenga  &ldquo;video&rdquo; y que cuesten entre diez y treinta libras, encontraremos el &uacute;nico producto que hay:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/564/original/E251I03.png" width="800" height="406" alt="Búsqueda de productos por nombre y rango de precios."/>
+</div>
+
+<p>La clave aqu&iacute; son los nombres de los campos en el formulario, porque determinan las condiciones de b&uacute;squeda.  Hay m&aacute;s opciones para usar en los campos de formulario, descritas en la  <a href="https://github.com/ernie/meta_search#readme">documentaci&oacute;n</a>.</p>
+
+<p>Otra funcionalidad que a&ntilde;ade MetaSearch es la posibilidad de ordenar los resultados por un campo concreto, usando el m&eacute;todo <code>sort_link</code>.  Este m&eacute;todo recibe dos argumentos: un objeto de b&uacute;squeda y un nombre de columna, con lo podemos a&ntilde;adir campos de ordenaci&oacute;n con el siguiente c&oacute;digo:</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">&lt;p&gt;
+  Sort by:
+  &lt;%= sort_link @search, :name %&gt;
+  &lt;%= sort_link @search, :price %&gt;
+  &lt;%= sort_link @search, :released_at %&gt;
+&lt;/p&gt;</pre>
+
+<p>Al recargar la p&aacute;gina veremos los enlaces por los cuales podemos ordenar los productos.  Tambi&eacute;n podemos combinar la ordenaci&oacute;n con un filtro.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/565/original/E251I04.png" width="800" height="491" alt="Ordenación de productos por precio"/>
+</div>
+
+<h3>Seguridad</h3>
+
+<p>Al trabajar con MetaSearch debemos tener en cuenta  que puede hacer que nuestras tablas de la base de datos admitan b&uacute;squedas sobre cualquiera de sus columnas, simplemente modificando el formulario antes de enviarlo.  Esto tambi&eacute;n se aplica a las asociaciones, por lo que si tenemos registros asociados que contienen datos sensibles deber&iacute;amos ser conscientes de esto.</p>
+
+<p>Para ayudarnos con este problema hay algunos m&eacute;todos de seguridad que podemos a&ntilde;adir a nuestros modelos para limitar qu&eacute; campos pueden buscarse.  No entraremos en detalle pero estos m&eacute;todos est&aacute;n descritos en  <a href="http://metautonomo.us/projects/metasearch/#security">el sitio web de MetaSearch</a>.  Necesitaremos implementar estos m&eacute;todos si estamos usando MetaSearch en una web que est&aacute; de cara al p&uacute;blico.</p>
+
+<p>Con esto terminamos nuestro repaso de MetaWhere y MetaSearch.  Hay otra gema que proporciona una funcionalidad semejante llamada Searchlogic, que no funciona con Rails 3.   Merece la pena considerar MetaWhere y MetaSearch si nos gusta la funcionalidad de Searchlogic pero necesitamos una soluci&oacute;n para Rails 3.</p>
+

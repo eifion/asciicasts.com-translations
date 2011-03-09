@@ -1,0 +1,266 @@
+<p>確認のためのダイアログボックスはウェブアプリケーションではよく使われます。ほぼすべてのRailsアプリケーションで「削除(delete)」リンクをクリックすると、その項目を本当に削除したいかを確認するダイアログが表示されます。項目を削除したいから削除リンクをクリックしたわけなので、ほとんどの場合これらの警告は必要ないはずですが、もちろん間違ってリンクをクリックしてしまう場合もあるでしょう。しかし、確認をする代わりに直前の変更を取り消すことができれば、より便利ではないでしょうか？ その方がよりスムーズなユーザ体験を提供できるでしょう。</p>
+
+<p>今回のエピソードでは、ActiveRecordのための汎用的な世代管理用ライブラリである<a href="https://github.com/airblade/paper_trail">PaperTrail</a>というgemを利用して、この機能を実装してみます。Rails向けには、例えばエピソード177[<a href="http://railscasts.com/episodes/177-model-versioning">動画を見る</a>, <a href="http://asciicasts.com/episodes/177-model-versioning">読む</a>]で取り上げた<a href="https://github.com/laserlemon/vestal_versions">Vestal Versions</a>のように取り消し機能専用のフレームワークも存在します。ですが、ここでは取り消し機能を付加する場合により便利なPaperTrailを使用することにします。</p>
+
+<h3>PaperTrailをインストールする</h3>
+
+<p>PaperTrailをインストールするには、アプリケーションの<code>Gemfile</code>に参照情報を追加し、<code>bundle</code>コマンドを実行してインストールします。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby"># Edit this Gemfile to bundle your application's dependencies.
+source 'http://gemcutter.org'
+
+gem "rails", "3.0.5"
+gem "sqlite3-ruby", :require =&gt; "sqlite3"
+gem "paper_trail"</pre>
+
+<p>gemをインストールしたら、PaperTrailのinstallジェネレータを実行します。</p>
+
+<pre class="terminal">$ rails g paper_trail:install</pre>
+
+<p>このジェネレータが生成するmigrationファイルに対して<code>rake db:migrate</code>を実行すると、<code>versions</code>(世代)テーブルが作成されます。</p>
+
+<h3>PaperTrailを使う</h3>
+
+<p>このアプリケーションのProductモデルに世代管理の機能を追加するために、モデルを定義するファイル内で<code>has_paper_trail</code>を呼び出します。</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">class Product &lt; ActiveRecord::Base
+  attr_accessible :name, :price, :released_at
+  has_paper_trail
+end</pre>
+
+<p>これで<code>Product</code>モデルは世代管理できるようになるので、どのような変更も取り消しが可能です。</p>
+
+<h3>取り消し機能を追加する</h3>
+
+<p>PaperTrailのインストールはとても簡単でしたが、アプリケーションに取り消し機能を付加するにはどうすればいいでしょうか？ まず初めに、取り消しのリンクで実行されるコントローラアクションが必要です。<code>ProductsController</code>に新しいアクションを追加することもできますが、コードをよりきれいに保つために新たに<code>versions</code>というコントローラを作成します。このアプローチをとることによって、後ほど他のモデルにも簡単に世代管理機能を付加できるようになります。</p>
+
+<pre class="terminal">$ rails g controller versions</pre>
+
+<p>このコントローラに必要なものは、世代を一つ戻すためのアクションだけです。</p>
+
+<p class="codeFilePath">/app/controllers/versions_controller.rb</p>
+<pre class="ruby">class VersionsController &lt; ApplicationController
+  def revert
+    @version = Version.find(params[:id])
+    @version.reify.save!    redirect_to :back, :notice =&gt; "Undid #{@version.event}"
+  end
+end</pre>
+
+<p>このアクションは、URLから渡される引数<code>id</code>に一致する<code>Version</code>を返します。次にモデルオブジェクトの特定の世代を得るために、versionインスタンスの<code>reify</code>メソッドを呼び出します。これが、今回の例では、指定した世代に対応する<code>Product</code>インスタンスを返します。これに対して<code>save!</code>メソッドを呼び出して、その商品を指定する世代に戻します。その世代を保存したら前のページに戻って、実行された内容をフラッシュメッセージで表示します。<code>@version.event</code>を呼び出せば、直前に完了したイベントを得ることができます。これによって返されるのは直前に取り消された「作成(create)」、「更新(update)」、「削除(destory)」のいずれかのアクションで、それをメッセージに表示させます。</p> 
+
+<p>この新しく作成したアクションにアクセスできるように、<code>routes</code>ファイルに新しいルートを追加します。</p> 
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Store::Application.routes.draw do |map|
+  post "versions/:id/revert" =&gt; "versions#revert", :as =&gt; ?     
+       "revert_version"
+  resources :products
+  root :to =&gt; "products#index"
+end</pre>
+
+<p>ここで<code>post</code>メソッドを使用していることに注目してください。取り消し処理はデータベースに変更を加える破壊的操作であるため、GETリクエストを受け付ける<code>match</code>は使用しません。名前が示すように、postはPOSTリクエストのみに応答します。</p>
+
+<h3>更新を取り消す</h3>
+
+<p>取り消し処理を行うアクションができたので、<code>ProductsController</code>内でフラッシュ通知にリンクを追加する部分を作成しましょう。まず<code>update</code>アクションを作成しましょう。これにより商品情報を更新した人がリンクをクリックすることで変更を取り消すことができるようになります。</p>
+
+<p>取り消しのリンクを作らなくてはいけないのですが、コントローラにどのように記述すればいいでしょうか？ 文字列にHTMLタグを埋め込むこともできるのですが、コントローラ内で<code>link_to</code>を使えればその方がずっときれいでしょう。<code>link_to</code>などのビューメソッドを直接コントローラ内で使用することはできませんが、<code>view_context</code>を介してアクセスできるので、<code>view_context.link_to</code>を呼び出してリンクを作成します。このリンクは、<code>revert</code>アクションを実行し、その商品の最後に保存されたバージョンの<code>id</code>を渡します。<code>@product.versions</code>を呼び出せばある商品のすべての世代を、また<code>last</code>を呼び出すことでもっとも最近保存された世代を得ることができます。これらの情報を元に、取り消しのリンクを作成してみましょう。<code>revert</code>アクションはPOSTリクエストのみに応答するため、<code>:method =&gt; :post</code>を指定していることに注目してください。リンクを作成したので、フラッシュメッセージに追加します。</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def update
+  @product = Product.find(params[:id])
+  if @product.update_attributes(params[:product])
+    undo_link = view_context.link_to("undo", ?
+      revert_version_path(@product.versions.last), ? 
+      :method =&gt; :post)
+    redirect_to products_url, :notice =&gt; ?
+      "Successfully updated product."
+  else
+    render :action =&gt; 'edit'
+  end
+end</pre>
+
+<p>ここまでで作成したコードを実際に試してみましょう。リスト中の項目、例えば「牛乳1本」を「牛乳2本」に変更すると、以下のような結果が得られます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/586/original/E255I01.png" width="815" height="415" alt="取り消しリンクが表示されたがエスケープされている"/>
+</div>
+
+<p>項目は変更されましたが、リンクは正しく表示されていません。リンクが生成されましたが、HTMLがエスケープされています。ここでフラッシュメッセージの表示を操作している部分を修正して、内容をエスケープしないようにします。このアプリケーションでは、レイアウトファイルに記述されています。ここでは、メッセージを<code>raw</code>メソッドで囲めば内容がエスケープされません。</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;div id="container"&gt;
+  &lt;h1&gt;&lt;%=h yield(:title) %&gt;&lt;/h1&gt;
+  &lt;%- flash.each do |name, msg| -%&gt;
+    &lt;%= content_tag :div, raw(msg), :id =&gt; "flash_#{name}" %&gt;
+  &lt;%- end -%&gt;      
+  &lt;%= yield %&gt;
+&lt;/div&gt;</pre>
+
+<p>ここで気をつけなくてはいけないことがあります。ユーザからの入力をフラッシュメッセージに表示する場合は、忘れずに表示の前にエスケープする必要があります。</p>
+
+<p>再度項目を編集して「牛乳4本」に変更すると、今度は取り消しリンクが正しく表示されました。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/587/original/E255I02.png" width="815" height="415" alt="リンクが正しく表示された"/>
+</div>
+
+<p>取り消しリンクをクリックすると、商品は前の世代に戻されました。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/588/original/E255I03.png" width="815" height="415" alt="更新が取り消された"/>
+</div>
+
+<h3>項目を削除した後の取り消し</h3>
+
+<p>次に<code>destroy</code>アクションに取り消しリンクを追加し、項目の削除後に元に戻せるようにします。<code>update</code>アクションのときと同じようにリンクを組み立てるので、まず最初にリンクを生成するコードを別のメソッドとして切り離し、<code>update</code>と<code>destroy</code>の両方から呼び出せるようにします。このメソッドは、アクションとして扱われないようプライベートメソッドにし、<code>undo_link</code>という名前にします。</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">class ProductsController &lt; ApplicationController
+
+  #other actions omitted.
+  
+  def update
+    @product = Product.find(params[:id])
+    if @product.update_attributes(params[:product])
+      redirect_to products_url, ?
+        :notice =&gt; "Successfully updated product. #{undo_link}"
+    else
+      render :action =&gt; 'edit'
+    end
+  end
+  
+  def destroy
+    @product = Product.find(params[:id])
+    @product.destroy
+    redirect_to products_url, ?
+      :notice =&gt; "Successfully destroyed product. #{undo_link}"
+  end
+  
+  private
+  def undo_link
+    view_context.link_to("undo", ? 
+            revert_version_path(@product.versions.scoped.last), ?
+     :method =&gt; :post)
+  end
+end</pre>
+
+<p>ここで小さな落とし穴に気をつけてください。レコードを削除しても、<code>product.versions</code>で参照できる世代リストにはもっとも最近の世代(destroyモデルによって削除された世代)は含まれません。世代はどうも配列にキャッシュされているようです。今回の例では、通常の場合のように<code>@product.versions(true)</code>を呼び出すことでキャッシュをクリアしたいのですが、レコード削除の場合は期待通りに動いてくれません。この問題への解決策として、<code>last</code>の前にversions配列の<code>scoped</code>を呼び出すようにすれば、常に最新の世代を参照していることになります。</p>
+
+<p>試してみましょう。「牛乳2本」の「削除(Destroy)」リンクをクリックして確認ボタンを押すと、項目が削除されます。</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/589/original/E255I04.png" width="815" height="415" alt="項目が削除された"/>
+</div>
+
+<p>「取り消し」リンクをクリックすると、削除された項目が復元されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/590/original/E255I05.png" width="815" height="415" alt="削除された項目が復元された"/>
+</div>
+
+<h3>新規作成を取り消す</h3>
+
+<p>最後に残ったのは<code>create</code>です。<code>update</code>と<code>destroy</code>でおこなったのと同じように、<code>create</code>アクション内のフラッシュメッセージに取り消しリンクを追加して、どうなるか見てみましょう。</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def create
+  @product = Product.new(params[:product])
+  if @product.save
+    redirect_to products_url, :notice =&gt; "Successfully created ?
+      product. #{undo_link}"
+  else
+    render :action =&gt; 'new'
+  end
+end</pre>
+
+<p>項目を新しく追加してそれを取り消そうとすると、エラーメッセージが表示されました。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/591/original/E255I06.png" width="815" height="415" alt="新しい項目を取り消そうとするとエラーが発生する"/>
+</div>
+
+<p>このコードではレコードを保存しようとしていますが、実際に行いたいのは項目の作成を取り消すことです。つまり作成された項目を保存するのではなく、削除したいのです。<code>VersionsController</code>のコードを修正して、動作を変更します。</p>
+
+<p>問題は、新規作成された項目に対して<code>reify</code>を呼び出すと、前の世代が存在しないため<code>nil</code>が返されます。<code>revert</code> アクションのコードを修正して、前の世代が存在するかをチェックし、もしあればそれを保存するように変更します。そうしないと、項目を削除してしまうことになるからです。</p>
+
+<p class="codeFilePath">/app/controllers/versions_controller.rb</p>
+<pre class="ruby">class VersionsController &lt; ApplicationController
+  def revert
+    @version = Version.find(params[:id])
+    if @version.reify
+      @version.reify.save!    else
+      @version.item.destroy
+    end
+    redirect_to :back, :notice =&gt; "Undid #{@version.event}"
+  end
+end</pre>
+
+<p>前の世代が存在しない場合、<code>@version.item</code>を呼び出すと商品テーブルから新規作成された<code>Product</code>が返されます。それに対して<code>destroy</code>メソッドを呼び出して、それを削除します。</p>
+
+<p>試してみましょう。「ポテトチップ(Chips)」という新規項目を作成します。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/592/original/E255I07.png" width="815" height="415" alt="新規項目を作成する"/>
+</div>
+
+<p>「取り消し」リンクをクリックすると、新規作成された項目が削除されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/593/original/E255I08.png" width="815" height="415" alt="新規項目が正しく削除された"/>
+</div>
+
+<h3>取り消した操作をやり直す</h3>
+
+<p>これで、商品の作成、更新、削除の後に取り消しができるようになったので、さらに取り消した操作をやり直す機能を追加すればより便利でしょう。やり直しの動作を追加するには、<code>VersionsController</code>内で、操作を取り消したときに表示されるフラッシュメッセージにリンクを追加します。</p> 
+
+<p class="codeFilePath">/app/controllers/versions_controller.rb</p>
+<pre class="ruby">class VersionsController &lt; ApplicationController
+  def revert
+    @version = Version.find(params[:id])
+    if @version.reify
+      @version.reify.save!    else
+      @version.item.destroy
+    end
+    link_name = params[:redo] == "true" ?"undo" : "redo"
+    link = view_context.link_to(link_name, ?
+      revert_version_path(@version.next, ?
+      :redo =&gt; !params[:redo]), :method =&gt; :post)
+    redirect_to :back, :notice =&gt; ?
+     ”Undid #{@version.event}. #{link}"
+  end
+end</pre>
+
+<p>ここに記述されているロジックの大部分は、直前の操作が何かによって表示するテキストを変更する処理に関連します。その次に<code>revert_version_path</code>を使用してリンクを生成します。リンクは一連の世代のうちの次の世代を参照します。次の世代を選択する理由は、項目を保存あるいは削除すると新しい世代レコードが作成され、それを指定することでやり直し処理を実行できるからです。</p>
+
+<p>ここで動作を試してみましょう。「Flat Screen TV(薄型TV)」を編集し「Flat Screen Television」に名称を変更します。想定どおり、取り消しリンクが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/594/original/E255I09.png" width="816" height="286" alt="商品名を修正してやり直し機能を試す"/>
+</div>
+
+<p>取り消しリンクをクリックすると前の商品名に戻りますが、今回は同時にやり直しのリンクも表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/595/original/E255I10.png" width="816" height="286" alt="変更が取り消される"/>
+</div>
+
+<p>やり直しのリンクをクリックすることで、変更が再実行され、タイトルが修正された版に再度変わります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/596/original/E255I11.png" width="816" height="286" alt="今度は変更がやり直された"/>
+</div>
+
+<p>「取り消し」と「やり直し」を何度でも繰り返すことができ、タイトルは最後の２つの世代の間を行き来することになります。取り消しとやり直しの機能が完成したので、最後に「削除」リンクから確認のダイアログボックスを取り除きます。</p> 
+
+<h3>古い世代情報を管理する</h3>
+
+<p>このアプリケーションを使用していくうちに、versionsテーブルには世代情報が大量に貯まっていきます。ひとつのテーブルにすべての世代情報を蓄積していれば、次のようなコマンドで簡単に古い世代情報を削除できます。</p>
+
+<pre class="ruby">Version.delete_all["created_at &lt; ?", 1.week.ago]</pre>
+
+<p>このコマンドをrakeタスク内に置いて、Whenever gemを利用して定期的に実行することができます。具体的な設定方法は、エピソード164 [<a href="http://railscasts.com/episodes/164-cron-in-ruby">動画を見る</a>, <a href="http://asciicasts.com/episodes/164-cron-in-ruby">読む</a>]を参照してください。</p> 
+
+<p>PaperTrailの優れた特徴として、versionsテーブルに簡単に追加情報を保存することも可能です。作業としては、versionsテーブルに新しい列を追加するだけです。その上で<code>has_paper_trail</code>メソッドの<code>:meta</code>オプションを使うか、コントローラの<code>info_for_paper_trail</code>メソッドに追加のオプションを指定します。versionsテーブルに追加の情報、例えばフラッシュメッセージに表示するために修正されたモデル名など保存したければ、ここにその情報を追加して<code>revert</code>アクション内で表示することができます。</p>

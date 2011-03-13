@@ -1,0 +1,187 @@
+<p>Supongamos que estamos construyendo una aplicaci&oacute;n que permite que usuarios artistas puedan subir y mostrar sus cuadros como galer&iacute;as.   Hay una parte del sitio que ya est&aacute; construida: se trata de una p&aacute;gina que lista las galer&iacute;as con un enlace a cada una de ellas y una p&aacute;gina que muestra las im&aacute;genes que hay en cada galer&iacute;a.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/574/original/E253I01.png" width="800" height="482" alt="La aplicación de Galerías."/>
+</div>
+
+<p>Cada cuadro tiene un nombre y el hueco correspondiente a cada imagen.  Si tratamos de a&ntilde;adir un nuevo cuadro a la galer&iacute;a veremos que hay un campo de texto para el nombre, pero no hay forma de subir una imagen.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/575/original/E253I02.png" width="800" height="351" alt="Los nuevos cuadros sólo pueden tener un nombre."/>
+</div>
+
+<p>&iquest;C&oacute;mo implementar la funcionalidad de adjuntar una imagen a un cuadro?  La gema Paperclip, que ya vimos en el episodio 134  [<a href="http://railscasts.com/episodes/134-paperclip">verlo</a>, <a href="http://railscasts.com/episodes/134-paperclip">leerlo</a>], puede controlar campos de ficheros adjuntos en modelos de Rails, pero esta vez vamos a utilizar una nueva gema llamada <a href="https://github.com/jnicklas/carrierwave">CarrierWave</a>.</p>
+
+<p>CarrierWave es m&aacute;s flexible que Paperclip.   Est&aacute; basado en Rack, lo que significa que funciona con Rails, Sinatra y cualquier otro <em>framework</em> sobre Rack, y soporta varios ORMs incluyendo ActiveRecord, DataMapper y Mongoid.  Otra diferencia importante entre CarrierWave y Paperclip es que CarrierWave lo mantiene todo en una clase separada a donde va a parar toda la l&oacute;gica de procesamiento de los ficheros adjuntos.  De esta forma la gesti&oacute;n de ficheros adjuntos no acaba dispersa por las clases de modelos de la aplicaci&oacute;n.</p>
+
+<h3>Instalaci&oacute;n de CarrierWave</h3>
+
+<p>Lo primero es a&ntilde;adir la gema CarrierWave a nuestra aplicaci&oacute;n.  La gema se instala como es habitual a&ntilde;adiendo una referencia en el fichero <code>Gemfile</code> de la aplicaci&oacute;n.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem &#x27;carrierwave&#x27;</pre>
+
+<p>Tenemos que ejecutar la orden <code>bundle</code> para que la gema quede instalada en nuestro sistema.  Una vez est&eacute; instalado lo primero que tenemos que hacer es generar la clase que gestionar&aacute; las subidas.  CarrierWave viene con  un generador llamado <code>uploader</code> que hace precisamente esto y al cual se le pasa el nombre que queremos dar a dicha clase, en este caso <code>image</code>.</p>
+
+<pre class="terminal">$ rails g uploader image
+      create  app/uploaders/image_uploader.rb</pre>
+
+<p>El generador crear&aacute; un nuevo directorio llamado <code>uploaders</code> bajo el directorio <code>app</code> de la aplicaci&oacute;n, y dentro de &eacute;ste un fichero llamado <code>image_uploader</code>.  En este fichero habr&aacute; varios comentarios explicando c&oacute;mo personalizar la clase.  Por ejemplo hay c&oacute;digo para cambiar la ubicaci&oacute;n de subida, para procesar la imagen despu&eacute;s de subirla y para restringir el tipo de los archivos que se pueden subir.  Dejaremos los valores por defecto y ya lo personalizaremos todo m&aacute;s tarde.</p>
+
+<p>A continuaci&oacute;n tenemos que a&ntilde;adir esta clase al modelo <code>Painting</code>.  Necesitamos una columna en la tabla <code>paintings</code>, as&iacute; que generaremos una migraci&oacute;n para ello.</p>
+
+<pre class="terminal">$ rails g migration add_image_to_paintings image:string</pre>
+
+<p>N&oacute;tese que la nueva columna es una cadena que tiene el mismo nombre que le dimos a la clase cuando la generamos.  Ejecutaremos <code>rake db:migrate</code> para actualizar la base de datos.</p>
+
+<p>Lo siguiente ser&aacute; vincular nuestra clase con el modelo <code>Painting</code> llamando al m&eacute;todo <code>mount_uploader</code> pas&aacute;ndole el nombre de la columna generada anteriormente y la clase.  Tambi&eacute;n tenemos que a&ntilde;adir la columna <code>image</code> a la lista de <code>attr_accessible</code> para que se pueda acceder a ella desde los controladores.</p>
+<p class="codeFilePath">/app/models/painting.rb</p>
+<pre class="ruby">class Painting &lt; ActiveRecord::Base
+  attr_accessible :gallery_id, :name, :image
+  belongs_to :gallery
+  mount_uploader :image, ImageUploader
+end</pre>
+
+<p>Con todo esto ya podemos modificar el formulario de creaci&oacute;n o edici&oacute;n de un cuadro para que tenga un campo de subida de archivo. Tendremos que modificar el formulario para que pueda gestionar adjuntos multiparte a&ntilde;adiendo la opci&oacute;n <code>:html</code> a <code>form_for</code>.</p>
+
+
+<p class="codeFilePath">/app/views/paintings/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for @painting, :html =&gt; {:multipart =&gt; true} do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= f.hidden_field :gallery_id %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.file_field :image %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<h3>Visualizaci&oacute;n de las im&aacute;genes subidas</h3>
+
+<p>Cuando ahora editemos un cuadro veremos que hay un campo de subida de archivos en el formulario a trav&eacute;s del cual podemos subir un fichero de imagen.  Tras hacerlo aparecer&aacute; un mensaje indicando que la subida ha sido correcta, pero la foto a&uacute;n no saldr&aacute; en la galer&iacute;a.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/576/original/E253I03.png" width="800" height="526" alt="La imagen ha sido subida pero no es visible aún."/>
+</div>
+
+<p>Tenemos que mostrar la imagen que se ha subido.  En la plantilla <code>show</code> de <code>GalleryController</code> est&aacute; el c&oacute;digo que recorre cada cuadro de la galer&iacute;a y muestra una imagen por defecto en un <code>div</code>.  Vamos a reemplazarlo por la imagen propiamente dicha utilizando <code>image_tag</code>, que enlazar&aacute; a la <code>image_url</code> de cada objeto <code>Painting</code>.  Este m&eacute;todo devolver&aacute; <code>nil</code> para los cuadros a los que no se haya subido una imagen, por lo que usaremos <code>to_s</code> para que esto funcione con <code>image_tag</code>.</p>
+
+<p class="codeFilePath">/app/views/show.html.erb</p>
+<pre class="ruby">&lt;div id=&quot;paintings&quot;&gt;
+  &lt;% @gallery.paintings.each do |painting| %&gt;
+    &lt;div class=&quot;painting&quot;&gt;
+      &lt;%= image_tag painting.image_url.to_s %&gt;
+      &lt;div class=&quot;name&quot;&gt;&lt;%= painting.name %&gt;&lt;/div&gt;
+      &lt;div class=&quot;actions&quot;&gt;
+        &lt;%= link_to &quot;edit&quot;, edit_painting_path(painting) %&gt; |
+        &lt;%= link_to &quot;remove&quot;, painting, :confirm =&gt; &#x27;Are you sure?&#x27;, :method =&gt; :delete %&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+  &lt;div class=&quot;clear&quot;&gt;&lt;/div&gt;
+&lt;/div&gt;</pre>
+
+<p>Si recargamos la p&aacute;gina ya veremos que aparece la imagen que hemos subido pero ser&aacute; m&aacute;s grande que la imagen por defecto.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/577/original/E253I04.png" width="800" height="526" alt="La imagen se muestra demasiado grande."/>
+</div>
+
+<p>Podemos reescalar la imagen para que se ajuste.  Si miramos en la clase <code>ImageUploader</code> veremos que hay c&oacute;digo comentado para procesar las im&aacute;genes:</p>
+
+<p class="codeFilePath">/app/uploaders/image_uploader.rb</p>
+<pre class="ruby">  # Process files as they are uploaded:
+  # process :scale =&gt; [200, 300]</pre>
+
+<p>No queremos cambiar el tama&ntilde;o de la imagen original, sino que queremos generar una imagen en miniatura diferente y mostrar un enlace a la imagen en tama&ntilde;o original.  La clase <code>ImageUploader</code> dispone de un m&eacute;todo <code>version</code> que har&aacute; esto por nosotros.  El m&eacute;todo <code>process</code> es bastante flexible y recibe un <em>hash</em> de opciones, tras lo cual recorrer&aacute; cada clave, buscando un m&eacute;todo que se llame igual que la clave al que le pasar&aacute; el valor de dicha clave como par&aacute;metros.  Por ejemplo para crear una imagen en miniatura podemos escribir algo como.</p>
+
+
+<p class="codeFilePath">/app/uploaders/image_uploader.rb</p>
+<pre class="ruby"># Create different versions of your uploaded files:
+version :thumb do
+  process :scale =&gt; [50, 50]
+end
+  
+def scale(width, height)
+  # do something
+end</pre>
+
+<p>No nos interesa escribir nosotros el m&eacute;todo de escalado.  Afortunadamente podemos hacer que RMagick haga este trabajo por nosotros, incluyendo el m&oacute;dulo <code>CarrierWave::RMagick</code> para habilitar el funcionamiento con RMagick.  Si vemos la <a href="http://rubydoc.info/gems/carrierwave/0.5.1/CarrierWave/RMagick">documentaci&oacute;n del m&oacute;dulo RMagick</a> veremos los m&eacute;todos que incluye.  Hay m&eacute;todos para reescalar la imagen, incluyendo uno llamado <code>resize_to_limit</code> que cambiar&aacute; el tama&ntilde;o de la imagen pero manteniendo las proporciones.  Para usarlo s&oacute;lo tenemos que descomentar la siguiente l&iacute;nea en nuestra clase:</p>
+
+<p class="codeFilePath">/app/uploaders/image_uploader.rb</p>
+<pre class="ruby">include CarrierWave::RMagick</pre>
+
+<p>Podemos luego descomentar el m&eacute;todo <code>version</code> y llamar a <code>process :resize_to_limit</code> en el bloque.  Este m&eacute;todo recibe un alto y un ancho m&aacute;ximos como argumento.  Nosotros restringiremos el tama&ntilde;o de las miniaturas a un m&aacute;ximo de 200x200.</p>
+
+<p class="codeFilePath">/app/uploaders/image_uploader.rb</p>
+<pre class="ruby">version :thumb do
+ process :resize_to_limit =&gt; [200, 200]
+end</pre>
+
+<p>Para que esto funcione tenemos que incluir la gema RMagick en el <code>Gemfile</code>.</p>
+
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem &quot;rmagick&quot;</pre>
+
+<p>Como siempre, tenemos que ejecutar <code>bundle</code> para instalar la gema.  RMagick depende de ImageMagick, por lo que tenemos que tener instalada la &uacute;ltima versi&oacute;n de &eacute;sta antes de instalar la gema RMagick.  Si usamos OS X podemos instalar ImageMagick mediante HomeBrew o MacPorts.</p>
+
+<p>Para mostrar la miniatura en la vista en lugar de la versi&oacute;n a tama&ntilde;o completo podemos especificar qu&eacute; versi&oacute;n queremos mostrar pas&aacute;ndole un argumento a <code>image_url</code>.</p>
+
+<p class="codeFilePath">/app/views/show.html.erb</p>
+<pre class="ruby">&lt;%= image_tag painting.image_url(:thumb).to_s %&gt;</pre>
+
+<p>Podemos probar esto subiendo la imagen de nuevo de forma que se vuelva a procesar su miniatura.  Tras hacerlo veremos la miniatura en la galer&iacute;a.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/578/original/E253I05.png" width="800" height="526" alt="La imagen ya tiene el tamaño correcto."/>
+</div>
+
+<h3>Subida de im&aacute;genes mediante una URL</h3>
+
+<p>Otra funcionalidad de CarrierWave es la posibilidad de a&ntilde;adir fotograf&iacute;as mediante una URL en lugar de subirlas directamente.  Podemos hacerlo a&ntilde;adiendo en el formulario de subida un nuevo campo llamado <code>remote_image_url</code>.  El nombre es importante, porque cuando CarrierWave ve un campo llamado as&iacute; sabe que tiene que recuperar la imagen a partir de una URL.</p>
+
+<p class="codeFilePath">/app/views/paintings/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for @painting, :html =&gt; {:multipart =&gt; true} do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= f.hidden_field :gallery_id %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.file_field :image %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :remote_image_url, &quot;or image URL&quot; %&gt;
+    &lt;%= f.text_field :remote_image_url %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>Como hemos a&ntilde;adido un nuevo campo al formulario de <code>painting</code> tendremos que a&ntilde;adirlo tambi&eacute;n a la lista de campos en <code>attr_accessible</code> del modelo <code>Painting</code>.</p>
+
+<p class="codeFilePath">/app/models/painting.rb</p>
+<pre class="ruby">class Painting &lt; ActiveRecord::Base
+  attr_accessible :gallery_id, :name, :image, :remote_image_url
+  belongs_to :gallery
+  mount_uploader :image, ImageUploader
+end</pre>
+
+<p>Ahora en el formulario tendremos un campo <code>remote_image_url</code> en el que podemos introducir una URL para a&ntilde;adir una imagen al cuadro sin tener que subirla manualmente.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/579/original/E253I06.png" width="801" height="327" alt="Subida de imagen mediante URL."/>
+</div>
+
+<p>Si ahora enviamos el formulario se descargar&aacute; la imagen remota y se procesar&aacute; su miniatura.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/580/original/E253I07.png" width="800" height="526" alt="Se añade y procesa la imagen remota igual que una subida manualmente."/>
+</div>
+
+<p>Con esto concluimos este episodio, pero CarrierWave va mucho m&aacute;s all&aacute;: se recomienda visitar su documentaci&oacute;n.  Una funcionalidad muy &uacute;til es la posibilidad de hacer que la subida de im&aacute;genes persista a pesar de que se recargue el formulario.  Si se a&ntilde;ade un campo <code>:image_cache</code> al formulario y se produce un error de validaci&oacute;n en el mismo, el archivo subido permanecer&aacute; y no habr&aacute; que subirlo otra vez.  Tambi&eacute;n se puede a&ntilde;adir una caja de selecci&oacute;n para que los usuarios puedan eliminar la imagen, y hacer que los archivos se suban al servicio S3 de Amazon.</p>

@@ -1,0 +1,221 @@
+<p>The topic of internationalization was last covered in episode 138 [<a href="http://railscasts.com/episodes/138-i18n">watch</a>, <a href="http://asciicasts.com/episodes/138-i18n">read</a>]. Por padrão, o Rails guarda as informações sobre internacionalização em arquivos YAML, mas neste episódio mostraremos a você como usar um diferente back-end para isso.</p>
+
+<p>Abaixo está uma página de um site em Rails muito simples que queremos internacionalizar o texto do cabeçalho.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/597/original/E256I01.png" width="800" height="318" alt="The homepage of our application."/>
+</div>
+
+<p>É fácil internacionalizar um pedaço de texto em uma aplicação Rails usando o método tradução, <code>t</code>, mas então precisamos editar um arquivo YAML para cada idioma que nossa aplicação suporta e adicionar uma chave e o texto para aquele idioma. Para aplicações grandes, isto pode rapidamente se tornar tedioso e, de qualquer maneira, não é realmente o trabalho do desenvolvedor escrever todo o texto internacionalizado. Seria muito melhor ofereceer uma interface web que permite ao administrador da aplicação adicionar e editar o texto internacionalizado.</p>
+
+<p>Thankfully the internationalization gem supports several different backends which means that we&rsquo;re not restricted to using YAML, we can choose to use any database backend we want. By default Rails uses a <a href="https://github.com/svenfuchs/i18n/blob/master/lib/i18n/backend/simple.rb">Simple backend</a> which handles loading the YAML files and managing the translations through them. The backend we&rsquo;ll focus on in this episode is the <a href="https://github.com/svenfuchs/i18n/blob/master/lib/i18n/backend/key_value.rb">Key-Value backend</a> which allows us to use any key-value store for managing the translations. There is also an ActiveRecord store which has been extracted out into <a href="https://github.com/svenfuchs/i18n-active_record">a separate gem</a>. This works but as the translations on the page are accessed frequently in every page of the application, ActiveRecord isn&rsquo;t really the best approach. We really want the translations in memory rather than in a SQL database. We could use caching to get around this issue but then we need to worry about expiring the cache when the translations are modified. For these reasons a key-value store is the way to go and its this approach that we&rsquo;ll be demonstrating in this episode.</p>
+
+<h3>Mudando o Back-end</h3>
+
+<p>Primeiro precisamos mudar o texto estático no cabeçalho para que ele use uma tradução no lugar. Vamos apontar para uma chave chamada <code>welcome</code>.</p>
+
+<p class="codeFilePath">/app/views/home/index.html.erb</p>
+<pre class="ruby">&lt;h1&gt;&lt;%= t(&#x27;welcome&#x27;) %&gt;&lt;/h1&gt;</pre>
+
+<p>Então podemos adicionar o texto traduzido no arquivo YAML em inglês.</p>
+
+<p class="codeFilePath">/config/locales/en.yml</p>
+<pre class="ruby">en:
+  welcome: &quot;Welcome&quot;</pre>
+  
+<p>Se nós atualizarmos a página agora, veremos o texto do arquivo YAML sendo mostrado.</p>
+
+<p>Agora que temos algum texto traduzido usando o back-end padrão, vamos mudar ele. No topo do arquivo <code>key_value.rb</code> estão alguns cometários explicando como ele deve ser usado, incluindo um exemplo de como implementar um back-end alternativo.</p>
+
+<pre class="ruby">#   I18n.backend = I18n::Backend::KeyValue.new(Rufus::Tokyo::Cabinet.new(&#x27;*&#x27;))</pre>
+      
+<p>We need to create a new <code>I18n::Backend::KeyValue</code> and pass in the key-value store that we want to use. This will then be used as the backend for the translations. The store needs to be able to respond to three methods, one to get a key&rsquo;s value, one to set it and one to list all of the keys. These are shown in the comments. Most key-value stores in Ruby support these methods and so we can use one them out of the box.</p>
+
+<pre class="ruby"># * store#[](key)         - Used to get a value
+# * store#[]=(key, value) - Used to set a value
+# * store#keys            - Used to get all keys</pre>
+
+<p>We have enough information now to start moving our application&rsquo;s internationalization backend so let&rsquo;s begin. First we&rsquo;ll create a new file in the <code>/config/initializers</code> directory called <code>i18n_backend.rb</code>.</p> 
+
+<p class="codeFilePath">/config/initalizers/i18n_backend.rb</p>
+<pre class="ruby">I18n.backend = I18n::Backend::KeyValue.new({})</pre>
+
+<p>The example in the comments uses a Tokyo Cabinet backend but to get the application up and running we&rsquo;ve used an empty hash. Obviously we wouldn&rsquo;t do this in a real application but as it&rsquo;s the simplest thing that supports the three methods listed above it&rsquo;ll do for demonstration purposes. If we restart our application now and go to the home page we&rsquo;ll see that the title doesn&rsquo;t look right any more.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/598/original/E256I02.png" width="800" height="314" alt="The translation is missing from the new backend."/>
+</div>
+
+<p>If we look at the source code we&rsquo;ll see that we now have a missing translation.</p>
+
+<pre class="erb">
+&lt;h1&gt;&lt;span class=&quot;translation_missing&quot;&gt;en, welcome&lt;/span&gt;&lt;/h1&gt;
+</pre>
+
+<p>As the application is now using its new backend, the translation is marked as missing. Even though it&rsquo;s still there in the YAML file, it&rsquo;s not in our new backend. We&rsquo;ll create the web interface now to enable users to add translations to the new backend. This will all be handled by a new <code>TranslationsController</code> with one action, <code>index</code>.</p>
+
+<pre class="terminal">$ rails g controller translations index</pre>
+
+<p>We want this new controller to behave like a resource so we&rsquo;ll replace the generated route (<code>get &quot;translations/index&quot;</code>) in the routes file with a call to <code>resources</code>.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Intn::Application.routes.draw do
+  resources :translations
+  root :to =&gt; &quot;home#index&quot;
+end</pre>
+
+<p>In the <code>index</code> action we want to display the existing translations and so we&rsquo;ll need to get the translations hash from the new backend store. We can do that by called <code>I18n.backend.store</code>.</p>
+
+<p class="codeFilePath">/app/controllers/translations_controller.rb</p>
+<pre class="ruby">class TranslationsController &lt; ApplicationController
+  def index
+    @translations = I18n.backend.store
+  end
+end</pre>
+
+<p>In the view we can then iterate through the translations and display them.</p>
+
+<p class="codeFilePAth">/app/views/translations/index.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Translations&lt;/h1&gt;
+
+&lt;ul&gt;
+  &lt;% @translations.each do |key, value| %&gt;
+    &lt;li&gt;&lt;%= key %&gt;: &lt;%= value %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;</pre>
+
+<p>This code loops through all of the translations in the hash and displays each key and value in a list. We&rsquo;ll need a way to add new translations so we&rsquo;ll add a form below the list.</p>
+
+<p class="codeFilePath">/app/views/translations/index.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Translations&lt;/h1&gt;
+
+&lt;ul&gt;
+  &lt;% @translations.each do |key, value| %&gt;
+    &lt;li&gt;&lt;%= key %&gt;: &lt;%= value %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;
+
+&lt;h2&gt;Add Translation&lt;/h2&gt;
+&lt;%= form_tag translations_path do %&gt;
+ &lt;p&gt;
+   &lt;%= label_tag :locale %&gt;&lt;br /&gt;
+   &lt;%= text_field_tag :locale %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= label_tag :key %&gt;&lt;br /&gt;
+    &lt;%= text_field_tag :key %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= label_tag :value %&gt;&lt;br /&gt;
+    &lt;%= text_field_tag :value %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= submit_tag &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>This form will POST to the <code>TranslationController</code>&rsquo;s <code>create</code> action. The form has three fields: one for the translation&rsquo;s locale, such as <code>en</code> for English;  one for the key, which is how we&rsquo;ll identify the translation in the view files, and one for the translated text itself.</p>
+
+<p>In the <code>create</code> action we want to add a new translation based on the supplied form values and we can do that by calling <code>I18n.backend.store_translations</code>. This takes three arguments: the first is the locale, which we get from the form and the second is a hash and can be anything we want. We&rsquo;ll pass in the key and value from the form fields. The final argument, <code>escape</code>, determines if the full stops are escaped in the key or not. We&rsquo;ll use full stops to separate different parts of the key so we&rsquo;ll set it to <code>false</code>.</p>
+
+<p class="codeFilePath">/app/controllers/translations_controller.rb</p>
+<pre class="ruby">def create
+  I18n.backend.store_translations(params[:locale], &crarr;
+    {params[:key] =&gt; params[:value]}, :escape =&gt; false)
+  redirect_to translations_url, :notice =&gt; &quot;Added translations&quot;
+end</pre>
+
+<p>We can try the new form out by adding the missing translation from the home page.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/599/original/E256I03.png" width="800" height="460" alt="Adding the new translation through the admin interface."/>
+</div>
+
+<p>When we go back to the home page now we&rsquo;ll see the translated header fetched from our new backend.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/600/original/E256I04.png" width="801" height="315" alt="The translation from the new backend"/>
+</div>
+
+<h3>Using Redis For The Backend</h3>
+
+<p>Our new backend works well now but as we&rsquo;re storing the values in a Ruby hash they&rsquo;re all lost when we restart the web server. We need a more persistent store for the translations and for this application we&rsquo;re going to use <a href="http://redis.io">Redis</a> which is a simple persistent key-value store.</p> 
+
+<p>If you&rsquo;re using a Mac the easiest way to install Redis is via <a href="https://github.com/mxcl/homebrew">HomeBrew</a>. To install it this way we need to run</p>
+<pre class="terminal">$ brew install redis</pre>
+
+<p>Once its installed follow the instructions to start the Redis server. This is generally as straightforward as running <code>redis-server</code>.</p>
+
+<p>We&rsquo;ll have to install the Redis gem to use Redit in our application. This is done by adding a reference to the gem in our <code>Gemfile</code> and then running the <code>bundle</code> command.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;redis&#x27;</pre>
+
+<p>We can now replace the hash in the backend initializer with a Redis database.</p>
+
+<p class="codeFilePath">/config/initializers/i18n_backend.rb</p>
+<pre class="ruby">I18n.backend = I18n::Backend::KeyValue.new(Redis.new)</pre>
+
+<p>That&rsquo;s all that&rsquo;s really necessary, although we might want to use the <code>:db</code> option to specify a database and to change the database that&rsquo;s used depending on whether the application&rsquo;s running in development, test or production mode.</p>
+
+<p>As we&rsquo;ve changed the key-value store we&rsquo;ll need to change the translations view code, too.  Currently it loops through a hash, but it now will be looping through a Redis database so we&rsquo;ll need to change the following piece of code:</p>
+
+<p class="codeFilePath">/app/views/translations/index.html.erb</p>
+<pre class="ruby">&lt;ul&gt;
+  &lt;% @translations.each do |key, value| %&gt;
+    &lt;li&gt;&lt;%= key %&gt;: &lt;%= value %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;to this:
+/app/views/translations/index.html.erb
+&lt;ul&gt;
+  &lt;% @translations.keys.each do |key| %&gt;
+    &lt;li&gt;&lt;%= key %&gt;: &lt;%= @translations[key] %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;</pre>
+
+<p>Now <code>@translations</code> points to a Redis database instance. which doesn&rsquo;t respond to <code>each</code>, so we&rsquo;ll need to iterate instead over its <code>keys</code>. In the block we can show the key and the value for that key.</p> 
+
+<p>We now have a persistent store for our translations and any that we add through the form will survive when the application&rsquo;s server is restarted.</p>
+
+<h3>Adding a Fallback Backend</h3>
+
+<p>We now have our alternative backend in place but what if we&rsquo;d still like to use the YAML files for some of the translations? We&rsquo;ll show you next how to use the YAML file as a fallback for values that aren&rsquo;t available in the key-value store.</p> 
+
+<p>To do this we need to make some changes to the way we define the backend in the initializer file that we created earlier. Instead of using a <code>KeyValue</code> backend directly we&rsquo;ll use a <code>Chain</code> backend. Any backends that we pass in to the <code>Chain</code> backend will be called in order until one of them responds to a given translation key.</p>
+
+<p class="codeFilePath">/config/initializers/i18n_backend.rb</p>
+<pre class="ruby">I18n.backend = I18n::Backend::Chain.new(I18n::Backend::KeyValue.new(Redis.new), I18n.backend)</pre>
+
+<p>We pass in our Redis backend first and then the default backend. Our application will now look for translations in the Redis database and, if it fails to find the appropriate key there, will look in the appropriate YAML file.</p>
+
+<p>Initalizing the backend this way makes it more difficult to access the key-value store directly. To get around this we can move our database out into a constant.</p>
+
+<p class="codeFilePath">/config/initializers/i18n_backend.rb</p>
+<pre class="ruby">TRANSLATION_STORE = Redis.new
+I18n.backend = I18n::Backend::Chain.new(I18n::Backend::KeyValue.new(TRANSLATION_STORE), I18n.backend)</pre>
+
+<p>We can now use this constant wherever we need to access the key-value store in our application, such as inside the <code>TranslationsController</code>. We can no longer call <code>I18n.backend.store</code> here.</p>
+
+<p class="codeFilePath">/app/controllers/translations_controller.rb</p>
+<pre class="ruby">def index
+  @translations = TRANSLATION_STORE
+end</pre>
+
+<p>If we remove the stored translations from our Redis store and go to the home page now we&rsquo;ll see the translated text from the YAML file.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/601/original/E256I05.png" width="800" height="452" alt="The translation now comes from the fallback backend."/>
+</div>
+
+<p>When we add the translation back in it will take precedence and we&rsquo;ll see the value from the Redis database.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/602/original/E256I06.png" width="800" height="452" alt="The translation now comes from the Redis database again."/>
+</div>
+
+<p>That&rsquo;s it for this episode. We now have a system in place that lets us edit translations through a web interface rather than by having to manually edit YAML files. If we were to do something like this in a production application there&rsquo;s plenty that could be done to improve the user experience, but the basics are there.</p> 
+
+<p>If you want information about this topic then it&rsquo;s well worth taking a look at Jos&eacute; Valim&rsquo;s upcoming book &ldquo;<a href="http://pragprog.com/titles/jvrails/crafting-rails-applications">Crafting Rails Applications</a>&rdquo; which is currently in beta and which was a great help in writing this episode.</p>

@@ -1,0 +1,271 @@
+<p>たとえば書籍販売サイトを開発しているとしましょう。まだ基本的な機能しかなく、新しい本の名前を登録できるだけです。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/606/original/E258I01.png" width="800" height="345" alt="簡単な書籍販売サイト"/>
+</div>
+
+<p>ある本に対して著者を登録しようと思います。このアプリケーションでは、<code>Book</code>(書籍)と<code>Author</code>(著者)が、<code>Authorship</code>(執筆)という結合用モデルを介して多対多の関係にあり、それに基づいてすでにある程度コードが書かれています。<code>Book</code>モデルを見てみましょう。</p>
+
+<p class="codeFilePath">/app/models/book.rb</p>
+<pre class="ruby">class Book &lt; ActiveRecord::Base
+  attr_accessible :name
+  has_many :authorships
+  has_many :authors, :through =&gt; :authorships
+end</pre>
+
+<p>この関連づけにより、書籍は複数の(<code>has_many</code>)著者によって執筆されます(<code>Authorship</code>)。これは標準的な<code>has_many :through</code>の関係です。</p> 
+
+<p>この多対多の関係を、フォームではどう扱えばいいでしょうか? 一つの方法は、チェックボックスを利用するやり方で、エピソード17[<a href="http://railscasts.com/episodes/17-habtm-checkboxes">動画を見る</a>, <a href="http://asciicasts.com/episodes/17-habtm-checkboxes">読む</a>]で紹介しました。ここでの問題は、選択対象の著者の数が多すぎて、チェックボックスを並べるのが現実的ではないという点です。そこで、たとえばテキストボックスに著者名を入力するにしたがって著者リストから自動補完され、複数の著者を登録できるようになっていれば、ずっと使いやすいのではないでしょうか? これは、Facebookでメッセージを送信するときのインターフェイスに似ていて、多対多の関係をうまく処理しています。</p>
+
+<div class="imageWrapper">
+  <img src="system/photos/607/original/E258I02.png" width="803" height="386" alt="アプリケーションの完成イメージ"/>
+</div>
+
+<p>今回のエピソードではjQueryプラグインを使ってこの機能をRailsアプリケーションに実装する方法を紹介します。</p>
+
+<h3>Tokeninput(トークン入力)</h3>
+
+<p>これを実現する一つの選択肢は、jQuery UIの<a href="http://jqueryui.com/demos/autocomplete/">Autocomplete プラグイン</a>を利用する方法です。しかしこの場合、トークン入力を扱うためにコードをかなりカスタマイズする必要があります。他のよりよい選択肢としては、<a href="http://loopj.com/jquery-tokeninput/">jQuery Tokeninput</a>があります。これはまさにここで作りたい機能を実現し、テーマをいくつかの中から選択することもできます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/608/original/E258I03.png" width="800" height="345" alt="jQuery Tokeninputサイトのデモ画面"/>
+</div>
+
+<p>このプラグインを利用するテキストフィールドは、コンマ区切りの数値<code>id</code>のリストを受け取り、サーバ側で簡単に分解できます。(このidがどこから来るかは、後ほど説明します。)</p> 
+
+<p>プラグインは以下のファイルで構成されています。今回のアプリケーションで使用するために、<code>jquery.tokeninput.js</code>ファイルを<code>public/javascripts</code>ディレクトリにコピーし、<code>styles</code>ディレクトリ内のファイルを<code>public/stylesheets</code>にコピーします。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/609/original/E258I04.png" width="803" height="284" alt="Tokeninputプラグインのディレクトリ構造"/>
+</div>
+
+<p>アプリケーションでjQueryを使用する設定をまだ行っていなかったので、<code>jquery-rails</code> gemを<code>Gemfile</code>に追加し、<code>bundle</code>コマンドを実行してインストールします。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.5'
+gem 'sqlite3'
+gem 'nifty-generators'
+gem 'jquery-rails'</pre>
+
+<p>次のコマンドでjQueryをインストールします。</p>
+
+<pre class="terminal">$ rails g jquery:install</pre>
+
+<p>最後に、TokeninputのJavaScriptとCSSのファイルを、アプリケーションのレイアウトファイルにincludeします。</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+  &lt;head&gt;
+    &lt;title&gt;&lt;%= content_for?(:title) ?yield(:title) : ↵
+      "Untitled" %&gt;&lt;/title&gt;
+    &lt;%= stylesheet_link_tag "application", "token-input" %&gt;
+    &lt;%= javascript_include_tag :defaults, "jquery.tokeninput" %&gt;
+    &lt;%= csrf_meta_tag %&gt;
+    &lt;%= yield(:head) %&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+  &lt;!-- Rest of file... --&gt;</pre>
+  
+<p>これですべての設定が終わったので、著者フィールドを追加します。まずフォームに新規のテキストフィールドを追加し、名前を<code>author_tokens</code>とします。</p>
+
+<p class="codeFilePath">/app/views/books/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for @book do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :author_tokens, "Authors" %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :author_tokens %&gt;    
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p><code>Book</code>モデルには<code>author_tokens</code>という属性はないので、ここでgetter、setterメソッドを追加します。</p>
+
+<p class="codeFilePath">/app/models/book.rb</p>
+<pre class="ruby">class Book &lt; ActiveRecord::Base
+  attr_accessible :name, :author_tokens
+  has_many :authorships
+  has_many :authors, :through =&gt; :authorships
+  attr_reader :author_tokens
+  
+  def author_tokens=(ids)
+    self.author_ids = ids.split(",")
+  end
+  
+end</pre>
+
+<p>getterメソッドには、<code>attr_reader</code>を使用できます。setterの方は少し複雑で、テキストフィールドから送信されたカンマ区切りのidのリストを分解する必要があります。setterメソッドでは、受け取ったリストを別々のidに分割し、<code>author_ids</code>にそのリストの値を入れて、その本の著者として設定します。最後にこの新しく作ったフィールドを<code>attr_accessible</code>のリストに追加し、フォームからどちらも受け付けられるようにします。</p>
+
+<p>フォームを再度読み込むと、新しい<code>Authors</code>フィールドが表示されます。idを直接このフィールドに入力することもできますが、ここではTokeninputプラグインを使いたいので、このフィールドで動作するよう設定していきます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/610/original/E258I05.png" width="800" height="386" alt="authorフィールドに直接idを追加する"/>
+</div>
+
+<p><a href="http://loopj.com/jquery-tokeninput/">Tokeninputのページ</a>には、プラグインの使い方のドキュメントがあります。ここでは、テキストフィールドで<code>tokenInput</code>を呼び出してURLを渡します。URLは、次のようなフォーマットのJSONを返し、ユーザが入力するにしたがって自動補完リストに項目が表示されます。</p>
+
+<pre class="javascript">[
+    {"id":"856","name":"House"},
+    {"id":"1035","name":"Desperate Housewives"},
+    ...
+]</pre>
+
+<p>リストをフィルタリングする場合は、テキストボックスのテキストがURLの検索文字列に<code>q</code>という引数として渡されます。</p>
+
+<p>それでは、これをアプリケーションに組み込みましょう。まずauthor_tokensにトークン入力の機能を付加するJavaScriptを記述します。このコードは<code>application.js</code>ファイルに置きます。</p>
+
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $('#book_author_tokens').tokenInput('/authors.json', { crossDomain: false });
+});</pre>
+
+<p>このコードは<code>id</code>を使ってauthor_tokensというテキストボックスを探し、それに対して<code>tokenInput</code>を呼び出してプラグインを有効化してURLをわたします。するとJSONが返され、自動補完候補として表示されます。このURLは<code>/authors.json</code>になります。これを処理するコードを次に記述します。いくつかのオプションを、第２引数として<code>tokenInput</code>関数に対して渡します。ここでは<code>crossDomain:false</code>オプションを指定して、結果がJSONPとして送られないようにする必要があるようです。このオプションによって、応答が標準的なJSONフォーマットで送信されます。</p>
+
+<p>次に、設定したURLが正しく動作するようにします。すでに<code>AuthorsController</code>があるので、あとは<code>index</code>アクションがJSONリクエストに応答できるようにします。そのために、ブロック内に２つのフォーマット用の<code>respond_to</code>の呼び出しを追加します。ひとつはデフォルトのHTML、もう一つはJSONで、著者のリストをJSONフォーマットで返します。</p>
+
+<p class="codeFilePath">/app/controllers/authors_controller.rb</p>
+<pre class="ruby">class AuthorsController &lt; ApplicationController
+  def index
+    @authors = Author.all
+    respond_to do |format|
+      format.html
+      format.json { render :json =&gt; @authors }
+    end
+  end
+end</pre>
+
+<p><code><a href="http://localhost:3000/authors.json">http://localhost:3000/authors.json</a></code>にアクセスすると、URLが返すJSONが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/611/original/E258I06.png" width="800" height="386" alt="authors.jsonから返されたJSON"/>
+</div>
+
+<p>これで著者のリストをJSONフォーマットで返すことができますが、それぞれの要素が<code>author</code>オブジェクト内にネストされています。しかしこれはTokeninputが求める形式ではありません。引数の<code>id</code>と<code>name</code>が配列になっていなくてはいけません。もし処理対象のモデルが<code>name</code>属性をもっていなければ、カスタマイズして追加しなければいけません。しかしここで必要なのは、リストの各要素からルートのauthorオブジェクトを削除することです。ルート項目を全体的に削除する方法はいくつかありますが、とりあえずここでは応急処置として、それぞれの著者の属性リストに配列をマッピングします。</p>
+
+<p class="codeFilePath">/app/controllers/authors_controller.rb</p>
+<pre class="ruby">def index
+  @authors = Author.all
+  respond_to do |format|
+    format.html
+    format.json { render :json =&gt; @authors.map(&amp;:attributes) }
+  end
+end</pre>
+
+<p>ここでページを再度読み込むとルート項目は削除されていて、各著者についてTokeninputが扱えるフォーマットの属性リストができています。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/612/original/E258I07.png" width="800" height="386" alt="Tokeninputが分解できる形式の修正版JSON"/>
+</div>
+
+<p><code>id</code>と<code>name</code>以外の属性はTokeninputに無視されるので問題ありませんが、本番のアプリケーションでは送信データを最小限にするために削除することを検討した方がいいでしょう。</p> 
+
+<p>新規書籍の登録フォームにアクセスして試してみましょう。著者フィールドでタイピングを始めるとすべての著者のリストが返されるのがわかります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/613/original/E258I08.png" width="800" height="386" alt="自動補完リストがすべての著者を表示する"/>
+</div>
+
+<p>ここは、すべての著者ではなく、名前が検索語に一致する著者だけが返されるように変更します。<code>AuthorsController</code>で、検索文字列の引数<code>q</code>でコントローラに渡されたテキストボックスのテキストによって、全著者のリストをフィルタリングします。</p>
+
+<p class="codeFilePath">/app/controllers/authors_controller.rb</p>
+<pre class="ruby">def index
+  @authors = Author.where("name like ?", "%#{params[:q]}%")
+  respond_to do |format|
+    format.html
+    format.json { render :json =&gt; @authors.map(&amp;:attributes) }
+  end
+end</pre>
+
+<p><code>Author.all</code>を<code>Author.where</code>に置き換え、渡された検索語にLIKEで部分一致する著者名を検索します。検索語が%記号で挟まれているので、名前フィールドの一部分でも一致したものがヒットします。もう一度著者を検索すると、今度は検索にヒットした名前だけが返されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/614/original/E258I09.png" width="800" height="386" alt="リストはテキストボックスの文字列でフィルタリングされる"/>
+</div>
+
+<p>これで自動補完フィールドが正しくフィルタリングしているので、試しに本を追加してみましょう。著者が二人いる書籍を作成すると正しく保存され、その後リダイレクトされたその書籍のページをみると著者が二人表示されているのがわかります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/615/original/E258I10.png" width="800" height="394" alt="保存後、書籍に著者が正しく追加されている"/>
+</div>
+
+<h3>書籍情報を編集する</h3>
+
+<p>しかしここで書籍情報を編集するときに問題があります。フォームに書籍の著者が表示されません。表示の前にフォームに著者名を渡さなくてはいけません。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/616/original/E258I11.png" width="800" height="394" alt="書籍情報の編集時に著者が表示されない"/>
+</div>
+
+<p>Tokeninputプラグインには<code>prePopulate</code>というオプションがあり、JSONデータを渡すとそれに基づいてリストデータを生成します。<code>application.js</code>ファイル内で<code>tokenInput</code>を呼び出すときにこのオプションを追加できますが、関連のデータをどう渡せばいいのでしょうか? ひとつの方法は、テキストフィールドにHTML 5データ属性を追加してそこからデータを読むやりかたです。今回はこの方法を試してみましょう。</p>
+
+<p class="codeFilePath">/app/views/books/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for @book do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :author_tokens, "Authors" %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :author_tokens, "data-pre" =&gt; ↵
+      @book.authors.map(&amp;:attributes).to_json %&gt;    
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>属性を<code>data-pre</code>と呼ぶことにします。その値は、自動補完リスト用にJSONを生成するのと同じ方法で、書籍の著者の属性に設定されます。</p> 
+
+<p>このデータをJavaScriptファイルから読めるので、著者リストを表示できるようになります。</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $('#book_author_tokens').tokenInput('/authors.json', { 
+    crossDomain: false,
+    prePopulate: $('#book_author_tokens').data('pre')
+  });
+});</pre>
+
+<p>編集ページを読み込むと、著者リストにデータが表示されるのがわかります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/617/original/E258I12.png" width="800" height="443" alt="著者が表示されるようになった"/>
+</div>
+
+<p>著者情報を更新してみましょう。例えば、一人削除して別の一人を追加すると、どちらも正しく更新されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/618/original/E258I13.png" width="800" height="443" alt="著者情報が正しく更新される"/>
+</div>
+
+<h3>テーマ</h3>
+
+<p>テーマは現在Tokeninputプラグインに標準で含まれるデフォルトのものを使っています。これを変更する場合は２ヶ所を修正する必要があります。一つ目はレイアウトファイルで、Tokeninput CSSファイルをデフォルトの<code>token-input</code>から希望のものに変更します。Facebookというテーマが利用できるので、デモの目的で使用してみます。</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= stylesheet_link_tag "application", "token-input-facebook" %&gt;</pre>
+
+<p>次にTokeninputフィールドを生成するJavaScriptファイルを編集して、テーマオプションを変更します。</p> 
+
+<pre class="codeFilePath">/public/javascripts/application.js</pre>
+<pre class="javascript">$(function () {
+  $('#book_author_tokens').tokenInput('/authors.json', { 
+    crossDomain: false,
+    prePopulate: $('#book_author_tokens').data('pre'),
+    theme: 'facebook'
+  });
+});</pre>
+
+<p>ここでは好きなテーマを設定し、アプリケーションに合うようにカスタマイズ可能です。編集ページを再読み込みすると、新しいテーマが適用されているのがわかります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/619/original/E258I14.png" width="800" height="390" alt="Facebookテーマを用いた自動補完テキストフィールド"/>
+</div>
+
+<p>今回のエピソードはこれで終わりです。TokeninputはRailsのフォームで多対多の関係を処理する優れた方法で、その素晴らしさをここで示すことができたと願っています。</p>

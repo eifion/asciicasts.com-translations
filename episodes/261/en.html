@@ -1,0 +1,334 @@
+<p>Most Rails developers understand the value of testing the Ruby code in their applications, but JavaScript is often only manually tested by running the application in a browser and checking for errors. As web applications become more complex and have more functionality on the client it would be good to have an automated way of testing JavaScript code. We&rsquo;ll take a look at one way of doing just that in this episode.</p>
+
+<p>The application we&rsquo;ll be working with is shown below. It has a basic order form with a text field for a credit card number. We want to add some client-side validation to this field so that the number entered is validated when the field loses the focus.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/629/original/E261I01.png" width="800" height="387" alt="The order page with the credit card field."/>
+</div>
+
+<p>We&rsquo;re not adding full credit card validation here but the logic is still fairly complicated so we want to make sure that this code is fully tested. We could consider using acceptance tests which were covered in episode 257 [<a href="http://railscasts.com/episodes/257-request-specs-and-capybara">watch</a>, <a href="http://asciicasts.com/episodes/257-request-specs-and-capybara">read</a>]. These allow us to test an application at a high level by using <a href="https://github.com/jnicklas/capybara">Capybara</a> and we can test the JavaScript in our application this way by using <a href="http://seleniumhq.org/">Selenium</a>.</p>
+
+<p>Sometimes, however, the JavaScript is complicated enough that we need something closer to the code itself, something like unit testing for JavaScript, and this is where <a href="http://pivotal.github.com/jasmine/">Jasmine</a> comes in. Jasmine is a testing framework for JavaScript that works in a smiliar way to RSpec with <code>describe</code> and <code>it</code> calls for organising tests. Of course unlike RSpec the tests are written in JavaScript, not Ruby.</p>
+
+<h3>Installing Jasmine</h3>
+
+<p>A gem is available that makes using Jasmine in Rails applications easier so we&rsquo;ll start by adding it to our application and then running <code>bundle</code> to install it. We&rsquo;ll restrict Jasmine to the <code>development</code> and <code>test</code> environments so that it isn&rsquo;t used in production. Note that we&rsquo;re using jQuery in this application. This isn&rsquo;t required to use Jasmine but it helps.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;jquery-rails&#x27;
+gem &#x27;jasmine&#x27;, :group =&gt; [:development, :test]</pre>
+
+<p>Once the gem has installed we need to run a generator to install the files that Jasmine uses.</p> 
+
+<pre class="terminal">$ rails g jasmine:install
+      create  spec
+      create  spec/javascripts/helpers/.gitkeep
+      create  spec/javascripts/support/jasmine.yml
+      create  spec/javascripts/support/jasmine_config.rb
+      create  spec/javascripts/support/jasmine_runner.rb</pre>
+      
+<p>The files are installed in a <code>spec</code> directory. Jasmine is generally used in conjunction with RSpec though we can use it just as well without.</p> 
+
+<h3>Creating Our First Spec</h3>
+
+<p>We&rsquo;re ready now to create our first JavaScript spec. Spec files belong in the 
+<code>/spec/javascripts</code> folder and we&rsquo;ll call this one <code>credit_card_spec.js</code>. (By the way if you use TextMate there&rsquo;s a <a href="https://github.com/pivotal/jasmine-tmbundle">bundle</a> available that provides some useful snippets such as <code>des</code> for creating a new description and <code>it</code> for creating a new it block.) Our first spec will test that the entered number is cleaned by having any dashes and spaces removed.</p>
+
+<p class="codeFilePath">/spec/javascripts/credit_card_spec.js</p>
+<pre class="javascript">describe(&quot;CreditCard&quot;, function() {
+  it(&quot;cleans the number by removing spaces and dashes&quot;, function() {
+    expect(CreditCard.cleanNumber(&quot;123 4-5&quot;)).toEqual(&quot;12345&quot;);
+  });
+});</pre>
+
+<p>Jasmine uses <code>expect</code> rather than the <code>assert</code> you might expect to check that a target has a given value. In our test we check that the <code>cleanNumber</code> method of a <code>CreditCard</code> object returns &ldquo;12345&rdquo; when passed &ldquo;123 4-5&rdquo;. Obviously, as we&rsquo;re doing TDD neither the <code>CreditCard</code> object or the <code>cleanNumber</code> method exist yet.</p>
+
+<p>We can run Jasmine&rsquo;s spec server by running <code>rake jasmine</code>. This will launch a server on point 8888. If we visit that page we&rsquo;ll see the results of running our specs.</p>
+
+
+
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/630/original/E261I02.png" width="800" height="387" alt="Our first failing spec."/>
+</div>
+
+<p>Our spec fails, as expected, and we&rsquo;re going to have to write the code to get it to pass. We&rsquo;ll write the code in a file called <code>credit_card.js</code> in the <code>public/javascripts</code> directory and there we&rsquo;ll create the object, along with an attempt at the <code>cleanNumber</code> function.</p>
+
+<p class="codeFilePath">/public/javascripts/credit_card.js</p>
+<pre class="javascript">var CreditCard = {
+  cleanNumber: function(number) {
+    return number.replace(/[- ]/, &quot;&quot;);
+  }
+}</pre>
+
+<p>When we reload the Jasmine page now we get a different error. Jasmine no longer complains about the missing <code>CreditCard</code> object, but it seems that <code>cleanNumber</code> doesn&rsquo;t remove all of the spaces and dashes.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/631/original/E261I03.png" width="800" height="387" alt="The spec still fails."/>
+</div>
+
+<p>The problem lies with the regular expression which is missing a <code>g</code> to make it a global replace across the whole string.</p>
+
+<p class="codeFilePath">/public/javascripts/credit_card.js</p>
+<pre class="javascript">var CreditCard = {
+  cleanNumber: function(number) {
+    return number.replace(/[- ]/g, &quot;&quot;);
+  }
+}</pre>
+
+<p>We can check that this has fixed the error by reloading the page again. When we do we&rsquo;ll see that we now have a passing spec.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/632/original/E261I04.png" width="795" height="280" alt="The spec now passes."/>
+</div>
+
+<p>Next we&rsquo;ll expand the validation by adding a <a href="http://en.wikipedia.org/wiki/Luhn_algorithm">mod 10 algorithm</a> to perform checksum validation. We&rsquo;ll write a spec with two expectations to test this code, one that expects a valid credit card number to pass and one that expects an invalid one to fail. These expectations will call a new <code>validNumber</code> function, one passing in a <a href="http://www.paypalobjects.com/en_US/vhelp/paypalmanager_help/credit_card_numbers.htm">valid test Visa number</a> that should pass and the other passing in an invalid number which should fail. Note that we have spaces and dashes in the numbers so that we can test that the validation takes these into consideration.</p>
+
+<p class="codeFilePath">/spec/javascripts/credit_card_spec.js</p>
+<pre class="javascript">describe(&quot;CreditCard&quot;, function () {
+  it(&quot;cleans the number by removing spaces and dashes&quot;, function() {
+    expect(CreditCard.cleanNumber(&quot;123 4-5&quot;)).toEqual(&quot;12345&quot;);
+  });
+  
+  it(&quot;validates based on mod 10&quot;, function () {
+    expect(CreditCard.validNumber(&quot;4111 1111 1111-1111&quot;)).toBeTruthy();
+    expect(CreditCard.validNumber(&quot;4111 1111 1111-1121&quot;)).toBeFalsy();
+  });
+});</pre>
+
+<p>When we reload the Jasmine page we again see a failure, this time because it cannot find a <code>validNumber</code> function.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/633/original/E261I05.png" width="795" height="280" alt="The failing spec for the mod10 validation."/>
+</div>
+
+<p>We&rsquo;ll write this function now, adding it to the <code>credit_card.js</code> file.</p>
+
+<p class="codeFilePath">/public/javascripts/credit_card.js</p>
+<pre class="javascript">var CreditCard = {
+  cleanNumber: function(number) {
+    return number.replace(/[- ]/g, &quot;&quot;);
+  },
+  
+  validNumber: function(number) {
+    var total = 0;
+    number = this.cleanNumber(number);
+    for (var i=number.length-1; i &gt;= 0; i--) {
+      var n = parseInt(number[i]);
+      if ((i+number.length) % 2 == 0) {
+        n = n*2 &gt; 9 ? n*2 - 9 : n*2;
+      }
+      total += n;
+    };
+    return total % 10 == 0;
+  }
+}</pre>
+
+<p>When we reload the Jasmine page now we see two passing specs.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/634/original/E261I06.png" width="795" height="280" alt="The mod10 validation now passes."/>
+</div>
+
+<h3>Testing The Validation in The Browser</h3>
+
+<p>Now that we have some working validation we can add it to our site. For testing that the validation works on a web page we&rsquo;ll use Capybara and Selenium. If the page had a lot of complex JavaScript code in it it might be difficult to test the validation code in isolation but this can be done and we&rsquo;ll show you how to do that now by using HTML fixtures.</p>
+
+<p><a href="https://github.com/velesin/jasmine-jquery">Jasmine-jquery</a> is, as the name suggests, a jQuery extension for Jasmine. This provides fixture support, which means that we can test JavaScript against a simple HTML fragment. It also includes a long list of matchers that we can use with expect.  We can install jasmine-jquery by running the following <code>curl</code> command, which will download the file to the <code>spec/javascripts/helpers</code> directory so that it&rsquo;s included automatically.</p>
+
+<pre class="terminal">$ curl http://cloud.github.com/downloads/velesin/jasmine-jquery/jasmine-jquery-1.2.0.js &gt; spec/javascripts/helpers/jasmine_jquery-1.2.0.js</pre>
+
+<p>We&rsquo;ll need to make a change to <code>src_files</code> section the <code>jasmine.yml</code> file in the <code>spec/javascripts/support</code> directory as this is configured to use Prototype by default:</p>
+
+<p class="codeFilePath">/spec/javascripts/support/jasmine.yml</p>
+<pre class="ruby">src_files:
+  - public/javascripts/prototype.js
+  - public/javascripts/effects.js
+  - public/javascripts/controls.js
+  - public/javascripts/dragdrop.js
+  - public/javascripts/application.js
+  - public/javascripts/**/*.js</pre>
+
+<p>We&rsquo;ll replace these references with a reference to jQuery. By default every other file in the <code>javascripts</code> directory is included but this can lead to problems so instead we&rsquo;ll include each file manually. This will also ensure that we get the load dependencies in the right order.</p>
+
+<p class="codeFilePath">/spec/javascripts/support/jasmine.yml</p>
+<pre class="ruby">src_files:
+  - public/javascripts/jquery.js
+  - public/javascripts/credit_card.js</pre>
+
+<p>We&rsquo;re going need a directory for the fixture files so we&rsquo;ll create one at <code>/spec/javascript/fixtures</code>. In there we&rsquo;ll create a file called <code>order_form.html</code> that will contain a simple HTML form that will enable us to test our credit card validation. All it needs is a text field with an <code>id</code> so that we can reference it from JavaScript and a <code>div</code> to display any errors.</p>
+
+<pre class="ruby">/spec/javascripts/fixtures/order_form.html</pre>
+<pre class="javascript">&lt;form&gt;
+  &lt;input type=&quot;text&quot; id=&quot;card_number&quot;&gt;
+  &lt;div id=&quot;card_number_error&quot;&gt;&lt;/div&gt;
+&lt;/form&gt;</pre>
+
+<p>To make our credit card validation code easier to use we&rsquo;ll turn it into a jQuery plugin that we&rsquo;ll call <code>validateCreditCardNumber</code>. This plugin will validate the value of any text field it&rsquo;s attached to and fire when the field loses the focus. If there are any validation errors it will set the text of the element whose <code>id</code> is the same as the text field but with <code>_error</code> appended to it.</p>
+
+<p>Before we create the plugin we&rsquo;ll write a spec that will use our new fixture to test it.</p>
+
+<p class="codeFilePath">/spec/javascripts/credit_card_spec.js</p>
+<pre class="javascript">describe(&quot;CreditCard&quot;, function () {
+  // Other specs omitted.
+  it(&quot;validates when text field loses focus&quot;, function() {
+    loadFixtures(&quot;order_form.html&quot;);
+    $(&quot;#card_number&quot;).validateCreditCardNumber();
+    $(&quot;#card_number&quot;).val(&quot;123&quot;);
+    $(&quot;#card_number&quot;).blur();
+    expect($(&quot;#card_number_error&quot;)).toHaveText(&quot;Invalid credit &crarr;
+      card number.&quot;);
+  });
+});</pre>
+
+<p>In this spec we load the fixture by calling <code>loadFixtures</code> then call our new plugin on the text field. We then set the text field&rsquo;s value to an invalid credit card number and call <code>blur()</code> on it to cause the plugin to fire. Finally we check that the element that shows the error message has the right error message in it by using the custom matcher <code>toHaveText</code> that jasmine-jquery provides. As expected when we reload the Jasmine page now we see a failing spec as jQuery doesn&rsquo;t know about <code>validateCreditCardNumber</code>.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/635/original/E261I07.png" width="795" height="280" alt="The failing spec for the jQuery plug in."/>
+</div>
+
+<p>To fix this we&rsquo;ll write the <code>validateCreditCardNumber</code> jQuery plugin. This plugin will listen to the <code>blur</code> event for any elements it&rsquo;s attached to and will validate that element&rsquo;s value when the event fires. It then uses the <code>validNumber</code> function we wrote earlier to check that the number is valid and, if not, will show an error.</p>
+
+<p class="codeFilePath">/public/javascripts/credit_card.js</p>
+<pre class="javascript">var CreditCard = {
+  cleanNumber: function(number) {
+    return number.replace(/[- ]/g, &quot;&quot;);
+  },
+  
+  validNumber: function(number) {
+    var total = 0;
+    number = this.cleanNumber(number);
+    for (var i=number.length-1; i &gt;= 0; i--) {
+      var n = parseInt(number[i]);
+      if ((i+number.length) % 2 == 0) {
+        n = n*2 &gt; 9 ? n*2 - 9 : n*2;
+      }
+      total += n;
+    };
+    return total % 10 == 0;
+  }
+}
+
+(function ($){
+  $.fn.validateCreditCardNumber = function () {
+    return this.each(function () {
+      $(this).blur(function () {
+        if (!CreditCard.validNumber(this.value)) {
+          $(&quot;#&quot; + this.id + &quot;_error&quot;).text(&quot;Invalid credit card number.&quot;);
+        }
+      });
+    });
+  };
+})(jQuery);</pre>
+
+<p>If we reload the specs page now the spec passes and our plugin seems to work.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/636/original/E261I08.png" width="795" height="280" alt="The plugin&rsquo;s spec now passes."/>
+</div>
+
+<h3>Integrating the Plugin</h3> 
+
+<p>Now that we&rsquo;ve tested our plugin in isolation we&rsquo;ll try to integrate it into our application. There are three files that we&rsquo;ll need to change. First we&rsquo;ll include our new jQuery plugin in the layout file.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= javascript_include_tag :defaults, &quot;credit_card&quot; %&gt;</pre>
+
+<p>Next we&rsquo;ll update the form that has the credit card field on it by adding an element to display error messages. As the form is for an <code>Order</code> and the field is called <code>credit_card_number</code> then element has to have an <code>id</code> of <code>order_credit_card_number_error</code>.</p>
+
+<p class="codeFilePath">/app/views/orders/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for @order do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :credit_card_number %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :credit_card_number %&gt;
+    &lt;span id=&quot;order_credit_card_number_error&quot;&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :credit_card_expires_on %&gt;&lt;br /&gt;
+    &lt;%= f.date_select :credit_card_expires_on, :add_month_numbers =&gt; true, :start_year =&gt; Time.now.year, :order =&gt; [:month, :year] %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>Finally we&rsquo;ll add some code to <code>application.js</code> to add the validation to the credit card number text field.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(&quot;#order_credit_card_number&quot;).validateCreditCardNumber();
+});</pre>
+
+<p>We can try this out now by visiting the New Order page and entering an invalid credit card number. When we tab out of the credit card number text field the error message appears.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/637/original/E261I09.png" width="800" height="399" alt="The error message shows when an invalid credit card number is entered."/>
+</div>
+
+<p>There&rsquo;s a bug on the page, though. If we change the credit card number to a valid one the error message remains on the page. The message should be hidden if it&rsquo;s showing when a valid number is entered.</p>
+
+<p>Having found a bug the first thing we need to do is write a failing spec for it. In this case we don&rsquo;t need to write a new spec, we can add an expect to the existing card validation spec that checks that the error isn&rsquo;t shown for a valid number.</p>
+
+<p class="codeFilePath">/spec/javascripts/credit_card_spec.js</p>
+<pre class="javascript">describe(&quot;CreditCard&quot;, function () {
+  // Other specs omitted.  
+  it(&quot;validates when text field loses focus&quot;, function() {
+    loadFixtures(&quot;order_form.html&quot;);
+    $(&quot;#card_number&quot;).validateCreditCardNumber();
+    $(&quot;#card_number&quot;).val(&quot;123&quot;);
+    $(&quot;#card_number&quot;).blur();
+    expect($(&quot;#card_number_error&quot;)).toHaveText(&quot;Invalid credit card number.&quot;);
+
+    $(&quot;#card_number&quot;).val(&quot;4111 1111 1111-1111&quot;);
+    $(&quot;#card_number&quot;).blur();
+    expect($(&quot;#card_number_error&quot;)).toHaveText(&quot;&quot;);
+  });
+});</pre>
+
+<p>When we load the Jasmine page we&rsquo;ll see that we&rsquo;ve successfully duplicated the bug and the failing spec is shown. We expect the error <code>div</code> to have no text but instead it shows a message.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/638/original/E261I10.png" width="803" height="280" alt="The failing spec to test that the error isn't shown for a valid number."/>
+</div>
+
+<p>Fixing this bug is fairly simple. We can alter the code in our jQuery plugin so that the error message is hidden if the credit card number that is being validated is valid.</p>
+
+<p class="codeFilePath">/public/javascripts/credit_card.js</p>
+<pre class="ruby">(function ($){
+  $.fn.validateCreditCardNumber = function () {
+    return this.each(function () {
+      $(this).blur(function () {
+        if (!CreditCard.validNumber(this.value)) {
+          $(&quot;#&quot; + this.id + &quot;_error&quot;).text(&quot;Invalid credit &crarr;
+  card number.&quot;);
+        }
+        else {
+          $(&quot;#&quot; + this.id + &quot;_error&quot;).text(&quot;&quot;);
+        }
+      });
+    });
+  };
+})(jQuery);</pre>
+
+<p>When we reload the Jasmine page now the specs again all pass.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/639/original/E261I11.png" width="803" height="280" alt="The spec now passes."/>
+</div>
+
+<p>Finally we&rsquo;ll test in in the browser again and now, when we enter an invalid number to make the error message show then enter a valid number the error disappears.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/640/original/E261I12.png" width="804" height="386" alt="The error message is now hidden for a valid credit card number."/>
+</div>
+
+<h3>A Tip</h3>
+
+<p>Instead of reloading the page that shows the specs each time we make a change we can instead run <code>rake jasmine:ci</code>. When we do it will open Firefox, run the specs using Selenium and then shows the output in the terminal.</p>
+
+<p>That&rsquo;s it for this episode on Jasmine. Using it in your Rails applications is a great way to test the JavaScript in your application as thoroughly as the Ruby code.</p>

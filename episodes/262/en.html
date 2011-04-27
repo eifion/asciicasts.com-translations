@@ -1,0 +1,234 @@
+<p>Let&rsquo;s say that we have an application that allows us to post messages. The messages page shows a list of all of the messages with a text area below in which we can add a new message.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/641/original/E262I01.png" width="800" height="469" alt="Our messaging application."/>
+</div>
+
+<p>All new messages appear at the bottom of the list. To improve the application we&rsquo;d like to add the ability to thread messages. We&rsquo;ll add a &lsquo;reply&rsquo; link to each message that will allow users to reply to a specific message. The new message should then appear immediately below its parent in the list.</p>
+
+<p>Back in episode 162 [<a href="http://railscasts.com/episodes/162-tree-based-navigation">watch</a>, <a href="http://asciicasts.com/episodes/162-tree-based-navigation">read</a>] we created a tree association using the acts_as_tree plugin. This approach could work here but it wouldn&rsquo;t give the best performance as it requires a separate SQL query for each message to determine that message&rsquo;s children. It would be much better if we could fetch all of the descendants for a message with a single query.</p> 
+
+<p>There are a number of nested set plugins available but the one we&rsquo;re going to use is called <a href="https://github.com/stefankroes/ancestry">Ancestry</a>. One unique feature that it has is that it stores all of the hierarchy information in a single string column, instead of just having a single integer field to store a record&rsquo;s parent&rsquo;s <code>id</code>. This enables each record to store all the information it needs to fetch related records and Ancestry provides a number of methods for this including <code>parent</code>, <code>siblings</code> and <code>children</code>.</p>
+
+<p>To add Ancestry to our application we&rsquo;ll first add a reference to the gem in the application&rsquo;s <code>Gemfile</code> and then run <code>bundle</code> to install it.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.6&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;ancestry&#x27;</pre>
+
+<p>Next we&rsquo;ll need to run a migration to add the Ancestry functionality to the <code>messages</code> table.</p>
+
+<pre class="terminal">$ rails g migration add_ancestry_to_message ancestry:string</pre>
+
+<p>The Ancestry README suggests adding an index to the ancestry field so we&rsquo;ll add that to the migration before running it.</p>
+
+<p class="codeFilePath">/db/migrate/20110418204049_add_ancestry_to_message.rb</p>
+<pre class="ruby">class AddAncestryToMessage &lt; ActiveRecord::Migration
+  def self.up
+    add_column :messages, :ancestry, :string
+    add_index :messages, :ancestry
+  end
+
+  def self.down
+    remove_index :messages, :ancestry
+    remove_column :messages, :ancestry
+  end
+end</pre>
+
+<p>We can now run the migration in the usual way with <code>rake db:migrate</code>.</p> 
+
+<p>The final step is to modify the <code>Message</code> model file and add a call to <code>has_ancestry</code>.</p>
+
+<p class="codeFilePath">/app/models/message.rb</p>
+<pre class="ruby">class Message &lt; ActiveRecord::Base
+  has_ancestry
+end</pre>
+
+<p>That&rsquo;s it. Now we have Ancestry all set up.</p>
+
+<h3>Adding Threading To The Messages</h3>
+
+<p>With Ancestry set up we can now start making changes to our application. The first thing we&rsquo;ll do is modify the view code that renders the list of messages and add a &ldquo;Reply&rdquo; link below each one. This will link to the new message page and, because we need to know which message the new one is a reply to, we&rsquo;ll pass the <code>id</code> of the current message as a <code>parent_id</code> parameter.</p>
+
+<p class="codeFilePath">/app/views/messages/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Messages&quot; %&gt;
+
+&lt;% for message in @messages %&gt;
+  &lt;div class=&quot;message&quot;&gt;
+    &lt;div class=&quot;created_at&quot;&gt;&lt;%= message.created_at.strftime(&quot;%B %d, %Y&quot;) %&gt;&lt;/div&gt;   
+    &lt;div class=&quot;content&quot;&gt;
+      &lt;%= message.content %&gt;
+    &lt;/div&gt;
+    &lt;div class=&quot;actions&quot;&gt;
+      &lt;%= link_to &quot;Reply&quot;, new_message_path(:parent_id =&gt; message) %&gt; |
+      &lt;%= link_to &quot;Destroy&quot;, message, :confirm =&gt; &quot;Are you sure?&quot;, :method =&gt; :delete %&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+&lt;% end %&gt;
+
+&lt;%= render &quot;form&quot; %&gt;</pre>
+
+<p>In the <code>MessageController</code>&rsquo;s <code>new</code> action we&rsquo;ll need to pass that <code>parent_id</code> parameter to the new <code>Message</code>. Ancestry will use this <code>parent_id</code> parameter to set the message&rsquo;s parent.</p>
+
+<p class="codeFilePath">/app/controllers/messages_controller.rb</p>
+<pre class="ruby">def new
+  @message = Message.new(:parent_id =&gt; params[:parent_id])
+end</pre>
+
+<p>Finally inside the form for a new message we&rsquo;ll add that <code>parent_id</code> as a hidden field so that the new message is marked as a child of the message that is being replied to.</p>
+
+<p class="codeFilePath">/app/views/messages/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for @message do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= f.hidden_field :parent_id %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :content, &quot;New Message&quot; %&gt;&lt;br /&gt;
+    &lt;%= f.text_area :content, :rows =&gt; 8 %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit &quot;Post Message&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>We can try this out now. If we reload the messages page we&rsquo;ll see a reply link for each message. Clicking one of the links will be take us to the new message page with the <code>id</code> of the message we&rsquo;re replying to in the query string.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/642/original/E262I02.png" width="800" height="425" alt="The new message form with the parent message&rsquo;s id in the query string."/>
+</div>
+
+<p>It would be good if we could see the message we&rsquo;re replying to displayed on the form. Ideally we&rsquo;d have some kind of AJAX-based functionality that would dynamically show the form inline when a &lsquo;reply&rsquo; link is clicked but to keep our application simple we&rsquo;ll display it on the new message page above the form. To make this easier to do we&rsquo;ll move the code that displays a message out from the index view into a partial.</p>
+
+<p class="codeFilePath">/app/views/messages/_message.html.erb</p>
+<pre class="ruby">&lt;div class=&quot;message&quot;&gt;
+  &lt;div class=&quot;created_at&quot;&gt;&lt;%= message.created_at.strftime(&quot;%B %d, %Y&quot;) %&gt;&lt;/div&gt;
+  &lt;div class=&quot;content&quot;&gt;
+    &lt;%= message.content %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;actions&quot;&gt;
+    &lt;%= link_to &quot;Reply&quot;, new_message_path(:parent_id =&gt; message) %&gt; |
+    &lt;%= link_to &quot;Destroy&quot;, message, :confirm =&gt; &quot;Are you sure?&quot;, :method =&gt; :delete %&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</pre>
+
+<p>We can now update the <code>index</code> view code to use the new partial.</p>
+
+<p class="codeFilePath">/app/views/messages/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Messages&quot; %&gt;
+
+&lt;%= render @messages %&gt;
+
+&lt;%= render &quot;form&quot; %&gt;</pre>
+
+<p>Now, in the new template we can use that partial to render the parent message, if there is one.</p>
+
+<p class="codeFilePath">/app/views/messages/new.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Reply&quot; %&gt;
+
+&lt;%= render @message.parent if @message.parent %&gt;
+
+&lt;%= render &quot;form&quot; %&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;Back to Messages&quot;, messages_path %&gt;&lt;/p&gt;</pre>
+
+<p>If we click &lsquo;reply&rsquo; on an existing message now that message will appear above the form. We&rsquo;ll enter a reply and see what happens.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/643/original/E262I03.png" width="800" height="493" alt="The message that is being replied to is now shown above the form."/>
+</div>
+
+<p>When we click the &lsquo;Post Message&rsquo; button we&rsquo;re redirected to the <code>index</code> action and we see our new message listed. The new message&rsquo;s parent is recorded by Ancestry but, because of the way we&rsquo;re rendering the list, the new message appears at the bottom of the list, rather than below its parent.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/644/original/E262I04.png" width="800" height="594" alt="The new message is shown at the top of the form."/>
+</div>
+
+<h3>Arranging Messages</h3>
+
+<p>Ancestry provides a method called <code>arrange</code> that will return records as a nested set of hashes and this will work perfectly for rendering the messages in a threaded manner. We can pass in an <code>:order</code> clause to this method to specify how the records should be sorted.</p> 
+
+<p>We&rsquo;ll use <code>arrange</code> in the <code>index</code> template to return the messages in the order we want. As <code>arrange</code> returns a hash we can can&rsquo;t pass it&rsquo;s output directly to <code>render</code>, instead we&rsquo;ll have to loop through each returned message separately. We&rsquo;ll do this in a helper method that we&rsquo;ll call <code>nested_messages</code> and which we can use instead of <code>render</code> to render the threaded list of messages.</p>
+
+<p class="codeFilePath">/app/views/messages/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Messages&quot; %&gt;
+
+&lt;%= nested_messages @messages.arrange(:order =&gt; :created_at) %&gt;
+
+&lt;%= render &quot;form&quot; %&gt;</pre>
+
+<p>We&rsquo;ll write <code>nested_messages</code> in the <code>MessagesHelper</code> and it will take a nested set of message hashes. The method will need to loop through each hash. We&rsquo;ll use <code>map</code> to do this as we&rsquo;ll need to join everything back together at the end. The block that <code>map</code> takes will have a message as the key and its sub messages as the value.</p>
+
+<p>Inside the block we render the current message and then recursively call <code>nested_messages</code>, passing in the current message&rsquo;s descendants. We&rsquo;ll want to modify the appearance of the sub messages later so we use <code>content_tag</code> to wrap the sub messages in a <code>div</code> which we give a class of <code>nested_messages</code>. Once we&rsquo;ve rendered all of the messages we join them back together and call <code>html_safe</code> on the output.</p>
+
+<p class="codeFilePath">/app/helpers/messages_helper.rb</p>
+<pre class="ruby">module MessagesHelper
+  def nested_messages(messages)
+    messages.map do |message, sub_messages|
+      render(message) + content_tag(:div, nested_messages(sub_messages), :class =&gt; &quot;nested_messages&quot;)
+    end.join.html_safe
+  end
+end</pre>
+
+<p>When we reload the message page now the reply to the first message is now shown in its correct place below its parent.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/645/original/E262I05.png" width="800" height="590" alt="The messages are now shown in the correct order."/>
+</div>
+
+<p>As we added a <code>class</code> to each sub message we can now apply some styling to indent them so that the relationship between each message and its replies can be more easily seen.</p>
+
+<p class="codeFilePath">/public/stylesheets/application.css</p>
+<pre class="css">.nested_messages {
+  margin-left: 30px;
+}</pre>
+
+<p>If a message has a large number of replies the margins will add up and some replies could appear too far across the screen. We can stop replies that are further than, say, three deep from being indented any further by adding the following style rule.</p>
+
+<p class="codeFilePath">/public/stylesheets/application.css</p>
+<pre class="css">.nested_messages .nested_messages .nested_messages {
+  margin-left: 0;
+}</pre>
+
+<p>When we reload the messages page now the nested messages are properly indented. If we add a reply to our existing reply that will be indented correctly too.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/646/original/E262I06.png" width="800" height="590" alt="Replies are now indented."/>
+</div>
+
+<h3>Viewing a Single Thread</h3>
+
+<p>We&rsquo;ll finish this episode off by adding one more small feature, modifying the application so that we can click on a message to view just that message and its replies.</p> 
+
+<p>The first step we&rsquo;ll take is to change each message&rsquo;s text to a link which will link to that message&rsquo;s <code>show</code> action.</p>
+
+<p class="codeFilePath">/app/views/messages/_message.html.erb</p>
+<pre class="ruby">&lt;div class=&quot;message&quot;&gt;
+  &lt;div class=&quot;created_at&quot;&gt;&lt;%= message.created_at.strftime(&quot;%B %d, %Y&quot;) %&gt;&lt;/div&gt;
+  &lt;div class=&quot;content&quot;&gt;
+    &lt;%= link_to message.content, message %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;actions&quot;&gt;
+    &lt;%= link_to &quot;Reply&quot;, new_message_path(:parent_id =&gt; message) %&gt; |
+    &lt;%= link_to &quot;Destroy&quot;, message, :confirm =&gt; &quot;Are you sure?&quot;, :method =&gt; :delete %&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</pre>
+
+<p>We can then modify the <code>show</code> template to display the messages. We call <code>subtree</code> on the message as this will fetch the message and all of its children and then call <code>arrange</code> on that to arrange it by its created date.</p>
+
+<p class="codeFilePath">/app/views/messages/show.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Message&quot; %&gt;
+
+&lt;%= nested_messages @message.subtree.arrange(:order =&gt; :created_at) %&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;Back to All Messages&quot;, messages_path %&gt;&lt;/p&gt;</pre>
+
+<p>If we reload the messages page now and click on one of the messages we&rsquo;ll see that message and its children.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/647/original/E262I07.png" width="804" height="375" alt="The messages from a single thread."/>
+</div>
+
+<p>No matter how many replies there are to a given message the replies will all be fetched by one database query so we don&rsquo;t need to wonder about this affecting our application&rsquo;s performance.</p>
+
+<p>That&rsquo;s it for this episode on Ancestry. It&rsquo;s a nice solution if you need to store Rails models in a tree structure and we&rsquo;ll worth considering should you ever need to do that.</p>

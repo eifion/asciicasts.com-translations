@@ -1,0 +1,211 @@
+<p>It can be frustrating to fill in a long form on a website only to have it returned back to you with a number of validation errors after you&rsquo;ve submitted it. Having any errors for a field show as soon as you&rsquo;ve completed it provides a much better user experience, but this can involve writing a lot of JavaScript validation code.</p>
+
+<p>In this episode we&rsquo;ll look at a gem that will allow us to automatically create client-side validations. Let&rsquo;s say that we have an application with a sign-up form for creating a new User model with four fields like this:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/648/original/E263I01.png" width="800" height="493" alt="The sign-up form."/>
+</div>
+
+<p>The <code>User</code> model has a number of validators, including some required field validators, so if we submit this form without filling in any of the fields we&rsquo;ll see a list of validation errors.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/649/original/E263I02.png" width="815" height="399" alt="The error messages shown when we submit the form without filling in any of the fields."/>
+</div>
+
+<p>As we said before it would be better if we could show any errors for a given field as soon as the user tabs out of that field but writing all of the JavaScript to do this could add up to quite a lot of work, especially if we have a number of models we want to validate this way or if some of the validations are complex. To save us this work we&rsquo;ll make use of a gem called <a href="https://github.com/bcardarella/client_side_validations/">client_side_validations</a> which will do it for us. This gem reads the validations in a model and generates the JavaScript necessary to create client-side validations that are fired as the user fills in a form for that model. The only non-standard requirement that this gem has is jQuery, so if you&rsquo;re using Prototype in your Rails applications you&rsquo;ll need to find an alternative solution.</p>
+
+<h3>Installing client_side_validations</h3>
+
+<p>To install the gem we just need to add a reference to it in the application&rsquo;s <code>Gemfile</code> and then run <code>bundle</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.7&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;bcrypt-ruby&#x27;, :require =&gt; &#x27;bcrypt&#x27;
+
+gem &#x27;jquery-rails&#x27;
+gem &#x27;client_side_validations&#x27;</pre>
+
+<p>Note that we&rsquo;ve already set up jQuery in the application by adding the <a href="https://github.com/indirect/jquery-rails">jquery-rails</a> gem. Once the client_side_validations gem has installed we&rsquo;ll need to run the generator that it provides. This adds a couple of files to our application: a configuration file in the <code>config/initializers</code> directory and a JavaScript file that we&rsquo;ll need to add a reference to in the layout file.</p>
+
+<pre class="terminal">$ rails g client_side_validations:install
+    create  config/initializers/client_side_validations.rb
+    create  public/javascripts/rails.validations.js</pre>
+    
+<p>We&rsquo;ll modify the layout file now. All we need to do is add <code>rails.validations</code> to the list of included JavaScript files.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= javascript_include_tag :defaults, &quot;rails.validations&quot; %&gt;</pre>
+
+<p>We&rsquo;re also going to need to modify client_side_validations&rsquo;s configuration file. By default it&rsquo;s configured to use <a href="https://github.com/plataformatec/simple_form">SimpleForm</a> and <a href="https://github.com/justinfrench/formtastic">Formtastic</a> but as we aren&rsquo;t using either of those we&rsquo;ll need to uncomment the section at the bottom of the file and override the <code>field_error_proc</code> method.</p>
+
+<p class="codeFilePath">/config/initializers/client_side_validations.rb</p>
+<pre class="ruby"># ClientSideValidations Initializer
+
+require &#x27;client_side_validations/simple_form&#x27; if defined?(::SimpleForm)
+require &#x27;client_side_validations/formtastic&#x27; if defined?(::Formtastic)
+
+# Uncomment the following block if you want each input field to have the validation messages attached.
+ActionView::Base.field_error_proc = Proc.new do |html_tag, instance|
+  unless html_tag =~ /^&lt;label/
+     %{&lt;div class=&quot;field_with_errors&quot;&gt;#{html_tag}&lt;label for=&quot;#{instance.send(:tag_id)}&quot;
+  class=&quot;message&quot;&gt;#{instance.error_message.first}&lt;/label&gt; &lt;/div&gt;}.html_safe
+  else
+    %{&lt;div class=&quot;field_with_errors&quot;&gt;#{html_tag}&lt;/div&gt;}.html_safe
+  end
+end</pre>
+
+<p>This method appends a <code>label</code> element containing the error message and with a class of <code>message</code> to any invalid fields. If the default way of displaying errors doesn&rsquo;t fit in with our application then we can customize the file above to suit.</p>
+
+<p>There&rsquo;s one more step we need to take. We need to add a <code>:validate =&gt; true</code> option to the <code>form_for</code> call for the form to which we want to add the validations. We now have everything in place to get validations working inline.</p>
+
+<p>If we reload the signup page now and tab out of the username field without entering a value an error message will be shown inline immediately and the same applies to any other fields with errors.</p>
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/650/original/E263I03.png" width="800" height="509" alt="The error message shows as soon as we tab out of a field."/>
+</div>
+
+<h3>More Complex Validations</h3>
+
+<p>Simple validations work out of the box but what about more complex ones? In the <code>User</code> model we have some other validations, one for the format of the <code>username</code> field that ensures that there are no unusual characters in it, one that checks the length of the password and one that checks that the confirmation matches the password.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">validates_presence_of :username, :email
+validates_presence_of :password, :on =&gt; :create
+validates_presence_of :username, :with =&gt; /^[-\w\._@]+$/i, :allow_blank =&gt; true, :message =&gt; &quot;should only contain letters, numbers, or .-_@&quot;
+validates_length_of :password, :minimum =&gt; 4, :allow_blank =&gt; true
+validates_confirmation_of :password</pre>
+
+<p>All of these validations are translated to JavaScript by client_side_validations and will just work so if we enter a &ldquo;bad&rdquo; username or a password that&rsquo;s too short we&rsquo;ll be told about that straight away.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/651/original/E263I04.png" width="800" height="543" alt="Different types of validators all work on the client."/>
+</div>
+
+<p>While there are visible errors the form can&rsquo;t be submitted but once we enter valid values into each field we can submit it and sign up.</p>
+
+<p>Some validations, such as <code>validates_uniqueness_of</code>, need to read data from the database. We want the <code>username</code> and <code>email</code> fields to be unique so let&rsquo;s add this validation in and see what happens.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">validates_uniqueness_of :username, :email</pre>
+
+<p>We&rsquo;ve already created an account for &ldquo;eifion&rdquo; and when we try creating another one the error is picked up as soon as we tab out of the username field.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/652/original/E263I05.png" width="800" height="543" alt="Validators that need to access the database will make an AJAX call to get the data."/>
+</div>
+
+<p>This works because client_side_validations makes an AJAX request when we tab out of the <code>username</code> field so that it can check on the server as to whether that username  has already been taken.</p> 
+
+<h3>Adding Styling</h3>
+
+<p>We want to customize the way that the error messages look so we&rsquo;ll take a look now at the CSS necessary to do that. First we&rsquo;ll style the <code>field_with_errors</code> class that Rails adds to invalid fields so that these elements are shown inline. The error message for a field is a <code>label</code> element with a <code>class</code> of message and we&rsquo;ll style these to look a little more like error messages be colouring them red and adding a little padding to the left to move them away from the form element they&rsquo;re associated with.</p>
+
+<p class="codeFilePath">/public/stylesheets/application.css</p>
+<pre class="css">.field_with_errors {
+  display: inline;
+}
+
+.field_with_errors .message {
+  color: #D00;
+  padding-left: 5px;
+  font-size: 12px;
+}</pre>
+
+<p>If we reload the sign up page now and cause some errors we&rsquo;ll see the new styles.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/653/original/E263I06.png" width="800" height="493" alt="The error messages styled as we want them."/>
+</div>
+
+<h3>Custom Validations</h3>
+
+<p>Back in episode 211 [<a href="http://railscasts.com/episodes/211-validations-in-rails-3">watch</a>, <a href="http://asciicasts.com/episodes/211-validations-in-rails-3">read</a>] we created a custom validator class called <code>EmailFormatValidator</code> to validate the format of email addresses. How would we go about translating this Ruby validator class into JavaScript so that we can use it on the client like the standard Rails validators?</p>
+
+<p>Thankfully there&rsquo;s a page on the <a href="https://github.com/bcardarella/client_side_validations/wiki/Custom-Validators">client_side_validations Wiki</a> that explains exactly how to do this and so we&rsquo;ll recreate the <code>EmailFormatValidator</code> in this application and then use the information on that page to extend it to work on the client too.</p> 
+
+<p>The first step is to add the validator in a file in the application&rsquo;s <code>/lib</code> directory.</p> 
+
+<p class="codeFilePath">/lib/email_format_validator.rb</p>
+<pre class="ruby">class EmailFormatValidator &lt; ActiveModel::EachValidator
+  def validate_each(object, attribute, value)
+    unless value =~ /^([^@\s]+)@((?:[-a-z0-9]+\.)+[a-z]{2,})$/i
+      object.errors[attribute] &lt;&lt; (options[:message] || &quot;is not formatted properly&quot;) 
+    end
+  end
+end</pre>
+
+<p>This class checks that the value passed in matches a regular expression and adds an error message to the model&rsquo;s list of errors if the match fails. We could have used a simple <code>validates_format_of</code> to achieve this, but for the purposes of this example we&rsquo;ve written a custom validator.</p>
+
+<p>Files in the <code>/lib</code> directory aren&rsquo;t automatically included in the application in Rails 3. We&rsquo;ll need to add that directory to the autoload_paths in our application&rsquo;s application.rb file so that the files in there are added to the load path.</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby">require File.expand_path(&#x27;../boot&#x27;, __FILE__)
+
+require &#x27;rails/all&#x27;
+
+# If you have a Gemfile, require the gems listed there, including any gems
+# you&#x27;ve limited to :test, :development, or :production.
+Bundler.require(:default, Rails.env) if defined?(Bundler)
+
+module Validator
+  class Application &lt; Rails::Application
+    config.autoload_paths &lt;&lt; &quot;#{config.root}/lib&quot;
+
+    # Configure the default encoding used in templates for Ruby 1.9.
+    config.encoding = &quot;utf-8&quot;
+
+    # Configure sensitive parameters which will be filtered from the log file.
+    config.filter_parameters += [:password]
+  end
+end</pre>
+
+<p>A custom validator needs to have its default error message defined inside a <code>locales</code> file. The error message needs to be nested under <code>errors/messages</code> and have a key that matches the name of the custom validator, in this case <code>email_format</code>.</p>
+
+<p class="codeFilePath">/config/locales/en.yml</p>
+<pre class="ruby"># Sample localization file for English. Add more files in this directory for other locales.
+# See http://github.com/svenfuchs/rails-i18n/tree/master/rails%2Flocale for starting points.
+
+en:
+  errors:
+    messages:
+      email_format: &quot;is not formatted properly.&quot;</pre>
+      
+<p>We can now add our new validator to the <code>User</code> model, using <code>validates</code> and passing in the name of the field we want to validate and the name of the validator.</p> 
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">validates :email, :email_format =&gt; true</pre>
+
+<p>We can replace <code>true</code> in the code above with a hash of options to, say, specify a custom error message, but here we&rsquo;ll just leave it at the default.</p>
+
+<p>If we enter an invalid email address into the form now and submit it we&rsquo;ll see the custom validator&rsquo;s error message but the error doesn&rsquo;t appear when we tab out of the field. Our validator is working on the server but we need to translate the code in <code>EmailFormatValidator</code> into JavaScript and wire it up to client_side_validation 
+so that it fires when the email field loses the focus.</p>
+
+<p>We&rsquo;ll put the code for this validator in a new file in <code>/public/javascripts</code> called <code>rails.validations.custom.js</code>, as the plugin expects a name in this format. In the file we&rsquo;ll write the code to validate the field on the client.</p>
+
+<p class="codeFilePath">/public/javascripts/rails.validations.custom.js</p>
+<pre class="javascript">clientSideValidations.validators.local[&quot;email_format&quot;] = function (element, options) {
+  if(!/^([^@\s]+)@((?:[-a-z0-9]+\.)+[a-z]{2,})$/i.test(element.val())) {
+    return options.message;
+  }
+}</pre>
+
+<p>In the code above we add our new validator by adding a new <code>local</code> validator called <code>email_format</code> to the <code>clientSideValidations.validators</code> object. Making it <code>local</code> means that all of the validator is performed on the client; if we added it to the <code>remote</code> validations then it would make an AJAX call to the server in the same way that the <code>validates_uniqueness_of</code> validator did earlier.</p>
+
+<p>The validator code validates the email format in the same way that the Ruby code did, by matching the element&rsquo;s value against a regular expression. If the match fails then the error message is returned. To add the new JavaScript validator to our application we just need to add a reference to the new validator file in the application&rsquo;s layout.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= javascript_include_tag :defaults, &quot;rails.validations&quot;, &quot;rails.validations.custom&quot; %&gt;</pre>
+
+<p>Now that all of this is in place we can give it a try. If we reload the page and enter an invalidly formatted email address the error message will be shown as soon as the email field loses the focus.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/654/original/E263I07.png" width="800" height="493" alt="Our custom validator working on the client."/>
+</div>
+
+<p>We now have client-side validation on all of the fields on the form. For users who don&rsquo;t have JavaScript enabled in their browser the validations still take place on the server.</p>
+
+<p>That&rsquo;s it for this episode on client side validations. Writing custom validations might seem like a lot of work but once you&rsquo;ve set up the first one, adding others is pretty straightforward. Getting instant feedback when filling in a form makes for a much better user experience and this is a great way to add them to your Rails applications.</p>

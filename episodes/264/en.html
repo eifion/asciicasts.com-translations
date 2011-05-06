@@ -1,0 +1,208 @@
+<p>In episode 257[<a href="http://railscasts.com/episodes/257-request-specs-and-capybara">watch</a>, <a href="http://asciicasts.com/episodes/257-request-specs-and-capybara">read</a>] we wrote an application that was built using test-driven development with RSpec&rsquo;s Request Specs. We can check that the application&rsquo;s tests pass at any time by running rake spec.</p>
+
+<pre class="terminal">$ rake spec
+(in /Users/eifion/rails/todo)
+/Users/eifion/.rvm/rubies/ruby-1.9.2-p0/bin/ruby -S bundle exec rspec ./spec/models/task_spec.rb ./spec/requests/tasks_spec.rb
+...
+Finished in 0.92211 seconds
+3 examples, 0 failures
+</pre>
+
+<p>It can get a little tedious to have to run that <code>rake</code> command every time we make a code change. If we have a large test suite then we might have to wait a long time for all of the tests to run, even if we&rsquo;ve only changed one or two files. It would be useful if there was a way to automate this.</p>
+
+<p>There are a number of tools to solve this problem but in this episode we&rsquo;re going to take a look at <a href="https://github.com/guard/guard">Guard</a>. This provides a way to listen to file modifications and then perform an action when a file is modified. There are a <a href="https://github.com/guard/guard/wiki/List-of-available-Guards">large number of extensions</a> available that enable Guard for different environments including <a href="https://github.com/guard/guard-rspec">one for RSpec</a> that will do just what we want: listening for file changes and then running the specs when there&rsquo;s a change. If you&rsquo;re using Test::Unit instead of RSpec there&rsquo;s an <a href="https://github.com/guard/guard-test">extension</a> that will work with that, too. There are also extensions for Cucumber, minitest and many other environments.</p>
+
+<h3>Installing</h3>
+
+<p>Let&rsquo;s try out Guard with guard-rspec in our application and see how we get on. We&rsquo;ll start by adding some gems to the <code>test</code> group in the <code>Gemfile</code>. As we&rsquo;re developing under OS X we need to install the <a href="http://rubygems.org/gems/rb-fsevent">rb-fsevent</a> gem as a prerequisite for Guard so we&rsquo;ll add that with a check that the current platform is OS X. We&rsquo;ll also add a reference to the guard-rspec gem. There&rsquo;s no need to add guard itself as it will be installed as a dependency on guard-rspec.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;jquery-rails&#x27;
+
+group :development, :test do
+  gem &#x27;rspec-rails&#x27;
+  gem &#x27;capybara&#x27;, :git =&gt; &#x27;git://github.com/jnicklas/capybara.git&#x27;
+  gem &#x27;launchy&#x27;
+  gem &#x27;database_cleaner&#x27;
+  gem &#x27;rb-fsevent&#x27;, :require =&gt; false if RUBY_PLATFORM =~ &crarr; 
+    /darwin/i
+  gem &#x27;guard-rspec&#x27;
+end</pre>
+
+<p>We can now run <code>bundle</code> to install everything and, once that&rsquo;s done, run <code>guard init rspec</code> to set up Guard.</p>
+
+<pre class="terminal">$ guard init rspec
+Writing new Guardfile to /Users/eifion/rails/todo/Guardfile
+rspec guard added to Guardfile, feel free to edit it</pre>
+
+
+<p>If you have problem running this command you can try prefixing it with <code>bundle exec</code>. This command will generate a <code>Guardfile</code> which we can leave alone for now, although we&rsquo;ll come back and take a look at it later.</p>
+
+<p>Guard also has support for <a href="http://growl.info/">Growl</a> notifications and these can be enabled by installing the <code>growl</code> gem, though we won&rsquo;t do that there.</p>
+
+<p>We can now run the guard command to start up the Guard server.</p>
+
+<pre class="terminal">$ guard
+Guard is now watching at &#x27;/Users/eifion/Desktop/Dropbox/rails/apps_for_asciicasts/ep264/todo&#x27;
+Guard::RSpec is running, with RSpec 2!
+Running all specs
+...
+
+Finished in 1.02 seconds
+3 examples, 0 failures</pre>
+
+<p>If we make a breaking change to our code, for example removing a validation from the <code>Task</code> model, Guard will run immediately and we&rsquo;ll see the broken test.</p>
+
+<p class="codeFilePath">/app/models/task.rb</p>
+<pre class="ruby">class Task &lt; ActiveRecord::Base
+  attr_accessible :name
+  #validates_presence_of :name
+end</pre>
+
+<pre class="terminal">Running: spec/models/task_spec.rb
+F
+
+Failures:
+
+  1) Task validates name
+     Failure/Error: Task.new.should have(1).error_on(:name)
+       expected 1 error on :name, got 0
+     # ./spec/models/task_spec.rb:5:in `block (2 levels) in &lt;top (required)&gt;&#x27;
+
+Finished in 0.04825 seconds
+1 example, 1 failure</pre>
+
+<p>As soon as we reinstate the validator the specs run again and pass.</p>
+
+<h3>Customizing Behaviour</h3>
+
+<p>If we want to we can customize Guard&rsquo;s behaviour. By default it won&rsquo;t run when we make a change to a view file. We can add this behaviour by modifying the <code>Guardfile</code> that was generated by the <code>guard init command</code>.</p>
+
+<p>The default Guardfile is shown below.</p>
+
+<p class="codeFilePath">/Guardfile</p>
+<pre class="ruby"># A sample Guardfile
+# More info at https://github.com/guard/guard#readme
+
+guard &#x27;rspec&#x27;, :version =&gt; 2 do
+  watch(%r{^spec/.+_spec\.rb})
+  watch(%r{^lib/(.+)\.rb})                           { |m| &quot;spec/lib/#{m[1]}_spec.rb&quot; }
+  watch(&#x27;spec/spec_helper.rb&#x27;)                       { &quot;spec&quot; }
+
+  # Rails example
+  watch(&#x27;spec/spec_helper.rb&#x27;)                       { &quot;spec&quot; }
+  watch(&#x27;config/routes.rb&#x27;)                          { &quot;spec/routing&quot; }
+  watch(&#x27;app/controllers/application_controller.rb&#x27;) { &quot;spec/controllers&quot; }
+  watch(%r{^spec/.+_spec\.rb})
+  watch(%r{^app/(.+)\.rb})                           { |m| &quot;spec/#{m[1]}_spec.rb&quot; }
+  watch(%r{^lib/(.+)\.rb})                           { |m| &quot;spec/lib/#{m[1]}_spec.rb&quot; }
+  watch(%r{^app/controllers/(.+)_(controller)\.rb})  { |m| [&quot;spec/routing/#{m[1]}_routing_spec.rb&quot;,  &quot;spec/#{m[2]}s/#{m[1]}_#{m[2]}_spec.rb&quot;, &quot;spec/acceptance/#{m[1]}_spec.rb&quot;] }
+end</pre>
+
+<p>Each line in the file is a call to a <code>watch</code> method with a block which contains the specs that will be run when a matching file changes. For example if the routes file is changed then it will look for a routing spec and change that. Some cases are more complex and take a regular expression. For example this line matches all of the Ruby files under the <code>/lib</code> directory. The modified file&rsquo;s is captured by the part of the regular expression in parentheses and this is passed to the block so that the matching spec is run.</p>
+
+<pre class="ruby">watch(%r{^lib/(.+)\.rb})    { |m| &quot;spec/lib/#{m[1]}_spec.rb&quot; }</pre>
+
+<p>All of the files matched in the default <code>Guardfile</code> are Ruby files. We want to run specs when a view file changes so we&rsquo;ll add a new watch command to match these.</p>
+
+<p class="codeFilePath">/Guardfile</p>
+<pre class="ruby">watch(%r{^app/views/(.+)/}) { |m| &quot;spec/requests/#{m[1]}_spec.rb&quot; }</pre>
+
+<p>In this new rule we match everything under the <code>/app/views</code> directory and capture everything after <code>app/views/</code> until the last slash, so for the file <code>/app/views/tasks/index.html.erb</code> this will capture <code>tasks</code>. We can then pass this into the block to run the appropriate request specs.</p>
+
+<p>We can test this out by changing one of the view files so that it breaks a test. If we remove the submit button from the <code>tasks</code> index view file Guard will run the request specs for tasks and we&rsquo;ll see a failing spec.</p>
+
+<pre class="terminal">Running: spec/requests/tasks_spec.rb
+.F
+
+Failures:
+
+  1) Tasks creates a task with validation error
+     Failure/Error: click_button &quot;Add&quot;
+     Capybara::ElementNotFound:
+       no button with value or id or text &#x27;Add&#x27; found
+     # ./spec/requests/tasks_spec.rb:13:in `block (2 levels) in &lt;top (required)&gt;&#x27;
+
+Finished in 0.82203 seconds
+2 examples, 1 failure</pre>
+
+<p>When we add it back the specs all pass again.</p>
+
+<h3>Using Guard To Automatically Refresh The Browser</h3>
+
+<p>Guard is a great way to run tests automatically when certain files in an application change but there are some other nice things we can do with it. We can for example automatically compile CoffeeScript and SASS files when they change, automatically run the <code>bundle</code> command when the <code>Gemfile</code> changes or restart a Passenger or Pow server when a config or initializer file changes. The one we&rsquo;ll take a look at is guard-livereload which is a gem that will automatically reload a browser when certain files change.</p>
+
+<p>To use it we add a reference to it in the Gemfile and run bundle again.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;jquery-rails&#x27;
+
+group :development, :test do
+  gem &#x27;rspec-rails&#x27;
+  gem &#x27;capybara&#x27;, :git =&gt; &#x27;git://github.com/jnicklas/capybara.git&#x27;
+  gem &#x27;launchy&#x27;
+  gem &#x27;database_cleaner&#x27;
+  gem &#x27;rb-fsevent&#x27;, :require =&gt; false if RUBY_PLATFORM =~ /darwin/i
+  gem &#x27;guard-rspec&#x27;
+  gem &#x27;guard-livereload&#x27;
+end</pre>
+
+<p>When the gem has installed we can need to run <code>guard init livereload</code> to modify the <code>Guardfile</code> and then start <code>guard</code> again.</p>
+
+<p>Next we&rsquo;ll need to install a LiveReload extension for Chrome, Safari or Firefox. The <a href="https://github.com/mockko/livereload">LiveReload page</a> has links for installing this and as we&rsquo;re using Safari we&rsquo;ll install that one.</p> 
+
+<p>Once we&rsquo;ve installed the extension we can enable it by going to our application&rsquo;s home page, right-clicking and selecting &ldquo;Enable Live Reload&rdquo;.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/655/original/E264I01.png" width="802" height="369" alt="Enabling LiveReload"/>
+</div>
+
+<p>If we make a change to one of our application&rsquo;s files, say the stylesheet, the page is reloaded in the browser as soon as we save the file. This works with other files too. If we change the title of the page in an erb file that change is reflected in the browser when we save the file, too.</p>
+
+<p class="codeFilePath">/app/views/tasks/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Todo List&quot; %&gt;</pre>
+<p>&nbsp;</p>
+<div class="imageWrapper">
+  <img src="/system/photos/656/original/E264I02.png" width="800" height="367" alt="CSS changes are reflected as soon as the file is saved."/>
+</div>
+
+<p>There&rsquo;s more of a delay when we change the erb file as the specs are rerun before LiveReload loads the page. This is because of the order of the items in the <code>Guardfile</code>. It would be more useful if the browser was updated first as we could then check the new page as the specs are running. To do that we just need to swap the two guard blocks in the <code>Guardfile</code> over so that the <code>livereload</code> section runs first.</p>
+
+<p class="codeFilePath">/Guardfile</p>
+<pre class="ruby"># A sample Guardfile
+# More info at https://github.com/guard/guard#readme
+
+guard &#x27;livereload&#x27; do
+  watch(%r{app/.+\.(erb|haml)})
+  watch(%r{app/helpers/.+\.rb})
+  watch(%r{public/.+\.(css|js|html)})
+  watch(%r{config/locales/.+\.yml})
+end
+
+guard &#x27;rspec&#x27;, :version =&gt; 2 do
+  watch(%r{^spec/.+_spec\.rb})
+  watch(%r{^lib/(.+)\.rb})                            { |m| &quot;spec/lib/#{m[1]}_spec.rb&quot; }
+  watch(&#x27;spec/spec_helper.rb&#x27;)                        { &quot;spec&quot; }
+
+  # Rails example
+  watch(&#x27;spec/spec_helper.rb&#x27;)                        { &quot;spec&quot; }
+  watch(&#x27;config/routes.rb&#x27;)                           { &quot;spec/routing&quot; }
+  watch(&#x27;app/controllers/application_controller.rb&#x27;)  { &quot;spec/controllers&quot; }
+  watch(%r{^spec/.+_spec\.rb})
+  watch(%r{^app/(.+)\.rb})                            { |m| &quot;spec/#{m[1]}_spec.rb&quot; }
+  watch(%r{^lib/(.+)\.rb})                            { |m| &quot;spec/lib/#{m[1]}_spec.rb&quot; }
+  watch(%r{^app/controllers/(.+)_(controller)\.rb})   { |m| [&quot;spec/routing/#{m[1]}_routing_spec.rb&quot;, &quot;spec/#{m[2]}s/#{m[1]}_#{m[2]}_spec.rb&quot;, &quot;spec/acceptance/#{m[1]}_spec.rb&quot;] }
+  watch(%r{^app/views/(.+)/})                         { |m| &quot;spec/requests/#{m[1]}_spec.rb&quot; }
+end</pre>
+
+<p>Now if we make a change in a file the change is seen straight away.</p>

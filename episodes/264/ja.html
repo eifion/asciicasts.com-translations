@@ -1,0 +1,207 @@
+<p>エピソード257[<a href="http://railscasts.com/episodes/257-request-specs-and-capybara">動画を見る</a>, <a href="http://asciicasts.com/episodes/257-request-specs-and-capybara">読む</a>]でRSpecのRequest Specsによるテスト駆動開発でアプリケーションを作成しました。アプリケーションのテストが成功することを、いつでもrake specでチェックできます。</p>
+
+<pre class="terminal">$ rake spec
+(in /Users/eifion/rails/todo)
+/Users/eifion/.rvm/rubies/ruby-1.9.2-p0/bin/ruby -S bundle exec rspec ./spec/models/task_spec.rb ./spec/requests/tasks_spec.rb
+...
+Finished in 0.92211 seconds
+3 examples, 0 failures
+</pre>
+
+<p>しかし、コードに変更を加えるごとに<code>rake</code>コマンドを実行しなくてはいけないのが少し面倒です。一連の大きなテストの場合、修正が1、2個のファイルだけだったとしてもすべてのテストが終了するのを待たなくてはいけません。これを自動化できる方法があれば便利でしょう。</p>
+
+<p>この問題を解決するツールはいくつかあります。今回のエピソードでは<a href="https://github.com/guard/guard">Guard</a>を見ていくことにしましょう。このツールは、ファイルの修正を監視して、修正が行われたらある動作を実行します。多様な環境でGuardを利用できるようにするために<a href="https://github.com/guard/guard/wiki/List-of-available-Guards">多くの機能拡張</a>があります。今回利用する<a href="https://github.com/guard/guard-rspec">RSpec用</a>では、ファイルの修正を監視して修正があったらspecを実行します。RSpecの代わりにTest::Unitを使用しているのであれば、そのための<a href="https://github.com/guard/guard-test">機能拡張</a>もあります。その他にもCucumber、minitestなど多くの環境向けの機能拡張があります。</p>
+
+<h3>インストール</h3>
+
+<p>対象のアプリケーションにguard-rspecでGuardを設定し、うまくいくか見ていきましょう。まず<code>Gemfile</code>の<code>test</code>グループにgemをいくつか追加します。OS Xで開発している場合、Guardの前提として<a href="http://rubygems.org/gems/rb-fsevent">rb-fsevent</a> gemをインストールする必要があるので、それを現在の環境がOS Xかどうかのチェックと共に追加します。加えてguard-rspec gemへの参照も追加します。guardそのものは、guard-rspecの依存関係により自動的にインストールされるため、追加する必要はありません。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.5'
+gem 'sqlite3'
+gem 'nifty-generators'
+gem 'jquery-rails'
+
+group :development, :test do
+  gem 'rspec-rails'
+  gem 'capybara', :git =&gt; 'git://github.com/jnicklas/capybara.git'
+  gem 'launchy'
+  gem 'database_cleaner'
+  gem 'rb-fsevent', :require =&gt; false if RUBY_PLATFORM =~ ↵ 
+    /darwin/i
+  gem 'guard-rspec'
+end</pre>
+
+<p>これで<code>bundle</code>を実行してすべてをインストールします。インストールが終わったら、<code>guard init rspec</code>を実行してGuardを設定します。</p>
+
+<pre class="terminal">$ guard init rspec
+Writing new Guardfile to /Users/eifion/rails/todo/Guardfile
+rspec guard added to Guardfile, feel free to edit it</pre>
+
+
+<p>このコマンドがうまく実行できない場合は、前に<code>bundle exec</code>をつけてみてください。このコマンドで、<code>Guardfile</code>が作成されます。今はそのままにしておきますが、後ほど中身を見てみます。</p>
+
+<p>Guardは<a href="http://growl.info/">Growl</a>の通知機能もサポートしており、<code>growl</code> gemをインストールすることで有効化できますが、ここでは扱いません。</p>
+
+<p>ではguardコマンドを実行してGuardサーバを起動します。</p>
+
+<pre class="terminal">$ guard
+Guard is now watching at '/Users/eifion/Desktop/Dropbox/rails/apps_for_asciicasts/ep264/todo'
+Guard::RSpec is running, with RSpec 2!Running all specs
+...
+
+Finished in 1.02 seconds
+3 examples, 0 failures</pre>
+
+<p>問題が起こるようなコードの修正、例えば<code>Task</code>モデルから検証機能を削除した場合、Guardがすぐに起動してテストが失敗したことがわかります。</p>
+
+<p class="codeFilePath">/app/models/task.rb</p>
+<pre class="ruby">class Task &lt; ActiveRecord::Base
+  attr_accessible :name
+  #validates_presence_of :name
+end</pre>
+
+<pre class="terminal">Running: spec/models/task_spec.rb
+F
+
+Failures:
+
+  1) Task validates name
+     Failure/Error: Task.new.should have(1).error_on(:name)
+       expected 1 error on :name, got 0
+     # ./spec/models/task_spec.rb:5:in `block (2 levels) in &lt;top (required)&gt;'
+
+Finished in 0.04825 seconds
+1 example, 1 failure</pre>
+
+<p>検証機能を元に戻すとすぐにまたspecが実行され、今度は成功します。</p>
+
+<h3>振る舞いをカスタマイズする</h3>
+
+<p>Guardの振る舞いをカスタマイズすることも可能です。デフォルトではビューファイルが修正されたときは起動されません。<code>guard init command</code>で生成された<code>Guardfile</code>を修正することで、この振る舞いを追加することができます。</p>
+
+<p>デフォルトのGuardfileを以下に示します。</p>
+
+<p class="codeFilePath">/Guardfile</p>
+<pre class="ruby"># A sample Guardfile
+# More info at https://github.com/guard/guard#readme
+
+guard 'rspec', :version =&gt; 2 do
+  watch(%r{^spec/.+_spec\.rb})
+  watch(%r{^lib/(.+)\.rb})                           { |m| "spec/lib/#{m[1]}_spec.rb" }
+  watch('spec/spec_helper.rb')                       { "spec" }
+
+  # Rails example
+  watch('spec/spec_helper.rb')                       { "spec" }
+  watch('config/routes.rb')                          { "spec/routing" }
+  watch('app/controllers/application_controller.rb') { "spec/controllers" }
+  watch(%r{^spec/.+_spec\.rb})
+  watch(%r{^app/(.+)\.rb})                           { |m| "spec/#{m[1]}_spec.rb" }
+  watch(%r{^lib/(.+)\.rb})                           { |m| "spec/lib/#{m[1]}_spec.rb" }
+  watch(%r{^app/controllers/(.+)_(controller)\.rb})  { |m| ["spec/routing/#{m[1]}_routing_spec.rb",  "spec/#{m[2]}s/#{m[1]}_#{m[2]}_spec.rb", "spec/acceptance/#{m[1]}_spec.rb"] }
+end</pre>
+
+<p>ファイル中の各行はブロック付きの<code>watch</code>メソッドの呼び出しで、そこには対応するファイルが修正されたときに実行されるspecが含まれています。例えばroutesファイルが修正されたら、ルーティングのspecを探して修正します。より複雑な条件もあり、その場合は正規表現で記述されています。例えばこの行は<code>/lib</code>ディレクトリ下のすべてのRubyファイルに一致します。修正されたファイルはカッコ内の正規表現で捉えられてブロックに渡され、一致するspecが実行されます。</p>
+
+<pre class="ruby">watch(%r{^lib/(.+)\.rb})    { |m| "spec/lib/#{m[1]}_spec.rb" }</pre>
+
+<p>デフォルトの<code>Guardfile</code>では一致するすべてのファイルはRubyファイルです。ビューファイルが変更されたときもspecを実行したいので、これに一致するwatchコマンドを新たに追加します。</p>
+
+<p class="codeFilePath">/Guardfile</p>
+<pre class="ruby">watch(%r{^app/views/(.+)/}) { |m| "spec/requests/#{m[1]}_spec.rb" }</pre>
+
+<p>この新しいルールでは<code>/app/views</code>ディレクトリ下のすべてのファイルと一致し、<code>app/views/</code>の後から最後のスラッシュの前までを取得します。つまり<code>/app/views/tasks/index.html.erb</code>というファイルの場合、<code>tasks</code>を取得します。そしてこれをブロックに渡して、対応するrequest specを実行します。</p>
+
+<p>これを確認するために、テストが失敗するような修正をビューファイルに加えてみます。<code>tasks</code>のindexビューファイルからsubmitボタンを削除すると、Guardがtasksのrequest specを実行し、specが失敗したのがわかります。</p>
+
+<pre class="terminal">Running: spec/requests/tasks_spec.rb
+.F
+
+Failures:
+
+  1) Tasks creates a task with validation error
+     Failure/Error: click_button "Add"
+     Capybara::ElementNotFound:
+       no button with value or id or text 'Add' found
+     # ./spec/requests/tasks_spec.rb:13:in `block (2 levels) in &lt;top (required)&gt;'
+
+Finished in 0.82203 seconds
+2 examples, 1 failure</pre>
+
+<p>これを元に戻すと、specはまたすべて成功します。</p>
+
+<h3>Guardでブラウザの再読み込みを自動化する</h3>
+
+<p>Guardは、アプリケーションの特定のファイルが修正されたときにテストを自動的に実行する優れた方法ですが、他にも便利な使い方があります。例えばCoffeeScriptやSASSのファイルが修正されたときに自動的にコンパイルを実行したり、<code>Gemfile</code>が修正されたときに自動的に<code>bundle</code>コマンドを実行したり、初期設定ファイルが修正されたときにPassengerやPowのサーバを再起動したりできます。ここでは、あるファイルが修正されたときにブラウザを自動的に再読み込みさせるためのguard-livereloadというgemを見ていきます。</p>
+
+<p>まずGemfileに参照情報を追加してまたbundleコマンドを実行します。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.5'
+gem 'sqlite3'
+gem 'nifty-generators'
+gem 'jquery-rails'
+
+group :development, :test do
+  gem 'rspec-rails'
+  gem 'capybara', :git =&gt; 'git://github.com/jnicklas/capybara.git'
+  gem 'launchy'
+  gem 'database_cleaner'
+  gem 'rb-fsevent', :require =&gt; false if RUBY_PLATFORM =~ /darwin/i
+  gem 'guard-rspec'
+  gem 'guard-livereload'
+end</pre>
+
+<p>gemがインストールされたら<code>guard init livereload</code>を実行して<code>Guardfile</code>を修正し、その後で再度<code>guard</code>を起動し直します。</p>
+
+<p>次にChrome、Safari、Firefox用のLiveReload機能拡張をインストールします。<a href="https://github.com/mockko/livereload">LiveReloadのページ</a>にインストール用のリンクがあり、ここではSafariを使用しているのでSafari用をインストールします。</p> 
+
+<p>機能拡張をインストールしたら、アプリケーションのトップページで右クリックして「Enable LiveReload」を選択して有効化します。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/655/original/E264I01.png" width="802" height="369" alt="LiveReloadを有効化する"/>
+</div>
+
+<p>アプリケーションのファイル、例えばスタイルシートを修正したら、ファイルを保存した直後にブラウザのページが再読み込みされます。他のファイルでも同じです。erbファイルでページタイトルを修正したら、ファイルを保存したときにその修正もブラウザに反映されます。</p>
+
+<p class="codeFilePath">/app/views/tasks/index.html.erb</p>
+<pre class="ruby">&lt;% title "Todo List" %&gt;</pre>
+<p>&nbsp;</p>
+<div class="imageWrapper">
+  <img src="/system/photos/656/original/E264I02.png" width="800" height="367" alt="CSSの修正がファイル保存後に反映される"/>
+</div>
+
+<p>erbファイルを修正したときには少し遅れがありますが、これはLiveReloadがページを読み込む前にspecが再実行されるからです。これには<code>Guardfile</code>内の項目の並び順が影響しています。ブラウザの更新を先にした方が、specが実行されている間に新しいページをチェックできるので、より便利でしょう。そのためには、<code>Guardfile</code>内の2つのguardブロックを入れ替えて、<code>livereload</code>セクションが先に実行されるようにするだけです。</p>
+
+<p class="codeFilePath">/Guardfile</p>
+<pre class="ruby"># A sample Guardfile
+# More info at https://github.com/guard/guard#readme
+
+guard 'livereload' do
+  watch(%r{app/.+\.(erb|haml)})
+  watch(%r{app/helpers/.+\.rb})
+  watch(%r{public/.+\.(css|js|html)})
+  watch(%r{config/locales/.+\.yml})
+end
+
+guard 'rspec', :version =&gt; 2 do
+  watch(%r{^spec/.+_spec\.rb})
+  watch(%r{^lib/(.+)\.rb})                            { |m| "spec/lib/#{m[1]}_spec.rb" }
+  watch('spec/spec_helper.rb')                        { "spec" }
+
+  # Rails example
+  watch('spec/spec_helper.rb')                        { "spec" }
+  watch('config/routes.rb')                           { "spec/routing" }
+  watch('app/controllers/application_controller.rb')  { "spec/controllers" }
+  watch(%r{^spec/.+_spec\.rb})
+  watch(%r{^app/(.+)\.rb})                            { |m| "spec/#{m[1]}_spec.rb" }
+  watch(%r{^lib/(.+)\.rb})                            { |m| "spec/lib/#{m[1]}_spec.rb" }
+  watch(%r{^app/controllers/(.+)_(controller)\.rb})   { |m| ["spec/routing/#{m[1]}_routing_spec.rb", "spec/#{m[2]}s/#{m[1]}_#{m[2]}_spec.rb", "spec/acceptance/#{m[1]}_spec.rb"] }
+  watch(%r{^app/views/(.+)/})                         { |m| "spec/requests/#{m[1]}_spec.rb" }
+end</pre>
+
+<p>これで、ファイルを修正したらすぐに画面で確認できるようになりました。</p>

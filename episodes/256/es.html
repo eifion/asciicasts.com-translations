@@ -1,0 +1,231 @@
+<p>En el episodio 138 [<a href="http://railscasts.com/episodes/138-i18n">verlo</a>, <a href="http://asciicasts.com/episodes/138-i18n">leerlo</a>] tratamos el problema de la internacionalizaci&oacute;n.  Por defecto Rails guarda la informaci&oacute;n de internacionalizaci&oacute;n en ficheros YAML, pero en este episodio vamos ver c&oacute;mo se puede almacenar de diferente forma.</p>
+
+<p>A continuaci&oacute;n vemos una p&aacute;gina de un sitio Rails muy sencillo del que queremos internacionalizar el texto de la cabecera.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/597/original/E256I01.png" width="800" height="318" alt="La página principal de nuestro sitio."/>
+</div>
+
+<p>Es muy f&aacute;cil internacionalizar un fragmento de texto en una aplicaci&oacute;n Rails utilizando el m&eacute;todo <code>t</code>, pero si lo hacemos as&iacute; tenemos que editar un fichero YAML para cada lenguaje que soporte nuestra aplicaci&oacute;n y a&ntilde;adir ah&iacute; la clave y el texto para dicho lenguaje.  Esto puede hacerse muy tedioso para aplicaciones grandes, y de todas formas no es trabajo del desarrollador escribir todos los textos traducidos.  Ser&iacute;a mucho mejor que existiese una interfaz web que permitiese a los administradores a&ntilde;adir y editar los textos traducibles.</p>
+
+<p>Afortunadamente la gema de internacionalizaci&oacute;n soporta diferentes tipos de almacenamiento, lo que quiere decir que no tenemos por qu&eacute; ce&ntilde;irnos a usar YAML sino que podemos utilizar cualquier otro tipo de base de datos.  Por defecto Rails utiliza el  <a href="https://github.com/svenfuchs/i18n/blob/master/lib/i18n/backend/simple.rb">Simple backend</a> que carga los ficheros YAML para gestionar con ellos las traducciones.  En este episodio nos centraremos en <a href="https://github.com/svenfuchs/i18n/blob/master/lib/i18n/backend/key_value.rb">Key-Value backend</a> que nos permite usar cualquier almacenamiento de pares clave-valor para guardar las traducciones.  Tambi&eacute;n hay un soporte para almacenamiento sobre ActiveRecord que ha sido extra&iacute;do a <a href="https://github.com/svenfuchs/i18n-active_record">su propia gema</a>, que funciona pero realmente no es la mejor manera de hacerlo.  Es mejor que las claves est&eacute;n en memoria en lugar de en una base de datos porque recuperar todas las cadenas traducibles de cada p&aacute;gina supondr&iacute;an muchos accesos a la base de datos.  Aunque se podr&iacute;a utilizar cach&eacute; para mejorar el rendimiento tendr&iacute;amos entonces el problema de expirar esta cach&eacute; cuando se modifiquen las claves de traducci&oacute;n, de ah&iacute; que sea mejor utilizar un almacenamiento de clave-valor, enfoque que veremos en este episodio.</p>
+
+<h3>Cambiando el motor</h3>
+
+<p>Primero queremos cambiar el texto est&aacute;tico de la cabecera para que utilice una traducci&oacute;n.  Haremos que apunte a una clave llamada <code>welcome</code>.</p>
+
+<p class="codeFilePath">/app/views/home/index.html.erb</p>
+<pre class="ruby">&lt;h1&gt;&lt;%= t(&#x27;welcome&#x27;) %&gt;&lt;/h1&gt;</pre>
+
+<p>A continuaci&oacute;n podemos a&ntilde;adir el texto traducido al YAML de ingl&eacute;s.</p>
+
+<p class="codeFilePath">/config/locales/en.yml</p>
+<pre class="ruby">en:
+  welcome: &quot;Welcome&quot;</pre>
+
+<p>Al refrescar la p&aacute;gina veremos que se muestra el texto del archivo YAML.</p>
+
+<p>Ahora que ya tenemos al menos una cadena de texto traducida utilizando el motor de internacionalizaci&oacute;n por defecto vamos a cambiarlo.  En el fichero <code>key_value.rb</code> hay instrucciones sobre c&oacute;mo hacerlo, incluso dando un ejemplo de implementaci&oacute;n de almacenamiento alternativo.</p>
+
+<pre class="ruby">#   I18n.backend = I18n::Backend::KeyValue.new(Rufus::Tokyo::Cabinet.new(&#x27;*&#x27;))</pre>
+      
+<p>Tenemos que crear un nuevo <code>I18n::Backend::KeyValue</code> y pasarle el almac&eacute;n de clave-valor que queremos usar para alojar las traducciones.  Dicho almac&eacute;n tiene que responder a tres m&eacute;todos: uno para recuperar el valor de una clave, otro para establecerlo, y otro para listar todas las claves disponibles, tal y como se lee en los comentarios.  La mayor parte de los almacenes de claves y valores de Ruby soportan estos m&eacute;todos, por lo que podemos usar uno cualquiera sin hacer nada.</p>
+
+<pre class="ruby"># * store#[](key)         - Used to get a value
+# * store#[]=(key, value) - Used to set a value
+# * store#keys            - Used to get all keys</pre>
+
+<p>Ya sabemos c&oacute;mo empezar a mover el motor de internacionalizaci&oacute;n de nuestra aplicaci&oacute;n.  Primero vamos a crear un nuevo fichero en el directorio <code>/config/initializers</code> llamado <code>i18n_backend</code>.</p>
+
+<p class="codeFilePath">/config/initalizers/i18n_backend.rb</p>
+<pre class="ruby">I18n.backend = I18n::Backend::KeyValue.new({})</pre>
+
+<p>El ejemplo de los comentarios utiliza Tokyo Cabinet pero para empezar r&aacute;pidamente nosotros hemos usado un <em>hash</em> vac&iacute;o.  Obviamente en una aplicaci&oacute;n en producci&oacute;n no se nos ocurrir&iacute;a hacer esto, pero dado que es la estructura de datos m&aacute;s simple que soporta estos tres m&eacute;todos nos servir&aacute; como demostraci&oacute;n.  Si reiniciamos la aplicaci&oacute;n y vamos a la p&aacute;gina pricipal veremos que el titulo ya no aparece.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/598/original/E256I02.png" width="800" height="314" alt="En el nuevo motor de traducción ya no aparece nuestro texto traducido."/>
+</div>
+
+<p>De hecho en el c&oacute;digo fuente de la p&aacute;gina veremos que nos falta la traducci&oacute;n.</p>
+
+<pre class="erb">
+&lt;h1&gt;&lt;span class=&quot;translation_missing&quot;&gt;en, welcome&lt;/span&gt;&lt;/h1&gt;
+</pre>
+
+<p>Vemos que la traducci&oacute;n se marca como inexistente aunque s&iacute; que est&aacute; en el fichero YAML.  Vamos a crear la interfaz web que permita a nuestros usuarios a&ntilde;adir las traducciones seg&uacute;n les vayan haciendo falta.  Esto lo gestionaremos con un <code>TranslationsController</code> que tendr&aacute; una &uacute;nica acci&oacute;n, <code>index</code>.</p>
+
+<pre class="terminal">$ rails g controller translations index</pre>
+
+<p>Queremos que este controlador se comporte como un recurso, por lo que cambiaremos la ruta generada  (<code>get &quot;translations/index&quot;</code>) con una llamada a  <code>resources</code>.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Intn::Application.routes.draw do
+  resources :translations
+  root :to =&gt; &quot;home#index&quot;
+end</pre>
+
+<p>En la acci&oacute;n <code>index</code> queremos mostrar las traducciones disponibles, as&iacute; que vamos a recuperar todas las traducciones del <em>hash</em>, lo que podemos hacer con <code>I18n.backend.store</code>.</p>
+
+<p class="codeFilePath">/app/controllers/translations_controller.rb</p>
+<pre class="ruby">class TranslationsController &lt; ApplicationController
+  def index
+    @translations = I18n.backend.store
+  end
+end</pre>
+
+<p>En la vista podemos iterar sobre las traducciones para mostrarlas.</p>
+
+<p class="codeFilePAth">/app/views/translations/index.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Translations&lt;/h1&gt;
+
+&lt;ul&gt;
+  &lt;% @translations.each do |key, value| %&gt;
+    &lt;li&gt;&lt;%= key %&gt;: &lt;%= value %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;</pre>
+
+<p>Con este c&oacute;digo recorremos todas las traducciones en el <em>hash</em> y mostraremos cada clave y su valor en una lista.  Necesitamos poder a&ntilde;adir traducciones, as&iacute; que le a&ntilde;adiremos un formulario.</p>
+
+<p class="codeFilePath">/app/views/translations/index.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Translations&lt;/h1&gt;
+
+&lt;ul&gt;
+  &lt;% @translations.each do |key, value| %&gt;
+    &lt;li&gt;&lt;%= key %&gt;: &lt;%= value %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;
+
+&lt;h2&gt;Add Translation&lt;/h2&gt;
+&lt;%= form_tag translations_path do %&gt;
+ &lt;p&gt;
+   &lt;%= label_tag :locale %&gt;&lt;br /&gt;
+   &lt;%= text_field_tag :locale %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= label_tag :key %&gt;&lt;br /&gt;
+    &lt;%= text_field_tag :key %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= label_tag :value %&gt;&lt;br /&gt;
+    &lt;%= text_field_tag :value %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= submit_tag &quot;Submit&quot; %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>Con este formulario haremos un POST a la acci&oacute;n <code>create</code> del controlador <code>TranslationController</code>.  El formulario tiene tres campos: uno para el idioma de la traducci&oacute;n, por ejemplo <code>en</code> para el ingl&eacute;s, otro para la clave que es como se identificar&aacute; la traducci&oacute;n en las vistas, y otro para el texto traducido en s&iacute;.</p>
+
+<p>En la acci&oacute;n <code>create</code> queremos a&ntilde;adir una nueva traducci&oacute;n bas&aacute;ndonos en los valores del formulario, lo que podemos hacer llamando a <code>I18n.backend.store_translations</code> que recibe tres argumentos: el primero es el idioma, y el segundo es un <em>hash</em> que puede contener cualquier cosa.  Pasaremos la clave y el valor recibidos del formulario.  El  argumento <code>escape</code> determina si se escapan los puntos en la clave o no.  Como queremos que los puntos separen diferentes segmentos de la clave, este valor tendr&aacute; que ser <code>false</code>.</p>
+
+<p class="codeFilePath">/app/controllers/translations_controller.rb</p>
+<pre class="ruby">def create
+  I18n.backend.store_translations(params[:locale], &crarr;
+    {params[:key] =&gt; params[:value]}, :escape =&gt; false)
+  redirect_to translations_url, :notice =&gt; &quot;Added translations&quot;
+end</pre>
+
+<p>Ya podemos probar el nuevo formulario para a&ntilde;adir la clave que falta.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/599/original/E256I03.png" width="800" height="460" alt="Utilizando el interfaz administrativo para poner una nueva traducción."/>
+</div>
+
+<p>Si ahora volvemos a la p&aacute;gina principal veremos que ya se traduce el campo de la cabecera seg&uacute;n los valores almacenados en nuestra nueva implementaci&oacute;n</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/600/original/E256I04.png" width="801" height="315" alt="El nuevo motor ya carga las traducciones"/>
+</div>
+
+<h3>Redis como almac&eacute;n</h3>
+
+<p>Nuestro nuevo motor de traducciones funciona muy bien pero como estamos alojando los valores en un <em>hash</em> de Ruby cuando reiniciemos el servidor web los cambios se perder&aacute;n.  Necesitamos un almac&eacute;n m&aacute;s persistente para las traducciones y en esta aplicaci&oacute;n vamos a utilizar  <a href="http://redis.io">Redis</a> que es un almac&eacute;n de claves y valores persistente muy sencillo.</p>
+
+<P>Los que usen Mac pueden instalar Redis utilizando <a href="https://github.com/mxcl/homebrew">HomeBrew</a>, con lo que la instalaci&oacute;n ser&iacute;a tan sencilla como </p>
+
+<pre class="terminal">$ brew install redis</pre>
+
+<p>Una vez instalado se deben seguir las instrucciones para arrancar el servidor Redis.  Por lo general esto es tan simple como lanzar <code>redis-server</code>.</p>
+
+<p>Tenemos que instalar la gema de Redis en nuestra aplicaci&oacute;n, a&ntilde;adiendo una referencia en el <code>Gemfile</code> y luego ejecutando el comando <code>bundle</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;redis&#x27;</pre>
+
+<p>Ahora podemos cambiar el <em>hash</em> del inicializador por la base de datos Redis.</p>
+
+<p class="codeFilePath">/config/initializers/i18n_backend.rb</p>
+<pre class="ruby">I18n.backend = I18n::Backend::KeyValue.new(Redis.new)</pre>
+
+<p>Y ya no tenemos que hacer nada m&aacute;s, aunque probablemente nos interesar&iacute;a utilizar la opci&oacute;n <code>:db</code> para especificar una base de datos y usar una u otra dependiendo de si la aplicaci&oacute;n est&aacute;n en desarrollo, pruebas o producci&oacute;n.</p>
+
+<p>Como hemos cambiado el almac&eacute;n de claves y valores tendremos que cambiar otra vez el c&oacute;digo de la vista.  Ahora mismo itera sobre un <em>hash</em>, pero como ahora lo har&aacute; sobre una base de datos Redis cambiaremos el siguiente c&oacute;digo:</p>
+
+<p class="codeFilePath">/app/views/translations/index.html.erb</p>
+<pre class="ruby">&lt;ul&gt;
+  &lt;% @translations.each do |key, value| %&gt;
+    &lt;li&gt;&lt;%= key %&gt;: &lt;%= value %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;
+</pre>
+
+por este otro:
+<p class="codeFilePath">/app/views/translations/index.html.erb</p>
+<pre class="ruby">
+&lt;ul&gt;
+  &lt;% @translations.keys.each do |key| %&gt;
+    &lt;li&gt;&lt;%= key %&gt;: &lt;%= @translations[key] %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;
+</pre>
+
+<p>Ahora <code>@translations</code> es una base de datos Redis que no responde al m&eacute;todo <code>each</code>, por lo que tenemos que iterar utilizando el m&eacute;todo <code>keys</code>.  En el bloque podemos mostrar la clave y su valor.</p>
+
+<p>Ya tenemos un almac&eacute;n persistente para las traducciones de nuestra aplicaci&oacute;n y cualquier cosa que a&ntilde;adamos utilizando la interfaz sobrevivir&aacute; a un reinicio.</p>
+
+<h3>C&oacute;mo a&ntilde;adir un almac&eacute;n de respaldo</h3>
+
+<p>Ya tenemos nuestro motor alternativo de traducciones en su sitio pero, &iquest;y si queremos seguir utilizando YAML para las traducciones que no se encuentren en el almac&eacute;n principal de claves y valores?  Ahora veremos c&oacute;mo hacerlo.</p>
+
+<p>Tendremos que hacer algunos cambios en la forma en que definimos el motor en el inicializador.  En lugar de utilizar el <code>KeyValue</code> directamente, vamos a utilizar otro motor llamado <code>Chain</code>, que lo que hace es ir invocando todos los motores que recibe como par&aacute;metro hasta que uno de ellos responde con la clave.</p>
+
+
+<p class="codeFilePath">/config/initializers/i18n_backend.rb</p>
+<pre class="ruby">I18n.backend = I18n::Backend::Chain.new(I18n::Backend::KeyValue.new(Redis.new), I18n.backend)</pre>
+
+<p>Pasamos primero nuestro almac&eacute;n Redis y luego el almac&eacute;n por defecto.  Nuestra aplicac&oacute;n ahora buscar&aacute; las traducciones en la base de datos Redis y luego, si no encuentra la clave, la buscar&aacute; en el fichero YAML correspondiente.</p>
+
+<p>Pero de esta manera se hace m&aacute;s dif&iacute;cil acceder directente al almac&eacute;n de claves y valores directamente.   Para soslayar esto podemos mover nuestra base de datos a una constante.</p>
+
+<p class="codeFilePath">/config/initializers/i18n_backend.rb</p>
+<pre class="ruby">TRANSLATION_STORE = Redis.new
+I18n.backend = I18n::Backend::Chain.new(I18n::Backend::KeyValue.new(TRANSLATION_STORE), I18n.backend)</pre>
+
+<p>Y ya podemos usar esta constante donde quiera que necesitemos acceder al almac&eacute;n de claves y valores en nuestra aplicaci&oacute;n, por ejemplo dentro de <code>TranslationsController</code> donde en lugar de llamar a <code>I18n.backend.store</code> lo haremos invocando a la constante.</p>
+
+
+<p class="codeFilePath">/app/controllers/translations_controller.rb</p>
+<pre class="ruby">def index
+  @translations = TRANSLATION_STORE
+end</pre>
+
+<p>Si eliminamos las traducciones del almac&eacute;n Redis y vamos ahora a la p&aacute;gina principal veremos el texto traducido que se recupera del YAML.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/601/original/E256I05.png" width="800" height="452" alt="Ahora la traducción viene del almacén de respaldo."/>
+</div>
+
+<p>Cuando a&ntilde;adamos un nuevo valor, &eacute;ste tendr&aacute; precedencia y ser&aacute; el que se muestre.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/602/original/E256I06.png" width="800" height="452" alt="Ahora la traducción viene de la base de datos Redis de nuevo."/>
+</div>
+
+<p>Y con esto concluye este episodio.  Ya tenemos un sistema que nos permite editar las traducciones mediante  una interfaz web en lugar de tener que editar manualmente los ficheros YAML.  Si tuvi&eacute;ramos que hacer algo como esto en una aplicaci&oacute;n de producci&oacute;n tendr&iacute;amos mucho que mejorar en cuanto a experiencia de usuario, pero la base ya est&aacute; puesta.</p>
+
+<p>Para ampliar m&aacute;s informaci&oacute;n sobre este tema se puede leer el pr&oacute;ximo libro de Jos&eacute; Valim llamado &ldquo;<a href="http://pragprog.com/titles/jvrails/crafting-rails-applications">Crafting Rails Applications</a>&rdquo; que est&aacute; en versi&oacute;n beta y que ha sido de mucha ayuda a la hora de escribir este episodio.</p>

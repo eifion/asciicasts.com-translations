@@ -1,0 +1,269 @@
+<p>Los di&aacute;logos de confirmaci&oacute;n son comunes en las aplicaciones web. Casi todas las aplicaciones Rails lo muestran cuando hacemos clic en un v&iacute;nculo &ldquo;eliminar&rdquo;, preguntando si estamos seguros que queremos eliminar un elemento. La mayor&iacute;a de las veces estas alertas son innecesarias, hicimos clic en el v&iacute;nculo porque queremos eliminar el elemento, pero hay, por supuesto, momentos cuando hacemos clic por error. &iquest;No ser&iacute;a mejor, sin embargo, si no hay una confirmaci&oacute;n sino un enlace ofreciendo deshacer el cambio que hemos realizado? Esto proporcionar&iacute;a una mejor experiencia de usuario.</p>
+
+<p>En este episodio vamos a implementar este comportamiento utilizando una gema llamada <a href="https://github.com/airblade/paper_trail">PaperTrail</a> que es una librer&iacute;a gen&eacute;rica de versionado para ActiveRecord. En Rails hay frameworks especificos para deshacer, por ejemplo <a href="https://github.com/laserlemon/vestal_versions">Vestal Versions</a> que fue cubierto en el episodio 177 [<a href="http://railscasts.com/episodes/177-model-versioning">ver</a>, <a href="http://asciicasts.com/episodes/177-model-versioning">leer</a>]. Usaremos PaperTrail aqu&iacute;, ya que funciona mejor cuando a&ntilde;adimos soporte para deshacer.</p>
+
+<h3>Instalando PaperTrail</h3>
+
+<p>Para instalar PaperTrail necesitamos agregar una referencia en nuestro archivo <code>Gemfile</code> y luego ejecutar el comando <code>bundle</code> para instalar la gema.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby"># Edit this Gemfile to bundle your application&#x27;s dependencies.
+source &#x27;http://gemcutter.org&#x27;
+
+gem &quot;rails&quot;, &quot;3.0.5&quot;
+gem &quot;sqlite3-ruby&quot;, :require =&gt; &quot;sqlite3&quot;
+gem &quot;paper_trail&quot;</pre>
+
+<p>Luego de instalar la gema, ejecutamos el generador instalador de PaperTrail.</p>
+
+<pre class="terminal">$ rails g paper_trail:install</pre>
+
+<p>Este generador crea una migraci&oacute;n que crear&aacute; una tabla <code>versions</code> una vez que ejecutemos <code>rake db:migrate</code>.</p>
+
+<h3>Utilizando PaperTrail</h3>
+
+<p>Para agregar versionado a un modelo, como al modelo <code>Product</code> de esta aplicaci&oacute;n, agregamos una llamada a  <code>has_paper_trail</code> en el archivo del modelo.</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">class Product &lt; ActiveRecord::Base
+  attr_accessible :name, :price, :released_at
+  has_paper_trail
+end</pre>
+
+<p>El modelo <code>Product</code> ser&aacute; ahora versionado, por lo que cualquier cambio en &eacute;l puede ser deshecho.</p>
+
+<h3>Agregando Funcionalidad de Deshacer</h3>
+
+<p>Instalar PaperTrail es bastante simple, pero &iquest;c&oacute;mo hacemos para agregar la funcionalidad de deshacer a nuestra aplicaci&oacute;n? Para empezar vamos a necesitar una acci&oacute;n a la cual apunte nuestro v&iacute;nculo de deshacer. Podemos agregar una nueva acci&oacute;n al controlador <code>ProductsController</code>, pero para mantener el c&oacute;digo limpio, crearemos un nuevo controlador llamado <code>versions</code>. De esta forma podemos luego a&ntilde;adir f&aacute;cilmente versionado a otros modelos.</p>
+
+<pre class="terminal">$ rails g controller versions</pre>
+
+<p>S&oacute;lo necesitamos una acci&oacute;n en este controlador para poder revertir una versi&oacute;n.</p>
+
+<p class="codeFilePath">/app/controllers/versions_controller.rb</p>
+<pre class="ruby">class VersionsController &lt; ApplicationController
+  def revert
+    @version = Version.find(params[:id])
+    @version.reify.save!
+    redirect_to :back, :notice =&gt; &quot;Undid #{@version.event}&quot;
+  end
+end</pre>
+
+<p>En esta acci&oacute;n obtenemos la <code>Version</code> que coincide con el par&aacute;metro <code>id</code> de la URL. Luego queremos obtener el objeto del modelo espec&iacute;fico a esa versi&oacute;n llamando <code>reify</code> sobre el objeto version. En este caso retornar&aacute; la instancia de <code>Product</code> a la que se refiere la versi&oacute;n. Podemos llamar luego a <code>save!</code> para revertir el producto a esa versi&oacute;n. A continuaci&oacute;n redirigimos a la p&aacute;gina anterior y asignamos un mensaje flash que nos describa que acaba de suceder. Podemos obtener el evento que se ha completado llamando a <code>@version.event</code>. Este retornar&aacute; &ldquo;create&rdquo;, &ldquo;update&rdquo; or &ldquo;destroy&rdquo; dependiendo de la acci&oacute;n que se ha revertido y lo pondremos en el mensaje</p>
+
+<p>Necesitamos poder acceder a esta nueva acci&oacute;n asi que agregamos una nueva ruta al archivo <code>routes</code>.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Store::Application.routes.draw do |map|
+  post &quot;versions/:id/revert&quot; =&gt; &quot;versions#revert&quot;, :as =&gt; &crarr;
+       &quot;revert_version&quot;
+  resources :products
+  root :to =&gt; &quot;products#index&quot;
+end</pre>
+
+<p>Nota que hemos utilizado el metodo <code>post</code>. Estamos realizando algo potencialmente destructivo en la acci&oacute;n revert ya que modifica la base de datos, por lo tanto no usaremos <code>match</code> porque aceptar&iacute;a pedidos GET. Como el nombre implica post &uacute;nicamente responde a pedidos POST.</p>
+
+<h3>Deshaciendo Actualizaciones</h3>
+
+<p>Ahora que tenemos una acci&oacute;n que manejar&aacute; el comportamiento de deshacer, es momento de agregar un v&iacute;nculo a los mensajes flash dentro de <code>ProductsController</code>. Comenzaremos con la acci&oacute;n <code>update</code> asi cuando alguien actualiza un producto, puede hacer clic en el v&iacute;nculo y deshacer los cambios realizados.</p>
+
+<p>Necesitamos crear el v&iacute;nculo deshacer, pero &iquest;c&oacute;mo lo hacemos en el controlador? Podr&iacute;amos colocar HTML dentro de un string pero ser&iacute;a mejor poder utilizar <code>link_to</code>. No podemos utilizar m&eacute;todos como <code>link_to</code> directamente en los controladores, pero podemos acceder a ellos a trav&eacute;s de <code>view_context</code> asi que llamamos a <code>view_context.link_to</code> para crear un v&iacute;nculo. Este v&iacute;nculo apuntar&aacute; a la acci&oacute;n <code>revert</code> y le pasar&aacute; el <code>id</code> de la &uacute;ltima versi&oacute;n guardada de ese producto. Podemos llamar <code>@product.versions</code> para obtener todas las versiones de un producto y llamar a <code>last</code> para obtener la versi&oacute;n m&aacute;s reciente. Conociendo esto podemos ahora crear el v&iacute;nculo a deshacer. Notar que incluimos <code>:method =&gt; :post</code> pues la acci&oacute;n <code>revert</code> s&oacute;lo responder&aacute; a pedidos POST. Luego de construir el v&iacute;nculo, podemos agregar el mismo al mensaje flash.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def update
+  @product = Product.find(params[:id])
+  if @product.update_attributes(params[:product])
+    undo_link = view_context.link_to(&quot;undo&quot;, &crarr;
+      revert_version_path(@product.versions.last), &crarr;
+      :method =&gt; :post)
+    redirect_to products_url, :notice =&gt; &crarr;
+      &quot;Successfully updated product.&quot;
+  else
+    render :action =&gt; &#x27;edit&#x27;
+  end
+end</pre>
+
+<p>Tenemos suficiente c&oacute;digo para probar. Si editamos uno de los productos de la lista, por ejemplo cambiando  &ldquo;1 Pint of Milk&rdquo; por &ldquo;2 Pints of Milk&rdquo;, obtendremos el siguiente resultado.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/586/original/E255I01.png" width="815" height="415" alt="Se muestra el vínculo deshacer, pero está sin escapar."/>
+</div>
+
+<p>El producto ha cambiado pero el v&iacute;nculo no ha funcionado a&uacute;n. El v&iacute;nculo esta ah&iacute;, pero el HTML ha sido escapado. Para arreglar esto debemos ir al lugar de la aplicaci&oacute;n que muestra los mensajes flash y modificarlo, de modo que no escape su contenido. En esta aplicaci&oacute;n esto sucede en el archivo de layout. Todo lo que debemos hacer es llamar al m&eacute;todo <code>raw</code> de forma que el contenido no sea escapado.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;div id=&quot;container&quot;&gt;
+  &lt;h1&gt;&lt;%=h yield(:title) %&gt;&lt;/h1&gt;
+  &lt;%- flash.each do |name, msg| -%&gt;
+    &lt;%= content_tag :div, raw(msg), :id =&gt; &quot;flash_#{name}&quot; %&gt;
+  &lt;%- end -%&gt;
+  &lt;%= yield %&gt;
+&lt;/div&gt;</pre>
+
+<p>Debemos ser cuidadosos haciendo esto. Si cualquier entrada del usuario es desplegada en el mensaje flash, no ser&aacute; escapada por lo que debemos escaparla antes de mostrarla.</p>
+
+<p>Si editamos nuevamente el producto, cambiando a &ldquo;4 Pints of Milk&rdquo; esta vez el v&iacute;nculo a deshacer se muestra correctamente.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/587/original/E255I02.png" width="815" height="415" alt="El vínculo ahora se muestra correctamente."/>
+</div>
+
+<p>Cuando hacemos clic en el v&iacute;nculo de deshacer el producto es revertido a su versi&oacute;n anterior.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/588/original/E255I03.png" width="815" height="415" alt="La modificación fue deshecha."/>
+</div>
+
+<h3>Deshaciendo Luego de Eliminar un Elemento</h3>
+
+<p>Ahora agregaremos el v&iacute;nculo de deshacer a la acci&oacute;n <code>destroy</code> asi podemos recuperar un elemento luego de eliminarlo. Construiremos el v&iacute;nculo de la misma forma que hicimos en la acci&oacute;n <code>update</code> por lo que primeramente moveremos el c&oacute;digo que crea el v&iacute;nculo a un m&eacute;todo separado al que podamos llamar <code>update</code> y <code>destroy</code>. Haremos privado al m&eacute;todo de forma de que no sea considerado una acci&oacute;n y lo llamaremos <code>undo_link</code>.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">class ProductsController &lt; ApplicationController
+
+  #other actions omitted.
+
+  def update
+    @product = Product.find(params[:id])
+    if @product.update_attributes(params[:product])
+      redirect_to products_url, &crarr;
+        :notice =&gt; &quot;Successfully updated product. #{undo_link}&quot;
+    else
+      render :action =&gt; &#x27;edit&#x27;
+    end
+  end
+
+  def destroy
+    @product = Product.find(params[:id])
+    @product.destroy
+    redirect_to products_url, &crarr;
+      :notice =&gt; &quot;Successfully destroyed product. #{undo_link}&quot;
+  end
+
+  private
+  def undo_link
+    view_context.link_to(&quot;undo&quot;, &crarr;
+            revert_version_path(@product.versions.scoped.last), &crarr;
+     :method =&gt; :post)
+  end
+end</pre>
+
+<p>Hay una peque&ntilde;a trampa aqu&iacute;. Cuando estamos eliminando un registro <code>product.versions</code> aun refiere a una lista de versiones que no incluye la versi&oacute;n m&aacute;s reciente (la versi&oacute;n que fue eliminada por <code>destroy</code>). Parece que las versiones son cacheadas en un array. En este caso deber&iacute;amos poder llamar a <code>@product.versions(true)</code> para evitar el cache pero esto no funciona como esperamos cuando eliminamos registros. Para evitar esto podemos llamar <code>scoped</code> en el array de veriones antes de llamar a <code>last</code> y esto significa que siempre nos estamos refiriendo a la versi&oacute;n m&aacute;s reciente.</p>
+
+<p>Vamos a probar esto. Hacemos clic en el v&iacute;nculo &ldquo;Destroy&rdquo; para &ldquo;2 Pints of Milk&rdquo; y confirmamos la eliminaci&oacute;n del elemento.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/589/original/E255I04.png" width="815" height="415" alt="El producto fue destruido correctamente.."/>
+</div>
+
+<p>Cuando hacemos click en el v&iacute;nculo &ldquo;undo&rdquo; el elemento eliminado es reintegrado.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/590/original/E255I05.png" width="815" height="415" alt="El elemento eliminado fue reintegrado."/>
+</div>
+
+<h3>Deshaciendo un Create</h3>
+
+<p>Hay una acci&oacute;n m&aacute;s que implementar: <code>create</code>. Probemos a&ntilde;adir el v&iacute;nculo al mensaje flash en la acci&oacute;n <code>create</code> tal como lo realizamos en <code>update</code> y <code>destroy</code> y veamos que pasa.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def create
+  @product = Product.new(params[:product])
+  if @product.save
+    redirect_to products_url, :notice =&gt; &quot;Successfully created &crarr;
+      product. #{undo_link}&quot;
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end</pre>
+
+<p>Cuando agregamos un nuevo producto y tratamos de deshacerlo, obtenemos un mensaje de error.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/591/original/E255I06.png" width="815" height="415" alt="Ocurre un error cuando queremos deshacer un nuevo producto."/>
+</div>
+
+<p>El c&oacute;digo esta tratando de guardar un registro pero nosotros estamos tratando de deshacer la creaci&oacute;n de un producto, pero lo que queremos es destruir el elemento creado en lugar de guardarlo. Necesitamos modificar el codigo en <code>VersionsController</code> y cambiar su comportamiento.</p>
+
+<p>El problema es que cuando llamamos <code>reify</code> en un objeto recientemente creado, retorna <code>nil</code> ya que no hay versiones previas. Necesitamos modificar en c&oacute;digo en la acci&oacute;n <code>revert</code> de forma que compruebe si esa versi&oacute;n previa existe, y si lo hace, guardarla. En otro caso elimina el elemento.</p>
+
+<p class="codeFilePath">/app/controllers/versions_controller.rb</p>
+<pre class="ruby">class VersionsController &lt; ApplicationController
+  def revert
+    @version = Version.find(params[:id])
+    if @version.reify
+      @version.reify.save!
+    else
+      @version.item.destroy
+    end
+    redirect_to :back, :notice =&gt; &quot;Undid #{@version.event}&quot;
+  end
+end</pre>
+
+<p>Si no existen versiones previas llamamos a <code>@version.item</code> que retornar&aacute; el nuevo <code>Product</code> de la tabla products. Podemos luego llamar a <code>destroy</code> para eliminarlo.</p>
+
+<p>Vamos a probar. Creamos un nuevo producto llamado &ldquo;Chips&rdquo;.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/592/original/E255I07.png" width="815" height="415" alt="Crando un nuevo producto."/>
+</div>
+
+<p>Cuando hacemos clic en v&iacute;nculo &ldquo;undo&rdquo; el nuevo objeto es eliminado.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/593/original/E255I08.png" width="815" height="415" alt="El nuevo elemento fue eliminado correctamente."/>
+</div>
+
+<h3>Rehaciendo el Deshacer</h3>
+
+<p>Ahora que podemos deshacer luego de crear, actualizar o eliminar un producto, seria muy &uacute;til agregar la habilidad de reahacer la acci&oacute;n que hemos deshecho. Para agregar el comportamiento de rehacer debemos ir a <code>VersionsController</code> y agregar un v&iacute;nculo al mensaje flash que se muestra cuando deshacemos una acci&oacute;n.</p>
+
+<p class="codeFilePath">/app/controllers/versions_controller.rb</p>
+<pre class="ruby">class VersionsController &lt; ApplicationController
+  def revert
+    @version = Version.find(params[:id])
+    if @version.reify
+      @version.reify.save!
+    else
+      @version.item.destroy
+    end
+    link_name = params[:redo] == &quot;true&quot; ? &quot;undo&quot; : &quot;redo&quot;
+    link = view_context.link_to(link_name, &crarr;
+      revert_version_path(@version.next, &crarr;
+      :redo =&gt; !params[:redo]), :method =&gt; :post)
+    redirect_to :back, :notice =&gt; &crarr;
+     &rdquo;Undid #{@version.event}. #{link}&quot;
+  end
+end</pre>
+
+<p>La mayor parte de la l&oacute;gica aqu&iacute; tiene que ver con cambiar el texto en el v&iacute;nculo dependiendo de la acci&oacute;n previa. Luego generamos el v&iacute;nculo que utiliza <code>revert_version_path</code> y el que apunta a la siguiente versi&oacute;n del elemento en la lista de versiones. Selecciona la siguiente versi&oacute;n porque cuando guardamos o eliminamos un elemento crear&aacute; una nueva versi&oacute;n y esa es la que necesitamos para el comportamiento de rehacer.</p>
+
+<p>Vamos a probar estos cambios. Editamos &ldquo;Flat Screen TV&rdquo; y cambiamos su nombre a &ldquo;Flat Screen Television&rdquo;. Como es de esperar, nos muestra un v&iacute;nculo a deshacer.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/594/original/E255I09.png" width="816" height="286" alt="Modificando un producto para probar la funcionalidad rehacer."/>
+</div>
+
+<p>Cuando hacemos clic en el v&iacute;nculo de deshacer el producto se revierte a su estado anterior.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/595/original/E255I10.png" width="816" height="286" alt="El cambio fue deshecho."/>
+</div>
+
+<p>Haciendo clic en el v&iacute;nculo rehacer, reahace los cambios realizados en el t&iacute;tulo.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/596/original/E255I11.png" width="816" height="286" alt="El cambio fue ahora rehecho."/>
+</div>
+
+<p>Podemos pasar entre &ldquo;undo&rdquo; y &ldquo;redo&rdquo; cuantas veces queramos. Ahora que tenemos la capacidad de deshacer y reahacer podemos finalmente eliminar el dialogo de confirmaci&oacute;n de los v&iacute;nculos de eliminar.</p>
+
+<h3>Administrar Versiones Antig&uuml;as</h3>
+
+<p>Con la utilizaci&oacute;n de la aplicaci&oacute;n los datos de las versiones crear&aacute;n mucha informaci&oacute;n. Guardar todas las versiones en una &uacute;nica tabla hace f&aacute;cil eliminar versiones antig&uuml;as con un comando como el siguiente:</p>
+
+<pre class="ruby">Version.delete_all[&quot;created_at &lt; ?&quot;, 1.week.ago]</pre>
+
+<p>Podemos colocar el comando anterior en una tarea rake y ejecutarla de forma regular con la gema Whenever. Hecha un vistazo al episodio 164 [<a href="http://railscasts.com/episodes/164-cron-in-ruby">ver</a>, <a href="http://asciicasts.com/episodes/164-cron-in-ruby">leer</a>] para m&aacute;s informaci&oacute;n.</p>
+
+<p>Otra excelente funcionalidad de PaperTrail es que hace f&aacute;cil guardar informaci&oacute;n adicional en la tabla de versiones. Todo lo que debemos hacer es agregar una nueva columna a la tabla de versiones. Podemos luego usar la opci&oacute;n <code>:meta</code> del m&eacute;todo <code>has_paper_trail</code> o utilizar el m&eacute;todo <code>info_for_paper_trail</code> en el controlador y suministrar las opciones adicionales ah&iacute;. Si deseamos agregar informaci&oacute;n adicional en la tabla de versiones, como el nombre del modelo modificado de forma de mostrarlo en el mensaje flash podemos agregar esa informaci&oacute;n aqu&iacute; y desplegarla en la acci&oacute;n <code>revert</code>.</p>

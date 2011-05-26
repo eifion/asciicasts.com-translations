@@ -1,0 +1,296 @@
+<p>Rails 3.1の最初のベータ版がリリースされました。今回から数回にわたって新機能を紹介していきます。今回のエピソードでは、環境のセットアップ方法について説明し、その後で新機能の概要を見ていきます。</p> 
+
+<h3>Rails 3.1をインストールする</h3>
+
+<p>Rails 3.1 beta gemをインストールする前に、rvmを使用してgemsetを作成し、インストールする環境をその他の環境から隔離してRails 3.0のインストール環境に影響を与えないようにします。次のコマンドを実行して、<code>railspre</code>というgemsetを作成します。</p>
+
+<pre class="terminal">$ rvm 1.9.2@railspre --create</pre>
+
+<p>次に以下のコマンドを実行して、このgemsetの下にRailsベータをインストールします。</p>
+
+<pre class="terminal">$ gem install rails --pre</pre>
+
+<p>これによっていくつかのgemがインストールされます。すべてが正しくインストールされたことを確認するためにRailsのバージョンをチェックします。</p>
+
+<pre class="terminal">$ rails -v
+Rails 3.1.0.beta1</pre>
+
+<p>これでベータ版がインストールされたので、最初のRails 3.1アプリケーションを作成できます。</p>
+
+<pre class="terminal">$ rails new todo</pre>
+
+<p>Rails 3.1はデフォルトのJavaScriptライブラリとしてjQueryを使用します。 Prototypeを使用して新しいアプリケーションを作成したい場合は、<code>-j</code>オプションを指定します。</p>
+
+<pre class="terminal">$ rails new todo -j prototype</pre>
+
+<p>新しいアプリケーションを見ていく前に、そのアプリケーションのディレクトリに<code>cd</code>し、<code>bundle</code>を実行してgemをインストールします。インストールが完了したら、アプリケーションの構造を見てみましょう。</p>
+
+<p>TextMateで見るとディレクトリ構造はこのようになっています。(ここでは、デフォルトのドロワ(drawer)ではなく、<a href="https://github.com/jezdez/textmate-missingdrawer">MissingDrawer</a>プラグインを使用して、サイドバーにディレクトリ構造を表示させています。)</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/657/original/E265I01.png" width="796" height="392" alt="TextMateで表示させたRails 3.1のディレクトリ構造"/>
+</div>
+
+<p>まず<code>Gemfile</code>を見てみましょう。中身は以下のとおりです。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.1.0.beta1'
+
+# Bundle edge Rails instead:
+# gem 'rails',     :git =&gt; 'git://github.com/rails/rails.git'
+
+gem 'sqlite3'
+
+# Asset template engines
+gem 'sass'
+gem 'coffee-script'
+gem 'uglifier'
+
+gem 'jquery-rails'
+
+# Use unicorn as the web server
+# gem 'unicorn'
+
+# Deploy with Capistrano
+# gem 'capistrano'
+
+# To use debugger
+# gem 'ruby-debug19', :require =&gt; 'ruby-debug'
+
+group :test do
+  # Pretty printed test output
+  gem 'turn', :require =&gt; false
+end</pre>
+
+<p>最初の数行には特に驚くような部分はないですが、そのあとに“Asset template engines”というセクションが登場します。Railsはこのバージョンから<a href="http://sass-lang.com/">SASS</a>と<a href="http://jashkenas.github.com/coffee-script/">CoffeeScript</a>がデフォルトで有効になりました。これについては今後のエピソードでより詳しく見ていきます。このセクションには、アプリケーションのproductionモードでのJavaScriptコードを縮小化する<a href="https://github.com/lautis/uglifier">Uglifier</a>というgemと、jquery-rails gemが含まれています。Prototypeを使用している場合は、これの代わりにprototype-railsになります。</p> 
+
+<p>ファイルの末尾には、<a href="http://rubygems.org/gems/turn">turn</a> gemへの参照情報があります。これはテスト出力をきれいにするためのgemで、後ほど説明します。</p> 
+
+<h3>テンプレートの変更点</h3>
+
+<p>ここでの最も大きな変更点は、テンプレートエンジンによるassetsの扱いです。アプリケーションの<code>/public</code>ディレクトリを開くと、<code>javascripts</code>と<code>stylesheets</code>ディレクトリがなくなっています。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/658/original/E265I02.png" width="803" height="507" alt="publicディレクトリにjavascriptsとstylesheetsディレクトリがない"/>
+</div>
+
+<p>もしこれらのディレクトリがなくなったのなら、JavaScriptとCSSのコードをどこに置けばいいのでしょうか。その答ですが、それらは新しい<code>/app/assets</code>ディレクトリに移動しました。<code>javascripts</code>ディレクトリを開くと、<code>application.js</code>ファイルがあります。しかし中を見てみると、ここはアプリケーションのJavascriptを置く場所ではないことがわかります。</p>
+
+<p class="codeFilePath">/app/assets/javascripts/application.js</p>
+<pre class="javascript">// FIXME: Tell people that this is a manifest file, real code should go into discrete files
+// FIXME: Tell people how Sprockets and CoffeeScript works
+//
+//= require jquery
+//= require jquery_ujs
+//= require_tree .</pre>
+
+<p>このファイルは登録簿的に使用されるよう設計されています。ここにJavascriptコードを直接書かずに、同じディレクトリ内の他のファイルに記述します。これがどのように動くかを理解するために、アプリケーションで<code>Project</code>のためのscaffoldを生成します。</p>
+
+<pre class="terminal">$ rails g scaffold project name:string</pre>
+
+<p>このコマンドからの出力を見てみると、<code>app/assets</code>ディレクトリにいくつかのファイルが生成されたのがわかります。</p>
+<pre class="terminal">      create  app/assets/stylesheets/scaffold.css.scss
+      invoke  assets
+      create    app/assets/javascripts/projects.js.coffee
+      create    app/assets/stylesheets/projects.css.scss</pre>
+
+<p>生成されたファイルの中にはCSSファイルがありますが拡張子は<code>.scss</code>になっています。またJavascriptファイルの拡張子は<code>.coffee</code>になっています。この後すぐにこれらのファイルを見ていきますが、その前にデータベースをマイグレートして、新たに<code>projects</code>テーブルを作成します。</p>
+
+<pre class="terminal">$ rake db:migrate</pre>
+
+<p>生成されたSCSSファイルはぱっと見たところは標準的なCSSと同じように見えますが、最後の方を見ると、ネストされたルールなどいくつか違いがあるのがわかります。これはSASS固有の機能で、今後のエピソードでSASSを紹介するときに詳しく見ていきます。</p>
+
+<p class="codeFilePath">/app/assets/stylesheets/scaffold.css.scss</p>
+<pre class="css">#error_explanation {
+  width: 450px;
+  border: 2px solid red;
+  padding: 7px;
+  padding-bottom: 0;
+  margin-bottom: 20px;
+  background-color: #f0f0f0;
+  
+  h2 {
+    text-align: left;
+    font-weight: bold;
+    padding: 5px 5px 5px 15px;
+    font-size: 12px;
+    margin: -7px;
+    margin-bottom: 0px;
+    background-color: #c00;
+    color: #fff;
+  }
+  
+  ul li {
+    font-size: 12px;
+    list-style: square;
+  }
+}</pre>
+
+<p>加えてscaffoldが生成したのは、<code>Projects</code>内のページだけで使用されるCSSのための<code>projects.css.scss</code>ファイルとjavascriptのための<code>projects.js.coffee</code>ファイルです。これは単なる推奨であるということに注意してください。すべてのCSSとJavascriptファイルは、それぞれ一つのファイルにまとめられて、すべてのページの表示時にロードされます。</p>
+
+<p>アプリケーションのサーバを起動してprojectsページを開くと、ページのソースにそれら2つのファイルが含まれているのがわかります。</p>
+
+<pre class="html">&lt;link href="/assets/application.css" media="screen" ↵
+  rel="stylesheet" type="text/css" /&gt;
+&lt;script src="/assets/application.js" type="text/javascript"&gt; ↵
+&lt;/script&gt;</pre>
+
+<p>これら2つのファイルの中身は、アプリケーションのJavaScriptとCSSのファイルのそれぞれの統合された版で、これらのファイルの中身は<code>application.js</code>と<code>application.css</code>ファイルの<code>require</code>の行に基づいています。これらの行によって、どのファイルがどういう順番で結合ファイルに追加されるかが決まります。</p>
+
+<p class="codeFilePath">/app/assets/javascripts/application.js</p>
+<pre class="javascript">//= require jquery
+//= require jquery_ujs
+//= require_tree .</pre>
+
+<p>Railsは裏で<a href="http://www.getsprockets.com/">Sprockets</a>を使用してこれらを実現しています。SprocketsはアプリケーションのすべてのJavascriptとCSSファイルを集めて一つのファイルにしてクライアントに送ります。この仕組みによって、アプリケーション内のファイルをどのような構成で配置しても、それらが最終的に一つのファイルに結合されます。productionモードではファイルが縮小化されるので、できるかぎり効率的にダウンロードされることになります。</p>
+
+<p>developmentモードでは<code>application.js</code>と<code>application.css</code>の各ファイルは自動的に再読み込みされますが、productionモードではCoffeeScriptとSASSのファイルはコンパイルされるため、パフォーマンスの低下を防ぐためにこれらのファイルはキャッシュされます。</p> 
+
+<h3>マイグレーションの変更点</h3>
+
+<p>Rails 3.1のその他の新機能を見ていきましょう。まず先ほどのscaffoldコマンドで生成されたデータベースマイグレーションファイルです。</p>
+
+<p class="codeFilePath">/db/migrate/20110511193808_create_projects.rb</p>
+<pre class="ruby">class CreateProjects &lt; ActiveRecord::Migration
+  def change
+    create_table :projects do |t|
+      t.string :name
+
+      t.timestamps
+    end
+  end
+end</pre>
+
+<p>このマイグレーションはこれまでのものとは違っています。通常の<code>up</code>と<code>down</code>のメソッドは<code>change</code>メソッドに置き換わって、一つでupとdownを処理するようになりました。Rails 3.1では、changeメソッドから判断できる限り、2つのメソッドを書く必要がなくなりました。ActiveRecordにこの便利な機能が加わったことで、マイグレーションのコードを生成する時間が少なくなります。</p>
+
+<h3>Identity Map</h3>
+
+<p>Identity Mapは、ActiveRecordに追加されたもう一つの優れた機能です。設定ファイル<code>application.rb</code>を見てみると、デフォルトで有効に設定されているのがわかります。</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby"># Enable IdentityMap for Active Record, ↵
+to disable set to false or remove the line below.
+config.active_record.identity_map = true</pre>
+
+<p>Rails 3.1の最初のベータ版でこの機能を動かすためには、この設定ファイルを少しいじって、コードを一行追加します。</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby"># Enable IdentityMap for Active Record, ↵
+to disable set to false or remove the line below.
+config.active_record.identity_map = true
+ActiveRecord::IdentityMap.enabled = true</pre>
+
+<p>IdentityMap機能によって何ができるのでしょうか? 実例で説明するためにコンソールで使用します。最初に新規の<code>Project</code>を作成します。</p>
+
+<pre class="terminal">&gt; p = Project.create!(:name =&gt; "Yardwork")
+  SQL (81.4ms)  INSERT INTO "projects" ("created_at", "name", "updated_at") VALUES (?, ?, ?)  [["created_at", Fri, 13 May 2011 18:41:25 UTC +00:00], ["name", "Yardwork"], ["updated_at", Fri, 13 May 2011 18:41:25 UTC +00:00]]
+ =&gt; #&lt;Project id: 1, name: "Yardwork", created_at: "2011-05-13 18:41:25", updated_at: "2011-05-13 18:41:25"&gt;</pre> 
+ 
+<p>まずここではログが直接コンソールに表示されるので、コマンドが実行されたときにどのようなSQLが発行されているのかを知ることができます。</p>
+
+<p>次に新しく作成した<code>Project</code>を<code>id</code>を指定して取り出します。</p>
+<pre class="terminal">ruby-1.9.2-p180 :002 &gt; p1 = Project.find(1)
+  Project Loaded  From Identity Map (id: 1)
+ =&gt; #&lt;Project id: 1, name: "Yardwork", created_at: "2011-05-13 18:41:25", updated_at: "2011-05-13 18:41:25"&gt;</pre> 
+ 
+<p>コンソールには<code>Project Loaded From Identity Map (id: 1)</code>と表示されています。データベースからprojectを取り出すのにSQLクエリは実行されません。そのprojectがすでにメモリにロードされていることをRailsが知っていてそのインスタンスを使用するからです。これを確認するために両方のProjectの<code>object_id</code>が同じかどうかをチェックします。</p>
+
+<pre class="terminal">ruby-1.9.2-p180 :006 &gt; p.object_id == p1.object_id
+ =&gt; true</pre>
+ 
+<p>つまり、あるレコードについて属性を設定しながら、それがアソシエーションを介して読み込んだレコードと同一であると考えて問題がないということです。それが同じインスタンスであることが保証されているからです。</p>
+
+<h3>ネストされたhas_many :throughアソシエーション</h3>
+
+<p>他にもいくつかActiveRecordに加えられた機能がありますが、その中のひとつがネストされた<code>has_many :through</code>アソシエーションです。次のモデルのコードを見てください。</p>
+
+<p class="codeFilePath">/app/models/project.rb</p>
+<pre class="ruby">class Project &lt; ActiveRecord::Base
+  has_many :tasks
+  has_many :assignments, :through =&gt; :tasks
+  has_many :users, :through =&gt; :assignments
+end</pre>
+
+<p>Railsの以前のバージョンではこのようなことはできませんでした。3.1では<code>has_many :through</code>アソシエーションをネストすることができるようになったので、役に立つ場面が多いでしょう。</p>
+
+<p>もう一つの新機能として、<code>attr_accessible</code>呼び出しにロールを割り当てることができるようになりました。例えば、<code>name</code>属性をアクセス可能に設定するときに、adminロールを持つユーザだけに限定できるようになりました。</p>
+
+<p class="codeFilePath">/app/models/project.rb</p>
+<pre class="ruby">class Project &lt; ActiveRecord::Base
+  attr_accessible :name, :as =&gt; :admin
+end</pre>
+
+<p>コンソールで作成した<code>Project</code>に対して、ブラウザから項目名を「庭仕事(Yardwork)」から「家事(Housework)」に変更しようとしても、adminとしてログインしていないため変更できません。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/659/original/E265I03.png" width="801" height="280" alt="適切なロールをもっていないので変更できない"/>
+</div>
+
+<p><code>:as</code>オプションを付けて<code>update_attributes</code>の呼び出しを修正して、コントローラを介してロールを渡します。</p>
+
+<p class="codeFilePath">/app/controllers/projects_controller.rb</p>
+<pre class="ruby">def update
+  @project = Project.find(params[:id])
+
+  respond_to do |format|
+    if @project.update_attributes(params[:project], :as =&gt; :admin)
+      format.html { redirect_to @project, notice: 'Project ↵
+          was successfully updated.' }
+      format.json { head :ok }
+    else
+      format.html { render action: "edit" }
+      format.json { render json: @project.errors, ↵           
+        status: :unprocessable_entity }
+    end
+  end
+end</pre>
+
+<p>フォームから<code>Project</code>を更新しようとすると、今度はadminロールを持っているので成功します。</p> 
+
+<h3>ビュー層の変更点</h3>
+
+<p>最後にビュー層の変更点を紹介します。一つ目は小さいですが便利な機能です。従来はフォームに<code>file_field</code>がある場合、アップロードされるファイルが正しく送信されるように<code>form_for</code>に<code>:html =&gt; { :multipart =&gt; :true }</code>を追加する必要がありました。Rails 3.1ではその必要はなくなり、フォームに<code>file_field</code>が含まれる場合は<code>form</code>タグに適切な<code>enctype</code>属性を加える形になりました。</p>
+
+<p>もう一つはリンクの変更です。URLヘルパーにドメインとサブドメインオプションを渡せるようになりました。例えばリンクとして次のようなコードがあるとします。</p>
+
+<pre class="ruby">&lt;%= link_to 'Edit', edit_project_path(@project) %&gt;</pre>
+
+<p>この編集画面へのリンクで別のサブドメインを指定したい場合、このコードを次のように変えることができます。</p>
+<pre class="ruby">&lt;%= link_to 'Edit', edit_project_url(@project, ↵
+  :subdomain =&gt; 'foo') %&gt;</pre>
+
+<p>これでリンクは<code>foo</code>サブドメインの同じページを指定できます。</p>
+
+<h3>見やすくなったテスト出力</h3>
+
+<p>最後に、改善されたテスト出力を見てみます。<code>rake test</code>を実行すると、前に<code>Gemfile</code>で見たturn gemを使うことで出力が整理されて見やすくなりました。</p>
+
+<pre class="terminal">$ rake test
+(in /Users/eifion/todo)
+Loaded suite /Users/eifion/.rvm/gems/ruby-1.9.2-p180@global/gems/rake-0.8.7/lib/rake/rake_test_loader
+Started
+
+Finished in 0.003966 seconds.
+
+0 tests, 0 assertions, 0 failures, 0 errors, 0 skips
+Loaded suite /Users/eifion/.rvm/gems/ruby-1.9.2-p180@global/gems/rake-0.8.7/lib/rake/rake_test_loader
+Started
+
+ProjectsControllerTest:
+     PASS should create project (0.16s) 
+     PASS should destroy project (0.01s) 
+     PASS should get edit (0.08s) 
+     PASS should get index (0.01s) 
+     PASS should get new (0.01s) 
+     PASS should show project (0.01s) 
+     PASS should update project (0.01s) 
+
+Finished in 0.307078 seconds.
+
+7 tests, 10 assertions, 0 failures, 0 errors, 0 skips</pre>
+
+<p>Rails 3.1にはまだここで触れることができなかった新機能がたくさんあります。自動ストリーミング、ビューの継承、マウント可能なエンジン、その他の新機能を、今後のエピソードで紹介していきます。</p>
+
+<p>Rails 3.1での変更点の完全なリストは、こちらの<a href="https://gist.github.com/958283">概要のページ</a>に掲載されているので参照してください。</p>

@@ -1,0 +1,362 @@
+<p>Es fundamental realizar tests de alto nivel a la hora de probar nuestras aplicaciones Rails.  Una forma muy popular de efectuar este tipo de pruebas es Cucumber, que ya repasamos en el episodio 155 [<a href="http://railscasts.com/episodes/155-beginning-with-cucumber">verlo</a>, <a href="http://asciicasts.com/episodes/155-beginning-with-cucumber">leerlo</a>].  Pero a la hora de definir el comportamiento de alto nivel de la aplicaci&oacute;n la sintaxis de Cucumber no es del agrado de todo el mundo, por lo que en este episodio veremos una forma alternativa de hacer estos tests de alto nivel.</p>
+
+<p>Aunque nosotros siempre recomendamos seguir un desarrollo guiado por tests, en este episodio vamos a ir a&ntilde;adiendo los tests sobre una aplicaci&oacute;n ya escrita para no tener que preocuparnos de los detalles de implementaci&oacute;n.  Se trata de una sencilla aplicaci&oacute;n que implementa una lista de tareas de una p&aacute;gina.  La aplicaci&oacute;n muestra un listado de cosas pendientes de hacer y tiene un formulario que nos permite a&ntilde;adir nuevas tareas.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/603/original/E257I01.png" width="800" height="321" alt="Nuestra sencilla aplicación de tareas pendientes."/>
+</div>
+
+<p>Para probar esta aplicaci&oacute;n vamos a utilizar especificaciones de petici&oacute;n (<em>N. del T: request specs en el original</em>), que est&aacute;n disponibles a partir de  RSpec 2.0, por lo que lo primero que tenemos que hacer es a&ntilde;adir la gema RSpec Rails a los grupos de desarrollo y test en el <code>Gemfile</code>, y luego ejecutar <code>bundle</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+
+group :development, :test do
+  gem &#x27;rspec-rails&#x27;
+end</pre>
+
+<p>Despu&eacute;s de que Bundler se haya ejecutado ya podemos lanzar la siguiente orden para configurar RSpec en nuestra aplicaci&oacute;n:</p>
+
+<pre class="terminal">$ rails g rspec:install</pre>
+
+<p>Las especificaciones de petici&oacute;n son el equivalente en RSpec de los tests de integraci&oacute;n que vienen con Rails (y que vimos en el episodio 187 [<a href="http://railscasts.com/episodes/187-testing-exceptions">verlo</a>, <a href="http://asciicasts.com/episodes/187-testing-exceptions">leerlo</a>]).  Para generar una especificaci&oacute;n de petici&oacute;n invocamos al generador de tests de integraci&oacute;n:</p>
+
+<pre class="terminal">$ rails g integration_test task</pre>
+
+<p>Esto generar&aacute; un fichero <code>tasks_spec</code> en el directorio <code>spec/requests</code> con el siguiente aspecto:</p>
+
+<p class="codeFilePath">/spec/requests/tasks_spec.rb</p>
+<pre class="ruby">require &#x27;spec_helper&#x27;
+
+describe &quot;Tasks&quot; do
+  describe &quot;GET /tasks&quot; do
+    it &quot;works! (now write some real specs)&quot; do
+      # Run the generator again with the --webrat flag if you want to use webrat methods/matchers
+      get tasks_path
+      response.status.should be(200)
+    end
+  end
+end</pre>
+
+<p>El contenido del fichero parece un test de RSpec  normal pero tiene la diferencia de que podemos invocar m&eacute;todos como <code>get</code> para cargar una p&aacute;gina de la aplicaci&oacute;n y <code>response</code> para comprobar la respuesta de dicha petici&oacute;n.  La especificaci&oacute;n que ha sido generada por defecto solicita la p&aacute;gina de tareas pendientes que vimos antes, y comprueba que el valor de estado devuelto es <code>200</code>, lo que indicar&iacute;a que la petici&oacute;n ha tenido &eacute;xito.   Esta petici&oacute;n deber&iacute;a pasar tal cual, por lo que podemos probarla.  Ejecutemos <code>rake spec:requests</code> para pasar s&oacute;lo las especificaciones de petici&oacute;n:</p>
+
+<pre class="terminal">$ rake spec:requests
+(in /Users/eifion/code/tasklist)
+/Users/eifion/.rvm/rubies/ruby-1.9.2-p0/bin/ruby -S bundle exec rspec ./spec/requests/tasks_spec.rb
+DEPRECATION WARNING: &lt;% %&gt; style block helpers are deprecated. Please use &lt;%= %&gt;. (called from _app_views_tasks_index_html_erb___875755388255758006_2152410020_3563250333774836596 at /Users/eifion/code/tasklist/app/views/tasks/index.html.erb:3)
+<span class="passed">.</span>
+
+Finished in 0.18535 seconds
+<span class="passed">1 example, 0 failures</span>
+</pre>
+
+<p>Vemos que la especificaci&oacute;n pasa, pero tambi&eacute;n se lanza un aviso de deprecaci&oacute;n: este es el tipo de cosas que pasar&iacute;amos por alto si estuvi&eacute;ramos probando este tipo de funcionalidad s&oacute;lo con el navegador.  Por lo visto se nos ha olvidado utilizar un signo de igualdad en un <em>helper</em> de bloque.</p>
+
+<p>En el fichero de vista del formulario veremos que se nos ha olvidado el s&iacute;mbolo de igualdad en la apertura de la etiqueta <code>form_for</code>, que es necesario en Rails 3.</p>
+
+<p class="codeFilePath">/app/views/tasks/index.html.erb</p>
+<pre class="ruby">&lt;% form_for Task.new do |f| %&gt;</pre>
+
+<p>Si a&ntilde;adimos esto...</p>
+
+<p class="codeFilePath">/app/views/tasks/index.html.erb</p>
+<pre class="ruby">&lt;%= form_for Task.new do |f| %&gt;</pre>
+<p>&hellip;y luego ejecutamos otra vez la especificaciones, veremos que esta vez no recibimos ning&uacute;n aviso.</p>
+
+<pre class="terminal">$ rake spec:requests
+(in /Users/eifion/code/tasklist)
+/Users/eifion/.rvm/rubies/ruby-1.9.2-p0/bin/ruby -S bundle exec rspec ./spec/requests/tasks_spec.rb
+<span class="passed">.</span>
+
+Finished in 0.16725 seconds
+<span class="passed">1 example, 0 failures</span></pre>
+
+<h3>Nuestra primera especificaci&oacute;n de petici&oacute;n de verdad</h3>
+
+<p>Por lo general en una especificaci&oacute;n de petici&oacute;n queremos hacer algo m&aacute;s que comprobar el estado de la respuesta.  Cambiemos la especificaci&oacute;n por defecto por una que comprueba que se muestran las tareas pendientes en la p&aacute;gina.</p>
+
+<p class="codeFilePath">/specs/requests/tasks_spec.rb</p>
+<pre class="ruby">require &#x27;spec_helper&#x27;
+
+describe &quot;Tasks&quot; do
+  describe &quot;GET /tasks&quot; do
+    it &quot;displays tasks&quot; do
+      Task.create!(:name =&gt; &quot;paint fence&quot;)
+      get tasks_path
+      response.body.should include(&quot;paint fence&quot;)
+    end
+  end
+end</pre>
+
+<p>Esta especificaci&oacute;n es muy sencilla.  Creamos una nueva tarea y luego visitamos la p&aacute;gina <code>tasks</code> para ver que el texto de la p&aacute;gina incluye el nombre de la tarea.  Cuando ejecutemos <code>rake spec:requests</code> veremos que la especificaci&oacute;n pasa porque la p&aacute;gina incluye dicho texto.</p>
+
+<p>Las especificaciones de petici&oacute;n soportan todos los <a href="http://guides.rubyonrails.org/testing.html#helpers-available-for-integration-tests">m&eacute;todos</a> de los tests de integraci&oacute;n de Rails porque se basan en ellos.  Por ejemplo, si queremos probar la creaci&oacute;n de una nueva tarea podemos utilizar el m&eacute;todo <code>post_via_redirect</code> para asegurarnos que se sigue la redirecci&oacute;n cuando se crea una tare.</p>
+
+<p>Ahora vamos a escribir esta especificaci&oacute;n. Llamaremos a <code>post_via_redirect</code> para hacer un POST a la p&aacute;gina <code>index</code> pas&aacute;ndole los par&aacute;metros necesarios para crear una nueva tarea llamada  &ldquo;mow lawn&rdquo; (<em>N. del T: cortar el c&eacute;sped</em>) y luego comprueba que dicho texto aparece en la p&aacute;gina de resultados.</p>
+
+<p class="codeFilePath">/specs/requests/tasks_spec.rb</p>
+<pre class="ruby">require &#x27;spec_helper&#x27;
+
+describe &quot;Tasks&quot; do
+  
+  # Other task omitted.
+  
+  describe &quot;POST /tasks&quot; do
+    it &quot;creates a task&quot; do
+      post_via_redirect tasks_path, &crarr;
+	   :task =&gt; { :name =&gt; &quot;mow lawn&quot; }
+      response.body.should include(&quot;mow lawn&quot;)
+    end
+  end
+end</pre>
+
+<p>Si  ejecutamos las especificaciones veremos que pasan dos, por lo que parece que nuestro c&oacute;digo funciona como deber&iacute;a.  Si hici&eacute;semos desarrollo guiado por tests, empezar&iacute;amos con una especificaci&oacute;n que falla y luego ir&iacute;amos escribiendo el c&oacute;digo necesario para que hacer que pasase (esta es una de las ventajas del desarrollo guiado por tests: nos aseguramos de que los tests de la aplicaci&oacute;n siempre pasan).  En esta aplicaci&oacute;n hemos escrito directamente un test que pasa porque la funcionalidad ya estaba escrita.  Cuando escribamos tests de c&oacute;digo ya existente puede ser &uacute;til a veces romper algo en el c&oacute;digo para asegurarnos de que el test que hemos escrito no deja pasar dicho error.</p>
+
+<h3>Pruebas de Interfaz con Capybare</h3>
+
+<p>El problema que tienen nuestras especificaciones de petici&oacute;n es que no comprueban toda la experiencia de usuario.  Podr&iacute;amos romper por completo el formulario para una Nueva Tarea y sin embargo nuestras especificaciones no se dar&iacute;an cuenta de esta situaci&oacute;n, porque estamos haciendo directamente un POST a la acci&oacute;n <code>create</code> del servidor, en lugar de ir desde el formulario (que es lo que har&iacute;a un usuario).</p>
+
+<p>Tenemos que  reproducir las acciones del usuario, lo que podemos hacer usando <a href="https://github.com/jnicklas/capybara">Capybara</a> que es una alternativa a Webrat, el cual vimos en el episodio 156 [<a href="http://railscasts.com/episodes/156-webrat">verlo</a>, <a href="http://asciicasts.com/episodes/156-webrat">leerlo</a>]. Con Capybara tenemos m&eacute;todos para reproducir el comportamiento de un usuario en una aplicaci&oacute;n web.  Como se trata de una gema, tenemos que a&ntilde;adirla de la manera habitual.  Tambi&eacute;n a&ntilde;adiremos la gema  <a href="http://rubygems.org/gems/launchy">launchy</a> (en breve veremos por qu&eacute;).  En el <code>Gemfile</code> vamos a a&ntilde;adir ambas gemas a los grupos de desarrollo y test, ejecutando luego <code>bundle</code> para instalarlas.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+
+group :development, :test do
+  gem &#x27;rspec-rails&#x27;
+  gem &#x27;capybara&#x27;
+  gem &#x27;launchy&#x27;
+end</pre>
+
+<p>Las especificaciones de petici&oacute;n incluyen  autom&aacute;ticamente Capybara por lo que en la primera de nuestras especificaciones podemos utilizar el m&eacute;todo <code>visit</code> de Capybar en lugar de <code>get</code>.  Tambi&eacute;n podemos cambiar <code>reponse.body.should include</code> por <code>page.should have_content</code>.</p>
+
+<p>En la segunda especificaci&oacute;n podemos utilizar Capybara para hacer como si el usuario rellenase y enviase el formulario en lugar de hacer un POST directamente a la acci&oacute;n <code>create</code>. Con el m&eacute;todo <code>fill_in</code> podemos encontrar la caja de texto con la etiqueta correspondiente y establecer su valor, tras lo que podemos utilizar <code>click_button</code> para encontrar el bot&oacute;n del formulario y hacer clic en &eacute;l.</p>
+
+
+
+<p class="codeFilePath">/specs/requests/task_spec.rb</p>
+<pre class="ruby">require &#x27;spec_helper&#x27;
+
+describe &quot;Tasks&quot; do
+  describe &quot;GET /tasks&quot; do
+    it &quot;displays tasks&quot; do
+      Task.create!(:name =&gt; &quot;paint fence&quot;)
+      visit tasks_path
+      page.should have_content(&quot;paint fence&quot;)
+    end
+  end
+  
+  describe &quot;POST /tasks&quot; do
+    it &quot;creates a task&quot; do
+      visit tasks_path
+      fill_in &quot;Name&quot;, :with =&gt; &quot;mow lawn&quot;
+      click_button &quot;Add&quot;
+	 page.should have_content(&quot;Successfully added task.&quot;)
+      page.should have_content(&quot;mow lawn&quot;)
+    end
+  end
+end</pre>
+
+<p>Si ahora rompemos deliberadamente el formularios veremos que se captura el error.</p>
+
+<h3>Depuraci&oacute;n de p&aacute;ginas</h3>
+
+<p>Si una especificaci&oacute;n falla, &iquest;c&oacute;mo podemos depurar este problema?  Aqu&iacute; es donde entra en juego la gema launchy.  Como estamos usando Capybara podemos invocar al m&eacute;todo <code>save_and_open_page</code> en cualquier punto, lo que har&aacute; que se abra la p&aacute;gina en el navegador para poder examinarla.  Vamos a a&ntilde;adirlo despu&eacute;s del m&eacute;todo <code>click_button</code> y cuando ejecutemos otra vez las especificaciones veremos la p&aacute;gina justo antes de comprobar su contenido en el test.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/604/original/E257I02.png" width="801" height="321" alt="La página a mitad de camino en la especificación."/>
+</div>
+
+<p>Podemos ver el estado de la p&aacute;gina en este punto, con el mensaje de flash visible y con la tarea que hemos a&ntilde;adido mediante Capybara.</p>
+
+<h3>Pruebas de JavaScript</h3>
+
+<p>Con esto ya tenemos la aplicaci&oacute;n bien probada y nos ha sido muy f&aacute;cil gracias a las especificaciones de petici&oacute;n y Capybara.  Pero &iquest;y si nuestra aplicaci&oacute;n tiene JavaScript y queremos probarlo? Pues es f&aacute;cil.</p>
+
+<p>A&ntilde;adamos JavaScript a nuestra plantilla <code>index</code> para poder escribir alg&uacute;n test.  Por simplicidad lo mostraremos en l&iacute;nea utilizando <code>link_to_function</code> para a&ntilde;adir un enlace en la p&aacute;gina que invoca una funci&oacute;n JavaScript que cambiar&aacute; el texto del enlace a  &quot;js works&quot;.  El script que se ejecuta requiere jQuery por lo que hemos a&ntilde;adido una referencia en el fichero de <em>layout</em> de la aplicaci&oacute;n (por cierto, jQuery ser&aacute; la librer&iacute;a de JavaScript por defecto en Rails 3.1, en lugar de Prototype).</p>
+
+<p class="codeFilePath">/app/views/tasks/index.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Task List&lt;/h1&gt;
+
+&lt;%= link_to_function &quot;test js&quot;, &#x27;$(this).html(&quot;js works&quot;)&#x27; %&gt;
+
+&lt;%= form_for Task.new do |f| %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;
+    &lt;%= f.text_field :name %&gt;
+    &lt;%= f.submit &quot;Add&quot; %&gt;
+  &lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;ul&gt;
+  &lt;% @tasks.each do |task| %&gt;
+    &lt;li&gt;&lt;%= task.name %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;</pre>
+
+<p>As&iacute; que ahora ya tenemos un enlace en la p&aacute;gina que dice &quot;test js&quot; y cuando hacemos clic en &eacute;l dicho texto cambia.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/605/original/E257I03.png" width="801" height="321" alt="El texto cambia después de hacer clic en el enlace."/>
+</div>
+
+<p>Vamos a probar esta funcionalidad con Capybara.  Primero escribimos una nueva especificaci&oacute;n:</p>
+
+<p class="codeFilePath">/spec/requests/tasks_spec.rb</p>
+<pre class="ruby">it &quot;supports js&quot; do
+  visit_tasks_path
+  click_link &quot;test js&quot;
+  page.should have_content(&quot;js works&quot;)
+end</pre>
+
+<p>Nuestras especificaciones de petici&oacute;n fallar&aacute;n:</p>
+
+
+<pre class="terminal">$ rake spec:requests
+(in /Users/eifion/code/tasklist)
+/Users/eifion/.rvm/rubies/ruby-1.9.2-p0/bin/ruby -S bundle exec rspec ./spec/requests/tasks_spec.rb
+.<span class="failed">F</span>.
+
+Failures:
+
+  1) Tasks GET /tasks supports js
+     <span class="failed">Failure/Error: page.should have_content(&quot;js works&quot;)</span>
+       <span class="failed">expected #has_content?(&quot;js works&quot;) to return true, got false</span>
+     # ./spec/requests/tasks_spec.rb:14:in `block (3 levels) in &lt;top (required)&gt;&#x27;
+
+Finished in 0.83232 seconds
+<span class="failed">3 examples, 1 failure</span>
+rake aborted!
+ruby -S bundle exec rspec ./spec/requests/tasks_spec.rb failed
+
+(See full trace by running task with --trace)</pre>
+
+<p>Esta especificaci&oacute;n falla porque la p&aacute;gina no tiene el texto que se pone mediante JavaScript.  Capybara por defecto no soporta JavaScript, as&iacute; que tenemos que decirle que utilice Selenium.</p>
+
+<p>La funcionalidad que vamos a ver ahora no est&aacute; soportada por la versi&oacute;n actual de Capybara pero con Bundler es muy f&aacute;cil pasar a la &uacute;ltima versi&oacute;n de GitHub.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+
+group :development, :test do
+  gem &#x27;rspec-rails&#x27;
+  gem &#x27;capybara&#x27;, :git =&gt; &#x27;git://github.com/jnicklas/capybara.git&#x27;
+  gem &#x27;launchy&#x27;
+end</pre>
+
+<p>S&oacute;lo tenemos que ejecutar <code>bundle</code> de nuevo para descargar la &uacute;ltima versi&oacute;n de la gema de Capybara.</p>
+
+<p>Otro paso que tenemos que dar para  los tests de JavaScript  es modificar el fichero <code>spec_helper</code> y a&ntilde;adir la l&iacute;nea  <code>require &#x27;rspec/rails&#x27;</code>.</p> 
+
+<p class="codeFilePath">/spec/spec_helper.rb</p>
+<pre class="ruby"># This file is copied to spec/ when you run &#x27;rails generate rspec:install&#x27;
+ENV[&quot;RAILS_ENV&quot;] ||= &#x27;test&#x27;
+require File.expand_path(&quot;../../config/environment&quot;, __FILE__)
+require &#x27;rspec/rails&#x27;
+require &#x27;capybara/rspec&#x27;
+
+# resto del archivo...</pre>
+
+<p>Aunque probablemente este paso no sea necesario en la versi&oacute;n final, por ahora tenemos que hacerlo.  Es f&aacute;cil hacer que Capybara utilice un motor u otro de JavaScript en nuestros tests, lo &uacute;nico que tenemos que hacer es a&ntilde;adir la opci&oacute;n <code>:js =&gt; true</code> en la especificaci&oacute;n.</p>
+
+<p class="codeFilePath">/spec/requests/tasks_spec.rb</p>
+<pre class="ruby">it &quot;supports js&quot;, :js =&gt; true do
+  visit tasks_path
+  click_link &quot;test js&quot;
+  page.should have_content(&quot;js works&quot;)
+end</pre>
+
+<p>Ahora las especificaciones lanzar&aacute;n Firefox y ejecutar&aacute;n las pruebas que requieran JavaScript.  Deber&iacute;an pasar todas.</p>
+
+<p>Se trata de una funcionalidad muy poderosa, pero nos podemos topar con un problema que tiene que ver con los registros de base de datos.  Podemos demostrar este peligro a&ntilde;adiendo la opci&oacute;n  <code>:js =&gt; true</code> a las primeras dos especificaciones, incluyendo la que crea una nueva instancia de <code>Task</code>.</p>
+
+<p class="codeFilePath">/spec/requests/tasks_spec.rb</p>
+<pre class="ruby">describe &quot;Tasks&quot; do
+  describe &quot;GET /tasks&quot;, :js =&gt; true do
+    it &quot;displays tasks&quot; do
+      Task.create!(:name =&gt; &quot;paint fence&quot;)
+      visit tasks_path
+      page.should have_content(&quot;paint fence&quot;)
+    end
+    
+    it &quot;supports js&quot; do
+      visit tasks_path
+      click_link &quot;test js&quot;
+      page.should have_content(&quot;js works&quot;)
+    end    
+  end
+end</pre>
+
+<p>Si ahora ejecutamos las especificaciones, utilizar&aacute; Selenium con las dos primeras peticiones.</p>
+
+
+<pre class="terminal">$ rake spec:requests
+(in /Users/eifion/code/tasklist)
+/Users/eifion/.rvm/rubies/ruby-1.9.2-p0/bin/ruby -S bundle exec rspec ./spec/requests/tasks_spec.rb
+<span class="failed">F</span>..
+
+Failures:
+
+  1) Tasks GET /tasks displays tasks
+     <span class="failed">Failure/Error: page.should have_content(&quot;paint fence&quot;)</span>
+       <span class="failed">expected there to be content &quot;paint fence&quot; in &quot;Task List\ntest js\n\nName&quot;</span>
+     # ./spec/requests/tasks_spec.rb:8:in `block (3 levels) in &lt;top (required)&gt;&#x27;
+
+Finished in 7.69 seconds
+<span class="failed">3 examples, 1 failure</span></pre>
+
+<p>La primera especificaci&oacute;n falla porque el contenido  &ldquo;paint fence&rdquo; no aparece en la p&aacute;gina.  El registro de base de datos que se crea no est&aacute; disponible para los tests de Selenium, porque nuestras especificaciones usan transacciones en base datos que no son compatibles con Selenium.  Para corregir esto podemos modificar el valor de <code>config.use_transactional_fixtures</code> en el fichero  <code>spec_helper</code> para que sea falso.</p>
+
+<p class="codeFilePath">/spec/spec_helper.rb</p>
+<pre class="ruby"># If you&#x27;re not using ActiveRecord, or you&#x27;d prefer not to run each of your
+# examples within a transaction, remove the following line or assign false
+# instead of true.
+config.use_transactional_fixtures = false</pre>
+
+<p>Con esto los tests pasar&aacute;n de nuevo, pero esto quiere decir que la base de datos arrastra los registros entre una especificaci&oacute;n y otra, lo que no queremos.  Para corregir este problema se puede usar una gema llamada  <a href="https://github.com/bmabey/database_cleaner">database_cleaner</a> para limpiar la base de datos de tests entre una especificaci&oacute;n y la siguiente.  En la <a href="https://github.com/bmabey/database_cleaner#readme">documentaci&oacute;n de la gema</a> se explican todas las opciones disponibles.</p>
+
+<p>Para usarla a&ntilde;adiremos una referencia en el fichero <code>Gemfile</code> y ejecutaremos <code>bundle</code> otra vez para instalarla.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+
+group :development, :test do
+  gem &#x27;rspec-rails&#x27;
+  gem &#x27;capybara&#x27;, :git =&gt; &#x27;git://github.com/jnicklas/capybara.git&#x27;
+  gem &#x27;launchy&#x27;
+  gem &#x27;database_cleaner&#x27;
+end</pre>
+
+<p>A continuaci&oacute;n modificaremos el fichero <code>spec_helper</code> de nuevo y a&ntilde;adiremos la configuraci&oacute;n para borrar la base de datos entre una especificaci&oacute;n y otra.</p>
+
+<pre class="ruby">/spec/spec_helper.rb</pre>
+<pre class="ruby">config.before(:suite) do
+  DatabaseCleaner.strategy = :truncation
+end
+
+config.before(:each) do
+  DatabaseCleaner.start
+end
+
+config.after(:each) do
+  DatabaseCleaner.clean
+end</pre>
+
+<p>Si ahora ejecutamos las especificaciones y dejamos que las dos primeras vayan a trav&eacute;s de Selenium veremos que todas pasan porque ya no usamos transacciones de base de datos.  Parece muy trabajoso, pero una vez que lo tengamos configurado es f&aacute;cil probar el JavaScript de cualquier especificaci&oacute;n simplemente a&ntilde;adiendo la opci&oacute;n  <code>:js =&gt; true</code> .</p>
+
+<p>En la pr&oacute;xima versi&oacute;n de Capybara (que todav&iacute;a no hemos visto) hay un nuevo DSL para definir especificaciones con el que podremos usar los m&eacute;todos  <code>feature</code>, <code>background</code> y <code>scenario</code> de forma muy similar a como funciona la gema  <a href="https://github.com/cavalle/steak">Steak</a>.   Si nos gusta trabajar con este tipo de DSL, conviene saber que Capybara incluir&aacute; esta funcionalidad, lo que eliminar&aacute; la necesidad de usar Steak.</p>

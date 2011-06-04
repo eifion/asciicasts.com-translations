@@ -1,0 +1,256 @@
+<p>今回のエピソードでは、引き続きRails 3.1の最初のベータ版の機能を紹介します。今回はHTTPストリーミングを見ていきましょう。この話題は<a href="http://weblog.rubyonrails.org/2011/4/18/why-http-streaming">Ruby on Railsブログのポスト</a>でも詳しく取り上げられているので、まずはその記事を読むことをお勧めします。ここではRailsアプリケーションでの設定方法と、使用時に発生する潜在的問題について説明します。</p>
+
+<p>HTTPストリーミングを実際に試すため、前回のエピソードで作成した簡単なToDoアプリケーションを使用します。アプリケーションのコントローラでストリーミングを有効にします。デフォルトでは有効になっていないので、アクションごとかコントローラごとに設定します。</p> 
+
+<p>ストリーミングを有効にするには、renderを使ってオプションで<code>:stream =&gt; true</code>を渡します。</p>
+
+<p class="codeFilePath">/app/controllers/projects_controller.rb</p>
+<pre class="ruby">def index
+  @projects = Project.all
+  render :stream =&gt; true
+end</pre>
+
+<p>コントローラ全体でストリーミングを有効にするにはクラスメソッドの<code>stream</code>を使用します。</p>
+
+<p class="codeFilePath">/app/controllers/projects_controller.rb</p>
+<pre class="ruby">class ProjectsController &lt; ApplicationController
+  stream
+
+  def index
+    # rest of controller code
+  end
+end</pre>
+
+<p>Rails 3のデフォルトのWebサーバであるWEBrickはストリーミングをサポートしていないので、実際に動作する様子を見るには、Unicornなどのストリーミングをサポートする別のWebサーバに切り替えます。</p>
+
+<p>Unicorn gemはアプリケーションの<code>Gemfile</code>に記述されていますが、デフォルトではコメントアウトされています。これを使用するためこの行を非コメント化し、bundleを実行してインストールします。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby"># Use unicorn as the web server
+gem 'unicorn'</pre>
+
+
+<p>Unicornでストリーミングを使用するために設定を編集します。Railsには<a href="https://github.com/rails/rails/blob/master/actionpack/lib/action_controller/metal/streaming.rb">ソースコード内にストリーミングに関するコメント</a>があり、設定の仕方に関する情報が含まれています。必要な作業としては、<code>config</code>ディレクトリに設定ファイルを新規作成します。</p>
+
+<p class="codeFilePath">/config/unicorn.rb</p>
+<pre class="ruby">listen 3000, :tcp_nopush =&gt; false</pre>
+
+<p>次にこの設定ファイルを指定してUnicornを起動します。</p>
+
+<pre class="terminal">$ unicorn_rails --config-file config/unicorn.rb</pre>
+
+<p>このコマンドがうまく実行できない場合は、<code>Gemfile</code>の<code>gem 'unicorn'</code>の行を非コメント化した後に<code>bundle</code>を実行したことを再度確認してください。それでもまだうまく行かない場合は、コマンドの前に<code>bundle exec</code>を付けてみてください。</p>
+
+<p>デフォルトのRailsサーバを使用しているときと同じように、ポート3000でブラウザからアプリケーションを開きます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/660/original/E266I01.png" width="800" height="290" alt="Unicornで動作するアプリケーション"/>
+</div>
+
+<h3>ストリーミングをシミュレートする</h3>
+
+<p>上のページはストリーミングを使用していますが、その効果はまだよくわかりません。ビュー層で表示されるのに数秒かかるようなものをシミュレートして、レスポンスがチャンク(chunk)単位で返される様子を見てみることにしましょう。これを行う一番簡単な方法は、ビューの最初に<code>sleep</code>呼び出しを追加する方法です。</p>
+
+<p class="codeFilePath">/app/views/projects/index.html.erb</p>
+<pre class="ruby">&lt;% sleep 5 %&gt;
+&lt;h1&gt;Listing projects&lt;/h1&gt;
+
+&lt;table&gt;
+  &lt;tr&gt;
+    &lt;th&gt;Name&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+  &lt;/tr&gt;
+
+&lt;% @projects.each do |project| %&gt;
+  &lt;tr&gt;
+    &lt;td&gt;&lt;%= project.name %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to 'Show', project %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to 'Edit', edit_project_path(project) %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to 'Destroy', project, confirm: 'Are you sure?', method: :delete %&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+&lt;% end %&gt;
+&lt;/table&gt;
+
+&lt;br /&gt;
+
+&lt;%= link_to 'New Project', new_project_path %&gt;</pre>
+
+<p><code>curl</code>を使ってこのページを取り込むことでチャンク単位の(chunked)レスポンスを見ることができます。アプリケーションのトップページを指定すると、すぐにレスポンスの一部が返されます。</p>
+
+<pre class="terminal">$ curl -i localhost:3000
+HTTP/1.1 200 OK 
+Date: Wed, 18 May 2011 08:18:56 GMT
+Status: 200 OK
+Connection: close
+Cache-control: no-cache
+Transfer-Encoding: chunked
+Content-Type: text/html; charset=utf-8
+X-UA-Compatible: IE=Edge
+X-Runtime: 0.023745
+
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Todo&lt;/title&gt;
+  &lt;link href="/assets/application.css" media="screen" rel="stylesheet" type="text/css" /&gt;
+  &lt;script src="/assets/application.js" type="text/javascript"&gt;&lt;/script&gt;
+  &lt;meta content="authenticity_token" name="csrf-param" /&gt;
+&lt;meta content="0eBxvhbMH6HA8ocRLw06uNnmh7zqWo5dGSeFIA8sfj8=" name="csrf-token" /&gt;
+&lt;/head&gt;
+&lt;body&gt;</pre>
+
+<p>その後数秒たってから残りの部分が返されます。上記の結果のヘッダ情報で、<code>Transfer-Encoding</code>は<code>chunked</code>に設定されている一方、レスポンスの最初の部分が返されるときにはまだページ全体のサイズがわからないので<code>Content-Length</code>ヘッダはありません。</p>
+
+<pre class="terminal">&lt;h1&gt;Listing projects&lt;/h1&gt;
+
+&lt;table&gt;
+  &lt;tr&gt;
+    &lt;th&gt;Name&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+  &lt;/tr&gt;
+
+  &lt;tr&gt;
+    &lt;td&gt;Housework&lt;/td&gt;
+    &lt;td&gt;&lt;a href="/projects/1"&gt;Show&lt;/a&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;a href="/projects/1/edit"&gt;Edit&lt;/a&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;a href="/projects/1" data-confirm="Are you sure?" data-method="delete" rel="nofollow"&gt;Destroy&lt;/a&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/table&gt;
+
+&lt;br /&gt;
+
+&lt;a href="/projects/new"&gt;New Project&lt;/a&gt;
+
+
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+
+<p>ストリーミングを有効にしなかった場合、サーバからレスポンスが返ってくるまでに5秒の遅れが発生します。ページのヘッダセクションがすぐに返されることで、ブラウザがこの部分の処理を開始して、参照されるべきJavaScriptやCSSファイルを読み込みながら、サーバからページの残りの部分が返されるのを待ちます。</p>
+
+<p>このページをブラウザで見ると、表示が開始されるのに5秒かかるのですが、メインページの残りが送信されるのを待っている間に裏でJavaScriptとCSSファイルを取得しています。</p>
+
+<p>ストリーミングの効果を最大限利用するためには、できるだけ多くの処理をビュー層に移して、サーバができるだけ早くページのストリーミングを開始できるようにします。indexアクションでは<code>Project.all</code>を使用して、ページに表示するprojectを取得しています。サーバは、このコマンドが実行されるまでこのページのストリーミングを開始することができません。そこでこれを、必要時にロードを行う<code>scoped</code>などに置き換えることで、ビュー層がprojectの集合に対して繰り返し処理を始めるまではデータベースの呼び出しが行われないようにします。</p>
+
+<p class="codeFilePath">/app/controllers/projects_controller.rb</p>
+<pre class="ruby">def index
+  @projects = Project.scoped
+end
+</pre>
+
+<h3>ストリーミングにともなう潜在的問題</h3>
+
+<p>ここまでのところではストリーミングはすばらしい機能のように思われるかもしれませんが、採用を決める前に知っておくべき欠点がいくつかあります。一つ目は、レイアウトとテンプレートのレンダリングの順序が逆になります。通常のRailsのリクエストではアクションのテンプレートがまずレンダリングされて、その後にレイアウトが続きます。ストリーミングのリクエストでは、レイアウトの内容をできるだけ早くレンダリングする必要があります。これは通常はレイアウトにヘッダセクションが含まれているからです。アクションのテンプレートは、レイアウトの<code>yield</code>コマンドのところで初めてレンダリングされます。</p>
+
+<p>つまりもしテンプレート中のインスタンス変数を設定しようとしても、テンプレートがまだレンダリングされていないのでレイアウトからその変数にはアクセスできません。例えば、<code>index</code>アクションでインスタンス変数<code>@title</code>を設定してみます。</p>
+
+<p class="codeFilePath">/app/views/projects/index.html.erb</p>
+<pre class="ruby">&lt;% @title = "Projects "%&gt;
+&lt;% sleep 5 %&gt;
+&lt;h1&gt;Listing projects&lt;/h1&gt;
+
+&lt;table&gt;
+&lt;!-- Rest of file omitted. --&gt;</pre>
+
+<p>続いてその変数をレイアウトで使用してみます。</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;&lt;%= @title %&gt;&lt;/title&gt;
+  &lt;%= stylesheet_link_tag    "application" %&gt;
+  &lt;%= javascript_include_tag "application" %&gt;
+  &lt;%= csrf_meta_tags %&gt;
+&lt;/head&gt;
+&lt;body&gt;
+
+&lt;%= yield %&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+
+<p>curlを使ってページを取得して<code>head</code>セクションを見てみると<code>title</code>要素は空です。レイアウトがテンプレートの前にレンダリングされるので、レイアウトファイルから読み込まれる時にはまだ<code>@title</code>変数が設定されていないのです。ストリーミングを使用しないリクエストでは、テンプレートが最初に読み込まれるのでこのようなことは起こりません。</p>
+
+<pre class="terminal">&lt;head&gt;
+  &lt;title&gt;&lt;/title&gt;
+  &lt;link href="/assets/application.css" media="screen" rel="stylesheet" type="text/css" /&gt;
+  &lt;script src="/assets/application.js" type="text/javascript"&gt;&lt;/script&gt;
+  &lt;meta content="authenticity_token" name="csrf-param" /&gt;
+  &lt;meta content="x0CtIY+0vEbfkh6gohZp/WdOd0ZanobQHZT8+HUC/OE=" name="csrf-token" /&gt;
+&lt;/head&gt;</pre>
+
+<p>テンプレートからレイアウトに情報を渡す正しい方法は<code>content_for</code>を使うやり方ですが、これもうまく動作しません。試しに<code>curl</code>を使ってページを見てみると、出力はtitle要素の直前で止まってしまいます。</p> 
+
+<p>この問題は、<code>content_for</code>のしくみに原因があります。同じ項目に対して<code>content_for</code>を複数回呼び出している場合、Railsはそれを一つに連結(concatenate)します。そのためRailsは、最初に<code>content_for :title</code>が現れたときに、ページの下の方に同じ呼び出しがもうないということを知ることができません。</p>
+
+<p>Rails 3.1には<code>provide</code>という新しいメソッドがあり、値を連結(concatenate)しないことを除いては、これがまさに<code>content_for</code>と同じようにふるまいます。これを用いてページのタイトルを設定します。</p>
+
+<p class="codeFilePath">/app/views/projects/index.html.erb</p>
+<pre class="ruby">&lt;% provide :title, "Projects" %&gt;</pre>
+
+<p>レイアウトで、<code>content_for</code>のときと同じように、<code>yield</code>を使用します。</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;title&gt;&lt;%= yield :title %&gt;&lt;/title&gt;</pre>
+
+<p>ページを見てみると、<code>title</code>要素には設定したタイトルが入っています。</p>
+
+<pre class="terminal">
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Projects&lt;/title&gt;
+  &lt;link href="/assets/application.css" media="screen" rel="stylesheet" type="text/css" /&gt;
+  &lt;script src="/assets/application.js" type="text/javascript"&gt;&lt;/script&gt;
+  &lt;meta content="authenticity_token" name="csrf-param" /&gt;
+  &lt;meta content="NzdFt92dDBSXRRgFR0pRZRizirN87Qb5CVdqgGEAvTU=" name="csrf-token" /&gt;
+&lt;/head&gt;
+&lt;!-- rest of page --&gt;</pre>
+
+<p>ストリーミングを利用するときに注意すべきもうひとつの問題は、例外が発生したときの動作です。例として、<code>index</code>テンプレートで実際には存在しないメソッドの呼び出しを追加します。</p>
+
+<p class="codeFilePath">/app/views/projects/index.html.erb</p>
+<pre class="ruby">&lt;% provide :title, "Projects" %&gt;
+
+&lt;% fall_over %&gt;
+
+&lt;% sleep 5 %&gt;
+&lt;h1&gt;Listing projects&lt;/h1&gt;
+&lt;!-- rest of page --&gt;</pre>
+
+<p>ページを見てみると、関心を引く出力が表示されています。</p> 
+
+<pre class="terminal">$ curl -i http://localhost:3000/
+
+(header information omitted)
+
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Projects&lt;/title&gt;
+  &lt;link href="/assets/application.css" media="screen" rel="stylesheet" type="text/css" /&gt;
+  &lt;script src="/assets/application.js" type="text/javascript"&gt;&lt;/script&gt;
+  &lt;meta content="authenticity_token" name="csrf-param" /&gt;
+&lt;meta content="rhFAQuK2s5Rxi6jjC3jA12k07GjD75VeWlbsyf47bLc=" name="csrf-token" /&gt;
+&lt;/head&gt;
+&lt;body&gt;
+
+"&gt;&lt;script type="text/javascript"&gt;window.location = "/500.html"&lt;/script&gt;&lt;/html&gt;</pre>
+
+<p>例外が発生すると、Railsはブラウザに対して<code>500.html</code>ページにリダイレクトさせるJavaScriptコードを含むscript要素を送り返します。このページをブラウザで見てみると、Railsアプリケーションが本運用(production)モードで実行中に表示する標準のエラーページにリダイレクトされます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/661/original/E266I02.png" width="800" height="290" alt="開発モードだが本番の500エラーページが表示される"/>
+</div>
+
+<p>つまり、開発(development)モードでエラーが投げられたときに通常表示されるデバッグ用情報を得ることができないということなので、開発用ログからエラーを探す必要があります。</p>
+
+<p>テンプレート内でセッションやクッキーの情報を設定することも、ストリーミングを使う場合はできません。テンプレートにセッション変数を設定しようとしても、Railsはすでにヘッダ情報をブラウザに送信してしまっているので、テンプレートからヘッダ情報を追加で送ることはできません。この問題は、他にもクッキーや、セッションを利用するフラッシュメッセージにも当てはまります。セッションとクッキーの情報は、ストリーミングを使用しているときはコントローラ内で設定する必要があります。</p>
+
+<p>最後の2つの潜在的問題ですが、まずRailsのHTTPストリーミング機能はRuby fiberを利用しているので、Ruby 1.9を使用する必要があります。また、ストリーミングは一部のミドルウェアと互換性がありません。ミドルウェアがレスポンスを修正する場合、ストリーミングと一緒に動作させることはできません。これで、ストリーミングがデフォルトでは有効になっていない理由がわかったかと思います。ストリーミングを使用する場合に気をつけなくてはいけない潜在的な問題がいくつかあるので、パフォーマンスが最大限に求められるページのみに使用を限定するのがいいでしょう。</p> 
+
+<p>ここで紹介した問題があるにも関わらず、ストリーミングは採用を検討する価値があります。特にJavaScriptやCSSファイルをいくつか含んでいるページの場合は、ブラウザがこれらのファイルの読み込みや処理にできるだけ早くとりかかることができるので、エンドユーザのユーザ体験を改善できる可能性があります。</p>

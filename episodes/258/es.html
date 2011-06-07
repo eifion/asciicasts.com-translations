@@ -1,0 +1,278 @@
+<p>Supongamos que estamos desarrollando una aplicaci&oacute;n para una tienda de libros.  Nos encontramos todav&iacute;a muy al principio y lo &uacute;nico que podemos hacer con un libro es darle un nombre.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/606/original/E258I01.png" width="800" height="345" alt="Nuestra sencilla aplicación de tienda de libros."/>
+</div>
+
+<p>Queremos poder asignar varios autores a un libro dado, y ya tenemos c&oacute;digo en la aplicaci&oacute;n para hacerlo: se define una relaci&oacute;n de muchos a muchos entre <code>Book</code> y <code>Author</code> a trav&eacute;s de un modelo llamado <code>Authorship</code>.  Veamos el modelo <code>Book</code>.</p>
+
+
+<p class="codeFilePath">/app/models/book.rb</p>
+<pre class="ruby">class Book &lt; ActiveRecord::Base
+  attr_accessible :name
+  has_many :authorships
+  has_many :authors, :through =&gt; :authorships
+end</pre>
+
+<p>Se trata de una relaci&oacute;n <code>has_many :through</code> est&aacute;ndar.  </p>
+
+<p>&iquest;C&oacute;mo gestionar esta relaci&oacute;n de muchos a muchos en el formulario?  Una posibilidad ser&iacute;a utilizar casillas de selecci&oacute;n, enfoque que ya vimos en el episodio 17  [<a href="http://railscasts.com/episodes/17-habtm-checkboxes">verlo</a>, <a href="http://asciicasts.com/episodes/17-habtm-checkboxes">leerlo</a>] pero el problema es que como tenemos un gran n&uacute;mero de autores entre los que escoger no ser&iacute;a pr&aacute;ctico utilizar una lista de casillas.  Ser&iacute;a mucho mejor poder elegir de entre los autores mediante una caja de texto que autocompletase del listado de autores seg&uacute;n escribamos, y nos permita escribir m&uacute;ltiples autores en cada libro.  Ser&iacute;a similar a la interfaz utilizada por Facebook para enviar mensajes y funcionar&iacute;a muy bien con la relaci&oacute;n de muchos a muchos.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/607/original/E258I02.png" width="803" height="386" alt="La aplicación cuando hayamos terminado."/>
+</div>
+
+<p>En este episodio veremos como implementar esta funcionalidad en una aplicaci&oacute;n Rails mediante el uso de un plugin de jQuery.</p>
+
+<h3>Tokeninput</h3>
+
+<p>Una posible soluci&oacute;n ser&iacute;a emplear el <em>plugin</em> <a href="http://jqueryui.com/demos/autocomplete/">Autocomplete</a> de jQuery UI pero habr&iacute;a que escribir mucho c&oacute;digo personalizado para gestionar las entradas por t&eacute;rminos prefijados.  <a href="http://loopj.com/jquery-tokeninput/">jQuery Tokeninput</a> es una alternativa mejor y hace justo lo que necesitamos, pudiendo escoger su aspecto de  entre varios temas.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/608/original/E258I03.png" width="800" height="345" alt="La demo de jQuery Token."/>
+</div>
+
+<p>Los campos de texto que usen este <em>plugin</em> deber&aacute;n permitir que se env&iacute;e su contenido como una lista de <code>id</code> num&eacute;ricos separados por comas, lo cual ser&aacute; f&aacute;cil de analizar por el servidor (pronto veremos de d&oacute;nde salen estos identificadores).</p>
+
+<p>El <em>plugin</em> se compone del archivo <code>jquery.tokeninput.js</code> que es el que tendremos que copiar en el directorio <code>public/javascripts</code> de nuestra aplicaci&oacute;n y los archivos del directorio <code>styles</code> que son los que copiaremos en <code>public/stylesheets</code>.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/609/original/E258I04.png" width="803" height="284" alt="Estructura del directorios para el plugin Tokeninput."/>
+</div>
+
+<p>A&uacute;n no hemos configurado la aplicaci&oacute;n para que utilice jQuery as&iacute; que vamos a a&ntilde;adir la gema <code>jquery-rails</code> al <code>Gemfile</code> y ejecutaremos <code>bundle</code> para instalarla.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;jquery-rails&#x27;</pre>
+
+<p>Podemos instalar jQuery con</p>
+
+<pre class="terminal">$ rails g jquery:install</pre>
+
+<p>Por &uacute;ltimo tenemos que incluir los ficheros JavaScript y CSS de Tokeninput en el <em>layout</em> de nuestra aplicaci&oacute;n:</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+  &lt;head&gt;
+    &lt;title&gt;&lt;%= content_for?(:title) ? yield(:title) : &crarr;
+      &quot;Untitled&quot; %&gt;&lt;/title&gt;
+    &lt;%= stylesheet_link_tag &quot;application&quot;, &quot;token-input&quot; %&gt;
+    &lt;%= javascript_include_tag :defaults, &quot;jquery.tokeninput&quot; %&gt;
+    &lt;%= csrf_meta_tag %&gt;
+    &lt;%= yield(:head) %&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+  &lt;!-- Resto del fichero... --&gt;</pre>
+
+<p>Con todo esto ya lo tenemos todo configurado para a&ntilde;adir el campo de autores a los libros en nuestra aplicaci&oacute;n.  Primero tenemos que a&ntilde;adir un nuevo campo de texto en el formulario y llamarlo <code>author_tokens</code>.</p>
+
+<p class="codeFilePath">/app/views/books/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for @book do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :author_tokens, &quot;Authors&quot; %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :author_tokens %&gt;    
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>En el modelo <code>Book</code> no existe un atributo <code>author_tokens</code> por lo que a&ntilde;adiremos sus m&eacute;todos de lectura y escritura:</p>
+
+<p class="codeFilePath">/app/models/book.rb</p>
+<pre class="ruby">class Book &lt; ActiveRecord::Base
+  attr_accessible :name, :author_tokens
+  has_many :authorships
+  has_many :authors, :through =&gt; :authorships
+  attr_reader :author_tokens
+  
+  def author_tokens=(ids)
+    self.author_ids = ids.split(&quot;,&quot;)
+  end
+  
+end</pre>
+
+<p>Para la funci&oacute;n que lee el valor podemos utilizar <code>attr_reader</code> pero la funci&oacute;n de escritura es m&aacute;s complicada porque tiene que analizar la lista de identificadores separados por comas que se reciben desde el campo de texto.  En este m&eacute;todo separaremos la lista de identificadores y luego estableceremos los <code>author_ids</code> con lo que efectivamente se asignar&aacute;n los autores del libro.  Por &uacute;ltimo tenemos que a&ntilde;adir este nuevo campo a la lista de <code>attr_accessible</code> para poder aceptar ambos campos desde el formulario.</p>
+
+<p>Si ahora recargamos el formulario tendr&aacute; un nuevo campo <code>Authors</code>.  Podr&iacute;amos insertar manualmente los identificadores en dicho campo pero obviamente queremos utilizar el <em>plugin</em> Tokeninput, que vamos a configurar para que funcione sobre este nuevo campo.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/610/original/E258I05.png" width="800" height="386" alt="Añadiendo los ids manualmente en el campo de autor."/>
+</div>
+
+<p>La <a href="http://loopj.com/jquery-tokeninput/">p&aacute;gina de Tokeninput</a> tiene documentaci&oacute;n acerca del uso del <em>plugin</em>.  Lo &uacute;nico que tenemos que hacer es llamar a <code>tokenInput</code> sobre el campo de texto y pasar una URL.  La URL deber&aacute; devolver cierto JSON con el siguiente formato para que los elementos puedan aparecer en la lista de autocompletado seg&uacute;n el usuario vaya tecleando.</p>
+
+<pre class="javascript">[
+    {&quot;id&quot;:&quot;856&quot;,&quot;name&quot;:&quot;House&quot;},
+    {&quot;id&quot;:&quot;1035&quot;,&quot;name&quot;:&quot;Desperate Housewives&quot;},
+    ...
+]</pre>
+
+<p>Si queremos filtrar la lista, el texto que aparece actualmente en la caja de texto se pasa en la cadena de la URL como el par&aacute;metro <code>q</code>.</p>
+
+<p>Apliquemos esto en nuestra aplicaci&oacute;n.  Lo primero que tenemos que hacer ese escribir el JavaScript que a&ntilde;ade la funcionalidad Tokeninput al campo del autor.  Esto ir&aacute; en el fichero <code>application.js</code>.</p>
+
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(&#x27;#book_author_tokens&#x27;).tokenInput(&#x27;/authors.json&#x27;, { crossDomain: false });
+});</pre>
+
+<p>Este c&oacute;digo encuentra la caja de texto de nombres de autor por su <code>id</code> y luego invoca <code>tokenInput</code> para activar el <em>plugin</em> en ella pas&aacute;ndole la URL que devolver&aacute; el JSON para rellenar las opciones.  Esta URL ser&aacute; <code>/authors.json</code>. Escribamos el c&oacute;digo para gestionar todo esto.  Podemos pasar algunas opciones a la funci&oacute;n <code>tokenInput</code> como segundo argumento, y por lo que parece hay que establecer <code>crossDomain:false</code> si queremos evitar que los resultados se env&iacute;en usando JSONP, para evitarlo y hacer que se env&iacute;e en JSON est&aacute;ndar debemos establecer la opci&oacute;n anterior.</p>
+
+<p>Lo siguiente es hacer que la URL funcione.  Ya tenemos un <code>AuthorsController</code> por lo que s&oacute;lo tenemos que hacer que la acci&oacute;n <code>index</code> sea capaz de responder peticiones JSON.  Para esto a&ntilde;adimos un <code>respond_to</code> con dos formatos en el interior del bloque, uno de HTML y otro de JSON que devuelve la lista de autores en formato JSON.</p>
+
+<p class="codeFilePath">/app/controllers/authors_controller.rb</p>
+<pre class="ruby">class AuthorsController &lt; ApplicationController
+  def index
+    @authors = Author.all
+    respond_to do |format|
+      format.html
+      format.json { render :json =&gt; @authors }
+    end
+  end
+end</pre>
+
+<p>Si visitamos <code><a href="http://localhost:3000/authors.json">http://localhost:3000/authors.json</a></code> podremos examinar el JSON devuelto por dicha URL.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/611/original/E258I06.png" width="800" height="386" alt="El JSON devuelto por authors.json"/>
+</div>
+
+<p>Podemos devolver el listado de autores en JSON pero entonces cada elemento aparecer&aacute; anidado dentro de un objeto <code>author</code>, que no es lo que espera Tokeninput, sino una lista de par&aacute;metros <code>id</code> y <code>name</code>.  Tendr&iacute;amos tambi&eacute;n que escribir una funci&oacute;n que devolviese el nombre si nuestro modelo no tuviese un atributo con ese nombre, pero en nuestro caso s&oacute;lo nos tenemos que preocupar de eliminar el objeto <code>author</code> de la ra&iacute;z de cada autor que aparece el listado.  Hay varias formas de hacer esto globalmente pero como arreglo r&aacute;pido tan s&oacute;lo tenemos que mapear el <em>array</em> con el listado de atributos de cada autor.</p>
+
+<p class="codeFilePath">/app/controllers/authors_controller.rb</p>
+<pre class="ruby">def index
+  @authors = Author.all
+  respond_to do |format|
+    format.html
+    format.json { render :json =&gt; @authors.map(&amp;:attributes) }
+  end
+end</pre>
+
+<p>Si ahora recargamos la p&aacute;gina veremos que ya no aparece el objeto <code>author</code> alrededor del nombre y el <code>id</code> de cada autor, con lo que el listado ya est&aacute; en el formato con el que trabaja Tokeninput.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/612/original/E258I07.png" width="800" height="386" alt="JSON en formato aceptable por Tokeninput."/>
+</div>
+
+<p>Tokeninput ignorar&aacute; cualquier otro atributo que no sea <code>id</code> o <code>name</code>.  En una aplicaci&oacute;n de producci&oacute;n deber&iacute;amos considerar eliminar los otros atributos para minimizar el uso de ancho de banda.</p>
+
+<p>Ya podemos visitar nuestro formulario de creaci&oacute;n de libro para probar el <em>plugin</em>.  Si empezamos a escribir en el campo de autores vereos un listado que contiene todos los autores.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/613/original/E258I08.png" width="800" height="386" alt="Listado de autocompletado que contiene a todos los autores."/>
+</div>
+
+<p>Pero en lugar hacer que se devuelvan todos los autores s&oacute;lo queremos devolver aquellos que casan con nuestro t&eacute;rmino de b&uacute;squeda.  En el controlador <code>AuthorsController</code> tenemos que filtrar el listado de autores seg&uacute;n el par&aacute;metro <code>q</code>, que es el contenido del texto introducido en la caja.</p>
+
+<p class="codeFilePath">/app/controllers/authors_controller.rb</p>
+<pre class="ruby">def index
+  @authors = Author.where(&quot;name like ?&quot;, &quot;%#{params[:q]}%&quot;)
+  respond_to do |format|
+    format.html
+    format.json { render :json =&gt; @authors.map(&amp;:attributes) }
+  end
+end</pre>
+
+<p>Cambiaremos <code>Author.all</code> por <code>Author.where</code> para buscar sobre los autores cuyo nombre sea similar al t&eacute;rmino recibido.  N&oacute;tese que dicho t&eacute;rmino se encuentra rodeado por signos de porcentaje para que pueda ser aceptado en cualquier posici&oacute;n del campo de nombre. Si ahora buscamos un autor, s&oacute;lo se devolver&aacute;n los nombres correspondientes.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/614/original/E258I09.png" width="800" height="386" alt="El listado filtrado por el texto introducido en la caja."/>
+</div>
+
+<p>Ahora que funciona el campo autocompletado con su filtrado podemos intentar a&ntilde;adir un libro para comprobar que si creamos un libro con dos autores &eacute;ste se guardar&aacute; correctamente y veremos los autores listados en la p&aacute;gina del libro a la que seremos redirigidos autom&aacute;ticamente.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/615/original/E258I10.png" width="800" height="394" alt="Los autores se guardan correctamente al crear un libro y guardarlo."/>
+</div>
+
+<h3>Edici&oacute;n de libro</h3>
+
+
+<p>Pero cuando editemos un libro nos encontraremos con un problema porque el formulario no muestra correctamente los autores.  Tenemos que pre-rellenar el formulario con los nombres de los autores del libro.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/616/original/E258I11.png" width="800" height="394" alt="Al editar un libro faltan sus autores."/>
+</div>
+
+<p>El <em>plugin</em> Tokeninput soporta la opci&oacute;n <code>prePopulate</code> donde si le pasamos un fragmento de JSON rellenar&aacute; la lista bas&aacute;ndose en su contenido.  Podemos a&ntilde;adir esta opci&oacute;n en la llamada a <code>tokenInput</code> en <code>application.js</code> pero &iquest;c&oacute;mo pasarle los datos en cuesti&oacute;n?  Una forma de hacerlo es a&ntilde;adir un atributo de datos HTML5 en el campo de texto y leer los datos de ah&iacute;:</p>
+
+<p class="codeFilePath">/app/views/books/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for @book do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :author_tokens, &quot;Authors&quot; %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :author_tokens, &quot;data-pre&quot; =&gt; &crarr;
+      @book.authors.map(&amp;:attributes).to_json %&gt;    
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>Al atributo lo llamaremos <code>data-pre</code>.  Su valor ser&aacute; establecido a los atributos de los autores del libro de forma similar a como creamos el JSON del listado de autocompletado.</p>
+
+<p>Podemos leer esto datos en el fichero JavaScript y utilizarlo para pre-rellenar el listado de autores.</p>
+
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(&#x27;#book_author_tokens&#x27;).tokenInput(&#x27;/authors.json&#x27;, { 
+    crossDomain: false,
+    prePopulate: $(&#x27;#book_author_tokens&#x27;).data(&#x27;pre&#x27;)
+  });
+});</pre>
+
+<p>Si ahora recargamos la p&aacute;gina de edici&oacute;n veremos que el listado de los autores se rellena correctamente.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/617/original/E258I12.png" width="800" height="443" alt="Ya aparecen los autores."/>
+</div>
+
+<p>Si actualizamos los autores (por ejemplo quitando uno y a&ntilde;adiendo otro) todo se guardar&aacute; correctamente.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/618/original/E258I13.png" width="800" height="443" alt="Autores actualizados correctamente."/>
+</div>
+
+<h3>Temas</h3>
+
+<p>Hasta ahora hemos venido usando el tema por defecto que se incluye con Tokeninput.  Si queremos cambiarlo tenemos que hacer dos cosas.  Primero tenemos que ir a nuestro fichero de <em>layout</em> y cambiar el fichero de CSS de Tokeninput por otro que no sea el incluido por defecto (<code>token-input</code>).  Existe un tema Facebook disponible que pasaremos a usar.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= stylesheet_link_tag &quot;application&quot;, &quot;token-input-facebook&quot; %&gt;</pre>
+
+<p>A continuaci&oacute;n modificaremos el JavaScript que crear&aacute; el campo Tokeninput para establecer la opci&oacute;n de tema:</p>
+
+
+<pre class="codeFilePath">/public/javascripts/application.js</pre>
+<pre class="javascript">$(function () {
+  $(&#x27;#book_author_tokens&#x27;).tokenInput(&#x27;/authors.json&#x27;, { 
+    crossDomain: false,
+    prePopulate: $(&#x27;#book_author_tokens&#x27;).data(&#x27;pre&#x27;),
+    theme: &#x27;facebook&#x27;
+  });
+});</pre>
+
+<p>As&iacute; podemos a&ntilde;adir el tema que queramos y adaptarlo a nuestra aplicaci&oacute;n.  Si ahora recargamos la p&aacute;gina de edici&oacute;n veremos el nuevo tema aplicado.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/619/original/E258I14.png" width="800" height="390" alt="El campo de autocompletado utilizando el tema Facebook."/>
+</div>
+
+<p>Con esto concluimos este episodio.  Tokeninput es una magn&iacute;fica soluci&oacute;n para manejar relaciones de muchos a muchos en formularios Rails, esperamos que haya quedado bien explicado.</p>
+

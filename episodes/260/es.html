@@ -1,0 +1,243 @@
+<p>En este episodio vamos a a&ntilde;adir funcionalidad de mensajer&iacute;a instant&aacute;nea a una aplicaci&oacute;n Rails ya existente.  Ya tenemos una parte de la funcionalidad adelantada: se trata de una p&aacute;gina con un campo de texto en el cual se puede escribir un mensaje, que luego se a&ntilde;ade a la ventana de conversaci&oacute;n cuando se hace clic en  &lsquo;send&rsquo; utilizando AJAX .</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/622/original/E260I01.png" width="800" height="393" alt="La página de conversación."/>
+</div>
+
+<p>Por ahora todo va bien, pero la aplicaci&oacute;n tiene un problema tal y como est&aacute;. Si se abre otra ventana del navegador para que funcione como si fuese  otro cliente de la conversaci&oacute;n, los mensajes que se tecleen en una ventana no aparecer&aacute;n en la otra.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/623/original/E260I02.png" width="800" height="400" alt="Los mensaje sólo se añaden en una ventana."/>
+</div>
+
+<p>Necesitamos enviar notificaciones para decirles a los otros clientes que se ha a&ntilde;adido un mensaje nuevo y mostrarlo.  Hay varias formar de implementar esto pero antes de hacerlo veamos el c&oacute;digo que ya tenemos.  Se trata de un sencillo formulario que utiliza AJAX y jQuery.  Esto no tiene nada de complicado, pero antes de seguir podemos familiarizarnos con jQuery en el episodio 136  [<a href="http://railscasts.com/episodes/136-jquery">verlo</a>, <a href="http://asciicasts.com/episodes/136-jquery">leerlo</a>].</p> 
+
+<p>Primero como estamos usando jQuery en nuestra aplicaci&oacute;n hemos a&ntilde;adido la gema <a href="https://github.com/indirect/jquery-rails">jquery-rails</a> al <code>Gemfile</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;jquery-rails&#x27;</pre>
+
+<p>Veamos ahora el c&oacute;digo de la vista de la p&aacute;gina de charla.  Tiene una lista con un <code>id</code> igual a <code>chat</code> que muestra los mensajes y un formulario con  <code>:remote =&gt; true</code> para que se env&iacute;e por AJAX.</p> 
+
+<p class="codeFilePath">/app/views/messages/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Chat&quot; %&gt;
+
+&lt;ul id=&quot;chat&quot;&gt;
+  &lt;%= render @messages %&gt;
+&lt;/ul&gt;
+
+&lt;%= form_for Message.new, :remote =&gt; true do |f| %&gt;
+  &lt;%= f.text_field :content %&gt;
+  &lt;%= f.submit &quot;Send&quot; %&gt;
+&lt;% end %&gt;</pre>
+
+<p>El formulario se env&iacute;a a la acci&oacute;n <code>create</code> de <code>MessagesController</code>.
+
+
+<p class="codeFilePath">/app/controllers/messages_controller.rb</p>
+<pre class="ruby">class MessagesController &lt; ApplicationController
+  def index
+    @messages = Message.all
+  end
+  
+  def create
+    @message = Message.create!(params[:message])
+  end
+
+end</pre>
+
+<p>La acci&oacute;n <code>create</code> tiene una plantilla JavaScript que agrega el nuevo mensaje a la lista y luego limpia el formulario.</p>
+
+<p class="codeFilePath">/app/views/messages/create.js.erb</p>
+<pre class="ruby">$(&quot;#chat&quot;).append(&quot;&lt;%= escape_javascript render(@message) %&gt;&quot;);
+$(&quot;#new_message&quot;)[0].reset();</pre>
+
+<p>Se trata de un c&oacute;digo JavaScript bastante sencillo.  Lo que tenemos que hacer es cambiar la primera l&iacute;nea del c&oacute;digo anterior para que se propague el nuevo mensaje a todos los clientes.</p>
+
+<p>&iquest;C&oacute;mo hacerlo?  La realidad es que Rails no lleva muy bien la gesti&oacute;n de eventos as&iacute;ncronos, dado que no podemos mantener un <em>socket</em> abierto contra una aplicaci&oacute;n Rails.  Podr&iacute;amos considerar cambiar por completo de <em>framework</em>, porque hay varios dise&ntilde;ados espec&iacute;ficamente para este tipo de problemas.  Se trata de <em>frameworks</em> como  <a href="http://nodejs.org/">Node.js</a> con <a href="http://socket.io/">Socket.IO</a>, o, si queremos seguir usando Ruby, <a href="https://github.com/lifo/cramp">Cramp</a>, <a href="https://github.com/raggi/async_sinatra">async_sinatra</a>, o el nuevo <a href="http://postrank-labs.github.com/goliath/">Goliath</a>.  Todas son soluciones igualmente v&aacute;lidas, pero &iquest;y si queremos seguir usando Rails?  Ser&iacute;a muy interesante poder seguir usando Rails para la l&oacute;gica de nuestra aplicaci&oacute;n y disfrutar a la vez de los beneficios de alg&uacute;n tipo de gesti&oacute;n de eventos as&iacute;ncronos para publicar y suscribir cuando sea necesario.</p>
+
+<p>Aqu&iacute; es donde entra en juego <a href="http://faye.jcoglan.com/">Faye</a>.  Faye es un servidor que gestiona de manera as&iacute;ncrona el patr&oacute;n de publicaci&oacute;n-suscripci&oacute;n.  Podemos usarlo junto con nuestra aplicaci&oacute;n Rails e invocarlo cuando necesitemos dicha funcionalidad.  Faye viene en dos variantes: un servidor en Node.js y un servidor en Ruby.  Ambos utilizan el mismo protocolo as&iacute; que podemos escoger nuestro lenguaje favorito.  No hace falta decir que nosotros nos quedamos con el servidor Ruby.</p>
+
+<p>Primero tenemos que empezar instalado la gema Faye.</p>
+
+<pre class="terminal">$ gem install faye</pre>
+
+<p>A continuaci&oacute;n tenemos que crear un fichero para Rackup en la ra&iacute;z de nuestra aplicaci&oacute;n Rails, al que llamaremos <code>faye.ru</code>.  En este fichero crearemos una nueva aplicaci&oacute;n Rack con una l&iacute;nea de c&oacute;digo copiada de la documentaci&oacute;n de Faye:</p>
+
+<p class="codeFilePath">/faye.ru</p>
+<pre class="ruby">require &#x27;faye&#x27;
+faye_server = Faye::RackAdapter.new(:mount =&gt; &#x27;/faye&#x27;, :timeout =&gt; 45)
+run faye_server</pre>
+
+<p>Podemos arrancar el servidor con la orden <code>rackup</code>, a&ntilde;adiendo las opciones necesarias para arrancarlo en modo de producci&oacute;n y con <a href="http://code.macournoyer.com/thin/">Thin</a> como servidor.</p>
+
+<pre class="terminal">$ rackup faye.ru -s thin -E production
+&gt;&gt; Thin web server (v1.2.11 codename Bat-Shit Crazy)
+&gt;&gt; Maximum connections set to 1024
+&gt;&gt; Listening on 0.0.0.0:9292, CTRL+C to stop</pre>
+
+<p>Nuestra aplicaci&oacute;n Faye se encuentra en ejecuci&oacute;n en el puerto 9292.  El servidor dispone de un fichero Javascript que tenemos que incluir en el <em>layout</em> de nuestra aplicaci&oacute;n.  Dicho fichero se encuentra en <code>http://localhost:9292/faye.js</code>, estando el nombre basado en la opci&oacute;n <code>:mount</code> que se ha pasado anteriormente.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= javascript_include_tag :defaults, &quot;http://localhost:9292/faye.js&quot; %&gt;</pre>
+
+<p>Por supuesto en producci&oacute;n tendremos que cambiar la URL para que apunte al servidor adecuado.</p>
+
+<p>El sitio web de Faye incluye <a href="http://faye.jcoglan.com/browser.html">documentaci&oacute;n</a> sobre su uso donde se explica que una vez incluido el JavaScript de Faye tenemos que crear un nuevo cliente.  Para ello, a&ntilde;adiremos el siguiente c&oacute;digo en nuestro fichero <code>application.js</code>.</p>
+
+<pre class="codeFilePath">/public/javascripts/application.js</pre>
+<pre class="javascript">$(function() {
+  var faye = new Faye.Client(&#x27;http://localhost:9292/faye&#x27;);
+});</pre>
+
+<p>N&oacute;tese que usamos la funci&oacute;n <code>$</code> para garantizar que el c&oacute;digo no se ejecuta hasta que el DOM de la p&aacute;gina no se haya cargado por completa.  Nuevamente tendremos que cambiar la URL una vez que tengamos la aplicaci&oacute;n en producci&oacute;n.</p>
+
+<p>Una vez que tenemos configurado el cliente Faye podemos suscribirnos a canales.  Dado que s&oacute;lo tenemos una p&aacute;gina en nuestra aplicaci&oacute;n s&oacute;lo existir&aacute; un &uacute;nico canal, al que llamaremos <code>/messages/new</code>.  Para suscribirnos a un canal invocamos la funci&oacute;n <code>subscribe</code>, pas&aacute;ndole el nombre del canal al que nos queremos suscribir y una funci&oacute;n de vuelta.  Esta funci&oacute;n <em>callback</em> ser&aacute; llamada cuando el canal reciba un mensaje, y se le pasar&aacute;n ciertos datos.  Por ahora, simplemente mostraremos un <code>alert</code> para ver qu&eacute; datos nos han llegado.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function() {
+  var faye = new Faye.Client(&#x27;http://localhost:9292/faye&#x27;);
+  faye.subscribe(&#x27;/messages/new&#x27;, function (data) {
+    alert(data);
+  });
+});</pre>
+
+<p>Podemos probarlo todo ahora mismo arrancando nuestra aplicaci&oacute;n Rails y visitando la p&aacute;gina de <em>chat</em>.  Se carga el JavaScript y el cliente Faye comienza a escuchar en espera de mensajes.  Podemos hacer que la funci&oacute;n de vuelta se dispare manualmente utilizando <code>curl</code> para enviar un mensaje al canal.</p>
+
+<pre class="terminal">$ curl http://localhost:9292/faye -d &#x27;message={&quot;channel&quot;:&quot;/messages/new&quot;, &quot;data&quot;:&quot;hello&quot;}&#x27;</pre>
+
+<p>Para que todo esto funcione tenemos que enviar datos POST en cierto formato: un par&aacute;metro de mensaje con ciertos datos en JSON, que tienen que incluir claves llamadas <code>channel</code> y <code>data</code>.</p>
+
+<p>Al ejecutar el comando <code>curl</code> recibiremos instant&aacute;neamente un mensaje de alerta en el navegador que abrimos antes con los datos que hemos enviado.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/624/original/E260I03.png" width="804" height="456" alt="La alerta aparece tan pronto como se envía la orden."/>
+</div>
+
+<p>Esto significa que podemos enviar notificaciones a trav&eacute;s de nuestra aplicaci&oacute;n Rails enviando una petici&oacute;n POST a Faye.</p>
+
+<h3>Difusi&oacute;n de mensajes</h3>
+
+<p>Podemos ya plantearnos modificar nuestro fichero <code>create.js.erb</code> para que cuando se env&iacute;e un mensaje se retransmita por Faye a todos los navegadores suscritos al canal.  Ser&iacute;a muy c&oacute;modo tener un m&eacute;todo llamado por ejemplo <code>broadcast</code> que recibiese un par&aacute;metro <code>channel</code> y un bloque de forma que cualquier cosa que el bloque devolviese ser&iacute;a retransmitida a todo el canal.</p>
+
+<p>Creemos este m&eacute;todo en <code>ApplicationHelper</code>, y en &eacute;l construiremos el mensaje a partir del par&aacute;metro <code>channel</code> y lo que devuelva el bloque y luego utilizaremos <code>Net::HTTP.post_form</code> para hacer un POST con estos datos hacia el servidor Faye.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def broadcast(channel, &amp;block)
+    message = {:channel =&gt; channel, :data =&gt; capture(&amp;block)}
+    uri = URI.parse(&quot;http://localhost:9292/faye&quot;)
+    Net::HTTP.post_form(uri, :message =&gt; message.to_json)
+  end
+end</pre>
+
+<p>Tenemos que requerir <code>Net::HTTP</code> en el fichero <code>/config/application.rb</code> dado que Rails no lo incluye por defecto.</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby">require File.expand_path(&#x27;../boot&#x27;, __FILE__)
+
+require &#x27;rails/all&#x27;
+require &#x27;net/http&#x27;
+# resto del archivo...</pre>
+
+<p>Ya podemos usar nuestro nuevo m&eacute;todo <code>broadcast</code> en <code>create.js.erb</code>.</p>
+
+<p class="codeFilePath">/app/views/messages/create.js.erb</p>
+<pre class="ruby">&lt;% broadcast &quot;/messages/new&quot; do %&gt;
+$(&quot;#chat&quot;).append(&quot;&lt;%= escape_javascript render(@message) %&gt;&quot;);
+&lt;% end %&gt;
+$(&quot;#new_message&quot;)[0].reset();</pre>
+
+<p>Podemos probarlo ahora mismo.  Si volvemos a la aplicaci&oacute;n e introducimos un mensaje, Faye nos lo devuelve y vemos el JavaScript que tenemos que evaluar para a&ntilde;adir el nuevo mensaje a la lista.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/625/original/E261I04.png" width="803" height="458" alt="En la alerta aparece el JavaScript devuelto."/>
+</div>
+
+<p>Para que el navegador eval&uacute;e el JavaScript en lugar de mostrarlo tan s&oacute;lo tenemos que cambiar <code>alert</code> por <code>eval</code>.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function() {
+  var faye = new Faye.Client(&#x27;http://localhost:9292/faye&#x27;);
+  alert(&#x27;subscribing!&#x27;)
+  faye.subscribe(&#x27;/messages/new&#x27;, function (data) {
+    eval(data);
+  });
+});</pre>
+
+<p>Podemos probar esta funcionalidad recargando la p&aacute;gina y abriendo una nueva ventana del navegador.  Cuando escribamos un mensaje en una ventana de conversaci&oacute;n, &eacute;ste aparecer&aacute; inmediatamente en la otra.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/626/original/E261I05.png" width="882" height="495" alt="Los mensajes enviados aparecen en ambas ventanas."/>
+</div>
+
+<p>Con esto podemos tomar cualquier peticion AJAX y retransmitir cualquier c&oacute;digo JavaScript a todos los clientes suscritos utilizando el bloque de <code>broadcast</code>. Si en lugar de ejecutar JavaScript preferimos trabajar con JSON podemos hacerlo con un enfoque similar devolviendo JSON en lugar de JavaScript.</p>
+
+<h3>Seguridad</h3>
+
+<p>El c&oacute;digo que llevamos escrito funciona bien, pero no es seguro.  Anteriorme enviamos un mensaje simplemente usando <code>curl</code> desde la l&iacute;nea de &oacute;rdenes, y tal y como est&aacute; el c&oacute;digo cualquiera podr&iacute;a hacer lo mismo y enviar c&oacute;digo JavaScript para ser evaluado en todos los clientes que se encuentren escuchando un canal dado.</p>
+
+<p>Con Faye podemos resolver esto utilizando extensiones, lo que se explica en la  <a href="http://faye.jcoglan.com/ruby.html">documentaci&oacute;n</a> pero que repasaremos r&aacute;pidamente aqu&iacute;.  Para definir estas extensiones tenemos que crear una clase ruby y hacer que implemente un m&eacute;todo llamado <code>incoming</code> o bien un m&eacute;todo <code>outgoing</code>.  Nuestro m&eacute;todo leer&aacute; un c&oacute;digo de autenticaci&oacute;n y devolver&aacute; un error si dicho c&oacute;digo no es el esperado.  Se puede utilizar el m&eacute;todo <code>add_extension</code> en el fichero Rackup  para a&ntilde;adir la clase como una extensi&oacute;n del propio servidor Faye.</p>
+
+<p>Tendremos que generar un c&oacute;digo secreto compartido entre el servidor Faye y la aplicaci&oacute;n Rails  para que sea verificado antes de aceptar ning&uacute;n mensaje.  Para ello tenemos que a&ntilde;adir un nuevo fichero de inicializaci&oacute;n en nuestra aplicaci&oacute;n Rails, al que llamaremos <code>faye_token.rb</code>.  N&oacute;tese que no queremos incluir este fichero en un repo Git porque tiene que ser &uacute;nico en cualquier sistema domde utilicemos esta aplicaci&oacute;n.  En el fichero crearemos una constante llamada <code>FAYE_TOKEN</code> que puede tener pr&aacute;cticamente cualquier valor.</p>
+
+<p class="codeFilePath">/config/initializers/faye_token.rb</p>
+<pre class="ruby">FAYE_TOKEN = &quot;anything_here&quot;</pre>
+
+<p>A continuaci&oacute;n actualizaremos el m&eacute;todo <code>broadcast</code> para que incluya este secreto junto con cualquier mensaje enviado.  Los datos de las extensiones se incluyen con el par&aacute;metro <code>:ext</code> y en dicho par&aacute;metro es en el que enviaremos el secreto con el nombre <code>:auth_token</code>.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def broadcast(channel, &amp;block)
+    message = {:channel =&gt; channel, :data =&gt; capture(&amp;block), :ext =&gt; {:auth_token =&gt; FAYE_TOKEN}}
+    uri = URI.parse(&quot;http://localhost:9292/faye&quot;)
+    Net::HTTP.post_form(uri, :message =&gt; message.to_json)
+  end
+end</pre>
+
+<p>Por &uacute;ltimo tenemos que modificar el fichero <code>faye.ru</code> para a&ntilde;adir la extensi&oacute;n que gestiona este esquema de autenticaci&oacute;n.</p>
+
+<p class="codeFilePath">/faye.ru</p>
+<pre class="ruby">require &#x27;faye&#x27;
+require File.expand_path(&#x27;../config/initializers/faye_token.rb&#x27;, __FILE__)
+
+class ServerAuth
+  def incoming(message, callback)
+    if message[&#x27;channel&#x27;] !~ %r{^/meta/}
+      if message[&#x27;ext&#x27;][&#x27;auth_token&#x27;] != FAYE_TOKEN
+        message[&#x27;error&#x27;] = &#x27;Invalid authentication token.&#x27;
+      end
+    end
+    callback.call(message)
+  end
+end
+
+faye_server = Faye::RackAdapter.new(:mount =&gt; &#x27;/faye&#x27;, :timeout =&gt; 45)
+faye_server.add_extension(ServerAuth.new)
+run faye_server</pre>
+
+<p>Cargamos el secreto para Faye desde el fichero de inicializaci&oacute;n que escribimos antes y luego creamos una nueva clase llamada  <code>ServerAuth</code> que implementa el m&eacute;todo <code>incoming</code>.  En este m&eacute;todo nos aseguramos que el nombre del canal no empiece por  &ldquo;meta&rdquo; porque Faye utiliza internamente nombres de ese estilo y no queremos autenticar ninguno de estos canales.  A continuaci&oacute;n compraremos que el <code>auth_token</code> es correcto y si no lo es enviamos un mensaje.  Luego llamamos a la funci&oacute;n de vuelta.  Por &uacute;ltimo, al final del fichero a&ntilde;adimos el m&eacute;todo de extensi&oacute;n justo despu&eacute;s de crear el servidor Faye.</p>
+
+<p>Si ahora reiniciamos ambos servidores e intentamos enviar el comando <code>curl</code> otra vez recibiremos un error de petici&oacute;n incorrecta porque la petici&oacute;n no ha sido validada.</p>
+
+<pre class="terminal">$ curl http://localhost:9292/faye -d &#x27;message={&quot;channel&quot;:&quot;/messages/new&quot;, &quot;data&quot;:&quot;hello&quot;}&#x27;
+HTTP/1.1 400 Bad Request
+Content-Type: application/json
+Connection: close
+Server: thin 1.2.11 codename Bat-Shit Crazy
+Content-Length: 11</pre>
+
+<p>Sin embargo nuestra aplicaci&oacute;n Rails sigue funcionando igual que antes porque los mensajes env&iacute;an el c&oacute;digo secreto de autenticaci&oacute;n correcto.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/627/original/E261I06.png" width="899" height="654" alt="Nuestro mensajes se envían porque validan correctamente."/>
+</div>
+
+<p>Con esto concluimos este episodio sobre Faye.  Es una soluci&oacute;n excelente para gestionar las notificaciones <em>push</em> sin tener que cambiar de <em>framework</em> por completo.  Podemos mantener toda la l&oacute;gica dentro de Rails y a la vez disfrutar de las ventajas que ofrecen las  notificacione as&iacute;ncronas.</p>
+
+<p>Aquellos que no est&eacute;n interesados en gestionar su propio servidor Faye, pueden considerar echar un vistazo a un servicio llamado <a href="http://pusherapp.com/">Pusher</a> que nos libera de llevar la gesti&oacute;nn del servidor de eventos.</p>

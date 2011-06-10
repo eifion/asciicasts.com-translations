@@ -1,0 +1,279 @@
+<p>En este episodio veremos una gema llamada <a href="https://github.com/voxdolo/decent_exposure">decent_exposure</a>.  Se trata de una sencilla gema que implementa un concepto muy elegante: crear una interfaz de m&eacute;todos en el controlador a los que puede acceder la vista en lugar de utilizar variables de instancia.  Dicho interfaz se define con un m&eacute;todo llamado <code>expose</code>.</p>
+
+<p>Tratemos primero de aplicar este concepto de forma manual antes de empezar con decent_exposure.  La aplicaci&oacute;n con la que vamos a trabajar es un blog muy sencillo con muchos <code>Articles</code>, cada uno de los cuales puede tener muchos <code>Comments</code>.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/620/original/E259I01.png" width="815" height="550" alt="Nuestra aplicación de blog."/>
+</div>
+
+<p>El c&oacute;digo de <code>ArticlesController</code> es el habitual para cualquier controlador.  Por ejemplo la acci&oacute;n <code>index</code> crea una variable de instancia llamada <code>@articles</code>.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">class ArticlesController &lt; ApplicationController
+  def index
+    @articles = Article.order(:name)
+  end
+
+  # Se omiten las otras acciones
+end</pre>
+
+
+<p><code>@articles</code> se usa luego en el c&oacute;digo de la vista <code>index</code> para recorrer los art&iacute;culos y mostrarlos de uno en uno.</p>
+
+<p>La primera vez que uno usa Rails puede parecer extra&ntilde;o que las variables de instancia de un controlador  se encuentren compartidas con las vistas, dado que por lo general las variables de instancia son privadas a una clase.  Veamos a continuaci&oacute;n un enfoque alternativo que comparte los datos exponiendo m&eacute;todos en los controladores que devuelven o bien instancias de los modelos o bien listas de instancias.</p>
+
+<p>Empezaremos quitando la l&iacute;nea de c&oacute;digo que recupera los art&iacute;culos en la acci&oacute;n <code>index</code> y la pondremos en un m&eacute;todo llamado <code>articles</code>.  Queremos que se utilice <code>@articles</code> como si fuese una cach&eacute;, de forma que se consulten los articulos una s&oacute;la vez.  Para esto podemos usar el operador <code>||=</code>, con lo cual tanto el controlador como en las vistas debemos dejar de hacer referencia a la variable de instancia.  Haremos que <code>articles</code> sea una funci&oacute;n <em>helper</em> para que pueda ser usada desde las vistas.</p>
+
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">class ArticlesController &lt; ApplicationController
+  def index
+  end
+
+  private
+  def articles
+    @articles ||= Article.order(:name)
+  end
+  helper_method :articles
+end</pre>
+
+<p>Ahora en la vista ya podemos reemplazar la llamada a la variable de instancia por una llamada al nuevo m&eacute;todo <code>articles</code>.</p>
+
+
+<p class="codeFilePath">/app/views/articles/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Articles&quot; %&gt;
+
+&lt;div id=&quot;articles&quot;&gt;
+&lt;% for article in articles %&gt;
+  &lt;h2&gt;
+    &lt;%= link_to article.name, article %&gt;
+    &lt;span class=&quot;comments&quot;&gt;(&lt;%= pluralize(article.comments.size, &#x27;comment&#x27;) %&gt;)&lt;/span&gt;
+  &lt;/h2&gt;
+  &lt;div class=&quot;created_at&quot;&gt;on &lt;%= article.created_at.strftime(&#x27;%b %d, %Y&#x27;) %&gt;&lt;/div&gt;
+  &lt;div class=&quot;content&quot;&gt;&lt;%= simple_format(article.content) %&gt;&lt;/div&gt;
+&lt;% end %&gt;
+&lt;/div&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;New Article&quot;, new_article_path %&gt;&lt;/p&gt;</pre>
+
+<p>Las otras acciones del controlador encuentran o crean un &uacute;nico art&iacute;culo, por lo que podemos hacer algo parecido definiendo un m&eacute;todo llamado <code>article</code>.  Dicho m&eacute;todo ser&aacute; un poco m&aacute;s complejo que <code>articles</code> porque tiene que hacer cosas distintas seg&uacute;n qu&eacute;  par&aacute;metros reciba.  Este m&eacute;todo quedar&iacute;a as&iacute;:</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">def article
+  @article ||= params[:id] ? Article.find(params[:id]) : Article.new(params[:article])
+end
+helper_method :article</pre>
+
+<p>Si el par&aacute;metro <code>id</code> est&aacute; presente el m&eacute;todo recuperar&aacute; el <code>Article</code> que tenga dicho <code>id</code>.  Si no, crear&aacute; uno nuevo utilizando lo que hayamos recibido por <code>params[:article]</code>.  Con esto ya tenemos un m&eacute;todo que podemos usar como alternativa a la variable de instancia <code>@article</code>, as&iacute; que podemos eliminar las l&iacute;neas que manipulaban  dicha variable en las acciones.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">class ArticlesController &lt; ApplicationController
+  def index
+  end
+
+  def show
+  end
+
+  def new
+  end
+  
+  def create
+    if article.save
+      redirect_to articles_path, :notice =&gt; &quot;Successfully created article.&quot;
+    else
+      render :new
+    end
+  end
+
+  def edit
+  end
+  
+  def update
+    if article.update_attributes(params[:articles])
+      redirect_to articles_path, :notice =&gt; &quot;Successfully updated article.&quot;
+    else
+      render :edit
+    end
+  end
+  
+  def destroy
+    article.destroy
+    redirect_to articles_url, :notice =&gt; &quot;Successfully destroyed article.&quot;
+  end
+
+private
+  def articles
+    @articles ||= Article.order(:name)
+  end
+  helper_method :articles
+  
+  def article
+    @article ||= params[:id] ? Article.find(params[:id]) : Article.new(params[:article])
+  end
+  helper_method :article
+end</pre>
+
+<p>Algunas de las acciones se han quedado sin c&oacute;digo alguno porque no hac&iacute;an nada que no fuese definir una variable de instancia, que es lo que estamos ahora gestionando en los m&eacute;todos privados que hemos escrito.  A&uacute;n tenemos que ir a las vistas de <code>ArticleController</code> y cambiar el uso de estas variables de instancia por una llamada al m&eacute;todo apropiado.  Por ejemplo, la vista <code>show</code> deber&aacute; quedar as&iacute;:</p>
+
+<p class="codeFilePath">/app/views/articles/show.html.erb</p>
+<pre class="ruby">&lt;% title article.name %&gt;
+
+&lt;%= simple_format article.content %&gt;
+
+&lt;p&gt;
+  &lt;%= link_to pluralize(article.comments.size, &#x27;Comment&#x27;), [article, :comments]%&gt; |
+  &lt;%= link_to &quot;Back to Articles&quot;, articles_path %&gt; |
+  &lt;%= link_to &quot;Edit&quot;, edit_article_path(article) %&gt; |
+  &lt;%= link_to &quot;Destroy&quot;, article, :method =&gt; :delete, :confirm =&gt; &quot;Are you sure?&quot; %&gt;
+&lt;/p&gt;</pre>
+
+<p>No mostramos las otras vistas pero habr&iacute;a que cambiarlas de la misma manera.</p>
+
+<p>Otra ventaja de este enfoque es que hace una carga diferida.  Si a&ntilde;adi&eacute;semos cach&eacute; de acciones a, por ejemplo, la acci&oacute;n <code>show</code>, el art&iacute;culo mostrado s&oacute;lo ser&iacute;a recuperado de la bae de datos si fu&eacute;semos a mostrar la vista dado que no se hace nada con el art&iacute;culo en la capa del controlador.  La cach&eacute; de acciones funcionar&iacute;a muy bien aqu&iacute; porque la acci&oacute;n no se ejecuta a no ser que el controlador realmente lo necesite.</p>
+
+<h3>decent_exposure en acci&oacute;n</h3>
+
+<p>La soluci&oacute;n que ya tenemos es razonablemente buena pero ser&iacute;a a&uacute;n mejor tener una forma m&aacute;s c&oacute;moda de definir los m&eacute;todos que exponemos en las vistas, y aqu&iacute; es donde entra en juego decent_exposure.  Su m&eacute;todo <code>expose</code> se puede usar para definir m&eacute;todos que expongan los modelos a la vista de forma similar a los m&eacute;todos <code>articles</code> y <code>article</code> que hemos escrito m&aacute;s arriba.  El m&eacute;todo <code>expose</code> por defecto tiene un funcionamiento que nos es &uacute;til: buscar&aacute; un modelo por su par&aacute;metro <code>id</code> y si dicho par&aacute;metro no est&aacute; presente crear&aacute; un modelo nuevo utilizando los par&aacute;metros correspondientes que pueda localizar.  Esto quiere decir que se pueden usar estos m&eacute;todos para buscar o crear modelos sencillos. Para  comportamientos m&aacute;s sofisticados tenemos que pasar un bloque al m&eacute;todo para definirlo.  Adem&aacute;s decent_exposure se encargar&aacute; de gestionar la cach&eacute; por nostros.</p>
+
+<p>Incorporemos la gema en nuestra aplicaci&oacute;n.  Primero a&ntilde;adiremos la gema al <code>Gemfile</code> y luego ejecutaremos el comando <code>bundle</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;decent_exposure&#x27;</pre>
+
+<p>Ahora en el controlador <code>ArticlesController</code> podemos cambiar los m&eacute;todos <code>article</code> y <code>articles</code> por dos llamadas a <code>expose</code>.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">class ArticlesController &lt; ApplicationController
+
+  expose(:article)
+  expose(:articles) { Article.order(:name) }
+  
+  def index
+  end
+  
+  # Se omiten las otras acciones
+end</pre>
+
+
+<p>El comportamiento definido por defecto es justo lo que queremos para un &uacute;nico <code>Article</code> pero para el caso del listado de art&iacute;culos hemos copiado el cuerpo del m&eacute;todo <code>articles</code> de antes y lo hemos puesto en el bloque del m&eacute;todo <code>expose</code>.</p>
+
+<p>Si ahora volvemos a cargar la aplicaci&oacute;n funcionar&aacute; igual que antes pero ahora los controladores son mucho m&aacute;s limpios porque est&aacute;n usando los m&eacute;todos proporcionados por decent_exposure en lugar de usar variables de instancia.</p>
+
+<h3>Recursos anidados</h3>
+
+<p>&iquest;C&oacute;mo se gestionan con decent_exposure los recursos anidados, como por ejemplo los comentarios en nuestra aplicaci&oacute;n?  Los comentarios est&aacute;n anidados dentro de los art&iacute;culos.</p>
+
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Blog::Application.routes.draw do
+  root :to =&gt; &quot;articles#index&quot;
+
+  resources :articles do
+    resources :comments
+  end
+end</pre>
+
+<p>Este es el aspecto que tiene el controlador <code>CommentsController</code>:</p>
+
+<p class="codeFilePath">/app/controllers/comments_controller.rb</p>
+<pre class="ruby">class CommentsController &lt; ApplicationController
+  def index
+    @article = article.find(params[:article_id])
+    @comments = @article.comments
+    @comment = Comment.new
+  end
+  
+  def new
+    @article = Article.find(params[:article_id])
+    @comment = @article.comments.build
+  end
+  
+  def create
+    @article = Article.find(params[:article_id])
+    @comment = @article.comments.build(params[:comment])
+    if @comment.save
+      redirect_to @comment.article, :notice =&gt; &quot;Successfully created comment!&quot;
+    else
+      render :new
+    end
+  end
+end</pre>
+
+<p>Aqu&iacute; todav&iacute;a nos encontramos usando variables de instancia.  Al principio de cada acci&oacute;n recuperamos un art&iacute;culo y luego construimos un comentario para dicho art&iacute;culo.  Tambi&eacute;n podemos emplear decent_exposure en este caso porque la gema soporta perfectamente el uso de recursos anidados.</p>
+
+<p>Al igual que antes vamos a cambiar cada variable de instancia por una llamada a <code>expose</code>.  Podemos utilizar el comportamiento por defecto para recuperar un <code>Article</code> y su <code>Comment</code> pero para recuperar el listado de comentarios tendremos que definir ese comportamiento, tras lo cual podemos borrar las l&iacute;neas del controlador que asignan las variables de instancia y en el c&oacute;digo que quede cambiar dichas variables por llamadas a los m&eacute;todos apropiados.  Con todos estos cambios, el controlador queda mucho m&aacute;s claro:</p>
+
+<p class="codeFilePath">/app/controllers/comments_controller.rb</p>
+<pre class="ruby">class CommentsController &lt; ApplicationController
+  expose(:article)
+  expose(:comments) { article.comments }
+  expose(:comment)
+  
+  def index
+  end
+  
+  def new
+  end
+  
+  def create
+    if comment.save
+      redirect_to comment.article, :notice =&gt; &quot;Successfully created comment!&quot;
+    else
+      render :new
+    end
+  end
+end</pre>
+
+<p>Al igual que hicimos cuando cambiamos el c&oacute;digo de <code>ArticlesController</code> ahora nos toca actualizar las vistas relacionadas con este controlador para que invoquen a los m&eacute;todos que han sido generados por decent_exposure en lugar de las variables de instancia, por ejemplo el siguiente parcial de formulario:</p>
+
+
+<p class="codeFilePath">/app/views/comments/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for [article, comment] do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= f.hidden_field :article_id %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :content, &quot;Comment&quot; %&gt;&lt;br /&gt;
+    &lt;%= f.text_area :content, :rows =&gt; 12, :cols =&gt; 35 %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>Si volvemos a probar la aplicaci&oacute;n veremos que sigue funcionando igual que antes pero el c&oacute;digo de los controladores est&aacute; mucho mejor.</p>
+
+
+<p>Tenemos que tener en cuenta un potencial peligro con el uso de decent_exposure.  Cuando usamos <code>expose</code> con su comportamiento por defecto (recuperar un &uacute;nico modelo) buscar&aacute; una versi&oacute;n pluralizada del nombre que recibe (por ejemplo <code>:article</code>) e intentar&aacute; recuperar y construir registros a trav&eacute;s de ese &aacute;mbito si es que existe.  Por ejemplo, supongamos que tenemos las siguientes dos llamadas a <code>expose</code> en <code>ArticlesController</code>.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">expose(:article)
+expose(:articles) { Article.order(:name).where(:visible =&gt; true) }</pre>
+
+<p>Cualquier llamado al m&eacute;todo en singular intentar&aacute; recuperar el art&iacute;culo bas&aacute;ndose en un &aacute;mbito <code>articles</code> en plural.  Por tanto, dado el c&oacute;digo anterior, cuando busquemos un &uacute;nico art&iacute;culo &eacute;ste s&oacute;lo ser&aacute; devuelto si dicho articulo es <code>visible</code>.  Para soslayar este comportamiento tenemos que cambiar el nombre de la versi&oacute;n en plural para que tenga un nombre m&aacute;s descriptivo.  En este caso, lo cambiaremos por <code>visible_articles</code>.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">expose(:article)
+expose(:visible_articles) { Article.order(:name).where(:visible =&gt; true) }</pre>
+
+<p>Con esto la segunda llamada a <code>expose</code> no ser&aacute; tomada como el &aacute;mbito base por defecto sobre el que se construyen las acciones.  Con este cambio, por supuesto, tendremos que cambiar las llamadas en las vistas.</p>
+
+<h3>Modificaci&oacute;n del comportamiento por defecto</h3>
+
+<p>Si alguna vez tenemos que cambiar el comportamiento por defecto del m&eacute;todo <code>expose</code> podemos emplear el m&eacute;todo <code>default_exposure</code> pas&aacute;ndole un bloque: el comportamiento que definamos en dicho bloque sobreescribir&aacute; al comportamiento por defecto.  El nombre recibido por <code>expose</code> ser&aacute; propagado al bloque de <code>default_exposure</code>.</p>
+
+<pre class="ruby">class MyController &lt; ApplicationController
+  default_exposure do |name|
+    ObjectCache.load(name.to_s)
+  end
+end</pre>
+
+<p>Por lo general no nos har&aacute; falta sobreescribir el comportamiento por defecto, pero ah&iacute; queda esta opci&oacute;n por si acaso alguna vez lo necesitamos.</p>
+
+<p>Con esto cerramos este episodio.  decent_exposure es una soluci&oacute;n muy limpia para reorganizar nuestros controladores y merece la pena tenerla en cuenta si pensamos que puede encajar con nuestra forma de trabajar.</p>

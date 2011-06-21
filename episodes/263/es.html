@@ -1,0 +1,212 @@
+<p>Puede ser muy frustrante rellenar un largo formulario en una web s&oacute;lo para que &eacute;ste regrese con varios errores de validaci&oacute;n despu&eacute;s de enviarlo.  Como experiencia es mucho mejor que los errores vayan apareciendo en cada campo seg&uacute;n vayamos complet&aacute;ndolos, pero esto puede implicar escribir mucho c&oacute;digo de validaci&oacute;n JavaScript.</p>
+
+<p>En este episodio vamos a ver una gema que nos permitir&aacute; crear autom&aacute;ticamente validaciones del lado de cliente.  Supongamos que tenemos una aplicaci&oacute;n con un formulario de registro que sirve para crear un nuevo modelo de usuarios con cuatro campos como el siguiente:</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/648/original/E263I01.png" width="800" height="493" alt="Formulario de registro."/>
+</div>
+
+<p>El modelo <code>User</code> tiene varias validaciones  de campos obligatorios por lo que si enviamos el formulario sin rellenar alguno de dichos campos veremos una lista de errores de validaci&oacute;n.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/649/original/E263I02.png" width="815" height="399" alt="Mensajes de error que aparecen cuando enviamos el formulario sin rellenar los campos."/>
+</div>
+
+<p>Como dijimos anteriormente ser&iacute;a mucho mejor poder mostrar los errores que tiene un campo determinado tan pronto como el usuario cambia de campo pero el inconveniente de esto es que tendr&iacute;amos que escribir mucho JavaScript, especialmente si tenemos varios modelos que debemos validar de esta forma o si las validaciones son complicadas.  Para ahorrarnos este trabajo vamos a utilizar una gema llamada <a href="https://github.com/bcardarella/client_side_validations/">client_side_validations</a>, que nos ahorrar&aacute; todo este trabajo.  La gema lee las validaciones de un modelo y genera el c&oacute;digo JavaScript necesario para implementar las mismas validaciones del lado del cliente que se activan cuando el usuario rellena un formulario de dicho modelo.  El &uacute;nico requisito no est&aacute;ndar de la gema es el uso de jQuery por lo que si estamos usando Prototype para nuestras aplicaciones Rails tendremos que encontrar una soluci&oacute;n altenativa.</p>
+
+<h3>Instalaci&oacute;n de client_side_validations</h3>
+
+<p>Para instalar la gema tenemos que a&ntilde;adir una referencia en el fichero <code>Gemfile</code> de la aplicaci&oacute;n y luego ejecutar <code>bundle</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.7&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;bcrypt-ruby&#x27;, :require =&gt; &#x27;bcrypt&#x27;
+
+gem &#x27;jquery-rails&#x27;
+gem &#x27;client_side_validations&#x27;</pre>
+
+<p>Obs&eacute;rvese que ya hemos incluido jQuery en la aplicaci&oacute;n con la gema <a href="https://github.com/indirect/jquery-rails">jquery-rails</a>. Una vez que tengamos la gema client_site_validations instalada tenemos que ejecutar el generador que a&ntilde;adir&aacute; varios archivos a nuestra aplicaci&oacute;n: un fichero de configuraci&oacute;n en el directorio <code>config/initializers</code> y un fichero JavaScript que debemos incluir desde el fichero de <em>layout</em>.</p>
+
+<pre class="terminal">$ rails g client_side_validations:install
+    create  config/initializers/client_side_validations.rb
+    create  public/javascripts/rails.validations.js</pre>
+
+<p>A continuaci&oacute;n modificaremos el fichero de <em>layout</em>, tan s&oacute;lo tenemos que a&ntilde;adir <code>rails.validations</code> a la lista de fichero JavaScript que se incluyen.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= javascript_include_tag :defaults, &quot;rails.validations&quot; %&gt;</pre>
+
+<p>Tambi&eacute;n debemos modificar el fichero de configuraci&oacute;n de client_side_validations.  La configuraci&oacute;n por defecto utiliza <a href="https://github.com/plataformatec/simple_form">SimpleForm</a> y  <a href="https://github.com/justinfrench/formtastic">Formtastic</a> pero como nosotros no vamos a usar ninguno de ellos tendremos que descomentar la secci&oacute;n del final del archivo y sobreescribir el m&eacute;todo  <code>field_error_proc</code>.</p>
+
+<p class="codeFilePath">/config/initializers/client_side_validations.rb</p>
+<pre class="ruby"># ClientSideValidations Initializer
+
+require &#x27;client_side_validations/simple_form&#x27; if defined?(::SimpleForm)
+require &#x27;client_side_validations/formtastic&#x27; if defined?(::Formtastic)
+
+# Uncomment the following block if you want each input field to have the validation messages attached.
+ActionView::Base.field_error_proc = Proc.new do |html_tag, instance|
+  unless html_tag =~ /^&lt;label/
+     %{&lt;div class=&quot;field_with_errors&quot;&gt;#{html_tag}&lt;label for=&quot;#{instance.send(:tag_id)}&quot;
+  class=&quot;message&quot;&gt;#{instance.error_message.first}&lt;/label&gt; &lt;/div&gt;}.html_safe
+  else
+    %{&lt;div class=&quot;field_with_errors&quot;&gt;#{html_tag}&lt;/div&gt;}.html_safe
+  end
+end</pre>
+
+<p>Este m&eacute;todo adjunta un elemento <code>label</code> con la clase <code>message</code> conteniendo el mensaje de error a los campos que no sean v&aacute;lidos.  Si la forma por defecto de mostrar errores no casa en nuestra aplicaci&oacute;n podemos personalizar el fichero.</p>
+
+<p>A&uacute;n nos queda un &uacute;ltimo paso por tomar, tenemos que a&ntilde;adir la opci&oacute;n  <code>:validate =&gt; true</code> a la llamada a <code>form_for</code> del formulario al que queramos a&ntilde;adir las validaciones.  Ya lo tendremos todo en su sitio para que las validaciones funcionen en l&iacute;nea.</p>
+
+<p>Si recargamos la p&aacute;gina de alta y salimos del campo del nombre de usuario sin introducir un valor aparecer&aacute; un mensaje de error inmediatamente, y lo mismo ocurrir&aacute; con el resto de campos con errores.</p>
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/650/original/E263I03.png" width="800" height="509" alt="El mensaje de error aparece tan pronto abandonamos un campo."/>
+</div>
+
+<h3>Validaciones m&aacute;s complejas</h3>
+
+<p>Queda claro que las validaciones sencillas funcionar&aacute;n tal cual pero &iquest;qu&eacute; pasa con las que son m&aacute;s complicadas?  En el modelo <code>User</code> tenemos algunas otras validaciones, una para el formato del campo <code>username</code> que se asegura de que no haya caracteres extra&ntilde;os, otra que comprueba la longitud de la clave y otra que comprueba que la clave y su confirmaci&oacute;n coinciden.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">validates_presence_of :username, :email
+validates_presence_of :password, :on =&gt; :create
+validates_presence_of :username, :with =&gt; /^[-\w\._@]+$/i, :allow_blank =&gt; true, :message =&gt; &quot;should only contain letters, numbers, or .-_@&quot;
+validates_length_of :password, :minimum =&gt; 4, :allow_blank =&gt; true
+validates_confirmation_of :password</pre>
+
+<p>Todas estas validaciones client_side_validations las traduce tal cual a JavaScript por lo que si introducimos un nombre de usuario con caracteres malos o una clave demasiado corta lo veremos de inmediato.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/651/original/E263I04.png" width="800" height="543" alt="En el cliente funcionan todo tipo de validaciones diferentes."/>
+</div>
+
+<p>Mientras queden errores visibles el formulario no se puede enviar, s&oacute;lo podremos enviarlo  una vez que hayamos introducido valores v&aacute;lidos en cada campo.</p>
+
+<p>Hay cierto tipo de validaciones, como por ejemplo <code>validates_uniqueness_of</code> tienen que leer datos de la base de datos y en nuestro caso queremos que los campos <code>username</code> y <code>email</code> sean &uacute;nicos por lo que a&ntilde;adiremos esta validaci&oacute;n y veremos lo que ocurre.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">validates_uniqueness_of :username, :email</pre>
+
+<p>Ya hemos creado una cuenta para  &ldquo;eifion&rdquo; y si tratamos de crear otra veremos que el error se recoge tan pronto como salimos del campo del nombre de usuario.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/652/original/E263I05.png" width="800" height="543" alt="Hay validadores que tienen que acceder a la base de datos y harán una llamada AJAX para obtener los datos"/>
+</div>
+
+<p>Esto funciona porque client_side_validations realiza una petici&oacute;n AJAX cuando salimos del campo <code>username</code> para poder comprobar en el servidor si el nombre de usuario ya est&aacute; siendo usado.</p>
+
+<h3>Estilos</h3>
+
+<p>Vamos a echar un vistazo a la CSS para personalizar el aspecto de los mensajes de error.  Primero le daremos estilo a la clase <code>field_with_errores</code> que a&ntilde;ade Rails a los campos no v&aacute;lidos de forma que estos elementos se muestren <code>inline</code>.  El mensaje de error para un campo es un elemento <code>label</code> con la clase <code>message</code> a lo que a&ntilde;adiremos estilos para que parezcan mensajes de error: le pondremos color rojo y un poco de <em>padding</em> a la izquierda para retirarlos del elemento de formulario al que est&aacute;n asociados.</p>
+
+<p class="codeFilePath">/public/stylesheets/application.css</p>
+<pre class="css">.field_with_errors {
+  display: inline;
+}
+
+.field_with_errors .message {
+  color: #D00;
+  padding-left: 5px;
+  font-size: 12px;
+}</pre>
+
+<p>Al recargar la p&aacute;gina de registro y provocar algunos errores veremos los nuevos estilos.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/653/original/E263I06.png" width="800" height="493" alt="Los mensajes de error a nuestro gusto."/>
+</div>
+
+<h3>Validaciones personalizadas</h3>
+
+<p>En el episodio 211  [<a href="http://railscasts.com/episodes/211-validations-in-rails-3">verlo</a>, <a href="http://es.asciicasts.com/episodes/211-las-validaciones-en-rails-3">leerlo</a>] creamos una clase de validaci&oacute;n personalizada llamada <code>EmailFormatValidator</code> para validar el formato de las direcciones de correo.  &iquest;C&oacute;mo podr&iacute;amos trasladar esta clase de validaci&oacute;n en Ruby y convertirla en JavaScript para utilizarla en el cliente como el resto de validaciones en Rails?</p>
+
+<p>Por suerte en el <a href="https://github.com/bcardarella/client_side_validations/wiki/Custom-Validators">wiki de client_side_validations</a> hay una p&aacute;gina que explica exactamente c&oacute;mo hacer esto, as&iacute; que en esta aplicaci&oacute;n vamos a recrear el validador <code>EmailFormatValidator</code> y usaremos la informaci&oacute;n de la p&aacute;gina del wiki para hacer que funcione tambi&eacute;n en el cliente.</p>
+
+<p>El primer paso es poner el validador en un archivo del directorio <code>/lib</code> de la aplicaci&oacute;n.</p>
+
+
+<p class="codeFilePath">/lib/email_format_validator.rb</p>
+<pre class="ruby">class EmailFormatValidator &lt; ActiveModel::EachValidator
+  def validate_each(object, attribute, value)
+    unless value =~ /^([^@\s]+)@((?:[-a-z0-9]+\.)+[a-z]{2,})$/i
+      object.errors[attribute] &lt;&lt; (options[:message] || &quot;is not formatted properly&quot;) 
+    end
+  end
+end</pre>
+
+<p>La clase comprobar&aacute; que el valor recibido coincide con cierta expresi&oacute;n regular y a&ntilde;ade un mensaje de error a la lista de errores del modelo si dicha comparaci&oacute;n no se cumple.  En este caso bien podr&iacute;amos haber usado <code>validates_format_of</code> pero hemos escrito nuestro propio validador para que sirva como ejemplo.</p>
+
+<p>En Rails 3 los ficheros del directorio <code>/lib</code> no se incluyen autom&aacute;ticamente en la aplicaci&oacute;n, por lo que tenemos que a&ntilde;adir este directorio a <code>autoload_paths</code> en el fichero <code>application.rb</code> de nuestra aplicaci&oacute;n.</p>
+
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby">require File.expand_path(&#x27;../boot&#x27;, __FILE__)
+
+require &#x27;rails/all&#x27;
+
+# If you have a Gemfile, require the gems listed there, including any gems
+# you&#x27;ve limited to :test, :development, or :production.
+Bundler.require(:default, Rails.env) if defined?(Bundler)
+
+module Validator
+  class Application &lt; Rails::Application
+    config.autoload_paths &lt;&lt; &quot;#{config.root}/lib&quot;
+
+    # Configure the default encoding used in templates for Ruby 1.9.
+    config.encoding = &quot;utf-8&quot;
+
+    # Configure sensitive parameters which will be filtered from the log file.
+    config.filter_parameters += [:password]
+  end
+end</pre>
+
+<p>El validador tiene que tener su mensaje de error por defecto definido en el fichero de <code>locales</code>.  El mensaje tiene que estar anidado en <code>errors/messages</code> y tener una clave que coincida con el nombre del validador, en este caso <code>email_format</code>.</p>
+
+<p class="codeFilePath">/config/locales/en.yml</p>
+<pre class="ruby"># Sample localization file for English. Add more files in this directory for other locales.
+# See http://github.com/svenfuchs/rails-i18n/tree/master/rails%2Flocale for starting points.
+
+en:
+  errors:
+    messages:
+      email_format: &quot;is not formatted properly.&quot;</pre>
+
+<p>Ya podemos a&ntilde;adir nuestro nuevo validador al modelo <code>User</code>, utilizando <code>validates</code> y pas&aacute;ndole el nombre del campo que deseamos validar y el nombre del validador.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">validates :email, :email_format =&gt; true</pre>
+
+<p>En el c&oacute;digo anterior podemos cambiar <code>true</code>  por un <em>hash</em> de opciones para, por ejemplo, especificar un mensaje de error por defecto pero en este caso lo dejaremos tal cual.</p>
+
+<p>Si introducimos una direcci&oacute;n de correo incorrecta en el formulario anterior y lo enviamos veremos que aparece el mensaje de error de nuestro validador personalizado pero dicho error no aparece cuando salimos del campo del formulario porque la validaci&oacute;n se produce en el servidor.  Queremos traducir el c&oacute;digo de <code>EmailFormatValidator</code> a JavaScript y conectarlo con client_side_validation para que se active cuando el campo de la direcci&oacute;n de correo pierde el foco.</p>
+
+<p>Pondremos el c&oacute;digo de este validador en un nuevo fichero de <code>/public/javascripts</code> llamado <code>rails.validations.custom.js</code>, dado que el <em>plugin</em> espera recibir un nombre en este formato.  En el archivo escribiremos el c&oacute;digo para validar el campo en el cliente.</p>
+
+<p class="codeFilePath">/public/javascripts/rails.validations.custom.js</p>
+<pre class="javascript">clientSideValidations.validators.local[&quot;email_format&quot;] = function (element, options) {
+  if(!/^([^@\s]+)@((?:[-a-z0-9]+\.)+[a-z]{2,})$/i.test(element.val())) {
+    return options.message;
+  }
+}</pre>
+
+<p>En el c&oacute;digo anterior a&ntilde;adimos nuestra validaci&oacute;n creando un nuevo validador <code>local</code> llamado <code>email_format</code> en el objeto <code>clientSideValidations.validators</code>.  Haci&eacute;ndolo <code>local</code> quiere decir que toda la validaci&oacute;n se ejecuta en el cliente; si lo a&ntilde;adi&eacute;semos a <code>remote</code> tendr&iacute;a que hacer una llamada AJAX al servidor de la misma forma que lo hac&iacute;a <code>validates_uniqueness_of</code>.</p>
+
+<p>El c&oacute;digo de validador comprueba el formato del email igual que el c&oacute;digo Ruby, utilizando una expresi&oacute;n regular y si la comparaci&oacute;n falla se devuelve el mensaje de error.  Para a&ntilde;adir el nuevo validador en JavaScript a nuestra aplicaci&oacute;n tan s&oacute;lo tenemos que incluir una referencia en el <em>layout</em> de nuestra aplicaci&oacute;n.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= javascript_include_tag :defaults, &quot;rails.validations&quot;, &quot;rails.validations.custom&quot; %&gt;</pre>
+
+<p>Con todo esto en su sitio ya podemos probarlo.  Si ahora recargamos la p&aacute;gina e introducimos una direcci&oacute;n de correo mal formateada el mensaje de error aparecer&aacute; tan pronto como el campo pierda el foco.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/654/original/E263I07.png" width="800" height="493" alt="Nuestro validador en el cliente." />
+</div>
+
+<p>Ya disponemos de validaci&oacute;n en el lado de cliente para todos los campos del formulario, y adem&aacute;s todas las validaciones se seguir&aacute;n efectuando en el lado del servidor para aquellos usuarios que no tengan JavaScript activado en su navegador.</p>
+
+<p>Con esto concluimos este episodio sobre las validaciones en el lado del cliente.  Escribir validaciones por defecto parece bastante trabajo, pero tras escribir la primera las dem&aacute;s son bastante f&aacute;ciles y con todo esto se mejora la experiencia de usuario en nuestros fomrularios.</p>

@@ -1,0 +1,176 @@
+<p>Rails 3.1の新機能のひとつがテンプレートの継承です。この機能はビューの書き方に革命を起こすというほどではないですが、とても便利な新機能です。今回のエピソードでそのしくみを紹介していきます。</p>
+
+<p>このエピソードのために、各ページに同じナビゲーションを持つアプリケーションを準備しました。</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/670/original/E269I01.png" width="801" height="345" alt="アプリケーションのトップページ"/>
+</div>
+
+<p>このナビゲーションは今はアプリケーションのレイアウトファイルの<code>div</code>要素内に<code>side</code>という<code>id</code>で、静的に定義されています。</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Store&lt;/title&gt;
+  &lt;%= stylesheet_link_tag "application" %&gt;
+  &lt;%= javascript_include_tag "application" %&gt;
+  &lt;%= csrf_meta_tags %&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;div id="container"&gt;
+
+    &lt;% flash.each do |name, msg| %&gt;
+      &lt;%= content_tag :div, msg, :id =&gt; "flash_#{name}" %&gt;
+    &lt;% end %&gt;
+
+    &lt;div id="side"&gt;
+      &lt;strong&gt;Pages&lt;/strong&gt;
+      &lt;ul&gt;
+        &lt;li&gt;&lt;%= link_to "Home", root_path %&gt;&lt;/li&gt;
+        &lt;li&gt;&lt;%= link_to "Products", products_path %&gt;&lt;/li&gt;
+      &lt;/ul&gt;
+    &lt;/div&gt;
+
+    &lt;%= yield %&gt;
+
+    &lt;div class="clear"&gt;&lt;/div&gt;
+  &lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+
+<p>このナビゲーションを、現在のコントローラに応じて変化するようにカスタマイズしたいと思います。これを実現する方法はいくつかありますが、今回はテンプレートの継承を利用します。そのためにまずナビゲーションをsideという部分テンプレート(partial)に切り出します。</p>
+
+<p class="codeFilePath">/app/layouts/views/application.html.erb</p>
+<pre class="ruby">&lt;div id="side"&gt;
+  &lt;%= render "side" %&gt;
+&lt;/div&gt;</pre>
+
+<p>この新しい部分テンプレートにアプリケーション内のすべてのコントローラからアクセスできるようにするためには、どこに置けばいいでしょうか? <code>views</code>ディレクトリ下に<code>shared</code>というディレクトリを作成してそこに置くか、あるいは<code>layouts</code>ディレクトリ下に置くこともできますが、Rails 3.1では<code>views</code>ディレクトリ下の<code>application</code>ディレクトリに置きます。Rails 3.1ではこのディレクトリはデフォルトでは存在しないため、新規に作成します。</p> 
+
+<p class="codeFilePath">/app/views/application/_side.html.erb</p>
+<pre class="ruby">&lt;strong&gt;Pages&lt;/strong&gt;
+&lt;ul&gt;
+  &lt;li&gt;&lt;%= link_to "Home", root_path %&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;%= link_to "Products", products_path %&gt;&lt;/li&gt;
+&lt;/ul&gt;</pre>
+
+<p>この<code>side</code>という部分テンプレートがすべてのコントローラから参照可能になります。これは、ビューの継承がコントローラの継承と並行して動作するからです。コントローラはすべて<code>ApplicationController</code>を継承しているので、テンプレートは<code>application</code>ディレクトリから継承されます。</p>
+
+<p>アプリケーションのいずれかのページを読み込むと、ナビゲーションは以前の通りに表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/671/original/E269I02.png" width="801" height="345" alt="ナビゲーションは以前の通りに表示される"/>
+</div>
+
+<p>この部分テンプレートは、アプリケーションのすべてのコントローラにおいて、簡単にオーバーライドできます。方法は、別のコントローラの<code>views</code>ディレクトリに<code>_side.html.erb</code>という部分テンプレートファイルを作成するだけです。この設定を<code>ProductsController</code>に対して行うために、追加のリンクを持つ部分テンプレートを作ります。</p>
+
+<p class="codeFilePath">/app/views/products/_side.html.erb</p>
+<pre class="ruby">&lt;strong&gt;Pages&lt;/strong&gt;
+&lt;ul&gt;
+  &lt;li&gt;&lt;%= link_to "Home", root_path %&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;%= link_to "Products", products_path %&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;%= link_to "Manage Products", admin_products_path %&gt;&lt;/li&gt;
+&lt;/ul&gt;</pre>
+
+<p><code>ProductsController</code>の下のいずれかのページを再読み込みすると、新しいリンクが表示されます。他のコントローラ下のページを見てみると、以前と同じようにデフォルトのナビゲーションが表示されています。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/672/original/E269I03.png" width="801" height="345" alt="ProductsControllerの下のすべてのアクションは、オーバーライドしたテンプレートを使うようになった"/>
+</div>
+
+<p>これで複数のコントローラにまたがって共有されるテンプレートのための標準的な置き場所が決まりました。そのテンプレートをオーバーライドするには、対象となるコントローラの<code>views</code>ディレクトリに同じ名前のテンプレートを作成します。</p>
+
+<p>この方法は、ネストが深いコンロトーラでも有効です。今回のアプリケーションでは<code>Admin</code>名前空間の下にいくつかのコントローラがあり、それらはすべて<code>BaseController</code>を継承しています。</p> 
+
+<p class="codeFilePath">/app/controllers/admin/base_controller.rb</p>
+<pre class="ruby">module Admin
+  class BaseController &lt; ApplicationController
+  end
+end</pre>
+
+<p>この<code>Base</code>ビューのテンプレートもオーバーライドできます。上のページで“Manage Products”のリンクをクリックすると、<code>/admin/products</code>ページが表示され、ナビゲーションはデフォルトに戻ります。すべてのadminページのナビゲーションをオーバーライドしたい場合はどうすればいいでしょうか? </p>
+
+<p><code>/app/views/admin</code>ディレクトリの下には<code>base</code>ディレクトリがあります。ここにテンプレートを置けば、自動的に他のコントローラに継承されます。そのように設定しつつ、加えて他のサイドテンプレートと区別できるようにリンクを一つ追加します。</p>
+
+<p class="codeFilePath">/app/views/admin/base/_side.html.erb</p>
+<pre class="ruby">&lt;strong&gt;Pages&lt;/strong&gt;
+&lt;ul&gt;
+  &lt;li&gt;&lt;%= link_to "Home", root_path %&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;%= link_to "Products", products_path %&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;%= link_to "Manage Products", admin_products_path %&gt;&lt;/li&gt;
+  &lt;li&gt;&lt;%= link_to "Manage Categories", admin_categories_path %&gt;&lt;/li&gt;
+&lt;/ul&gt;</pre>
+
+<p><code>admin/products</code>ページを再度読み込むと、<code>base</code>ディレクトリのテンプレートが適用されているのがわかります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/673/original/E269I04.png" width="801" height="358" alt="BaseControllerから継承しているページは、baseディレクトリのテンプレートを使う"/>
+</div>
+
+<p>このテンプレートが<code>Admin</code>名前空間のすべてのページで表示されるのは、これらのページが<code>Admin</code>名前空間の<code>BaseController</code>から継承されているからです。</p>
+
+<p>テンプレートの継承は部分テンプレートだけでなく、すべてのビューテンプレートで有効です。<code>app/views/admin</code>フォルダでは、<code>edit.html.erb</code>テンプレートが、<code>categories</code>と<code>products</code>の両方のディレクトリに存在します。どちらも中身のコードは同じです。</p>
+
+<p class="codeFilePath">/app/views/admin/categories/edit.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Edit&lt;/h1&gt;
+
+&lt;%= render 'form' %&gt;</pre>
+
+<p>これらのテンプレートの一つを上位の<code>base</code>ディレクトリに移動してもう片方を削除すると、両方のコントローラが新しい場所のテンプレートを継承するようになります。両方のページとも以前と同じように動作します。アプリケーションに管理用ページが大量にある場合に、この機能は非常に便利です。これらのページは、ビューに繰り返しがたくさんある場合も多いため、この方法を用いればこれらのテンプレートをbaseコントローラに抽象化して取り出し、必要であれば特定のコントローラについてはオーバーライドすることができます。</p>
+
+<p>テンプレートのオーバーライドの話題が出たついでに、もうひとつのトリックとして、コントローラではなく引数に応じてテンプレートをカスタマイズする方法を紹介します。 例えば、モバイル版のサイトをmobileサブドメイン下で提供したいとしましょう。ビュー参照パスを使うことで、サブドメインに応じて使われるビューを変えることができます。この機能は、Rails 3.1の新機能ではなくRails 2でも動作するのですが、この話題に関連するのでここで紹介します。</p>
+
+<p>アプリケーションのコントローラに、ビューパス(view path)と呼ばれるものがあります。ビューで<code>controller.view_paths</code>を呼び出すと、そのコントローラのビューパスを見ることができます。</p>
+
+<p class="codeFilePath">/app/views/admin/base/edit.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Edit&lt;/h1&gt;
+
+&lt;%= render 'form' %&gt;
+
+&lt;%= controller.view_paths %&gt;</pre>
+
+<p>productの編集ページを再度読み込むと、<code>view_paths</code>がリスト表示されます。(なお、アプリケーションの開発中にサブドメインを簡単に使えるように<a href="http://pow.cx/">Powウェブサーバ</a>を使用しています。)</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/674/original/E269I05.png" width="800" height="405" alt="ビューパスが表示されたページ"/>
+</div>
+
+<p>このコントローラはデフォルトでビューパスを一つ持っていますが、更に追加できます。お勧めするのは<code>ApplicationController</code>の<code>before_filter</code>を使用する方法です。</p>
+
+<p class="codeFilePath">/app/controllers/application_controller.rb</p>
+<pre class="ruby">class ApplicationController &lt; ActionController::Base
+  protect_from_forgery
+  before_filter :subdomain_view_path
+  
+  def subdomain_view_path
+    if request.subdomain.present?
+      prepend_view_path "app/views/#{request.subdomain}_subdomain"
+    end
+  end  
+end</pre>
+
+<p><code>before_filter</code>のメソッドで、サブドメインがある場合には、<code><a href="http://apidock.com/rails/AbstractController/ViewPaths/ClassMethods/prepend_view_path">prepend_view_path</a></code>でリクエストのサブドメインに応じて新しいビューパスを追加します。ページを再度読み込むと、この新しいビューパスを見ることができます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/675/original/E269I06.png" width="800" height="405" alt="追加されたビューパスが表示される"/>
+</div>
+
+<p>mobileサブドメインが<code>view_paths</code>の一覧に表示されています。上のURLから<code>mobile</code>サブドメインを削除してページを再読込みすると、表示から消えます。これを使って現在のサブドメインに応じたビューをカスタマイズできます。<code>views</code>の下に<code>mobile_subdomain</code>という新しいディレクトリを作成すれば、対応するデフォルトテンプレートをoverrideするビューテンプレートをそこに追加できます。ここに新しく作った<code>products</code>ディレクトリの下に<code>index.html.erb</code>テンプレートを新しく作成すると、このテンプレートはmobileサブドメインの下で表示された時だけ使われます。</p>
+
+<p class="codeFilePath">/app/views/mobile_subdomain/products/index.html</p>
+<pre class="ruby">&lt;h1&gt;mobile version&lt;/h1&gt;</pre>
+
+<p>サブドメインなしでこのページを表示すると、デフォルトのページが表示されます</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/676/original/E269I07.png" width="800" height="323" alt="サブドメインがなければ、デフォルトテンプレートが使われる"/>
+</div>
+
+<p>しかしmobileサブドメインを追加すると、デフォルトページがオーバーライドされるので新しいテンプレートが使われます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/677/original/E269I08.png" width="800" height="280" alt="mobileサブドメイン下でページを見ると、mobileテンプレートが表示される"/>
+</div>
+
+<p>テンプレートのoverrideについての今回のエピソードは以上です。継承とビューの参照パスによる2つの方法を紹介しました。どちらも高度なカスタマイズが可能で、ビューを抽象化してoverrideする方法を提供します。ビューを更にカスタマイズする必要があればview resolverを作ることもできますが、それはまた別の機会に紹介します。</p>

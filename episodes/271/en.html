@@ -1,0 +1,217 @@
+<p>In this episode we&rsquo;ll take a break from our series on the new features of Rails 3.1 and take a look at Resque1 which is a great way to handle background jobs in Rails applications. We&rsquo;ve covered several ways of handling background processing in previous episodes; each one serves a slightly different need and Resque is no exception. At the end of this episode we&rsquo;ll give you some tips on choosing the right one to fit your needs but for now, let&rsquo;s dive into Resque and add it to a Rails application.</p>
+
+<p>The application we&rsquo;ll be using is a simple code-sharing snippet site a little like Pastie. With this site we can enter a code sample and give it a name and language.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/683/original/E271I01.png" width="800" height="558" alt="The code snippets website."/>
+</div>
+
+<p>When we submit a snippet it is shown with the appropriate syntax highlighting for the selected language applied.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/684/original/E271I02.png" width="800" height="558" alt="The new snippet showing the highlighted code."/>
+</div>
+
+<p>The syntax highlighting is handled by an external web service and it&rsquo;s this part of the code that we want to be handled by a background job. It is currently executed inline as part of the <code>SnippetController</code>&rsquo;s <code>create</code> action.</p>
+
+<p class="codeFilePath">/app/controller/snippets_controller.rb</p>
+<pre class="ruby">def create
+  @snippet = Snippet.new(params[:snippet])
+  if @snippet.save
+    uri = URI.parse(&#x27;http://pygments.appspot.com/&#x27;)
+    request = Net::HTTP.post_form(uri, {&#x27;lang&#x27; =&gt; &crarr;
+      @snippet.language, &#x27;code&#x27; =&gt; @snippet.plain_code})
+    @snippet.update_attribute(:highlighted_code, request.body)
+    redirect_to @snippet, :notice =&gt; &quot;Successfully created &crarr;
+      snippet.&quot;
+  else
+    render &#x27;new&#x27;
+  end
+end</pre>
+
+<p>The syntax highlighting happens when the snippet is saved. It uses the service available at <a href="http://pygments.appspot.com/">http://pygments.appspot.com/</a>, which was set up by Trevor Turk, to provide highlighting without using a local dependency. The code makes a POST request to the service, sending the plain code and the language, and populates the snippet&rsquo;s <code>highlighted_code</code> attribute with the response from that request.</p>
+
+<p>Communicating with external services through a Rails request is generally a bad idea as they might be slow to reply and so tie up your entire Rails process and any other requests that trying to connect to it. It&rsquo;s much better to move external requests out into an external process. We&rsquo;ll set up Resque so that we can move the request into a Resque worker.</p>
+
+<h3>Getting Resque Running</h3>
+
+<p>Resque depends on <a href="http://redis.io/">Redis</a> which is a persistent key-value store. Redis is fairly awesome in itself and well worth an episode on its own, but here we&rsquo;re just going to use it with Resque.</p> 
+
+<p>As we&rsquo;re running OS X the easiest way to get Redis installed is through <a href="http://mxcl.github.com/homebrew/">Homebrew</a> which we can do by running this command.</p>
+
+<pre class="terminal">$ brew install redis</pre>
+
+<p>Once it has installed we can start up the server by running</p>
+
+<pre class="terminal">$ redis-server /usr/local/etc/redis.conf</pre>
+
+<p>With Redis running we can add Resque to our application&rsquo;s <code>Gemfile</code> and then install it by running bundle.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.9&#x27;
+
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+
+gem &#x27;resque&#x27;</pre>
+
+<p>Next we have to add the Resque Rake tasks. We&rsquo;ll do this by adding a <code>resque.rake</code> file in our application&rsquo;s <code>/lib/tasks</code> directory. In this file we need to <code>require &quot;resque/tasks&quot;</code> so that the gem&rsquo;s custom tasks are loaded. We&rsquo;ll also load the Rails environment when the workers start.</p> 
+
+<p class="codeFilePath">/lib/tasks/resque.rake</p>
+<pre class="ruby">require &quot;resque/tasks&quot;
+
+task &quot;resque:setup&quot; =&gt; :environment</pre>
+
+<p>This gives us access to our application&rsquo;s models in the workers. If we want to keep our workers light, however, it might be worth implementing a customized solution so that the entire Rails environment isn&rsquo;t loaded.</p>
+
+<p>We now have a Rake task that we can use to start up the Resque workers. To run it we need to pass in a QUEUE argument. We can either pass in the name of a specific queue that we want to work on or &#x27;*&#x27; to work on any queue.</p>
+
+<pre class="terminal">$ rake resque:work QUEUE=&#x27;*&#x27;</pre>
+
+<p>This script won&rsquo;t show any output but it is working.</p> 
+
+<h3>Moving The Web Service Code</h3>
+
+<p>Now that we have Resque set up we can focus on moving the code that calls the web  service into a background process and handling it through a worker. We need to add a job to the queue so that the work is handled by a Resque worker. Here&rsquo;s the <code>create</code> action again.</p>
+
+<p class="codeFilePath">/app/controller/snippets_controller.rb</p>
+<pre class="ruby">def create
+  @snippet = Snippet.new(params[:snippet])
+  if @snippet.save
+    uri = URI.parse(&#x27;http://pygments.appspot.com/&#x27;)
+    request = Net::HTTP.post_form(uri, {&#x27;lang&#x27; =&gt; &crarr;
+      @snippet.language, &#x27;code&#x27; =&gt; @snippet.plain_code})
+    @snippet.update_attribute(:highlighted_code, request.body)
+    redirect_to @snippet, :notice =&gt; &quot;Successfully created &crarr;
+      snippet.&quot;
+  else
+    render &#x27;new&#x27;
+  end
+end</pre>
+
+<p>We add a job to the queue by calling <code>Resque.enqueue</code>. This method takes a number of arguments, the first of which is the class of the worker that we want to use to handle the job. We haven&rsquo;t created any workers but we&rsquo;ll create one shortly and call it <code>SnippetHighlighter</code>. We also need to pass any additional arguments that we want to pass to the worker. In this case we could pass in the snippet but whatever we pass in to <code>enqueue</code> is converted to JSON so that it can be stored in the Redis database. This means that we shouldn&rsquo;t pass complex objects like ActiveRecord models into here so instead of passing the whole snippet we&rsquo;ll pass it&rsquo;s <code>id</code> and refetch the snippet in the worker.</p>
+
+<p class="codeFilePath">/app/controllers/snippets_controller.rb</p>
+<pre class="ruby">def create
+  @snippet = Snippet.new(params[:snippet])
+  if @snippet.save
+    Resque.enqueue(SnippetHighlighter, @snippet.id)
+    redirect_to @snippet, :notice =&gt; &quot;Successfully created &crarr;
+      snippet.&quot;
+  else
+    render &#x27;new&#x27;
+  end
+end</pre>
+
+<p>Next we&rsquo;ll create the worker and move the code that we&rsquo;ve taken from the controller into it. We&rsquo;ll put the worker in a new workers directory under <code>/app</code>. We could put this class under the <code>/lib</code> directory but by having it in <code>/app</code> it&rsquo;s automatically loaded and already in Rails&rsquo; loadpath.</p>
+
+<p>A worker is just a class with two features. Firstly it needs an instance variable called <code>@queue</code> that holds the name of the queue. This limits the queues that the worker handles. Secondly it needs a class method called <code>perform</code> that takes the arguments that we passed to <code>enqueue</code>, in this case the snippet&rsquo;s <code>id</code>. In this method we can put the code we extracted from the <code>create</code> action that calls the remote server and returns the highlighted code, replacing the calls to the <code>@snippet_id</code> instance variable with the local variable with the same name.</p>
+
+<p class="codeFilePath">/app/workers/snippet_highlighter.rb</p>
+<pre class="ruby">class SnippetHighlighter
+  @queue = :snippets_queue
+  def self.perform(snippet_id)
+    snippet = Snippet.find(snippet_id)
+    uri = URI.parse(&#x27;http://pygments.appspot.com/&#x27;)
+    request = Net::HTTP.post_form(uri, {&#x27;lang&#x27; =&gt; &crarr;
+      snippet.language, &#x27;code&#x27; =&gt; snippet.plain_code})
+    snippet.update_attribute(:highlighted_code, request.body)
+  end
+end</pre>
+
+<p>Let&rsquo;s try this out and see if it works. We&rsquo;ll create a new snippet and submit it. When we do and we&rsquo;ll see the snippet without any highlighting.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/685/original/E271I03.png" width="818" height="547" alt="The new snippet is created without highlighting."/>
+</div>
+
+<p>We won&rsquo;t see the highlighting straightaway as it&rsquo;s now done in the background. If we wait a few seconds and reload the page it&rsquo;s still not applied so let&rsquo;s try debugging the code to see what&rsquo;s not working. Resque comes with a web interface, written in Sinatra. This makes is easy to monitor and manage its jobs. We can start it up by running</p> 
+
+<pre class="terminal">$ resque-web</pre>
+
+<p>When we run this the admin interface opens and we&rsquo;ll see that we have a failed job.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/686/original/E271I04.png" width="820" height="600" alt="Resque's failed jobs list."/>
+</div>
+
+<p>If we click on the failed job we&rsquo;ll see the details of the error: <code>uninitialized constant SnippetHighlighter</code>.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/687/original/E271I05.png" width="820" height="391" alt="Details of the failed job."/>
+</div>
+
+<p>The <code>SnippetHighlighter</code> class isn&rsquo;t being found and the reason for this is that we started the Rake task before we wrote it. Let&rsquo;s restart it and see if it fixes the issue.</p>
+
+<p>Once we&rsquo;ve restarted the rake task we can click the &lsquo;Retry&rsquo; link to run the job again. When we do and we go back to the &lsquo;Overview&rsquo; page there is still only one failed task listed so it appears that the job has run successfully this time. We can confirm this by reloading the last snippet we uploaded. This time the code is highlighted which means that the background job has run successfully.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/688/original/E271I06.png" width="800" height="499" alt="The snippet is now shown with highlighting."/>
+</div>
+
+<p>If we upload a new snippet now it will be syntax-highlighted, though there may be a few seconds&rsquo; delay before the highlighting appears.</p>
+
+<h3>Embedding The Resque Web Interface</h3>
+
+<p>We now have Resque all set up and handling the jobs we give it. It would be useful though if we could embed Resque&rsquo;s web interface into our Rails application so that we don&rsquo;t have to start it up and manage another separate process.</p>
+
+<p>Rails 3 works well with Rack applications and Sinatra is just another Rack application so it&rsquo;s easy to do this by just mounting the application in the routes file.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Coderbits::Application.routes.draw do
+  resources :snippets
+  root :to =&gt; &quot;snippets#new&quot;
+  mount Resque::Server, :at =&gt; &quot;/resque&quot;
+end</pre>
+
+<p>The Resque web interface will now be mounted in our Rails application at <code><a href="http://localhost:3000/resque">http://localhost:3000/resque</a></code>. We need to make sure that the Resque server is loaded for this to work and so inside the <code>Gemfile</code> we&rsquo;ll add a require option to the <code>resque</code> gem.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.9&#x27;
+
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+
+gem &#x27;resque&#x27;, :require =&gt; &#x27;resque/server&#x27;</pre>
+
+<p>If we restart our application&rsquo;s server now and visit <code><a href="http://localhost:3000/resque">http://localhost:3000/resque</a></code> we&rsquo;ll see Resque&rsquo;s web interface.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/689/original/E271I07.png" width="800" height="499" alt="The embedded Resque page is visible to anyone."/>
+</div>
+
+<p>We don&rsquo;t want this page to be publicly visible. How can we add some authorization to it to keep prying eyes out? If we were using something like Devise in our application it would be easy to secure this by wrapping the route in a call to <code>authenticate</code>.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Coderbits::Application.routes.draw do
+  resources :snippets
+  root :to =&gt; &quot;snippets#new&quot;
+  authenticate :admin do
+    mount Resque::Server, :at =&gt; &quot;/resque&quot;
+  end
+end</pre>
+
+<p>We&rsquo;re not using Devise or any other authentication system in our application so instead we&rsquo;ll use HTTP Basic Authentication. To do this we&rsquo;ll create a new initializer in the <code>config/initializers</code> directory called <code>resque_auth.rb</code>.</p>
+
+<p class="codeFilePath">/config/initializers/resque_auth.rb</p>
+<pre class="ruby">Resque::Server.use(Rack::Auth::Basic) do |user, password|
+  password == &quot;secret&quot;
+end</pre>
+
+<p>In this file we call <code>use</code> on <code>Resque::Server</code>, which is a Rack app, and add the Basic Authentication. In the block we check that the password matches. Obviously we can customize this code to set any username or password and add any other logic we want in here. When we restart the server and reload the page we&rsquo;ll see the login prompt and we&rsquo;ll need to enter the password we specified in the initializer to view the page.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/690/original/E271I08.png" width="802" height="500" alt="The page now requires authentication."/>
+</div>
+
+<h3>Resque and its Alternatives</h3>
+
+<p>That&rsquo;s it for our coverage of Resque. How do we choose between this and the other background processing tools available to us? One of the benefits of Resque is the admin interface that allows us to monitor that lets us monitor the queue, retry failed jobs and so on. Another reason to consider Resque is that Github uses it. Github handles a heavy load and so it should be able to handle anything we can throw at it.</p> 
+
+<p>If the Redis dependency is a problem then <a href="http://devcenter.heroku.com/articles/delayed-job">Delayed Job</a> is a great alternative. This was covered in episode 171 [<a href="http://railscasts.com/episodes/171-delayed-job">watch</a>, <a href="http://asciicasts.com/episodes/171-delayed-job">read</a>] and is an easier solution as it uses our application&rsquo;s database to manage the job queue. It does, however, load the application&rsquo;s Rails environment for all the workers. If we want to keep our workers light then this may not be the best solution.</p>
+
+<p>Both Resque and Delayed Job use polling on the queue so there might be a slight delay between a job being added to the queue and when it&rsquo;s processed. If the queue is often empty and we want jobs to be processed straightway then <a href="http://kr.github.com/beanstalkd/">Beanstalkd</a>, covered in episode 243 [<a href="http://railscasts.com/episodes/243-beanstalkd-and-stalker">watch</a>, <a href="http://asciicasts.com/episodes/243-beanstalkd-and-stalker">read</a>], is the better option. Beanstalkd handles jobs through a push event so it can begin processing a job that&rsquo;s added to the queue immediately.</p>

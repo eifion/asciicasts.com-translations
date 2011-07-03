@@ -1,0 +1,262 @@
+<p>Continuamos en este episodio con la serie dedicada a algunas de las novedades que se incluyen en  la primera versi&oacute;n beta de rails 3.1  Esta vez veremos lo que se conoce como emisi&oacute;n continua (<em>streaming</em>) de HTTP explicado en  <a href="http://weblog.rubyonrails.org/2011/4/18/why-http-streaming">este post del blog oficial de Ruby on Rails</a>; merece la pena leer esa anotaci&oacute;n primero.  Hoy trataremos de configurarlo en una aplicaci&oacute;n Rails y repasaremos algunos de los potenciales problemas que nos podemos encontrar.</p>
+
+<p>Para demostrar en qu&eacute; consiste la emisi&oacute;n continua de HTTP utilizaremos la sencilla aplicaci&oacute;n de tareas que vimos en el &uacute;ltimo episodio.  Esta funcionalidad puede activarse a nivel de controlador o acci&oacute;n pero no viene habilitada por defecto.</p>
+
+
+<p>Para activar la emisi&oacute;n continua utilizamos <em>render</em> pasando la opci&oacute;n <code>:stream =&gt; true</code>.</p>
+
+
+<p class="codeFilePath">/app/controllers/projects_controller.rb</p>
+<pre class="ruby">def index
+  @projects = Project.all
+  render :stream =&gt; true
+end</pre>
+
+<p>Y para habilitar la emisi&oacute;n continua en todo el controlador utilizaremos el m&eacute;todo de clase <code>stream</code>.</p>
+
+<p class="codeFilePath">/app/controllers/projects_controller.rb</p>
+<pre class="ruby">class ProjectsController &lt; ApplicationController
+  stream
+
+  def index
+    # rest of controller code
+  end
+end</pre>
+
+<p>Pero WEBrick, el servidor web por defecto en Rails 3, no soporta la emisi&oacute;n continua por lo que para verla en acci&oacute;n tenemos que cambiar a otro que s&iacute; lo haga como por ejemplo Unicorn.</p>
+
+<p>En el <code>Gemfile</code> de la aplicaci&oacute;n figura la gema Unicorn  pero por defecto se encuentra comentada.  Para utilizar esta gema descomentaremos la l&iacute;nea y ejecutaremos bundle para instalarla.</p>
+
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby"># Use unicorn as the web server
+gem &#x27;unicorn&#x27;</pre>
+
+
+<p>Para que Unicorn realice la emisi&oacute;n continua de HTTP debemos configurarlo, Rails dispone de <a href="https://github.com/rails/rails/blob/master/actionpack/lib/action_controller/metal/streaming.rb">de documentaci&oacute;n interna sobre la emisi&oacute;n continua de HTTP</a> donde se  explica c&oacute;mo hacerlo; de momento nosotros tan s&oacute;lo tendremos que crear un fichero de configuraci&oacute;n que pondremos en el directorio <code>config</code>.</p>
+
+<p class="codeFilePath">/config/unicorn.rb</p>
+<pre class="ruby">listen 3000, :tcp_nopush =&gt; false</pre>
+
+<p>Tras esto podemos arrancar Unicorn dici&eacute;ndole que use dicho fichero de configuraci&oacute;n.</p>
+
+<pre class="terminal">$ unicorn_rails --config-file config/unicorn.rb</pre>
+
+<p>Si tenemos problemas al lanzar esta orden debemos asegurarnos de haber ejecutado <code>bundle</code> despu&eacute;s de descomentar la l&iacute;nea que incluye <code>gem &#x27;unicorn&#x27;</code> en el <code>Gemfile</code>. Si a&uacute;n as&iacute; sigue sin funcionar, podemos probar a poner delante  <code>bundle exec</code>.</p>
+
+<p>Ya podemos abrir nuestra aplicaci&oacute;n con el navegador en el puerto 3000, como lo har&iacute;amos si estuvi&eacute;semos con el servidor de Rails por defecto.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/660/original/E266I01.png" width="800" height="290" alt="Nuestra aplicación servida por Unicorn."/>
+</div>
+
+<h3>Simulaci&oacute;n de la emisi&oacute;n continua</h3>
+
+<p>No habremos podido notar que el HTML de la pag&iacute;na se emite de forma continua, para apreciarlo tenemos que simular algo que haga que la p&aacute;gina tarde algunos segundos en ejecutarse en la capa de vista para as&iacute; ver que la respuesta se est&aacute; devolviendo a trozos.    La forma m&aacute;s sencilla de hacer esto es a&ntilde;adiendo una llamada a <code>sleep</code> en una de las vistas.</p>
+
+
+<p class="codeFilePath">/app/views/projects/index.html.erb</p>
+<pre class="ruby">&lt;% sleep 5 %&gt;
+&lt;h1&gt;Listing projects&lt;/h1&gt;
+
+&lt;table&gt;
+  &lt;tr&gt;
+    &lt;th&gt;Name&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+  &lt;/tr&gt;
+
+&lt;% @projects.each do |project| %&gt;
+  &lt;tr&gt;
+    &lt;td&gt;&lt;%= project.name %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &#x27;Show&#x27;, project %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &#x27;Edit&#x27;, edit_project_path(project) %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &#x27;Destroy&#x27;, project, confirm: &#x27;Are you sure?&#x27;, method: :delete %&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+&lt;% end %&gt;
+&lt;/table&gt;
+
+&lt;br /&gt;
+
+&lt;%= link_to &#x27;New Project&#x27;, new_project_path %&gt;</pre>
+
+<p>Podemos ver la respuesta troceada recuperando la p&aacute;gina con <code>curl</code>. Si cargamos la p&aacute;gina principal de la aplicaci&oacute;n veremos que parte de la respuesta se devuelve inmediatamente.</p>
+
+
+<pre class="terminal">$ curl -i localhost:3000
+HTTP/1.1 200 OK 
+Date: Wed, 18 May 2011 08:18:56 GMT
+Status: 200 OK
+Connection: close
+Cache-control: no-cache
+Transfer-Encoding: chunked
+Content-Type: text/html; charset=utf-8
+X-UA-Compatible: IE=Edge
+X-Runtime: 0.023745
+
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Todo&lt;/title&gt;
+  &lt;link href=&quot;/assets/application.css&quot; media=&quot;screen&quot; rel=&quot;stylesheet&quot; type=&quot;text/css&quot; /&gt;
+  &lt;script src=&quot;/assets/application.js&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+  &lt;meta content=&quot;authenticity_token&quot; name=&quot;csrf-param&quot; /&gt;
+&lt;meta content=&quot;0eBxvhbMH6HA8ocRLw06uNnmh7zqWo5dGSeFIA8sfj8=&quot; name=&quot;csrf-token&quot; /&gt;
+&lt;/head&gt;
+&lt;body&gt;</pre>
+
+<p>Habr&aacute; algunos segundos de retraso antes de que vuelva el resto.  N&oacute;tese en la informaci&oacute;n de la cabecera que <code>Transfer-Encoding</code> vale <code>chunked</code> y no hay cabecera  <code>Content-Length</code porque el servidor no puede saber el tamaño de la página completa.</p>
+
+<pre class="terminal">&lt;h1&gt;Listing projects&lt;/h1&gt;
+
+&lt;table&gt;
+  &lt;tr&gt;
+    &lt;th&gt;Name&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+  &lt;/tr&gt;
+
+  &lt;tr&gt;
+    &lt;td&gt;Housework&lt;/td&gt;
+    &lt;td&gt;&lt;a href=&quot;/projects/1&quot;&gt;Show&lt;/a&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;a href=&quot;/projects/1/edit&quot;&gt;Edit&lt;/a&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;a href=&quot;/projects/1&quot; data-confirm=&quot;Are you sure?&quot; data-method=&quot;delete&quot; rel=&quot;nofollow&quot;&gt;Destroy&lt;/a&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/table&gt;
+
+&lt;br /&gt;
+
+&lt;a href=&quot;/projects/new&quot;&gt;New Project&lt;/a&gt;
+
+
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+
+<p>Si no hubi&eacute;semos habilitado la emisi&oacute;n continua se habr&iacute;a producido un retraso de cinco segundos antes de ver cualquier respuesta desde el servidor.  Si somos capaces de devolver la parte de la cabecera de la p&aacute;gina de forma inmediata el navegador podr&aacute; empezar a procesar esta secci&oacute;n y cargar&aacute; el JavaScript y los archivos CSS  que necesite mientras espera que el resto de la p&aacute;gina sea devuelto por el servidor.</p>
+
+<p>Para aprovechar al m&aacute;ximo la emisi&oacute;n continua tenemos que mover todo el procesamiento que podamos a la capa de las vista para que el servidor pueda empezar a emitir la p&aacute;gina tan pronto como le sea posible.  En nuestra acci&oacute;n <code>index</code> usamos <code>Project.all</code> para recuperar los proyectos que aparecen en la p&aacute;gina pero si lo hacemos as&iacute; el servidor no puede empezar a emitir esta p&aacute;gina hasta que dicha consulta haya terminado. Si la cambiamos por algo basado en <code>scoped</code>, que realiza una carga perezosa, la llamada a base de datos no se har&aacute; hasta que la capa de vista empiece a iterar sobre la colecci&oacute;n de proyectos.</p>
+
+<p class="codeFilePath">/app/controllers/projects_controller.rb</p>
+<pre class="ruby">def index
+  @projects = Project.scoped
+end
+</pre>
+
+<h3>Problemas potenciales con la emisi&oacute;n continua</h3>
+
+<p>Todo esto pinta muy bien pero hay algunos inconvenientes que deberemos tener en cuenta antes de usarlo.  El primero es que se invierte el orden de procesamiento entre <em>layout</em> y plantilla.  En una petici&oacute;n Rails normal primero se procesa la plantilla de la acci&oacute;n y a continuaci&oacute;n el <em>layout</em>.  En una petici&oacute;n con emisi&oacute;n continua tenemos que mostrar primero el contenido del <em>layout</em> tan pronto como se pueda porque por lo general esta es la parte que contiene la secci&oacute;n <code>head</code>.  La plantilla de la acci&oacute;n no se procesar&aacute; hasta que lleguemos al comando <code>yield</code> del <em>layout</em>.</p>
+
+<p>Todo esto quiere decir que si intentamos hacer algo como establecer una variable de instancia en la plantilla no tendremos acceso a ella en el <em>layout</em> porque la plantilla todav&iacute;a no habr&aacute; sido procesada.  Por ejemplo, intentemos establecer una variable de instancia llamada <code>@title</code> en la acci&oacute;n <code>index</code>.</p>
+
+
+<p class="codeFilePath">/app/views/projects/index.html.erb</p>
+<pre class="ruby">&lt;% @title = &quot;Projects &quot;%&gt;
+&lt;% sleep 5 %&gt;
+&lt;h1&gt;Listing projects&lt;/h1&gt;
+
+&lt;table&gt;
+&lt;!-- Se omite el resto del archivo. --&gt;</pre>
+
+<p>Y tratemos a continuaci&oacute;n de utilizar esta variable en el <em>layout</em>:</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;&lt;%= @title %&gt;&lt;/title&gt;
+  &lt;%= stylesheet_link_tag    &quot;application&quot; %&gt;
+  &lt;%= javascript_include_tag &quot;application&quot; %&gt;
+  &lt;%= csrf_meta_tags %&gt;
+&lt;/head&gt;
+&lt;body&gt;
+
+&lt;%= yield %&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+
+<p>Si recuperamos la p&aacute;gina con <code>curl</code> y miramos la cabecera <code>head</code> el elemento <code>title</code> aparecer&aacute; vac&iacute;o porque el <em>layout</em> se procesa antes que la plantilla y por lo tanto la variable <code>@title</code> a&uacute;n no habr&aacute; sido definida cuando la pide el fichero de <em>layout</em>.  Esto no ocurre en las peticiones normales (que no usan emisi&oacute;n continua) porque la plantilla se procesa primero.</p>
+
+<pre class="terminal">&lt;head&gt;
+  &lt;title&gt;&lt;/title&gt;
+  &lt;link href=&quot;/assets/application.css&quot; media=&quot;screen&quot; rel=&quot;stylesheet&quot; type=&quot;text/css&quot; /&gt;
+  &lt;script src=&quot;/assets/application.js&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+  &lt;meta content=&quot;authenticity_token&quot; name=&quot;csrf-param&quot; /&gt;
+  &lt;meta content=&quot;x0CtIY+0vEbfkh6gohZp/WdOd0ZanobQHZT8+HUC/OE=&quot; name=&quot;csrf-token&quot; /&gt;
+&lt;/head&gt;</pre>
+
+<p>Por supuesto la forma correcta de pasar informaci&oacute;n entre la plantilla y el <em>layout</em> es utilizar <code>content_for</code>, pero esto tampoco funciona.  Si lo intentamos y luego utilizamos <code>curl</code> para ver la p&aacute;gina veremos que la salida se detendr&aacute; justo antes del elemento <code>title</code>.</p>
+
+<p>Este fallo se debe al funcionamiento de <code>content_for</code>.  Si tenemos varias llamadas a <code>content_for</code> para el mismo elemento Rails las concatena todas.  Por tanto, cuando Rails ve <code>content_for :title</code> al principio no puede saber que no hay m&aacute;s llamadas en el resto de la p&aacute;gina.</p>
+
+<p>Rails 3.1 proporciona un nuevo m&eacute;todo llamado <code>provide</code> que se comporta exactamente igual que <code>content_for</code> excepto que no concatena los valores y es el que debemos utilizar para establecer el t&iacute;tulo de la p&aacute;gina.</p>
+
+
+<p class="codeFilePath">/app/views/projects/index.html.erb</p>
+<pre class="ruby">&lt;% provide :title, &quot;Projects&quot; %&gt;</pre>
+
+<p>En el <em>layout</em> ya podemos utilizar <code>yield</code> igual que har&iacute;amos si us&aacute;semos <code>content_for</code>.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;title&gt;&lt;%= yield :title %&gt;&lt;/title&gt;</pre>
+
+<p>Si ahora abrimos la p&aacute;gina veremos que el elemento <code>title</code> contiene el t&iacute;tulo deseado.</p>
+
+<pre class="terminal">
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Projects&lt;/title&gt;
+  &lt;link href=&quot;/assets/application.css&quot; media=&quot;screen&quot; rel=&quot;stylesheet&quot; type=&quot;text/css&quot; /&gt;
+  &lt;script src=&quot;/assets/application.js&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+  &lt;meta content=&quot;authenticity_token&quot; name=&quot;csrf-param&quot; /&gt;
+  &lt;meta content=&quot;NzdFt92dDBSXRRgFR0pRZRizirN87Qb5CVdqgGEAvTU=&quot; name=&quot;csrf-token&quot; /&gt;
+&lt;/head&gt;
+&lt;!-- rest of page --&gt;</pre>
+
+<p>Otro potencial problema a la hora de utilizar la emisi&oacute;n continua es lo que ocurre cuando se eleva una excepci&oacute;n.  Podemos ver esto a&ntilde;adiendo una llamada a un m&eacute;todo inexistente en la plantilla <code>index</code>.</p>
+
+
+<p class="codeFilePath">/app/views/projects/index.html.erb</p>
+<pre class="ruby">&lt;% provide :title, &quot;Projects&quot; %&gt;
+
+&lt;% fall_over %&gt;
+
+&lt;% sleep 5 %&gt;
+&lt;h1&gt;Listing projects&lt;/h1&gt;
+&lt;!-- resto de la p&aacute;gina --&gt;</pre>
+
+<p>Podemos ver la interesante salida que devuelve la p&aacute;gina.</p>
+
+<pre class="terminal">$ curl -i http://localhost:3000/
+
+(omitimos la informaci&oacute;n de la cabecera)
+
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Projects&lt;/title&gt;
+  &lt;link href=&quot;/assets/application.css&quot; media=&quot;screen&quot; rel=&quot;stylesheet&quot; type=&quot;text/css&quot; /&gt;
+  &lt;script src=&quot;/assets/application.js&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+  &lt;meta content=&quot;authenticity_token&quot; name=&quot;csrf-param&quot; /&gt;
+&lt;meta content=&quot;rhFAQuK2s5Rxi6jjC3jA12k07GjD75VeWlbsyf47bLc=&quot; name=&quot;csrf-token&quot; /&gt;
+&lt;/head&gt;
+&lt;body&gt;
+
+&quot;&gt;&lt;script type=&quot;text/javascript&quot;&gt;window.location = &quot;/500.html&quot;&lt;/script&gt;&lt;/html&gt;</pre>
+
+<p>Si se eleva una excepci&oacute;n Rails devuelve un elemento <em>script</em> al navegador que contiene una l&iacute;nea JavaScript para redirigir el navegador a la p&aacute;gina <code>500.html</code>.  Si vemos esta p&aacute;gina en el navegador seremos llevados a la p&aacute;gina de error est&aacute;ndar que muestran las aplicaciones Rails en producci&oacute;n.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/661/original/E266I02.png" width="800" height="290" alt="La página de error 500 de producción se muestra incluso en desarrollo."/>
+</div>
+
+<p>Esto quiere decir que no podemos ver la informaci&oacute;n de depuraci&oacute;n ni tan siquiera en modo de desarrollo, por lo que tendremos que buscar los errores en el <em>log</em> de desarrollo.</p>
+
+<p>Tampoco podremos establecer informaci&oacute;n de sesi&oacute;n y <em>cookies</em> dentro de la plantilla en emisi&oacute;n continua.  Si intentamos establecer una variable de sesi&oacute;n en la plantillas Rails ya habr&aacute; enviado  la cabecera HTTP al navegador por lo que no podremos ampliar dicha informaci&oacute;n desde la plantilla.  Esto se aplica tambi&eacute;n a <em>cookies</em> y mensajes <em>flash</em>, que utilizan la sesi&oacute;n.  Deberemos establecer esta informaci&oacute;n siempre desde el controlador.</p>
+
+<p>Los dos &uacute;ltimos problemas potenciales consisten en que la emisi&oacute;n continua de HTML utiliza la funcionalidad de fibras en Ruby, por lo que necesitamos estar en Ruby 1.9 y que adem&aacute;s es incompatible con ciertos tipos de <em>middleware</em>.  Si el <em>middleware</em> modifica por su cuenta la respuesta de la aplicaci&oacute;n no funcionar&aacute; en emisi&oacute;n continua.</p>  
+
+<p>Con todo esto ya podemos entender por qu&eacute; la emisi&oacute;n continua de HTTP no viene activada por defecto: hay un gran n&uacute;mero de problemas potenciales que deberemos tener en cuenta antes de su uso, por lo que lo mejor es restringirlo a s&oacute;lo aquellas p&aacute;ginas en las que necesitemos sacar el m&aacute;ximo rendimiento. Pero a pesar de todos estos problemas Merece la pena considerar la emisi&oacute;n continua de HTTP porque podemos mejorar la experiencia final de usuario, especialmente en p&aacute;ginas que incluyen un gran n&uacute;mero de ficheros JavaScript y CSS que el navegador pueda ir cargando y procesando tan pronto como sea posible.</p>

@@ -1,0 +1,202 @@
+<p>A couple of months ago Github <a href="https://github.com/blog/832-rolling-out-the-redcarpet">introduced</a> a Ruby gem called <a href="https://github.com/tanoku/redcarpet">Redcarpet</a>. This gem is used to interpret <a href="http://en.wikipedia.org/wiki/Markdown">Markdown</a> code and Github use it internally with the <a href="http://fossil.instinctive.eu/libupskirt/index">Upskirt</a> library to provide an easy way to mark up documents. Redcarpet is easy to use and in this episode we&rsquo;ll add it to a Rails application and show how it can be customized and how we can add syntax highlighting to code blocks.</p> 
+
+<p>We&rsquo;ll be working with the simple blogging application shown below. The content we&rsquo;ve entered for the article below is output directly as HTML so even though we entered it as two separate paragraphs it&rsquo;s shown in one block.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/691/original/E272I01.png" width="801" height="358" alt="Our blogging application."/>
+</div>
+
+<p>The content currently isn&rsquo;t interpreted in any way. We&rsquo;ll change our application so that it&rsquo;s passed through Markdown. That way anyone creating or editing an article will have a lot of flexibility in controlling how it&rsquo;s formatted.</p> 
+
+<h3>Installing Redcarpet</h3>
+
+<p>The first step in doing this, as you might expect, is to install the Redcarpet gem. This is done in the usual way by adding a reference to the gem in the Gemfile and then running bundle to install it.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.9&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+
+gem &#x27;redcarpet&#x27;</pre>
+
+<p>Next we&rsquo;ll go to the <code>ArticleController</code>&rsquo;s <code>show</code> page and add Redcarpet to the line of the code that shows the article&rsquo;s content. To do this we create a new <code>Redcarpet</code> object, pass in the content we want marked up, and call <code>to_html</code> on the string that is returned.</p>
+
+<p class="codeFilePath">/app/views/articles/show.html.erb</p>
+<pre class="ruby">&lt;% title @article.name %&gt;
+
+&lt;%= Redcarpet.new(@article.content).to_html %&gt;
+
+&lt;p&gt;
+  &lt;%= link_to &quot;Edit&quot;, edit_article_path(@article) %&gt; |
+  &lt;%= link_to &quot;Destroy&quot;, @article, :confirm =&gt; &#x27;Are you sure?&#x27;, :method =&gt; :delete %&gt; |
+  &lt;%= link_to &quot;View All&quot;, articles_path %&gt;
+&lt;/p&gt;</pre>
+
+<p>When we reload the page, though, we don&rsquo;t quite get the result we want.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/692/original/E272I02.png" width="800" height="324" alt="The content&rsquo;s tags are escaped."/>
+</div>
+
+<p>Rails 3 has auto-escaped the HTML so we see the tags that Redcarpet has added displayed on the page. The quick way to fix this is to wrap the output with <code>raw</code>.</p>
+
+<p class="codeFilePath">/app/views/articles/show.html.erb</p>
+<pre class="ruby">&lt;% title @article.name %&gt;
+
+&lt;%= raw Redcarpet.new(@article.content).to_html %&gt;
+
+&lt;p&gt;
+  &lt;%= link_to &quot;Edit&quot;, edit_article_path(@article) %&gt; |
+  &lt;%= link_to &quot;Destroy&quot;, @article, :confirm =&gt; &#x27;Are you sure?&#x27;, :method =&gt; :delete %&gt; |
+  &lt;%= link_to &quot;View All&quot;, articles_path %&gt;
+&lt;/p&gt;</pre>
+
+<p>When we reload the page now it displays like we want it to.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/693/original/E272I03.png" width="800" height="350" alt="The content is now shown in two paragraphs as we want."/>
+</div>
+
+<p>Doing all this every time we want to display some Markdown code is a bit of a pain so we&rsquo;ll create a helper method called <code>markdown</code> to make it easier.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def markdown(text)
+    Redcarpet.new(text).to_html.html_safe
+  end
+end</pre>
+
+<p>When we return content from a helper method we call <code>html_safe</code> on it instead of <code>raw</code>. We can now use the new helper method in the article page.</p>
+
+<p class="codeFilePath">/app/views/articles/show.html.erb</p>
+<pre class="ruby">&lt;% title @article.name %&gt;
+
+&lt;%= markdown @article.content %&gt;
+
+&lt;p&gt;
+  &lt;%= link_to &quot;Edit&quot;, edit_article_path(@article) %&gt; |
+  &lt;%= link_to &quot;Destroy&quot;, @article, :confirm =&gt; &#x27;Are you sure?&#x27;, :method =&gt; :delete %&gt; |
+  &lt;%= link_to &quot;View All&quot;, articles_path %&gt;
+&lt;/p&gt;</pre>
+
+<h3>Customizing Redcarpet</h3>
+
+<p>We&rsquo;ll look next at customizing Redcarpet. One thing that is doesn&rsquo;t do by default is handle single line breaks: a blank line is required to define the start of a new paragraph. If we enter some text with a single line break in it like this</p>
+
+<pre class="html">give me a 
+break</pre>
+
+<p>it will be displayed as a single line of text in the output.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/694/original/E272I04.png" width="802" height="478" alt="Line breaks aren't shown in the content."/>
+</div>
+
+<p>It would be better if entering text like this inserted a link break tag at the appropriate place in the HTML. If we take a look at the <a href="http://rdoc.info/github/tanoku/redcarpet/master/Redcarpet">Redcarpet documentation</a> we&rsquo;ll see a list of options and one of these is <a href="http://rdoc.info/github/tanoku/redcarpet/master/Redcarpet#hard_wrap-instance_method">hard_wrap</a> which will do exactly that.</p> 
+
+<p>We add options as symbols to Redcarpet&rsquo;s constructor, like this:</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def markdown(text)
+    Redcarpet.new(text, :hard_wrap).to_html.html_safe
+  end
+end</pre>
+
+<p>When we reload out article now the line &ldquo;Give me a break&rdquo; will appear on two lines as we want.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/695/original/E272I05.png" width="802" height="428" alt="The line break is now shown."/>
+</div>
+
+<p>There are a number of other useful options we can add here. The <code><a href="http://rdoc.info/github/tanoku/redcarpet/master/Redcarpet#filter_html-instance_method">filter_html</a></code> option will stop any raw HTML from being output. We&rsquo;ll also add <code><a href="http://rdoc.info/github/tanoku/redcarpet/master/Redcarpet#autolink-instance_method">autolink</a></code> so that any URLs that are detected in the code are turned into links. As we&rsquo;re planning on including code examples in the articles we&rsquo;ll also use the <code><a href="http://rdoc.info/github/tanoku/redcarpet/master/Redcarpet#no_intraemphasis-instance_method">no_intraemphasis</a></code> option. This will stop underscores within words from being treated as the start or end of emphasis blocks and will therefore stop Ruby method or variable names with underscores in them from triggering the emphasis. Finally, to help render code samples in our blog&rsquo;s articles we&rsquo;ll add two more options: <code><a href="http://rdoc.info/github/tanoku/redcarpet/master/Redcarpet#fenced_code-instance_method">fenced_code</a></code> (we&rsquo;ll see this in use shortly) and <code><a href="http://rdoc.info/github/tanoku/redcarpet/master/Redcarpet#gh_blockcode-instance_method">gh_blockcode</a></code>.</p>
+
+<p>We now have quite a long list of options we&rsquo;ll extract them out into an array in our helper.</p>
+
+<p class="codeFilePath">/app/helpers/applciation_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def markdown(text)
+    options = [:hard_wrap, :filter_html, :autolink, &crarr;
+      :no_intraemphasis, :fenced_code, :gh_blockcode]
+    Redcarpet.new(text, *options).to_html.html_safe
+  end
+end</pre>
+
+<p>With these options in place we can add code blocks to our articles just as we can with Github. These blocks start and end with a line containing three backticks and with the language specified in the opening line. We&rsquo;ll edit our article and add a Ruby code block to it.</p>
+
+<pre class="html">Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. 
+
+``` ruby
+puts &quot;Hello, world!&quot;
+```</pre>
+
+<p>This is rendered like this, with the code sample rendered in a <code>pre</code> tag with the appropriate <code>lang</code> element to define the language.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/696/original/E272I06.png" width="802" height="428" alt="Code blocks are now shown."/>
+</div>
+
+<p>We can also use the more traditional way of defining code blocks with Fenced Code by using tildes instead of backticks.</p>
+
+<pre class="html">Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. 
+
+~~~ruby
+puts &quot;Hello, world!&quot;
+~~~</pre>
+
+<p>This will be rendered exactly as it is when we use backticks.</p>
+
+<h3>Syntax Highlighting</h3>
+
+<p>Now that we can add code blocks to our articles how can we add syntax highlighting? Github handles this with a combination of the Python library <a href="http://pygments.org/">Pygments</a> and the <a href="https://github.com/github/albino">Albino gem</a> and we&rsquo;ll do the same in our application.</p>
+
+<p>We&rsquo;ll add Albino to our <code>Gemfile</code> and also Nokogiri so that we can interpret and parse the HTML that Redcarpet generates.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.9&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+
+gem &#x27;redcarpet&#x27;
+gem &#x27;albino&#x27;
+gem &#x27;nokogiri&#x27;</pre>
+
+<p>As before we&rsquo;ll need to run bundle to ensure that everything&rsquo;s installed.</p> 
+
+<p>We&rsquo;ll also need to install Pygments. As we have Python installed on our machine we can install it by running</p>
+
+<pre class="terminal">$ sudo easy_install pygments</pre>
+
+<p>In our <code>ApplicationHelper</code> we&rsquo;ll add a wrapper method that we&rsquo;ll call <code>syntax_highlighter</code> around the line of code that converts the Redcarpet code to HTML. This method will use Nokogiri to search the document for <code>pre</code> elements with a <code>lang</code> attribute as this is how Redcarpet defines code blocks. It will then replace the contents of these elements with the syntax-highlighted code.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def markdown(text)
+    options = [:hard_wrap, :filter_html, :autolink, &crarr;
+      :no_intraemphasis, :fenced_code, :gh_blockcode]
+    syntax_highlighter(Redcarpet.new(text, &crarr;
+      *options).to_html).html_safe
+  end
+  
+  def syntax_highlighter(html)
+    doc = Nokogiri::HTML(html)
+    doc.search(&quot;//pre[@lang]&quot;).each do |pre|
+      pre.replace Albino.colorize(pre.text.rstrip, pre[:lang])
+    end
+    doc.to_s
+  end
+end</pre>
+
+<p>This code is based on the <a href="https://github.com/injekt/rack-pygmentize">rack-pygmentize gem</a> and it&rsquo;s worth taking a look at that to see how it works. This method makes it easy to swap in a different syntax highlighting library such as Coderay if you prefer.</p> 
+
+<p>We&rsquo;ve added in a stylesheet to show off the syntax highlighting which you can find <a href="https://github.com/ryanb/railscasts-episodes/blob/master/episode-272/blog-after/public/stylesheets/pygments.css">on Github</a>. When we reload the page the code sample is highlighted.</p>
+
+ <div class="imageWrapper">
+  <img src="/system/photos/697/original/E272I07.png" width="800" height="322" alt="Code is now syntax highlighted."/>
+</div>
+
+<p>That wraps up our look at Redcarpet. For more information take a look at <a href="https://github.com/tanoku/redcarpet">the project&rsquo;s Github page</a>.</p>

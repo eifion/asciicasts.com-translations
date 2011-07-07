@@ -1,0 +1,133 @@
+<p>Pour Rails Rumble, qui a eu lieu r&eacute;cemment, les participants ont tent&eacute; de cr&eacute;er une application Rails en 48 heures. La page de connexion pour la comp&eacute;tition &eacute;tait int&eacute;ressante. Elle permettait de se connecter via un certain nombre de services.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/475/original/E233I01.png" width="804" height="716" alt="La page de connexion Rails Rumble."/>
+</div>
+
+<p>Proposer une connexion au travers de diff&eacute;rents services peu prendre un certain temps &agrave; impl&eacute;menter. Cependant, le site de Rails Rumble a r&eacute;solu ce probl&egrave;me gr&acirc;ce &agrave; Janrain, qui fournit un service appel&eacute; <a href="http://www.janrain.com/products/engage">Janrain Engage</a> (&eacute;galement connu sous le nom RPX). C&#x27;est un syst&egrave;me de centralisation de l&#x27;authentification&nbsp;; une API qu&#x27;une application peut utiliser pour permettre l&#x27;authentification via un grand nombre de fournisseurs. Janrain est un service commercial mais il existe une offre Basique gratuite, ce qui est parfait pour quelque chose comme Rails Rumble.</p>
+
+<h3>S&#x27;inscrire sur Engage</h3>
+
+<p>S&#x27;inscrire au service basique de Janrain Engage est tr&egrave;s simple. Une fois que nous sommes inscrits et que nous avons fourni un nom pour notre application, nous sommes redirig&eacute;s vers la page d&#x27;accueil de notre compte. Nous devons ici r&eacute;cup&eacute;rer notre cl&eacute; d&#x27;API et le nom de notre application, dans notre cas, &ldquo;asciicasts&rdquo;. Nous devons &eacute;galement choisir la liste des fournisseurs que nous souhaitons utiliser. Si nous nous connectons et cliquons sur l&#x27;onglet &ldquo;Providers&rdquo;, s&#x27;affiche une page listant les services que notre application peut utiliser.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/476/original/E233I02.png" width="802" height="582" alt="Choix des fournisseurs d'authentification pour notre application."/>
+</div>
+
+<p>L&#x27;offre gratuite nous permet de prendre jusqu&#x27;&agrave; six fournisseurs, cela nous laisse un large choix. Notez cependant que certains d&#x27;entre eux requi&egrave;rent un peu de configuration suppl&eacute;mentaire. Pour utiliser Twitter par exemple, nous devons configurer notre application comme client OAuth mais cela est assez facile &agrave; r&eacute;aliser. Pour notre application nous allons utiliser les quatre fournisseurs par d&eacute;faut.</p>
+
+<h3>Modifier notre application pour qu&#x27;elle utilise Engage</h3>
+
+<p>Maintenant que nous sommes inscrits, nous pouvons utiliser Engage dans une application Rails. Si nous devions cr&eacute;er une authentification from scratch, nous pourrions utiliser la gem <a href="http://github.com/grosser/rpx_now">RPXNow</a> qui fournit de nombreuses fonctionnalit&eacute;s pour faciliter l&#x27;utilisation d&#x27;Engage. Si notre application utilisait Authlogic, il existe la gem <a href="http://github.com/tardate/authlogic_rpx">Authlogic RPX</a> qui vaudrait la peine d&#x27;&ecirc;tre regard&eacute;e. Enfin, il existe la gem <a href="http://github.com/slainer68/devise_rpx_connectable">RPX Connectable</a> pour fonctionner avec Devise. L&#x27;application sur laquelle nous travaillons dans cet &eacute;pisode fonctionne avec Devise, nous utiliserons donc cette derni&egrave;re pour passer par Engage. Si vous n&#x27;&ecirc;tes pas familiaris&eacute; avec Devise, prenez le temps de jeter un &oelig;il &agrave; l&#x27;&eacute;pisode 209 [<a href="http://railscasts.com/episodes/209-introducing-devise">regarder</a>, <a href="http://fr.asciicasts.com/episodes/209-introducing-devise">lire</a>] pour une introduction.</p>
+
+<p>Notre application a d&eacute;j&agrave; les liens &ldquo;Inscription&rdquo; et &ldquo;Connexion&rdquo; qui m&egrave;nent &agrave; un formulaire assez simple dans lequel il faut saisir une adresse e-mail et un mot de passe.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/477/original/E233I03.png" width="802" height="438" alt="L'actuelle page de connexion de notre application."/>
+</div>
+
+<p>Nous voulons remplacer ces liens par un seul pointant sur une page o&ugrave; l&#x27;utilisateur peut se connecter via Engage et c&#x27;est l&agrave; que nous allons utiliser la gem RPX Connectable.</p>
+
+<p>Pour utiliser la gem dans notre application, nous devons juste y faire r&eacute;f&eacute;rence dans le <code>Gemfile</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.0&#x27;
+gem &#x27;sqlite3-ruby&#x27;, &#x27;1.2.5&#x27;, :require =&gt; &#x27;sqlite3&#x27;
+gem &#x27;devise&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;devise_rpx_connectable&#x27;
+</pre>
+
+<p>Ensuite, installez-la gr&acirc;ce &agrave;</p>
+
+<pre class="terminal">
+$ bundle install
+</pre>
+
+<p>Pour utiliser RPX, nous avons besoin d&#x27;un champ <code>rpx_identifier</code> dans notre table <code>users</code>. Nous allons donc g&eacute;n&eacute;rer une migration pour le faire.</p>
+
+<pre class="terminal">
+$ rails g migration add_rpx_to_users rpx_identifier:string
+</pre>
+
+<p>Nous pouvons ensuite lancer la migration pour ajouter le nouveau champ.</p>
+
+<pre class="terminal">
+$ rake db:migrate
+</pre>
+
+<p>Nous devons modifier l&#x27;appel &agrave; <code>devise</code> dans le mod&egrave;le <code>User</code> de mani&egrave;re &agrave; ce qu&#x27;il ait <code>:rpx_connectable</code> dans sa liste de modules.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  devise :database_authenticatable, :registerable, 
+         :recoverable, :rememberable, :trackable, :validatable, :rpx_connectable
+
+  # Setup accessible (or protected) attributes for your model
+  attr_accessible :email, :password, :password_confirmation
+end
+</pre>
+
+<p>Enfin, nous devons mettre la configuration Devise de notre application &agrave; jour pour sp&eacute;cifier le nom que nous avons donn&eacute; pour Engage ainsi que notre cl&eacute; d&#x27;API.</p>
+
+<p class="codeFilePath">/config/initializers/devise.rb</p>
+<pre class="ruby">
+Devise.setup do |config|
+  # Configure the e-mail address which will be shown in DeviseMailer.
+  config.mailer_sender = &quot;test@example.com&quot;
+  config.rpx_application_name = &#x27;asciicasts&#x27;
+  RPXNow.api_key = &quot;aaabbbcccdddeeefff&quot; # real key goes here.
+end
+</pre>
+
+<p>Maintenant que tout est en place, nous pouvons remplacer les liens &ldquo;Inscription&rdquo; et &ldquo;Connexion&rdquo;, dans le layout, par un lien pointant vers la page de connexion d&#x27;Engage en passant en param&egrave;tre la page vers laquelle on veut &ecirc;tre redirig&eacute; une fois la connexion effectu&eacute;e.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= link_to_rpx "Connexion", user_session_url %&gt;
+</pre>
+
+<h3>Connexion</h3>
+
+<p>Nous avons maintenant le code n&eacute;cessaire pour une tentative de connexion. Lorsque l&#x27;on clique sur le lien &ldquo;Connexion&rdquo; de notre application, nous sommes bien redirig&eacute;s vers le serveur de Janrain.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/478/original/E233I04.png" width="814" height="444" alt="Nous pouvons maintenant nous connecter via Engage."/>
+</div>
+
+<p>Nous pouvons maintenant nous connecter au travers d&#x27;un des comptes ci-dessous, si nous rentrons les informations correctes, et nous sommes redirig&eacute;s vers notre application.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/479/original/E233I05.png" width="813" height="375" alt="Connexion reussie via Google."/>
+</div>
+
+<p>Notez que nous sommes maintenant connect&eacute;s sur l&#x27;application.</p>
+
+<h3>Un meilleur formulaire de connexion</h3>
+
+<p>Si vous souhaitez que le formulaire de connexion soit un panneau d&eacute;roulant sympa au lien d&#x27;une page s&eacute;par&eacute;e, c&#x27;est possible en ajoutant ces quelques lignes de code juste avant la balise body fermante dans le layout&nbsp;:</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;%= javascript_include_rpx(user_session_url) %&gt;
+</pre>
+
+<p>Cela va ajouter &agrave; notre application un peu de JavaScript qui affiche un panneau d&eacute;roulant sur le site quand l&#x27;utilisateur essaie de se connecter.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/480/original/E233I06.png" width="813" height="413" alt="Utilisation d'un panneau deroulant pour la connexion."/>
+</div>
+
+<p>Nous pourrions &eacute;galement inclure note formulaire de connexion n&#x27;importe o&ugrave; dans l&#x27;application au travers d&#x27;une iframe. Pour ce faire, il nous suffit d&#x27;ajouter le code suivant dans le code de vue&nbsp;:</p>
+
+<pre class="ruby">
+&lt;%= embed_rpx user_session_url %&gt;
+</pre>
+
+<p>Ce code sera, au mieux, plac&eacute; quelque part autour des formulaires d&#x27;inscription ou le connexion pour fournir une alternative de connexion.</p>
+
+<p>Tout ce qui a &eacute;t&eacute; montr&eacute; dans cet &eacute;pisode est &eacute;crit dans le README de RPX Connectable. On y trouve &eacute;galement la liste des options suppl&eacute;mentaires que l&#x27;ont peut passer afin de r&eacute;cup&eacute;rer d&#x27;autres informations &agrave; propos de l&#x27;utilisateur connect&eacute;.</p>

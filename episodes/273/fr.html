@@ -1,0 +1,163 @@
+<p>Si vous devez travailler avec des donn&eacute;es g&eacute;ographique dans vos applications Rails, la <a href="http://rubygeocoder.com/">gem Geocoder</a> rend cela tr&egrave;s facile. Elle peut convertir un nom de lieu en coordonn&eacute;es ou l&#x27;inverse. Elle peut m&ecirc;me transformer des IP en adresses ou trouver les lieux proches d&#x27;un point avec leur distance ainsi que leur pertinence. La gem contient bon nombre d&#x27;autres fonctionnalit&eacute;s.</p>
+
+<p>Dans cet &eacute;pisode, nous allons cr&eacute;er une application appel&eacute;e Siteseer qui permettra au utilisateurs de recommander des lieux touristiques. Une fois l&#x27;application cr&eacute;&eacute;e, nous devons ajouter un scaffold pour le mod&egrave;le <code>Location</code> (Lieu) contenant les champs <code>address</code>, <code>latitude</code> et <code>longitude</code>.</p>
+
+<pre class="terminal">$ rails g nifty:scaffold location adress:string latitude:float longitude:float</pre>
+
+<p>Les noms des champs <code>latitude</code> et <code>longitude</code> sont importants. Geocoder va les utiliser pour stocker les coordonn&eacute;es du lieu. Les noms par d&eacute;faut peuvent cependant &ecirc;tre surcharg&eacute;s. Les deux champs doivent &ecirc;tre des <code>floats</code>. Migrons la base pour ajouter la table locations.</p>
+
+<pre class="terminal">$ rake db:migrate</pre>
+
+<p>Maintenant que le scaffold est en place, nous pouvons cr&eacute;er des lieux mais nous devons saisir &agrave; la main la latitude et la longitude. Nous allons maintenant mettre &agrave; jour notre application de fa&ccedil;on &agrave; ce que ces champs soient remplis automatiquement par Geocoder.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/698/original/E273I01.png" width="813" height="438" alt="Le formulaire d'un lieu cree par le scaffold."/>
+</div>
+
+<h3>Installer et Utiliser Geocoder</h3>
+
+<p>Geocoder s&#x27;installe de la mani&egrave;re habituelle. Nous ajoutons d&#x27;abord une r&eacute;f&eacute;rence &agrave; la gem dans le <code>Gemfile</code> et nous appelons <code>bundle</code> pour l&#x27;installer.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.9&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+
+gem &#x27;geocoder&#x27;</pre>
+
+<p>Nous modifions ensuite notre mod&egrave;le <code>Location</code> et ajoutons un appel &agrave; <code>geocoded_by</code> pour pr&eacute;ciser les attributs que nous voulons voir convertis par Geocoder, dans notre cas, le champ <code>address</code>.</p>
+
+<p class="codeFilePath">/app/models/location.rb</p>
+<pre class="ruby">class Location &lt; ActiveRecord::Base
+  attr_accessible :address, :latitude, :longitude
+  geocoded_by :address
+end</pre>
+
+<p>Si l'adresse est stock&eacute;e dans plusieurs champs, nous pouvons sp&eacute;cifier une m&eacute;thode et &eacute;crire cette m&eacute;thode pour qu&#x27;elle retourne l&#x27;adresse compl&egrave;te.</p>
+
+<p>Quand un lieu est cr&eacute;&eacute; ou mis &agrave; jour, nous devons appeler la m&eacute;thode <code>geocode</code> qui effectue le g&eacute;ocodage. Il est d&#x27;usage d&#x27;utiliser le callback <code>after_validation</code>.</p>
+
+<p class="codeFilePath">/app/models/location.rb</p>
+<pre class="ruby">class Location &lt; ActiveRecord::Base
+  attr_accessible :address, :latitude, :longitude
+  geocoded_by :address
+  after_validation :geocode
+end</pre>
+
+<p>La m&eacute;thode geocode envoie une requ&ecirc;te &agrave; une API externe, <a href="http://code.google.com/apis/maps/index.html">l&#x27;API Google Maps</a> par d&eacute;faut. Comme c&#x27;est un appel &agrave; un service externe, il serait pr&eacute;f&eacute;rable de le mettre dans un processus en arri&egrave;re plan. Nous n&#x27;allons pas le faire ici mais pour savoir comment faire, jetez un &oelig;il &agrave; l&#x27;&eacute;pisode r&eacute;cemment pass&eacute; sur Resque [<a href="http://railscasts.com/episodes/271-resque">regarder</a>, <a href="http://fr.asciicasts.com/episodes/271-resque">lire</a>].</p>
+
+<p>Nous pouvons maintenant lancer notre application et tester Geocoder. Lorsque nous saisissons un nouveau lieu, disons &ldquo;St Pancras Station, London&rdquo;, sans latitude ni longitude, Geocoder va r&eacute;cup&eacute;rer ces informations de l&#x27;API externe et les ajouter au lieu.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/699/original/E273I02.png" width="800" height="372" alt="Le nouveau lieu montrant les données de Geocoder."/>
+</div>
+
+<p>L&#x27;API externe sera appel&eacute;e chaque fois que nous mettons le lieu &agrave; jour mais cela devrait &ecirc;tre fait uniquement quand le champ <code>address</code> change. Nous pouvons apporter une petite modification au callback <code>after_validation</code> pour impl&eacute;menter ceci.</p>
+
+<p class="codeFilePath">/app/models/location.rb</p>
+<pre class="ruby">class Location &lt; ActiveRecord::Base
+  attr_accessible :address, :latitude, :longitude
+  geocoded_by :address
+  after_validation :geocode, :if =&gt; :address_changed?
+end</pre>
+
+<p>Cela va utiliser le dirty tracking pour d&eacute;terminer si l&#x27;adresse a chang&eacute; et appeler l&#x27;API dans ce cas.</p>
+
+<p>Nous pouvons &eacute;galement utiliser la m&eacute;thode <code>reverse_geocoded_by</code> pour convertir des coordonn&eacute;es en adresse. Cela fonctionne de mani&egrave;re similaire &agrave; la m&eacute;thode <code>geocoded_by</code> et nous ne l&#x27;utiliserons pas dans notre application.</p>
+
+<h3>Obtenir les lieux &agrave; proximit&eacute;</h3>
+
+<p>Il peut &ecirc;tre utile, lorsque l&#x27;on consulte un lieu, d&#x27;&ecirc;tre capable de lister ceux qui sont &agrave; proximit&eacute;. Nous avons un certain nombre de lieux dans notre base maintenant. Nous allons donc ajouter cette fonctionnalit&eacute; &agrave; notre application.</p>
+
+<p>Nous voulons lister tous les lieux dans un p&eacute;rim&egrave;tre donn&eacute; et Geocoder facilite l&#x27;obtention de cette liste gr&acirc;ce &agrave; la m&eacute;thode <code>nearbys</code>. Par d&eacute;faut, elle va retourner la liste des lieux dans un rayon de vingt miles (environ trente-deux kilom&egrave;tres), nous allons restreindre ce dernier &agrave; dix. Pour lister les lieux &agrave; proximit&eacute;, nous allons boucler sur chaque lieu retourn&eacute; par <code>@location.nearbys</code> et afficher un lien vers celui-ci ainsi que sa distance en miles.</p>
+
+<p class="codeFilePath">/app/views/locations/show.html.erb</p>
+<pre class="ruby">&lt;ul&gt;
+&lt;% for location in @location.nearbys(10) %&gt;
+  &lt;li&gt;&lt;%= link_to location.address, location %&gt; &crarr;
+    (&lt;%= location.distance.round(2) %&gt; miles)&lt;/li&gt;
+&lt;% end %&gt;
+&lt;/ul&lt;% title &quot;Location&quot; %&gt;
+
+&lt;p&gt;
+  &lt;strong&gt;Address:&lt;/strong&gt;
+  &lt;%= @location.address %&gt;
+&lt;/p&gt;
+&lt;p&gt;
+  &lt;strong&gt;Latitude:&lt;/strong&gt;
+  &lt;%= @location.latitude %&gt;
+&lt;/p&gt;
+&lt;p&gt;
+  &lt;strong&gt;Longitude:&lt;/strong&gt;
+  &lt;%= @location.longitude %&gt;
+&lt;/p&gt;
+
+&lt;h3&gt;Nearby Locations&lt;/h3&gt;
+&lt;ul&gt;
+&lt;% for location in @location.nearbys(10) %&gt;
+  &lt;li&gt;&lt;%= link_to location.address, location %&gt; &crarr;
+    (&lt;%= location.distance.round(2) %&gt; miles)&lt;/li&gt;
+&lt;% end %&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;
+  &lt;%= link_to &quot;Edit&quot;, edit_location_path(@location) %&gt; |
+  &lt;%= link_to &quot;Destroy&quot;, @location, :confirm =&gt; &crarr;
+    &#x27;Are you sure?&#x27;, :method =&gt; :delete %&gt; |
+  &lt;%= link_to &quot;View All&quot;, locations_path %&gt;
+&lt;/p&gt;</pre>
+
+<p>Lorsque nous consultons un lieu, nous voyons maintenant la liste des lieux &agrave; proximit&eacute; except&eacute; notre lieu &agrave; Liverpool, situ&eacute; &agrave; 200 miles.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/700/original/E273I03.png" width="800" height="438" alt="La page d'un lieu listant les lieux a proximite."/>
+</div>
+
+<p>Nous allons ensuite ajouter une boite de recherche sur la page des lieux pour que nous puissions chercher un lieu dans une ville donn&eacute;e. Nous allons ajouter ceci dans un nouveau formulaire situ&eacute; en haut de la vue index.</p>
+
+<p class="codeFilePath">/app/views/locations/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Locations&quot; %&gt;
+
+&lt;%= form_tag locations_path, :method =&gt; :get do %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag &quot;Search Near&quot;, :name =&gt; nil %&gt;
+&lt;% end %&gt;
+&lt;!-- rest of page --&gt;</pre>
+
+<p>Le formulaire utilise GET et va appeler la page <code>index</code> avec un param&egrave;tre <code>search</code> lorsqu&#x27;il est soumis. Dans l&#x27;action <code>index</code> de <code>LocationsController</code>, nous allons v&eacute;rifier que le param&egrave;tre <code>search</code> est pr&eacute;sent et, dans ce cas, chercher les lieux &agrave; proximit&eacute;.</p>
+
+<p class="codeFilePath">/app/controllers/locations_controller.rb</p>
+<pre class="ruby">def index
+  if params[:search].present?
+    @locations = Location.near(params[:search], 50, &crarr;
+      :order =&gt; :distance)
+  else
+    @locations = Location.all
+  end
+end</pre>
+
+<p>Si nous rechargeons la page et cherchons &ldquo;Manchester&rdquo;, nous allons voir un r&eacute;sultat, le lieu &agrave; Liverpool, situ&eacute; &agrave; trente miles.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/701/original/E273I04.png" width="800" height="341" alt="Résultat d'une recherche de ville."/>
+</div>
+
+<p>C&#x27;est tout ce dont nous avons besoin pour trouver les lieux proches d&#x27;une ville donn&eacute;e.</p>
+
+<h3>Ajouter des cartes</h3>
+
+<p>Puisque nous travaillons avec les coordonn&eacute;es g&eacute;ographiques, il serait pratique d&#x27;avoir une carte pour chaque lieu. Nous allons en ajouter une sur la page d&#x27;un lieu pour montrer exactement o&ugrave; ce dernier se situe. L&#x27;API Google Maps fournit plusieurs mani&egrave;res d&#x27;ajouter des cartes &agrave; une page web mais, par simplicit&eacute;, nous allons utiliser <a href="http://code.google.com/apis/maps/documentation/staticmaps/">l&#x27;API des Cartes Statiques</a>. Les cartes sont ajout&eacute;es gr&acirc;ce &agrave; une simple balise image dont l&#x27;URL contient des param&egrave;tres pour sp&eacute;cifier les diff&eacute;rents aspects de la carte, y compris les coordonn&eacute;es, la taille, le niveau de zoom, etc. Nous allons placer la carte juste au dessus de la liste des lieux &agrave; proximit&eacute;.</p>
+
+<p class="codeFilePath">/app/views/locations/show.html.erb</p>
+<pre class="ruby">&lt;%= image_tag &quot;http://maps.google.com/maps/api/staticmap?size=450x300&amp;sensor=false&amp;zoom=16&amp;markers=#{@location.latitude}%2C#{@location.longitude}&quot; %&gt;</pre>
+
+<p>Tous les param&egrave;tres que nous passons sont statique except&eacute; pour les coordonn&eacute;es qui proviennent de l&#x27;objet <code>@location</code>. Lorsque nous visitons la page d&#x27;un lieu, nous voyons maintenant la carte de ce lieu.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/702/original/E273I05.png" width="828" height="753" alt="La carte d'un lieu."/>
+</div>
+
+<p>Pour quelque chose de plus pouss&eacute; que des images statiques, cela vaut la peine de jeter un &oelig;il &agrave; la <a href="https://github.com/apneadiving/Google-Maps-for-Rails">gem Google Maps For Rails</a> qui rend facile l&#x27;interaction avec l&#x27;API JavaScript. Cela vous donne un moyen simple d&#x27;ajouter des cartes interactives &agrave; vos applications Rails.</p>

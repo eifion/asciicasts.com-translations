@@ -1,0 +1,347 @@
+<p>Although there are a number of good available authentication solutions for Rails applications there&rsquo;s still a lot to be said for rolling your own. In episode 250 [<a href="http://railscasts.com/episodes/250-authentication-from-scratch">watch</a>, <a href="http://asciicasts.com/episodes/250-authentication-from-scratch">read</a>] we did exactly that and later, in episode 270 [<a href="http://railscasts.com/episodes/270-authentication-in-rails-3-1">watch</a>, <a href="http://asciicasts.com/episodes/270-authentication-in-rails-3-1">read</a>], we showed how Rails 3.1 makes it even easier by giving us has_secure_password which will automatically generate password hashes.</p>
+
+<p>The authentication we implemented in those episodes was fairly basic so in this episode we&rsquo;ll add a couple of new features to make it better. First we&rsquo;ll add a &ldquo;Remember Me&rdquo; checkbox to the login page so that users can choose to be logged in automatically then we&rsquo;ll add a &ldquo;Reset Password&rdquo; link that will allow users who have forgotten their password to have it reset. We&rsquo;ll implement these features by extending the application we wrote in episode 270. This application uses Rails 3.1 but what we&rsquo;ll show here will work just as well in Rails 3.0.</p>
+
+<h3>Adding a &ldquo;Remember Me&rdquo; Checkbox</h3>
+
+<p>When a user logs in to our application their <code>id</code> is stored in the session. This takes place in the <code>SessionsController</code>&rsquo;s <code>create</code> action.</p>
+
+<p class="codeFilePath">/app/controllers/sessions_controller.rb</p>
+<pre class="ruby">def create
+  user = User.find_by_email(params[:email])
+  if user &amp;&amp; user.authenticate(params[:password])
+    session[:user_id] = user.id
+    redirect_to root_url, :notice =&gt; &quot;Logged in!&quot;
+  else
+    flash.now.alert = &quot;Invalid email or password&quot;
+    render &quot;new&quot;
+  end
+end</pre>
+
+
+<p>When a logged-in user closes their browser the session cookie is deleted and they need to log in again the next time they open the application. We&rsquo;ll replace this session cookie with a permanent one so that we can persist each user&rsquo;s <code>id</code>.</p>
+
+<p>The most obvious problem with this is that the <code>id</code>s are stored as sequential integers. If the <code>id</code> is stored in a permanent cookie it would be easy for a malicious user to change the value and so view other users&rsquo; data. To stop this we&rsquo;ll generate a unique token for each user that is unguessable and store that value in the cookie instead.</p>
+
+<p>Each user will have their own token which will need to be stored in the database so we&rsquo;ll create a migration that will add an auth_token field to the users table and then migrate the database.</p>
+
+<pre class="terminal">$ rails g migration add_auth_token_to_users auth_token:string</pre>
+
+<p>We need a way to generate this unique token when a user is created and so we&rsquo;ll write a method called <code>generate_token</code> in the <code>User</code> model. This method will take a <code>column</code> argument so that we can have multiple tokens later if need be.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  attr_accessible :email, :password, :password_confirmation
+  has_secure_password
+  validates_presence_of :password, :on =&gt; :create
+  before_create { generate_token(:auth_token) }
+  
+  def generate_token(column)
+    begin
+      self[column] = SecureRandom.urlsafe_base64
+    end while User.exists?(column =&gt; self[column])
+  end
+end</pre>
+
+<p>To create the token we use <code>ActiveSupport</code>&rsquo;s <code><a href="http://api.rubyonrails.org/classes/ActiveSupport/SecureRandom.html">SecureRandom</a></code> class to generate a random string. We check that no other user exists with that token and repeatedly generate another random token while this is true. We call the method in a <code>before_create</code> filter so that the token is generated when a new user is saved for the first time. If we have pre-existing users in the database we&rsquo;ll need to create tokens for them as we could create a rake task to do this, though we won&rsquo;t do so here.</p>
+
+<p>We&rsquo;ll modify the <code>SessionsController</code>&rsquo;s <code>create</code> action now so that when a user logs in we store their token in a cookie. We&rsquo;ll change the <code>destroy</code> action too so that the cookie is removed when a user logs out.</p>
+
+<p class="codeFilePath">/app/controllers/sessions_controller.rb</p>
+<pre class="ruby">class SessionsController &lt; ApplicationController
+  def new
+  end
+
+  def create
+    user = User.find_by_email(params[:email])
+    if user &amp;&amp; user.authenticate(params[:password])
+      cookies.permanent[:auth_token] = user.auth_token
+      redirect_to root_url, :notice =&gt; &quot;Logged in!&quot;
+    else
+      flash.now.alert = &quot;Invalid email or password&quot;
+      render &quot;new&quot;
+    end
+  end
+
+  def destroy
+    cookies.delete(:auth_token)
+    redirect_to root_url, :notice =&gt; &quot;Logged out!&quot;
+  end
+end</pre>
+
+<p>Any user who logs in now is logged in permanently. They may not want this so we&rsquo;ll add a checkbox to the login form so that they can choose for themselves. The changes to the form are straightforward enough: we just need to add the checkbox along with a label that says what it&rsquo;s for.</p>
+
+<p class="codeFilePath">/app/views/sessions/new.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Log in&lt;/h1&gt;
+
+&lt;%= form_tag sessions_path do %&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= label_tag :email %&gt;
+    &lt;%= text_field_tag :email, params[:email] %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= label_tag :password %&gt;
+    &lt;%= password_field_tag :password %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= label_tag :remember_me %&gt;
+    &lt;%= check_box_tag :remember_me, 1, params[:remember_me] %&gt;
+  &lt;/div&gt;  
+  &lt;div class=&quot;actions&quot;&gt;&lt;%= submit_tag &quot;Log in&quot; %&gt;&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p>We can now modify the <code>SessionsController</code> so that the permanent cookie is only set if the user has checked the checkbox. If they haven&rsquo;t the login details will be stored in a session cookie.</p>
+
+<p class="codeFilePath">/app/controllers/sessions_controller.rb</p>
+<pre class="ruby">def create
+  user = User.find_by_email(params[:email])
+  if user &amp;&amp; user.authenticate(params[:password])
+    if params[:remember_me]
+      cookies.permanent[:auth_token] = user.auth_token
+    else
+      cookies[:auth_token] = user.auth_token  
+    end
+    redirect_to root_url, :notice =&gt; &quot;Logged in!&quot;
+  else
+    flash.now.alert = &quot;Invalid email or password&quot;
+    render &quot;new&quot;
+  end
+end</pre>
+
+<p>There&rsquo;s one more change we need to make. The <code>ApplicationController</code> needs to be changed so that it reads the authentication token from the cookie rather than a user&rsquo;s id from the session.</p>
+
+<p class="codeFilePath">/app/controllers/application_controller.rb</p>
+<pre class="ruby">class ApplicationController &lt; ActionController::Base
+  protect_from_forgery
+
+  private
+  def current_user
+    @current_user ||= User.find_by_auth_token( &crarr;
+      cookies[:auth_token]) if cookies[:auth_token]
+  end
+  helper_method :current_user
+end</pre>
+
+<p>We can try this out now. When we log into our application now we&rsquo;ll see the &ldquo;Remember me&rdquo; checkbox.  If we check the box when we log in and then close and reopen the browser we&rsquo;ll be logged in automatically. Our &ldquo;remember me&rdquo; functionality is working just as we want.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/703/original/E274I01.png" width="801" height="425" alt="The form with the &ldquo;remember me&rsquo; checkbox."/>
+</div>
+
+<h3>Adding &ldquo;Forgotten Password&rdquo; Functionality</h3>
+
+<p>Now we&rsquo;ll take a look at allowing a user to reset a forgotten password. We&rsquo;ll start by adding a suitable link in the login form.</p>
+
+<p class="codeFilePath">/app/views/sessions/new.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Log in&lt;/h1&gt;
+
+&lt;%= form_tag sessions_path do %&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= label_tag :email %&gt;
+    &lt;%= text_field_tag :email, params[:email] %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= label_tag :password %&gt;
+    &lt;%= password_field_tag :password %&gt;
+  &lt;/div&gt;
+  &lt;p&gt;&lt;%= link_to &quot;forgotten password?&quot;, &crarr;
+    new_password_reset_path %&gt;&lt;/p&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= label_tag :remember_me %&gt;
+    &lt;%= check_box_tag :remember_me, 1, params[:remember_me] %&gt;
+  &lt;/div&gt;  
+  &lt;div class=&quot;actions&quot;&gt;&lt;%= submit_tag &quot;Log in&quot; %&gt;&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p>The link points to <code>new_password_reset_path</code> which is part of a resource that we haven&rsquo;t yet written. We&rsquo;ll fix that now by creating a <code>PasswordResets</code> controller with a new action.</p>
+
+<pre class="terminal">$ rails g controller password_resets new</pre>
+
+<p>We want to treat this controller as a resource so we&rsquo;ll modify the routes file, replacing the generated route with a call to <code>resources</code>.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Auth::Application.routes.draw do
+
+  get &quot;logout&quot; =&gt; &quot;sessions#destroy&quot;, :as =&gt; &quot;logout&quot;
+  get &quot;login&quot; =&gt; &quot;sessions#new&quot;, :as =&gt; &quot;login&quot;
+  get &quot;signup&quot; =&gt; &quot;users#new&quot;, :as =&gt; &quot;signup&quot;
+  root :to =&gt; &quot;home#index&quot;
+  resources :users
+  resources :sessions
+  resources :password_resets
+end</pre>
+
+<p>This isn&rsquo;t a proper model-backed resource but it will work for us.</p> 
+
+<p>In the <code>new</code> action&rsquo;s view we&rsquo;ll create a form to allow a user to enter their email address and request that their password is reset. The form looks like this:</p>
+
+<p class="codeFilePath">/app/views/password_resets/new.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Reset Password&lt;/h1&gt;
+
+&lt;%= form_tag password_resets_path, :method =&gt; :post do %&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= label_tag :email %&gt;
+    &lt;%= text_field_tag :email, params[:email] %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;actions&quot;&gt;&lt;%= submit_tag &quot;Reset Password&quot; %&gt;&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p>This isn&rsquo;t a model-backed resource so we&rsquo;re using <code>form_tag</code> here. The form POSTs to the <code>PasswordResets</code> controller&rsquo;s <code>create</code> action and we&rsquo;ll write that action next. In it we&rsquo;ll find the <code>User</code> with the supplied email address and send them instructions on how to reset their password. This will be done in a new <code>send_password_reset</code> method in the <code>User</code> model.</p>
+
+<p class="codeFilePath">/app/controllers/password_resets.rb</p>
+<pre class="ruby">def create
+  user = User.find_by_email(params[:email])
+  user.send_password_reset if user
+  redirect_to root_url, :notice =&gt; &quot;Email sent with &crarr;
+    password reset instructions.&quot;
+end</pre>
+
+<p>The notice is shown whether the user is found or not. This makes things a little more secure so that a malicious user can&rsquo;t determine whether a given user exists in the database.</p>
+
+<p>We&rsquo;ll write the <code>send_password_reset</code> method now. In it we&rsquo;ll send an email containing a token for the password reset request. We want the token to expire after a given period, say a couple of hours, so that the link is valid only for a short time after the reset is requested. To hold this data we&rsquo;ll need a couple of extra fields in the users table so we&rsquo;ll write and run a migration to create these.</p>
+
+<pre class="terminal">$ rails g migration add_password_reset_to_users password_reset_token:string password_reset_sent_at:datetime</pre>
+  
+<p>In <code>send_password_reset</code> we&rsquo;ll use the <code>generate_token</code> method we wrote earlier to create a password reset token. We&rsquo;ll also set the <code>password_reset_sent_at</code> field so that we know when the token should expire and then save the <code>User</code> so that these details are stored. After we&rsquo;ve saved the changes to the User we&rsquo;ll pass it to a <code>UserMailer</code> so that we can sent the reset email.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">def send_password_reset
+  generate_token(:password_reset_token)
+  self.password_reset_sent_at = Time.zone.now
+  save!
+  UserMailer.password_reset(self).deliver
+end</pre>
+
+<p>We haven&rsquo;t created the <code>UserMailer</code> yet so we&rsquo;ll do that next.</p>
+
+<pre class="terminal">$ rails g mailer user_mailer password_reset</pre>
+
+<p>In the mailer we&rsquo;ll assign the user to an instance variable so that we can access it from the template and set the recipient and subject.</p>
+
+<p class="codeFilePath">/app/mailers/user_mailer.rb</p>
+<pre class="ruby">class UserMailer &lt; ActionMailer::Base
+  default from: &quot;from@example.com&quot;
+
+  def password_reset(user)
+    @user = user
+    mail :to =&gt; user.email, :subject =&gt; &quot;Password Reset&quot;
+  end
+end</pre>
+
+<p>In the template we&rsquo;ll write some instructions and provide a link to reset the password.</p>
+
+<p class="codeFilePath">/app/views/user_mailer/password_reset_text.erb</p>
+<pre class="ruby">To reset your password click the URL below.
+
+&lt;%= edit_password_reset_url(@user.password_reset_token) %&gt;
+
+If you did not request your password to be reset please ignore this email and your password will stay as it is.</pre>
+
+<p>The link in the email sends the user to the <code>PasswordResetsController</code>&rsquo;s <code>edit</code> action. Technically this isn&rsquo;t the best RESTful approach but it will work well enough for us. To get URLs working in mailers we&rsquo;ll need to alter our environment configuration and add the following line to <code>development.rb</code>.</p>
+
+<p class="codeFilePath">/config/environments/development.rb</p>
+<pre class="ruby">Auth::Application.configure do
+  # Other config items omitted.
+  
+  config.action_mailer.default_url_options = { :host =&gt; &crarr; 
+    &quot;localhost:3000&quot; }
+end</pre>
+
+<p>We&rsquo;ll add a similar line in <code>production.rb</code> with the live domain name.</p>
+
+<p>Let&rsquo;s try this out. If we visit the password reset page and enter our email address we should be told that an email containing the reset instructions has been sent.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/704/original/E274I02.png" width="801" height="425" alt="The home page showing that the password reset email has been sent."/>
+</div>
+
+<p>When we check the development log we&rsquo;ll see the details of the email.</p>
+
+<pre class="terminal">Sent mail to eifion@asciicasts.com (65ms)
+Date: Thu, 14 Jul 2011 20:18:48 +0100
+From: from@example.com
+To: eifion@asciicasts.com
+Message-ID: &lt;4e1f4118af661_31a81639e544652a@noonoo.home.mail&gt;
+Subject: Password Reset
+Mime-Version: 1.0
+Content-Type: text/plain;
+ charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+To reset your password click the URL below.
+
+http://localhost:3000/password_resets/DeStUAsv2QTX_SR3ub_N0g/edit
+
+If you did not request your password to be reset please ignore this email and your password will stay as it is.
+Redirected to http://localhost:3000/
+Completed 302 Found in 1889ms</pre>
+
+<p>The email includes a link that contains the password reset URL. This URL includes the reset token as the <code>id</code> parameter.</p> 
+
+Next w<p>e have to write the <code>edit</code> action. In it we&rsquo;ll fetch the user by their reset token. Note that we use the method with an exclamation mark so that if the user isn&rsquo;t found a 404 error is thrown.</p>
+
+<p class="codeFilePath">/app/controllers/password_resets_controller.rb</p>
+<pre class="ruby">def edit
+  @user = User.find_by_password_reset_token!(params[:id])
+end</pre>
+
+<p>In the associated view we&rsquo;ll create a form to allow the user to reset their password.</p>
+
+<p class="codeFilePath">/app/views/password_resets/edit.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Reset Password&lt;/h1&gt;
+
+&lt;%= form_for @user, :url =&gt; password_reset_path(params[:id]) &crarr;
+  do |f| %&gt;
+  &lt;% if @user.errors.any? %&gt;
+    &lt;div class=&quot;error_messages&quot;&gt;
+      &lt;h2&gt;Form is invalid&lt;/h2&gt;
+      &lt;ul&gt;
+        &lt;% for message in @user.errors.full_messages %&gt;
+          &lt;li&gt;&lt;%= message %&gt;&lt;/li&gt;
+        &lt;% end %&gt;
+      &lt;/ul&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= f.label :password %&gt;
+    &lt;%= f.password_field :password %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= f.label :password_confirmation %&gt;
+    &lt;%= f.password_field :password_confirmation %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;actions&quot;&gt;&lt;%= f.submit &quot;Update Password&quot; %&gt;&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p>We use <code>form_for</code> in this form as we&rsquo;re modifying a resource. Because of this we have to explicitly set the <code>:url</code> parameter so that the form isn&rsquo;t POSTed to the <code>UsersController</code>. Instead it is sent to the <code>PasswordResetsController</code>&rsquo;s <code>update</code> action, passing in the reset token as the <code>id</code>. The form contains a section for displaying any error messages and fields for entering and confirming the new password.</p>
+
+<p>We&rsquo;ll write the <code>update</code> action next. This first checks that the password reset token is less than two hours old; if it isn&rsquo;t then we redirect the user to the reset form again. If the token is recent enough we then try to update the user. If this is successful we redirect to the home page and show a message; if not there must have been an error in the form so we render it again.</p>
+
+<p class="codeFilePath">/app/controllers/password_resets_controller.rb</p>
+<pre class="ruby">def update
+  @user = User.find_by_password_reset_token!(params[:id])
+  if @user.password_reset_sent_at &lt; 2.hours.ago
+    redirect_to new_password_reset_path, :alert =&gt; &quot;Password &crarr; 
+      reset has expired.&quot;
+  elsif @user.update_attributes(params[:user])
+    redirect_to root_url, :notice =&gt; &quot;Password has been reset.&quot;
+  else
+    render :edit
+  end
+end</pre>
+
+<p>We can try this out by pasting the URL from the reset email into the browser.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/705/original/E274I03.png" width="801" height="425" alt="Resetting our password."/>
+</div>
+
+<p>If we enter non-matching passwords we&rsquo;ll see an error message but when we submit the form correctly our password is successfully reset.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/706/original/E273I04.png" width="801" height="425" alt="Our password has been reset."/>
+</div>
+
+<p>We can use this password reset idea to add other features, for example to confirm new account registrations. This is very similar to password resets but instead of resetting the password when the link is clicked we set a flag in the database to say that the account is confirmed as registered.</p>
+
+<p>That&rsquo;s it for this episode on remembering logins and resetting passwords. Some tools, such as Devise, provide this functionality but it can be useful to do it from scratch especially if you&rsquo;re going to need to do a lot of customization.</p>

@@ -1,0 +1,237 @@
+<p>今までのエピソードでいくつかの認証の手法について解説してきましたが、今回もひとつ紹介します。今回紹介するのは<a href="http://github.com/plataformatec/devise">devise</a>という名前で、最近特に人気が出てきています。Deviseは、Rackベースの認証ツールである<a href="http://github.com/hassox/warden">Warden</a>の上で、それを隠した状態で動作します。今回のエピソードを理解するためには、直接deviseを操作するので、Wardenに関する知識は必要ありません。</p>
+
+<p>Deviseはフルスタックを使って認証を扱います。エピソード160 [<a href="http://railscasts.com/episodes/160-authlogic">動画を見る</a>, <a href="http://asciicasts.com/episodes/160-authlogic">読む</a>]で紹介したAuthlogicを触ったことがあれば、それがモデル層だけでなりたっていることをご存知でしょう。一方deviseはRails Engineとして動作して、コントローラとビューも持っています。Deviseはモジュラー方式で現在は11のモジュールから成り立っていて、それぞれが違った認証機能を提供します。例えばモジュールの一つのRememberableは保存したクッキーにユーザの認証情報を記憶し、別のモジュールのRecoverableはユーザのパスワードリセットを世話したりリセット作業の指示を送信します。このアプローチによって、アプリケーションで使いたい認証パーツを簡単に選べるようになっています。</p> 
+
+<h3>アプリケーションに認証機能を追加する</h3>
+
+<p>アプリケーションでdeviseを動かすために何が必要かを見ていきましょう。このスクリーンショットは簡単なプロジェクト管理用アプリケーションです。Rails 3.0で書かれており、deviseを使ってUserモデルと認証機能を追加していきます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/361/original/E209I01.png" width="801" height="319" alt="プロジェクト管理用アプリケーション"/>
+</div>
+
+<p>DeviseはRails 3で動作しますが、正しいバージョンを設定するために従わなくてはいけないインストール手順がいくつかあります。Rails 3アプリケーション用には、最新バージョン(現在は1.1.rc0)をインストールします。deviseをRails 2.3のアプリケーションで使用したい場合はバージョン1.0.6が必要です。これは、バージョン1.1がRails 2に対して下位互換性を持っていないからです。</p>
+
+<p>Rails 3アプリケーションでは、Gemfileにdeviseの参照情報を追加して、正しいバージョンを特定します。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">
+gem 'devise', '1.1.rc0'
+</pre>
+
+<p>準備ができたらbundleコマンドを実行して、gemとその依存関係をインストールします。</p>
+<pre class="terminal">
+bundle install
+</pre>
+<p>次はインストール用のジェネレータを実行します。</p>
+<pre class="terminal">
+$ rails generate devise_install
+      create  config/initializers/devise.rb
+      create  config/locales/devise.en.yml
+
+===============================================================================
+
+Some setup you must do manually if you haven't yet:
+
+  1. Setup default url options for your specific environment. Here is an
+     example of development environment:
+
+       config.action_mailer.default_url_options = { :host =&gt; 'localhost:3000' }
+
+     This is a required Rails configuration. In production is must be the
+     actual host of your application
+
+  2. Ensure you have defined root_url to *something* in your config/routes.rb.
+     For example:
+
+       root :to =&gt; "home#index"
+
+===============================================================================
+</pre>
+
+<p>このコマンドによっていくつかのファイルが生成されます。まず初期設定ファイルと、deviseが表示するすべてのメッセージを含んだlocaleファイルです。その下には、手作業で行う2つの設定作業が記述されています。一つ目にアプリケーションのメーラにhostオプションを設定します。二つ目にルート(root)のルート(route)設定を持たなくてはいけません。アプリケーションにはrootのルートがすでにあるのでそれについては作業は不要ですが、メーラの設定は必要です。これについては、上記の手順の表示から行をコピーして、開発(development)モードの環境ファイルのブロック内に挿入します。</p>
+
+<p class="codeFilePath">/config/environments/development.rb</p>
+<pre class="ruby">
+config.action_mailer.default_url_options = { :host =&gt; 'localhost:3000' }
+</pre>
+
+<p>この行は、<code>localhost</code>に<code>host</code>オプションを追加しています。アプリケーションを本番(production)モードで稼働するときには、対応する<code>production.rb</code>ファイルのドメイン名にこの値を設定します。</p>
+
+<h3>deviseユーザモデルを作成する</h3>
+
+<p>認証処理を行うために<code>User</code>モデルが必要になりますが、deviseはそのためのジェネレータ(generator)を提供します。これを使うことは必須ではないですが、利用すればdeviseの設定で何ステップかを省略できます。</p> 
+
+<pre class="terminal">
+$ rails generate devise User
+      invoke  active_record
+      create    app/models/user.rb
+      invoke    test_unit
+      create      test/unit/user_test.rb
+      create      test/fixtures/users.yml
+      inject  app/models/user.rb
+      create  db/migrate/20100412200407_devise_create_users.rb
+       route  devise_for :users
+</pre> 
+
+<p>このジェネレータはいくつか興味深いものを作成します。モデルファイル、マイグレーション、 <code>devise_for</code>ルートです。これらを順に見ていきましょう。</p>
+
+<p>生成されたモデルファイルの中身は以下のとおりです。</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  # Include default devise modules. Others available are:
+  # :token_authenticatable, :lockable, :timeoutable and :activatable
+  # :confirmable
+  devise :database_authenticatable, :registerable, 
+         :recoverable, :rememberable, :trackable, :validatable
+
+  # Setup accessible (or protected) attributes for your model
+  attr_accessible :email, :password, :password_confirmation
+end
+</pre>
+
+<p><code>User</code>モデルは通常のActiveRecordモデルに非常に似ていますが、<code>devise</code>メソッドの呼び出しが含まれています。これによって認証マジックが実現します。deviseメソッドは、引数としてアプリケーションでサポートするモジュールのリストをとります。先に説明した<code>:rememberable</code>と<code>:recoverable</code>が含まれています。このリストから簡単にモジュールを追加や削除することで、deviseの認証機能をアプリケーションのニーズに従ってカスタマイズできます。その目的で、ユーザが登録したことをEメールで確認しなくてもいいように<code>:confirmable</code>を削除しました。</p> 
+
+<p><code>User</code>クラスにも<code>attr_accessible</code>があり、ユーザが画面から修正できる属性をリストアップします。もしモデルにカスタムカラムがある場合は、ここで追加できます。</p>
+
+<p>次に、生成されたマイグレーションファイルを見てみましょう。</p>
+
+<pre class="ruby">
+class DeviseCreateUsers &lt; ActiveRecord::Migration
+  def self.up
+    create_table(:users) do |t|
+      t.database_authenticatable :null =&gt; false
+      # t.confirmable
+      t.recoverable
+      t.rememberable
+      t.trackable
+      # t.lockable :lock_strategy =&gt; :failed_attempts, :unlock_strategy =&gt; :both
+
+      t.timestamps
+    end
+
+    add_index :users, :email,                :unique =&gt; true
+    # add_index :users, :confirmation_token,   :unique =&gt; true
+    add_index :users, :reset_password_token, :unique =&gt; true
+    # add_index :users, :unlock_token,         :unique =&gt; true
+  end
+
+  def self.down
+    drop_table :users
+  end
+end
+</pre>
+
+<p>このファイルは簡単に理解することができるでしょう。テーブルに各モジュール用に必要なカラムを作成する別のメソッド呼び出しが含まれています。<code>confirmable</code>モジュールは使用しないため、対応するメソッドをコメントアウトしました。合わせて、データベースのテーブルにカラムが存在しないので、confirmation tokenに関連するインデックスを削除します。</p>
+
+<p>マイグレーションファイルを利用するモジュールに合わせて修正したら、データベースマイグレーションを実行します。</p>
+
+<pre class="terminal">
+rake db:migrate
+</pre>
+
+<p>最後に、routeルートファイルに追加された<code>devise_for</code>ルートが設定されました。<code>rake routes</code>を実行すると、このコードが生成するルートが表示されます。</p>
+
+<pre class="terminal">
+    new_user_session   GET    /users/sign_in                 {:controller=&gt;"devise/sessions", :action=&gt;"new"}
+          user_session POST   /users/sign_in                 {:controller=&gt;"devise/sessions", :action=&gt;"create"}
+  destroy_user_session GET    /users/sign_out                {:controller=&gt;"devise/sessions", :action=&gt;"destroy"}
+                       POST   /users/password(.:format)      {:controller=&gt;"devise/passwords", :action=&gt;"create"}
+         user_password PUT    /users/password(.:format)      {:controller=&gt;"devise/passwords", :action=&gt;"update"}
+     new_user_password GET    /users/password/new(.:format)  {:controller=&gt;"devise/passwords", :action=&gt;"new"}
+    edit_user_password GET    /users/password/edit(.:format) {:controller=&gt;"devise/passwords", :action=&gt;"edit"}
+                       POST   /users(.:format)               {:controller=&gt;"devise/registrations", :action=&gt;"create"}
+                       PUT    /users(.:format)               {:controller=&gt;"devise/registrations", :action=&gt;"update"}
+     user_registration DELETE /users(.:format)               {:controller=&gt;"devise/registrations", :action=&gt;"destroy"}
+ new_user_registration GET    /users/sign_up(.:format)       {:controller=&gt;"devise/registrations", :action=&gt;"new"}
+edit_user_registration GET    /users/edit(.:format)          {:controller=&gt;"devise/registrations", :action=&gt;"edit"}
+</pre>
+
+<p>これは少し読みにくいですが、いくつかの認証のためのルート(ログイン、ログアウト、パスワードの再設定、新規ユーザの登録、プロフィールの再設定)が含まれています。これらのルートを変更したい場合はすべてカスタマイズ可能です。</p>
+
+<p>これらのルートを介して認証機能にアクセスできるようになりました。<code>/users/sign_up</code>にアクセスすると、新規ユーザ登録用のフォームが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/362/original/E209I02.png" width="801" height="478" alt="deviseが生成する登録フォーム"/>
+</div>
+
+<p>フォームに記入して「登録(Sign up)」ボタンをクリックすると、登録が完了してログインします。ログイン状態のときには<code>/users/sign_out</code>にアクセスすることでログアウトできます。再度ログインするために<code>/users/sign_in</code>にアクセスして、登録時に指定したユーザ名とパスワードをフォームに入力するとエラーが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/363/original/E209I03.png" width="801" height="372" alt="Rails 3 beta 2で登録処理がエラーを返す"/>
+</div>
+
+<p>これはRails 3.0 beta 2の問題により発生するもので、deviseに特有のものではありません。このエラーが発生しても、幸い修正は簡単です。<code>/config/initializers/cookie_verification_secret.rb</code>のファイルに、署名されたcookieを検証する秘密鍵を設定するためのコード行があります。</p>
+
+<p class="codeFilePath">/config/initalizers/cookie_verification_secret.rb</p>
+<pre class="ruby">
+# Be sure to restart your server when you modify this file.
+
+# Your secret key for verifying the integrity of signed cookies.
+# If you change this key, all old signed cookies will become invalid!# Make sure the secret is at least 30 characters and all random, 
+# no regular words or you'll be exposed to dictionary attacks.
+Rails.application.config.cookie_secret = '3b161f7668f938d1aeb73e1137964f8d5ebaf32b9173c2130ecb73b95b610702b77370640dce7e76700fb228f35f7865ab2a5ccd22d00563504a2ea9c3d8dffe'
+</pre>
+
+<p>この行を<code>/config/application.rb</code>に移動し、<code>Rails.application</code>セクションをこのファイルから削除するだけです。</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby">
+require File.expand_path('../boot', __FILE__)
+require 'rails/all'
+
+Bundler.require(:default, Rails.env) if defined?(Bundler)
+
+module ProjectManage
+  class Application &lt; Rails::Application
+    config.filter_parameters &lt;&lt; :password
+    config.cookie_secret = '3b161f7668f938d1aeb73e1137964f8d5ebaf32b9173c2130ecb73b95b610702b77370640dce7e76700fb228f35f7865ab2a5ccd22d00563504a2ea9c3d8dffe'
+  end
+end
+</pre>
+
+<p>この修正を有効化するためにサーバを再起動する必要がありますが、これで正しくログインできるようになりました。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/364/original/E209I04.png" width="800" height="355" alt="登録が成功する"/>
+</div>
+
+<p>正常動作する認証機能が設定できたので、ここから改良を加えていきます。ページの上部に、ログイン中にはログアウト、ログアウト後はログインのためのリンクを表示して、現在の状態がわかるようになっていたら便利でしょう。</p>
+
+<p>アプリケーションのレイアウトファイルにこの修正を加えればすべてのページにリンクを表示できます。フラッシュメッセージを表するコードの直前に次のコード行を追加します。</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">
+&lt;div id="user_nav"&gt;
+  &lt;% if user_signed_in?%&gt;
+    Signed in as &lt;%= current_user.email %&gt;. Not you?    &lt;%= link_to "Sign out", destroy_user_session_path %&gt;
+  &lt;% else %&gt;
+    &lt;%= link_to "Sign up", new_user_registration_path %&gt; or
+    &lt;%= link_to "Sign in", new_user_session_path %&gt;
+  &lt;% end %&gt;
+&lt;/div&gt;
+</pre>
+
+<p>コードには<code>if</code>/<code>else</code>構文があり、サイトを見ているユーザがログイン中かどうかによって、異なったメッセージを表示できるようにしています。これを判断するために、deviseが提供する<code>user_signed_in?</code>メソッドを呼び出します。現在のユーザがログイン中の場合は<code>true</code>を返します。現在ログイン中のユーザが存在する場合、ログインに使用したメールアドレスとログアウト用のリンクを表示します。Eメールアドレスを表示するためには、<code>current_user</code>を呼び出して現在のユーザの<code>User</code>オブジェクトを取得してEメール属性を表示します。ログアウト用リンクの正しいパスを得るために、rake routesを実行して前に作成したルートのリストを見直すことができます。ここにリストされたルートの中に<code>destroy_user_session</code>があり、<code>/users/sign_out</code>にマップされているので、<code>destroy_user_session_path</code>を用いてリンク用の正しいURLを設定します。</p> 
+
+<p>同じように<code>new_user_registration_path</code>と<code>new_user_session_path</code>を用いて登録とログイン用のリンクを設定します。これらが正しく設定されたらページを再度読み込みます。するとページの上部にユーザの情報が表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/365/original/E209I05.png" width="800" height="355" alt="ユーザの詳細が各ページの上部に表示される"/>
+</div>
+
+<p>「ログアウト」のリンクをクリックすると、代わりに「登録」と「ログイン」のリンクが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/366/original/E209I06.png" width="800" height="371" alt="ログインしていない場合は「登録」と「ログイン」のリンクが表示される"/>
+</div>
+
+<p>ここまでで示した通り、deviseを使えばかなり容易に完全な認証機能を設定することができます。少しの設定で新規ユーザに登録をさせる機能とユーザがログインとログアウトを行う機能を持つことができました。他にもまだ触れていない部品があります。例えば、パスワードのリセットページです。もしconfirmableモデルを利用する設定にしていたら、deviseがフォームと関連ロジックを自動的に作っていたはずです。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/367/original/E209I07.png" width="800" height="371" alt="パスワードリセットのページ"/>
+</div>
+
+<p>これらのフォームが自動的に生成されるのは便利ですが、アプリケーションの外観に合わせるためにカスタマイズする必要が出てくるでしょう。幸いdeviseを使えば簡単に行うことができるので、次回のエピソードで紹介します。</p>

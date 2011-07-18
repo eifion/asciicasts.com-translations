@@ -1,0 +1,217 @@
+<p>今回のエピソードではRails 3.1の新機能シリーズはひと休みして、Railsアプリケーションでバックグラウンドジョブを処理する優れた方法であるResqueを紹介します。今までのエピソードでもバックグラウンド処理を取り扱う方法をいくつか紹介しました。それぞれ微妙に違うニーズに対応しており、Resqueも例外ではありません。エピソードの最後で、異なるニーズに合った正しいツールを選択するチップを紹介しますが、とりあえずはResqueを詳しく見ていき、アプリケーションに追加してみましょう。</p>
+
+<p>使用するアプリケーションは、Pastieに少し似ている簡単なスニペット(コード片)共有サイトです。このサイトでは、コードのサンプルを入力して名称と使用言語を設定します。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/683/original/E271I01.png" width="800" height="558" alt="コード共有サイト"/>
+</div>
+
+<p>スニペットを投稿すると、選択した言語の文法でシンタックスハイライトされて表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/684/original/E271I02.png" width="800" height="558" alt="ハイライト表示された新規スニペット"/>
+</div>
+
+<p>シンタックスハイライトは外部ウェブサービスで処理されるので、この部分をバックグラウンドジョブで扱うことにします。現在は<code>SnippetController</code>の<code>create</code>アクションの一部として、インラインで実行されています。</p>
+
+<p class="codeFilePath">/app/controller/snippets_controller.rb</p>
+<pre class="ruby">def create
+  @snippet = Snippet.new(params[:snippet])
+  if @snippet.save
+    uri = URI.parse('http://pygments.appspot.com/')
+    request = Net::HTTP.post_form(uri, {'lang' =&gt; ↵
+      @snippet.language, 'code' =&gt; @snippet.plain_code})
+    @snippet.update_attribute(:highlighted_code, request.body)
+    redirect_to @snippet, :notice =&gt; "Successfully created ↵
+      snippet."
+  else
+    render 'new'
+  end
+end</pre>
+
+<p>シンタックスハイライトは、スニペットが保存されるときに実行されます。これには、<a href="http://pygments.appspot.com/">http://pygments.appspot.com/</a>で公開されている、ローカルな環境に依存せずにハイライト機能を提供する、Trevor Turk開発によるサービスを利用しています。このコードが、サービスに対してPOSTリクエストで素のコード片と言語の種類を送信し、そのリクエストの応答をスニペットの<code>highlighted_code</code>属性に保存します。</p>
+
+<p>一般的にRailsリクエストを介して外部サービスと通信することは推奨されません。これは、応答が遅くなってRailsプロセス全体とそれに接続しようとしている他のリクエストを待たせる可能性があるからです。外部リクエストは外部プロセスとして外に出すのがより良い方法でしょう。そこでResqueを設定し、リクエストをResque workerに移し替えていきます。</p>
+
+<h3>Resqueを動かす</h3>
+
+<p>Resqueは、永続的キーバリューストアの<a href="http://redis.io/">Redis</a>に依存しています。Redis自体もとても優れていて、それだけで一つのエピソードにする価値があるのですが、今回はResqueと一緒に使用します。</p> 
+
+<p>OS Xを使っている場合、Redisをインストールする一番簡単な方法は<a href="http://mxcl.github.com/homebrew/">Homebrew</a>を利用する方法で、次のコマンドを実行します。</p>
+
+<pre class="terminal">$ brew install redis</pre>
+
+<p>インストールされたら、次のコマンドでサーバを起動します。</p>
+
+<pre class="terminal">$ redis-server /usr/local/etc/redis.conf</pre>
+
+<p>Redisが起動したら、アプリケーションの<code>Gemfile</code>にResqueを追加し、bundleを実行してインストールします。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.9'
+
+gem 'sqlite3'
+gem 'nifty-generators'
+
+gem 'resque'</pre>
+
+<p>次にResque Rakeタスクを追加します。このためにアプリケーションの<code>/lib/tasks</code>ディレクトリに<code>resque.rake</code>ファイルを追加します。このファイルに<code>require "resque/tasks"</code>と指定し、gemのカスタムタスクがロードされるようにします。workerが起動したときにRails環境もロードします。</p> 
+
+<p class="codeFilePath">/lib/tasks/resque.rake</p>
+<pre class="ruby">require "resque/tasks"
+
+task "resque:setup" =&gt; :environment</pre>
+
+<p>これによって、workerからアプリケーションのモデルにアクセスできるようになります。しかしworkerを軽くしたければ、Rails環境の全体をロードしないようカスタマイズするのもいいでしょう。</p>
+
+<p>Resque workerを起動するのに使用するRakeタスクができました。実行時には、引数QUEUEを指定する必要があります。対象となる具体的なキューの名称を指定するか、どのキューでもいい場合は'*'と指定します。</p>
+
+<pre class="terminal">$ rake resque:work QUEUE='*'</pre>
+
+<p>このスクリプトは何も出力を返しませんがちゃんと動作しています。</p> 
+
+<h3>Webサービスのコードを移動する</h3>
+
+<p>これでResqueが設定できたので、ここからはWebサービスを呼び出すコードをバックグラウンド処理に移してworkerを通じて処理させることに集中します。workがResque workerに処理されるようジョブをキューに追加します。ここで再度<code>create</code>アクションを見てみます。</p>
+
+<p class="codeFilePath">/app/controller/snippets_controller.rb</p>
+<pre class="ruby">def create
+  @snippet = Snippet.new(params[:snippet])
+  if @snippet.save
+    uri = URI.parse('http://pygments.appspot.com/')
+    request = Net::HTTP.post_form(uri, {'lang' =&gt; ↵
+      @snippet.language, 'code' =&gt; @snippet.plain_code})
+    @snippet.update_attribute(:highlighted_code, request.body)
+    redirect_to @snippet, :notice =&gt; "Successfully created ↵
+      snippet."
+  else
+    render 'new'
+  end
+end</pre>
+
+<p><code>Resque.enqueue</code>を呼び出してジョブをキューに追加します。このメソッドはいくつかの引数をとります。一つ目は、ジョブを処理するために使うworkerのクラスです。まだworkerを作成していませんが、このあと<code>SnippetHighlighter</code>という名前で作成します。その他にworkerに渡したい追加の引数を指定します。今回は、スニペットを渡しますが、<code>enqueue</code>に渡されたものはすべてRedisデータベースに格納するためにJSONに変換されます。これはつまり、ActiveRecordモデルのような複雑なオブジェクトを渡すべきではなく、 スニペット全体を渡す代わりにその<code>id</code>を渡して、worker内でスニペットを取得し直すようにします。</p>
+
+<p class="codeFilePath">/app/controllers/snippets_controller.rb</p>
+<pre class="ruby">def create
+  @snippet = Snippet.new(params[:snippet])
+  if @snippet.save
+    Resque.enqueue(SnippetHighlighter, @snippet.id)
+    redirect_to @snippet, :notice =&gt; "Successfully created ↵
+      snippet."
+  else
+    render 'new'
+  end
+end</pre>
+
+<p>次にworkerを作成して、コントローラから取り出したコードを移します。workerは<code>/app</code>の下に新規作成したworkersディレクトリに入れます。このクラスを<code>/lib</code>ディレクトリに入れることもできますが、<code>/app</code>内に持つことでRailsのロードパスにあるので自動的にロードされます。</p>
+
+<p>workerとは、2つの機能を持つだけのクラスです。最初にインスタンス変数<code>@queue</code>でキューの名前を保持します。これによってworkerが扱うキューを制限します。次に<code>perform</code>というクラスメソッドが必要です。これは<code>enqueue</code>に渡された引数（今回の場合はスニペットの<code>id</code>）を受け取ります。このメソッドに、<code>create</code>アクションから抽出されたコード(リモートサーバを呼び出してハイライトされたコードを戻す)を加えて、<code>@snippet_id</code>インスタンス変数の呼び出しを同じ名前のローカル変数に置き換えます。</p>
+
+<p class="codeFilePath">/app/workers/snippet_highlighter.rb</p>
+<pre class="ruby">class SnippetHighlighter
+  @queue = :snippets_queue
+  def self.perform(snippet_id)
+    snippet = Snippet.find(snippet_id)
+    uri = URI.parse('http://pygments.appspot.com/')
+    request = Net::HTTP.post_form(uri, {'lang' =&gt; ↵
+      snippet.language, 'code' =&gt; snippet.plain_code})
+    snippet.update_attribute(:highlighted_code, request.body)
+  end
+end</pre>
+
+<p>正しく動くかどうか見てみましょう。新しいスニペットを作って登録します。しかしスニペットはハイライトさせていません。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/685/original/E271I03.png" width="818" height="547" alt="新しいスニペットが作成されるがハイライトされていない"/>
+</div>
+
+<p>ハイライトは現在バックグラウンドで処理中のため、すぐに見ることはできません。数秒待ってからページを再読み込みしてもまだ適用されていないようなので、コードをデバッグして何がうまくいっていないか見てみましょう。ResqueはSinatraで書かれたWeb画面を持っています。これを使って、ジョブのモニタリングや管理を簡単に行うことができます。次のコマンドを実行して起動します。</p> 
+
+<pre class="terminal">$ resque-web</pre>
+
+<p>これを実行すると管理画面が表示され、ジョブが失敗していることがわかります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/686/original/E271I04.png" width="820" height="600" alt="Resqueの失敗したジョブのリスト"/>
+</div>
+
+<p>失敗したジョブをクリックすると、エラーの詳細を見ることができ、<code>uninitialized constant SnippetHighlighter</code>とあります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/687/original/E271I05.png" width="820" height="391" alt="失敗したジョブの詳細"/>
+</div>
+
+<p><code>SnippetHighlighter</code>クラスが見つからない状態ですが、これはクラスを実際に書く前にRakeタスクを起動したのが原因です。再起動して問題が解決するか見てみます。</p>
+
+<p>rakeタスクを再起動したら、「Retry」をクリックしてジョブを再実行します。Overview(概要)ページを見てみると、失敗したタスクは一つのまま増えていないので、今回はジョブは正しく実行されたようです。これを確認するために最後にアップロードしたスニペットを読み込み直します。今度はコードがハイライトされているので、バックグラウンドジョブはうまく実行されたようです。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/688/original/E271I06.png" width="800" height="499" alt="スニペットはハイライト付きで表示される"/>
+</div>
+
+<p>新しいスニペットをアップロードするとシンタックスハイライトされますが、ハイライトが表示されるまでに数秒の遅れがあります。</p>
+
+<h3>ResqueのWebインターフェイスを組み込む</h3>
+
+<p>Resqueの設定はすべて終わり、与えたジョブを処理できるようになりました。ResqueのWeb画面を、作成しているRailsアプリケーションに組み込むことができたら、別のプロセスをもう一つ立ち上げる手間がかからず便利でしょう。</p>
+
+<p>Rails 3はRackアプリケーションとの相性がよく、SinatraもRackアプリケーションの一つなので、routesファイルでアプリケーションをマウントするだけで簡単に設定できます。</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Coderbits::Application.routes.draw do
+  resources :snippets
+  root :to =&gt; "snippets#new"
+  mount Resque::Server, :at =&gt; "/resque"
+end</pre>
+
+<p>これでResqueのWeb管理画面が<code><a href="http://localhost:3000/resque">http://localhost:3000/resque</a></code>でRailsアプリケーションにマウントされました。この機能正しく動作する形でResqueサーバがロードされるよう、 <code>Gemfile</code>で<code>resque</code> gemの行にrequireオプションを追加します。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.9'
+
+gem 'sqlite3'
+gem 'nifty-generators'
+
+gem 'resque', :require =&gt; 'resque/server'</pre>
+
+<p>アプリケーションのサーバを起動して<code><a href="http://localhost:3000/resque">http://localhost:3000/resque</a></code>にアクセスすると、ResqueのWeb画面が表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/689/original/E271I07.png" width="800" height="499" alt="embedされたResqueページは誰にも見える"/>
+</div>
+
+<p>このページが誰にでも見える状態なのは好ましくありません。詮索好きな目から守るために認証機能を追加するにはどうすればいいのでしょうか? アプリケーションでDeviseなどを使っているのであれば、ルートを<code>authenticate</code>の呼び出しでラップすることでこのページをセキュアにできます。</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Coderbits::Application.routes.draw do
+  resources :snippets
+  root :to =&gt; "snippets#new"
+  authenticate :admin do
+    mount Resque::Server, :at =&gt; "/resque"
+  end
+end</pre>
+
+<p>このアプリケーションではDeviseなどの認証システムを使っていないので、代わりにHTTPベーシック認証を使用しましょう。そのために、<code>config/initializers</code>ディレクトリに<code>resque_auth.rb</code>という初期設定ファイルを作成します。</p>
+
+<p class="codeFilePath">/config/initializers/resque_auth.rb</p>
+<pre class="ruby">Resque::Server.use(Rack::Auth::Basic) do |user, password|
+  password == "secret"
+end</pre>
+
+<p>このファイルで、Rackアプリケーションである<code>Resque::Server</code>の<code>use</code>を呼び出して、ベーシック認証を追加します。ブロックでパスワードが一致するかチェックします。もちろんこのコードをカスタマイズして、ユーザ名とパスワードを設定したりその他のロジックを追加することができます。サーバを再起動してページを再度読み込むと、ログイン画面が出てきて初期設定ファイルで指定したパスワードの入力を求められます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/690/original/E271I08.png" width="802" height="500" alt="認証が求められる"/>
+</div>
+
+<h3>Resque以外の選択肢</h3>
+
+<p>Resqueの紹介は以上です。それでは、Resqueとその他のバックグラウンド処理ツールからどれを選べばいいのでしょうか? Resqueの利点の一つは、管理画面からキューをモニターしたり失敗したジョブを再実行できる点です。もう一つResqueを勧める理由は、Githubで使われているからです。Githubで大量のデータを処理しているので、およそどのようなものを投げても処理できるでしょう。</p> 
+
+<p>Redisに依存していることが問題であれば、<a href="http://devcenter.heroku.com/articles/delayed-job">Delayed Job</a>も優れた選択肢でしょう。これについてはエピソード171 [<a href="http://railscasts.com/episodes/171-delayed-job">動画を見る</a>, <a href="http://asciicasts.com/episodes/171-delayed-job">読む</a>]で紹介しましたが、操作が簡単でジョブキューをアプリケーションのデータベースで管理します。しかし、アプリケーションのRails環境をすべてのworkerにロードします。workerを軽くしたいのであれば、ベストの方法ではないかも知れません。</p>
+
+<p>ResqueとDelayed Jobはともにキューに対してpoll(先頭を取得および削除)するので、ジョブがキューに追加されてからそれが処理され始めるまでに少し遅れが発生します。キューが空の時が多く、ジョブがすぐに処理されてほしい場合には、エピソード243[<a href="http://railscasts.com/episodes/243-beanstalkd-and-stalker">動画を見る</a>, <a href="http://asciicasts.com/episodes/243-beanstalkd-and-stalker">読む</a>]で取り上げた<a href="http://kr.github.com/beanstalkd/">Beanstalkd</a>がより良い選択肢になるでしょう。Beanstalkdはpushイベントを介してジョブを処理するので、キューにジョブが追加されたらただちに処理を開始することができます。</p>

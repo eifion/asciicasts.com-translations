@@ -1,0 +1,221 @@
+<p>Hagamos un alto en nuestra serie dedicada a las novedades de Rails 3.1 y vamos a echarle un vistazo a Resque, que es una forma muy interesante de gestionar tareas en segundo plano en las aplicaciones Rails.  Ya hemos visto varias formas de hacer este procesamiento en segundo plano; cada una tiene sus particularidades y Resque no es ninguna excepci&oacute;n.  Al final de este episodio veremos algunos consejos que pueden resultar de ayuda a la hora de escoger una implementaci&oacute;n de tareas en segundo plano.  Pero por ahora, vamos a empezar con Resque a&ntilde;adi&eacute;ndolo a una aplicaci&oacute;n Rails.</p>
+
+<p>La aplicaci&oacute;n que vamos a usar es un sitio que permite compartir fragmentos de c&oacute;digo al estilo de Pastie.  Con este sitio podemos introducir un c&oacute;digo de ejemplo y asignarle un nombre y un lenguaje.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/683/original/E271I01.png" width="800" height="558" alt="Aplicación de fragmentos de código."/>
+</div>
+
+<p>Cuando enviemos un fragmento, &eacute;ste aparecer&aacute; con el coloreado sint&aacute;ctico apropiado seg&uacute;n el lenguaje escogido.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/684/original/E271I02.png" width="800" height="558" alt="El nuevo fragmento de código con el código resaltado."/>
+</div>
+
+<p>El coloreado sint&aacute;ctico se gestiona con un servicio web externo, y esta es la parte del c&oacute;digo que queremos que se haga con una tarea en segundo plano.  Por ahora se ejecuta en l&iacute;nea como parte de la acci&oacute;n <code>create</code> de  <code>SnippetController</code>.</p>
+
+<p class="codeFilePath">/app/controller/snippets_controller.rb</p>
+<pre class="ruby">def create
+  @snippet = Snippet.new(params[:snippet])
+  if @snippet.save
+    uri = URI.parse(&#x27;http://pygments.appspot.com/&#x27;)
+    request = Net::HTTP.post_form(uri, {&#x27;lang&#x27; =&gt; &crarr;
+      @snippet.language, &#x27;code&#x27; =&gt; @snippet.plain_code})
+    @snippet.update_attribute(:highlighted_code, request.body)
+    redirect_to @snippet, :notice =&gt; &quot;Successfully created &crarr;
+      snippet.&quot;
+  else
+    render &#x27;new&#x27;
+  end
+end</pre>
+
+<p>El resaltado sint&aacute;ctico se efectua cuando se guarda el fragmento de c&oacute;digo.  Utiliza el servicio  <a href="http://pygments.appspot.com/">http://pygments.appspot.com/</a>, creado por Trevor Turk, que proporciona resaltado sint&aacute;ctico sin requerir dependencias locales.  El c&oacute;digo realiza una petici&oacute;n POST a este servicio, enviando el c&oacute;digo junto con el lenguaje, y coge la respuesta del servicio para rellenar el atributo <code>highlighted_code</code> del modelo Snippet.</p>
+
+<p>Por lo general no es muy buena idea comunicarse con servicios externos dentro de una petici&oacute;n Rails porque estos servicios podr&iacute;an demorar su respuesta y bloquear totalmente el proceso  Rails as&iacute; como todas las peticiones que intentan conectarse con &eacute;l.  Configuremos Resque para poder mover esta petici&oacute;n a una tarea de Resque.</p>
+
+<h3>C&oacute;mo poner en marcha Resque</h3>
+
+<p>Resque utiliza  <a href="http://redis.io/">Redis</a> que es un almac&eacute;n de claves y valores persistente.  Redis ya es bastante sorprendente por s&iacute; mismo, y merecer&iacute;a la pena un cap&iacute;tulo dedicado en exclusiva, pero por ahora s&oacute;lo lo vamos a usar con Resque.</p>
+
+<p>Como estamos ejecutando OS X la forma m&aacute;s f&aacute;cil de instalar Redis es con  <a href="http://mxcl.github.com/homebrew/">Homebrew</a> lo que podemos hacer con la siguiente orden:</p>
+
+<pre class="terminal">$ brew install redis</pre>
+
+<p>Una vez que se haya instalado podemos arrancar el servidor de la siguiente manera:</p>
+
+<pre class="terminal">$ redis-server /usr/local/etc/redis.conf</pre>
+
+<p>Con Redis en marcha podemos poner Resque en el <code>Gemfile</code> de nuestra aplicaci&oacute;n y luego instalarlo con <code>bundle</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.9&#x27;
+
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+
+gem &#x27;resque&#x27;</pre>
+
+<p>A continuaci&oacute;n tenemos que crear las tareas Rake de Resque.  Lo haremos creando un fichero <code>resque.rake</code> en el directorio <code>lib/tasks</code> de nuestra aplicaci&oacute;n.  En este fichero tenemos que hacer un <code>require &quot;resque/tasks&quot;</code> de forma que se carguen las tareas de Rake que incorpora la propia gema.  Tambi&eacute;n cargaremos el entorno de Rails cuando se arranquen los trabajos.</p>
+
+<p class="codeFilePath">/lib/tasks/resque.rake</p>
+<pre class="ruby">require &quot;resque/tasks&quot;
+
+task &quot;resque:setup&quot; =&gt; :environment</pre>
+
+<p>De esta forma las tareas de Resque tendr&aacute;n acceso a los modelos de la aplicaci&oacute;n pero si  queremos que nuestros procesos de ejecuci&oacute;n sean m&aacute;s ligeros nos interesar&aacute; implementar nuestra propia soluci&oacute;n de forma que no se cargue todo el entorno de Rails.</p>
+
+<p>Ya tenemos una tarea de Rake que podemos usar para lanzar los procesos de ejecuci&oacute;n de Resque.  Para ello tenemos que pasar un argumento <code>QUEUE</code>.  Podemos bien pasar el nombre de una cola espec&iacute;fica o  &#x27;*&#x27; para trabajar con cualquier cola.</p>
+
+<pre class="terminal">$ rake resque:work QUEUE=&#x27;*&#x27;</pre>
+
+<p>Este <em>script</em> no genera ninguna salida pero est&aacute; funcionando.</p>
+
+<h3>Mover el procesamiento del c&oacute;digo del servicio web</h3>
+
+<p>Con Resque configurado ya podemos centrarnos en mover el c&oacute;digo que llama al servicio web a un proceso en segundo plano y gestionarlo con un proceso de ejecuci&oacute;n de Resque.  Tenemos que a&ntilde;adir el trabajo a la cola para que Resque lo pueda procesar. Veamos como quedar&iacute;a la acci&oacute;n <code>create</code>.</p>
+
+<p class="codeFilePath">/app/controller/snippets_controller.rb</p>
+<pre class="ruby">def create
+  @snippet = Snippet.new(params[:snippet])
+  if @snippet.save
+    uri = URI.parse(&#x27;http://pygments.appspot.com/&#x27;)
+    request = Net::HTTP.post_form(uri, {&#x27;lang&#x27; =&gt; &crarr;
+      @snippet.language, &#x27;code&#x27; =&gt; @snippet.plain_code})
+    @snippet.update_attribute(:highlighted_code, request.body)
+    redirect_to @snippet, :notice =&gt; &quot;Successfully created &crarr;
+      snippet.&quot;
+  else
+    render &#x27;new&#x27;
+  end
+end</pre>
+
+<p>Los trabajos se a&ntilde;aden a la cola invocando <code>Resque.enqueue</code>.  Este m&eacute;todo recibe varios argumentos, el primero es la clase que queremos utilizar para gestionar la tarea.  Todav&iacute;a no hemos creado ninguna, pero la que crearemos en breve se llamar&aacute; <code>SnippetHighlighter</code>  Tambi&eacute;n tenemos que poner todos los argumentos adicinoales que le queramos pasar a la tarea.  En este caso podr&iacute;amos pasar la propia instancia del modelo pero todo lo que le pasemos a <code>enqueue</code> ser&aacute; convertido a JSON y almacenado en Redis, por lo que no es recomendable pasar objetos complejos (como modelos de ActiveRecord) as&iacute; que en vez de pasar toda la instancia s&oacute;lo le pasaremos el <code>id</code>, y recuperaremos la instancia dentro de la tarea.</p>
+
+<p class="codeFilePath">/app/controllers/snippets_controller.rb</p>
+<pre class="ruby">def create
+  @snippet = Snippet.new(params[:snippet])
+  if @snippet.save
+    Resque.enqueue(SnippetHighlighter, @snippet.id)
+    redirect_to @snippet, :notice =&gt; &quot;Successfully created &crarr;
+      snippet.&quot;
+  else
+    render &#x27;new&#x27;
+  end
+end</pre>
+
+<p>A continuaci&oacute;n crearemos la clase que implementa la tarea, y moveremos el c&oacute;digo que hemos quitado del controlador a ella.  Pondremos la clase en el directorio <code>/app/workers</code>.  Tambi&eacute;n podr&iacute;amos poner la clase en <code>/lib</code> pero si hacemos que cuelgue de <code>app/</code> Rails cargar&aacute; el c&oacute;digo autom&aacute;ticamente.</p>
+
+<p>Una tarea es tan s&oacute;lo una clase con dos funcionalidades. Primero tiene que tener una variable de instancia llamada <code>@queue</code>, que tiene el nombre de la cola.  Esto limita las colas que puede gestionar la clase.  Segundo necesita un m&eacute;todo de clase llamado <code>perform</code> que recibe los argumentos que se pasaron <code>enqueue</code>, en este caso el <code>id</code> del objeto ActiveRecord del fragmento de c&oacute;digo.  En este m&eacute;todo podemos poner el c&oacute;digo que sacamos de la acci&oacute;n <code>create</code> y que invoca al servidor remoto y devuelve el c&oacute;digo resaltado.</p>
+
+<p class="codeFilePath">/app/workers/snippet_highlighter.rb</p>
+<pre class="ruby">class SnippetHighlighter
+  @queue = :snippets_queue
+  def self.perform(snippet_id)
+    snippet = Snippet.find(snippet_id)
+    uri = URI.parse(&#x27;http://pygments.appspot.com/&#x27;)
+    request = Net::HTTP.post_form(uri, {&#x27;lang&#x27; =&gt; &crarr;
+      snippet.language, &#x27;code&#x27; =&gt; snippet.plain_code})
+    snippet.update_attribute(:highlighted_code, request.body)
+  end
+end</pre>
+
+<p>Veamos si esto funciona.  Creemos un nuevo fragmento de c&oacute;digo y sub&aacute;moslo.  Si lo hacemos veremos que el fragmento no muestra ning&uacute;n tipo de coloreado.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/685/original/E271I03.png" width="818" height="547" alt="El fragmento de código no tiene resaltado de ningún tipo."/>
+</div>
+
+<p>No podemos ver de inmediato el resaltado sint&aacute;ctico porque se efect&uacute;a en segundo plano.  Si esperamos unos segundos y recargamos la p&aacute;gina veremos que sigue sin verse los colores as&iacute; que vamos a intentar depurar el c&oacute;digo para ver qu&eacute; es lo que no est&aacute; funcionando.  Resque viene con una interfaz web, escrita en Sinatra.  De esta manera es muy f&aacute;cil monitorizar y gestionar las tareas.  Podemos arrancar esta interfaz con:</p>
+
+<pre class="terminal">$ resque-web</pre>
+
+<p>Cuando ejecutemos esta orden aparecer&aacute; la interfaz administrativa y podremos ver que tenemos una tarea fallida.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/686/original/E271I04.png" width="820" height="600" alt="Listado de tareas fallidas de Resque."/>
+</div>
+
+<p>Si hacemos clic en la tarea que ha dado error veremos los detalles:  <code>uninitialized constant SnippetHighlighter</code>.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/687/original/E271I05.png" width="820" height="391" alt="Details of the failed job."/>
+</div>
+
+<p>La raz&oacute;n por la que no se encuentra la clase <code>SnippetHighlighter</code> es porque hemos empezado la tarea Rake que ejecuta el servidor antes de escribir dicha clase.  Reiniciemos el servidor y veamos si esto corrige el error.</p>
+
+<p>Una vez que hayamos reiniciado el servidor con la tarea Rake podemos hacer clic en el enlace  &lsquo;Retry&rsquo; para volver a ejecutar la tarea que fall&oacute;.  Si lo hacemos y volvemos a la vista fe  &lsquo;Overview&rsquo; veremos que s&oacute;lo hay una ejecuci&oacute;n fallida por lo que parece que esta vez el trabajo ha concluido correctamente.  Podemos confirmarlo recargando la p&aacute;gina con el &uacute;ltimo fragmento de c&oacute;digo que cargamos.  Esta vez veremos que el c&oacute;digo se encuentra coloreado, lo que confirma que la tarea de segundo plano se ha ejecutado correctamente.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/688/original/E271I06.png" width="800" height="499" alt="El fragmento aparece resaltado en colores."/>
+</div>
+
+<p>Si volvemos a subir un nuevo fragmento de c&oacute;digo veremos que aparece resaltado, aunque pueden pasar varios segundos de retraso hasta que los colores aparezcan.</p>
+
+<h3>C&oacute;mo embeber la interfaz web de Resque</h3>
+
+
+<p>Ya tenemos Resque configurado y gestionando los trabajos que le damos.  Ser&iacute;a muy &uacute;til poder embeber la interfaz administrativa de Resque en nuestra aplicaci&oacute;n Rails para no tener que arrancarla y gestionar otro proceso separado.</p>
+
+<p>Rails 3 se integra perfectamente con aplicaciones Rack y Sinatra no es sino otra aplicaci&oacute;n Rack por lo que es f&aacute;cil hacer lo que queremos simplemente montando la aplicaci&oacute;n en el fichero de rutas:</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Coderbits::Application.routes.draw do
+  resources :snippets
+  root :to =&gt; &quot;snippets#new&quot;
+  mount Resque::Server, :at =&gt; &quot;/resque&quot;
+end</pre>
+
+<p>La interfaz web de Resque quedar&aacute; montada en nuestra aplicaci&oacute;n Rails en  <code><a href="http://localhost:3000/resque">http://localhost:3000/resque</a></code>. Tenemos que asegurarnos de que el servidor Resque est&aacute; cargado para que esto funcione por lo que en el <code>Gemfile</code> tenemos que usar la opci&oacute;n <code>require</code> con la gema <code>resque</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.9&#x27;
+
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+
+gem &#x27;resque&#x27;, :require =&gt; &#x27;resque/server&#x27;</pre>
+
+<p>Si ahora reiniciamos el servidor de nuestra aplicaci&oacute;n y visitamos
+ <code><a href="http://localhost:3000/resque">http://localhost:3000/resque</a></code> podremos ver la interfaz administrativa de Resque.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/689/original/E271I07.png" width="800" height="499" alt="Cualquiera puede ver la administración de Resque."/>
+</div>
+
+<p>No queremos que esta p&aacute;gina sea  accesible p&uacute;blicamente, pero podemos a&ntilde;adir algo de autorizaci&oacute;n para evitar que la gente curiosee.  Si us&aacute;semos algo como Devise en nuestra aplicaci&oacute;n ser&iacute;a f&aacute;cil asegurar esto rodeando la ruta por una llamada a <code>authenticate</code>.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Coderbits::Application.routes.draw do
+  resources :snippets
+  root :to =&gt; &quot;snippets#new&quot;
+  authenticate :admin do
+    mount Resque::Server, :at =&gt; &quot;/resque&quot;
+  end
+end</pre>
+
+<p>Como no estamos usando Devise u otro sistema de autenticaci&oacute;n vamos a usar la autenticaci&oacute;n b&aacute;sica de HTTP.  Crearemos un nuevo inicializador en <code>config/initializers</code> llamado <code>resque_auth.rb</code>.</p>
+
+<p class="codeFilePath">/config/initializers/resque_auth.rb</p>
+<pre class="ruby">Resque::Server.use(Rack::Auth::Basic) do |user, password|
+  password == &quot;secret&quot;
+end</pre>
+
+<p>En este fichero llamaremos a <code>use</code> sobre <code>Resque::Server</code>, que es una aplicaci&oacute;n Rack, y a&ntilde;adiremos la autenticaci&oacute;n b&aacute;sica de HTTP.  En el bloque comprobaremos que la clave coincide.  Obviamente deber&iacute;amos personalizar este c&oacute;digo para establecer la clave y el usuario o para a&ntilde;adir otra l&oacute;gica que necesitemos.  Si reiniciamos el servidor y recargamos la p&aacute;gina veremos el di&aacute;logo de contrase&ntilde;a, que tendremos que introducir para ver la p&aacute;gina.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/690/original/E271I08.png" width="802" height="500" alt="Ya tenemos autenticación en la página."/>
+</div>
+
+<h3>Las alternativas a Resque</h3>
+
+<p>Con esto terminamos nuestro repaso a Resque.  &iquest;C&oacute;mo escoger entre esta u otras herramientas de procesamiento en segundo plano?  Una de las ventajas de Resque es la interfaz administrativa que nos permite inspeccionar la cola, reintentar las tareas que hayan fallado, etc.  Otra raz&oacute;n por la que considerar Resque es que GitHub la utiliza, y eso deber&iacute;a bastar para estar seguros de que puede soportar cualquier nivel de carga a que lo sometamos.</p>
+
+<p>Si la dependencia de Redis es un problema podemos usar como alternativa 
+ <a href="http://devcenter.heroku.com/articles/delayed-job">Delayed Job</a>.  Ya lo vimos en el episodio 171  [<a href="http://railscasts.com/episodes/171-delayed-job">verlo</a>, <a href="http://asciicasts.com/episodes/171-delayed-job">leerlo</a>] y es una soluci&oacute;n m&aacute;s sencilla porque utiliza la base de datos de nuestra aplicaci&oacute;n para gestionar la cola de tareas.  Sin embargo, carga el entorno de Rails en todas las tareas, por lo que puede que no sea la mejor soluci&oacute;n si queremos que las tareas sean tan ligeras que sea  posible.</p>
+
+<p>Tanto Resque como Delayed Job cogen sus tareas consultando peri&oacute;dicamente las colas por lo que puede haber cierto retraso entre el momento en que se a&ntilde;ade una tarea a una cola y el momento en que empieza el procesamiento de dicha tarea.  Si la cola por lo general est&aacute; vac&iacute;a queremos que los procesos se ejecuten de inmediato, y en ese caso  <a href="http://kr.github.com/beanstalkd/">Beanstalkd</a>, que vimos en el episodio 243 [<a href="http://railscasts.com/episodes/243-beanstalkd-and-stalker">verlo</a>, <a href="http://es.asciicasts.com/episodes/243-beanstalkd-y-stalker">leerlo</a>], ser&aacute; una opci&oacute;n mejor.   Beanstalkd gestiona las tareas mediante eventos por lo que puede empezar a procesar un trabajo tan pronto como &eacute;ste se a&ntilde;ada a la cola.</p>

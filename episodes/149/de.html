@@ -1,0 +1,136 @@
+  <p>Eine Rails Engine ("Schienenmotor") ist eine M&ouml;glichkeit, eine Rails-Applikation in eine andere einzubetten. Engines gibt es schon eine Weile als <a href="http://rails-engines.org/">Plugin</a>, aber viel der Funktionalit&auml;t ist in Rails 2.3 schon eingebaut. In dieser Episode zeigen wir, wie es funktioniert.</p>
+
+  <p>Wir starten mit zwei separaten Applikationen. Die eine ist eine einfache e-commerce-Applikation, welche Produkte verkauft.</p>
+  <div class="imageWrapper">
+    <img src="/system/photos/53/original/E149I01.png" width="823" height="412" alt="Our shop application."/>
+    <p class="title">Unsere Shop-Applikation l&auml;uft auf Port 3000.</p>
+  </div>
+  <p>Die andere ist eine Blog-Applikation, welche Artikel beinhaltet und Benutzern erlaubt, diese zu kommentieren.</p>
+  <div class="imageWrapper">
+    <img src="/system/photos/54/original/E149I02.png" width="823" height="412" alt="Our blog application."/>
+    <p class="title">Unsere Blog-Applikation auf Port 3001.</p>
+  </div>
+  <p>Was wir erreichen m&ouml;chten ist, die Blog-Funktionalit&auml;t zu dem Shop hinzuf&uuml;gen, sodass dieser sein eigenen Blog hat. Wir k&ouml;nnten diese zwei Applikationen zusammenf&uuml;hren, aber wir wollen beide Applikationen so getrennt wie m&ouml;glich halten, damit wir den Blog auch in anderen Applikationen nutzen k&ouml;nnen. Um dies zu erreichen, betten wir die Blog-Applikation mittels Engines in unseren Shop ein.</p>
+
+  <h3>Ein Plugin erstellen</h3>
+  <p>Beide Applikationen sitzen derzeit in verschiedenen Verzeichnissen. Um die Blog-App einzust&ouml;pseln, m&uuml;ssen wir zuerst ein Plugin in der Shop-App generieren.</p>
+  <pre class="terminal">script/generate plugin blogify</pre>
+  <p>Nachdem wir das Plugin generiert haben, erstellt es einige Dateien im <code>/vendor/plugins/blogify</code> Verzeichnis und es ist dieses Verzeichnis, in welches wir die Dateien unserer Blog-App kopieren. Das erste Verzeichnis, welches wir r&uuml;berkopieren m&uuml;ssen, ist <code>/app</code>.</p>
+  <pre class="terminal">cp -R ~/rails/blogify/app .</pre>
+  <p>Jetzt haben wir alle unsere Blog-Model, -Controller und Views in dem Plugin-Verzeichnis. Diese Verzeichnisse werden automatisch von der Applikation eingebunden, sodass wir nun in der Lage sind, die Artikel- und Comments-Controller zu verwenden.</p>
+  <p>Wir m&uuml;ssen auch die routes-Datei der Blog-App kopieren. Wir k&ouml;nnen ein <code>config</code>-Verzeichnis in dem Plugin-Verzeichnis erzeugen und die Dateien r&uuml;berkopieren.</p>
+  <pre class="terminal">
+  mkdir config
+  cp ~/rails/blogify/config/routes.rb config
+  </pre>
+  <p>Nachdem wir die Blog-Routen kopiert haben, m&uuml;ssen wir die <code>map.root</code>-Zeile aus der Datei entfernen, damit es keinen Konflikt mit dem root-Controller der Shop-App gibt.</p>
+
+  <h3>Die Migrationen migrieren</h3>
+  <p>Wenn wir den Server nun starten und versuchen, den Artikel-Controller zu
+benutzen, bekommen wir ein Response, was bedeutet, dass Rails zwar den
+Controller im Plugin-Verzeichnis findet. Auf der Artikel-Seite tritt aber ein
+Fehler auf. Der Grund daf&uuml;r sind die Datenbank-Tabellen, welche im Blog
+existieren, aber noch nicht in der Shop-Applikation erstellt wurden. Wir
+werden die Migrationen der Blog-Applikation auf der Shop-Datenbank ausf&uuml;hren
+m&uuml;ssen. Dazu m&uuml;ssen wir ein <code>db</code>-Verzeichnis in dem
+Plugin-Verzeichnis anlegen und unsere Migrationen r&uuml;berkopieren.</p>
+  <pre class="terminal">
+  mkdir db
+  cp -R ~/rails/blogify/db/migrate db
+  </pre>
+  <p>Obwohl die Dateien nun im richtigen Verzeichnis des Plugins sind, weiß Rails
+2.3 nicht, dass es in diesem Verzeichnis danach suchen soll. Es gibt keine
+einfache Methode, Rails zu zeigen, wo es nachschauen soll. Also werden wir ein
+Rake-Task anlegen, welcher die Plugin-Migrationen mit den Migrationen der
+Haupt-Applikation synchronisiert.</p>
+
+  <h3>Den rake-Task erstellen</h3>
+  <p>Im Plugin-Verzeichnis gibt es ein <code>tasks</code>-Verzeichnis und darin
+sollte eine Datei mit dem Namen <code>blogify_tasks.rake</code> liegen. Wir
+werden unseren rake-Task in dieser Datei erzeugen.</p>
+  <pre class="ruby">
+  namespace :blogify do
+    desc &quot;Sync extra files from blogify plugin&quot;
+    task :sync do
+      system &quot;rsync -ruv vendor/plugins/blogify/db/migrate db&quot;
+    end
+  end
+  </pre>
+  <p>Unser neuer rake-Task wird <code>rsync</code> benutzen, um die
+Migration-Dateien zu syncen (Leider funktioniert <code>rsync</code> nicht unter
+Windows)</p>
+  <p>Unseren neuen rake-Task k&ouml;nnen wir nun im Shop-Verzeichnis ausf&uuml;hren und die Migrationen synchronisieren</p>
+  <pre class="terminal">
+  rake blogify:sync
+  (in /Users/eifion/rails/apps_for_asciicasts/ep149)
+  building file list ... done
+  migrate/20090226195405_create_articles.rb
+  migrate/20090226200008_create_comments.rb
+  migrate/20090226202713_add_article_id_to_comments.rb
+
+  sent 944 bytes  received 86 bytes  2060.00 bytes/sec
+  total size is 646  speedup is 0.63
+  </pre>
+  <p>Jedes mal, wenn wir nun unser plugin modifizieren, k&ouml;nnen wir unseren
+rake-Task ausf&uuml;hren. Nat&uuml;rlich m&uuml;ssen wir danach rake <code>db:migrate</code>
+ausf&uuml;hren um die Datenbank upzugraden.</p>
+
+  <h3>Erfolg!</h3>
+  <p>Jetzt, da die Datenbank migriert ist, k&ouml;nnen wir den Server der Applikation
+wieder starten. Mit den neuen Tabellen an der richtigen Stelle funktioniert
+der Artikel-Index jetzt, obwohl nat&uuml;rlich keine Artikel da sind, da wir gerade
+neue, leere Tabellen erstellt haben.</p>
+  <div class="imageWrapper">
+    <img src="/system/photos/55/original/E149I03.png" width="808" height="315" alt="Der Blog funktioniert als Plugin."/>
+  </div>
+  <h3>Stylesheets und Layouts</h3>
+
+  <p>Der Blog-Bereich unserer Applikation funktioniert jetzt, aber er hat die
+Layout-Datei und die Stylesheets unserer Shop-App angenommen. Der Grund daf&uuml;r
+ist, dass wir zwei Layout-Dateien mit den gleichen Namen
+<code>application.html.erb</code> haben, und eine Layout-Datei in der
+Haupt-Applikation hat Vorrang vor einer mit dem gleichen Namen in einem Plugin.
+Deshalb wird ein Template des Blog-Plugins mit der Layoutdatei des Shops
+angezeigt. Dieses Verhalten wirkt auch bei Models und Controllern, was uns
+erlaubt, beliebige Teile eines Plugins zu &uuml;berschreiben. Da wir f&uuml;r unseren
+Blog das gleiche Aussehen wie f&uuml;r den Shop haben wollen, bleiben wir bei
+dieser Variante.</p>
+
+  <p>Was aber, wenn wir eine separate Layoutedatei und separate Stylesheets f&uuml;r
+unseren Blog haben wollen? <a
+href="http://asciicasts.com/episodes/7-all-about-layouts">Episode 7</a>
+behandelte verschiedene Typen von verf&uuml;gbaren Layouts. Eines davon ist ein
+Controller-spezifisches Layout und dies ist f&uuml;r uns eine ideale M&ouml;glichkeit
+ein separates Layout f&uuml;r unseren Blog zu behalten, da unsere Blog-Applikation
+nur ein Controller hat.</p>
+
+  <p>Man ben&ouml;tigt nur zwei Schritte ein separates Layout anzulegen. Als Erstes
+m&uuml;ssen wir die Layout-Datei des Plugins von <code>application.html.erb</code>
+zu <code>articles.html.erb</code> umbenennen.
+Controller-Layouts haben Vorrang vor Applikations-Layouts, also m&uuml;sste unser
+Blog dieses Layout nun verwenden. Als Zweites m&uuml;ssen wir den Blog-Stylesheet
+von der originalen Blog-App zum Stylesheet-Ordner der Shop-App kopieren. (Wir
+k&ouml;nnen es nicht in ein <code>public/stylesheets</code>-Verzeichnis im Plugin-Ordner
+kopieren, da Rails dort nicht danach suchen wird).</p>
+
+  <h3>Bilder und JavaScript</h3>
+  <p>Egal ob wir eine separates Layout verwenden oder nicht, wollen wir
+normalerweise auch andere statische Inhalte r&uuml;berkopieren, zum Beispiel Bilder
+und JavaScript-Dateien. Dies k&ouml;nnen wir machen, indem wir diese Dateien von
+dem <code>public</code>-Verzeichnis unserer Blog-App in ein
+<code>public</code>-Verzeichnis des Plugins
+kopieren. Um diese dann aktuell zu halten, k&ouml;nnen wir den rake-Task erweitern,
+den wir fr&uuml;her angelegt hatten. Wenn wir, wie oben beschrieben, einen
+separates Stylesheet benutzen, kann diese Technik benutzt werden, um diesen
+auch zu syncen.</p>
+  <pre class="ruby">
+  namespace :blogify do
+    desc &quot;Sync extra files from blogify plugin&quot;
+    task :sync do
+      system &quot;rsync -ruv vendor/plugins/blogify/db/migrate db&quot;
+      system &quot;rsync -ruv vendor/plugins/blogify/public .&quot;
+    end
+  end
+  </pre>
+  <p class="title">Der verbesserte rake-Task kopiert nun auch den public-Ordner.</p>
+  <p>Das ist erstmal alles wichtige &uuml;ber Rails-Engines. Auch wenn sie nicht passend f&uuml;r jede Rails-Applikation sind, bieten sie einen m&auml;chtigen Weg, eine Rails-Applikation in eine andere einzubetten.</p>

@@ -1,0 +1,161 @@
+<p>Railsアプリケーションで地理データを扱う場合、<a href="http://rubygeocoder.com/">Geocoder gem</a>が作業をとても簡単にしてくれます。地名から地理座標への変換あるいはその逆、またIPアドレスを住所に変換することもできます。近くの観光スポットを探して距離と方位を提示したり、その他にも役に立つ機能を多く持っています。</p>
+
+<p>今回のエピソードではユーザが観光スポットを推薦するSiteseerというアプリケーションを作成します。アプリケーションを新規作成したら、次は<code>Location</code>のscaffoldを<code>address</code>、<code>latitude</code>、 <code>longitude</code>フィールドを指定して作成します。</p>
+
+<pre class="terminal">$ rails g nifty:scaffold location address:string latitude:float longitude:float</pre>
+  
+<p><code>latitude</code>(緯度)と<code>longitude</code>(経度)のフィールド名は、Geocoderが観光スポットの地理座標を保存するために使用するので重要です。ただしこのデフォルトのフィールド名は変更することもできます。どちらのフィールドも<code>float</code>(浮動小数)にする必要があります。データベースのマイグレーションを行って、新しくlocationsテーブルを作成します。</p>
+
+<pre class="terminal">$ rake db:migrate</pre>
+
+<p>scaffoldの設定ができたので新しい観光スポットを作成できるのですが、このままでは緯度と経度を手入力しなくてはいけません。そこでGeocoderが自動的にこれらのフィールドを埋めるようにアプリケーションを改良していきます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/698/original/E273I01.png" width="813" height="438" alt="scaffoldで作成された新しい観光スポットページ"/>
+</div>
+ 
+<h3>Geocoderのインストールと使用</h3>
+
+<p>Geocoderのインストール方法は通常どおりです。まず<code>Gemfile</code>でgemへの参照情報を追加して、<code>bundle</code>コマンドを実行してインストールします。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.9'
+gem 'sqlite3'
+gem 'nifty-generators'
+
+gem 'geocoder'</pre>
+
+<p>次に<code>Location</code>モデルに<code>geocoded_by</code>の呼び出しを追加してGeocoderに変換させたい属性(今回の場合は<code>address</code>(住所))を指定します。 </p>
+
+<p class="codeFilePath">/app/models/location.rb</p>
+<pre class="ruby">class Location &lt; ActiveRecord::Base
+  attr_accessible :address, :latitude, :longitude
+  geocoded_by :address
+end</pre>
+
+<p>もし住所が複数のフィールドに分かれて保存されている場合は代わりにメソッドを指定して、完全な住所を返すメソッドを作成します。</p>
+
+<p>観光スポットが作成あるいは更新されたら<code>geocode</code>メソッドを呼び出します。通常はこれを<code>after_validation</code>コールバックを使って行います。</p>
+
+<p class="codeFilePath">/app/models/location.rb</p>
+<pre class="ruby">class Location &lt; ActiveRecord::Base
+  attr_accessible :address, :latitude, :longitude
+  geocoded_by :address
+  after_validation :geocode
+end</pre>
+
+<p>geocodeメソッドはリクエストを外部API(デフォルトでは<a href="http://code.google.com/apis/maps/index.html">Google Maps API</a>)に送ります。外部サービスを呼び出す場合は、この呼び出しをバックグラウンドプロセスに移した方がいいでしょう。ここではそれは行いませんが、その設定方法を知るためにはResqueについての最近のエピソード[<a href="http://railscasts.com/episodes/271-resque">動画を見る</a>, <a href="http://asciicasts.com/episodes/271-resque">読む</a>]を参照してください。</p>
+
+<p>それではアプリケーションを起動してGeocoderを試してみましょう。新しい観光スポット(例えばSt Pancras Station, London)を緯度や経度なしで入力すると、Geocoderが外部APIからデータを取得して観光スポットに追加します。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/699/original/E273I02.png" width="800" height="372" alt="新しい観光スポットのデータをGeocoderが表示する"/>
+</div>
+
+<p>外部APIは観光スポットが更新されるたびに呼び出されますが、これは<code>address</code>フィールドが変更されたときのみに限定したほうがいいでしょう。これを実装するために、<code>after_validation</code>コールバックを少し修正します。</p>
+
+<p class="codeFilePath">/app/models/location.rb</p>
+<pre class="ruby">class Location &lt; ActiveRecord::Base
+  attr_accessible :address, :latitude, :longitude
+  geocoded_by :address
+  after_validation :geocode, :if =&gt; :address_changed?end</pre>
+
+<p>これはdirty trackingを用いて住所が変更されたかどうかをチェックして、変更されている場合のみAPIを呼び出します。</p>
+
+<p>また<code>reverse_geocoded_by</code>メソッドを使って、逆に緯度と経度を住所に変換することもできます。これは<code>geocoded_by</code>メソッドと同じ要領で動作します。今回のアプリケーションでは使用しません。</p>
+
+<h3>近くの観光スポットを取得する</h3>
+
+<p>ある場所を見ているときに近くの観光スポットを見ることができたら便利でしょう。データベースにいくつか観光地の情報があるので、観光スポットページにこの機能を追加してみましょう。</p>
+
+<p>ある距離内に存在する観光スポットをリスト表示したいのですが、Geocoderは<code>nearbys</code>メソッドで近くのスポットを簡単に取得することができます。デフォルトではこれは半径20マイル内の観光スポットを返しますが、ここでは10マイルに狭めます。近くの観光スポットをリストアップするために<code>@location.nearbys</code>の各locationをループして、距離(マイル)と一緒にリンクを表示します。</p>
+
+<p class="codeFilePath">/app/views/locations/show.html.erb</p>
+<pre class="ruby">&lt;ul&gt;
+&lt;% for location in @location.nearbys(10) %&gt;
+  &lt;li&gt;&lt;%= link_to location.address, location %&gt; ↵
+    (&lt;%= location.distance.round(2) %&gt; miles)&lt;/li&gt;
+&lt;% end %&gt;
+&lt;/ul&lt;% title "Location" %&gt;
+
+&lt;p&gt;
+  &lt;strong&gt;Address:&lt;/strong&gt;
+  &lt;%= @location.address %&gt;
+&lt;/p&gt;
+&lt;p&gt;
+  &lt;strong&gt;Latitude:&lt;/strong&gt;
+  &lt;%= @location.latitude %&gt;
+&lt;/p&gt;
+&lt;p&gt;
+  &lt;strong&gt;Longitude:&lt;/strong&gt;
+  &lt;%= @location.longitude %&gt;
+&lt;/p&gt;
+
+&lt;h3&gt;Nearby Locations&lt;/h3&gt;
+&lt;ul&gt;
+&lt;% for location in @location.nearbys(10) %&gt;
+  &lt;li&gt;&lt;%= link_to location.address, location %&gt; ↵
+    (&lt;%= location.distance.round(2) %&gt; miles)&lt;/li&gt;
+&lt;% end %&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;
+  &lt;%= link_to "Edit", edit_location_path(@location) %&gt; |
+  &lt;%= link_to "Destroy", @location, :confirm =&gt; ↵
+    'Are you sure?', :method =&gt; :delete %&gt; |
+  &lt;%= link_to "View All", locations_path %&gt;
+&lt;/p&gt;</pre>
+
+<p>観光スポット情報のページを見るとその近くのスポットもリスト表示されますが、200マイル離れたLiverpoolにあるスポットは表示されません。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/700/original/E273I03.png" width="800" height="438" alt="観光スポットページに近くのスポットが表示される"/>
+</div>
+
+<p>次に観光スポットページに検索ボックスを追加して、ある街にあるスポットを検索できるようにします。これをindexビューの一番上の新しいフォームに追加します。</p>
+
+<p class="codeFilePath">/app/views/locations/index.html.erb</p>
+<pre class="ruby">&lt;% title "Locations" %&gt;
+
+&lt;%= form_tag locations_path, :method =&gt; :get do %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag "Search Near", :name =&gt; nil %&gt;
+&lt;% end %&gt;
+&lt;!-- rest of page --&gt;</pre>
+
+<p>検索語が送信されると、フォームはGETを使って<code>search</code>パラメータを付けて<code>index</code>ページを呼び出します。<code>LocationsController</code>の<code>index</code>アクションでパラメータを確認し、もし存在したら近くの観光スポットを探します。</p>
+
+<p class="codeFilePath">/app/controllers/locations_controller.rb</p>
+<pre class="ruby">def index
+  if params[:search].present?    @locations = Location.near(params[:search], 50, ↵
+      :order =&gt; :distance)
+  else
+    @locations = Location.all
+  end
+end</pre>
+
+<p>ページを再度読み込んでManchesterを検索すると、30マイル離れたLiverpoolに1件見つかりました。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/701/original/E273I04.png" width="800" height="341" alt="街の検索結果"/>
+</div>
+
+<p>これである街の近くにある観光スポットを探せました。</p>
+
+<h3>地図を追加する</h3>
+
+<p>地理情報を扱っているのであれば、各場所について地図を表示できたら便利でしょう。観光スポットページに、観光スポットの場所を正確に示す地図を追加してみましょう。Google Maps APIはWebページに地図を追加する各種の方法を提供していますが、今回は簡単に実装できる<a href="http://code.google.com/apis/maps/documentation/staticmaps/">Static Maps API</a>を使用します。簡単なimageタグで地図を追加できますが、指定されるURLには地図のいろいろな外観を指定するパラメータ(緯度、経度、サイズ、ズーム、など)がついています。近くの観光スポットのリストの上に直接地図を追加します。</p>
+
+<p class="codeFilePath">/app/views/locations/show.html.erb</p>
+<pre class="ruby">&lt;%= image_tag "http://maps.google.com/maps/api/staticmap?size=450x300&amp;sensor=false&amp;zoom=16&amp;markers=#{@location.latitude}%2C#{@location.longitude}" %&gt;</pre>
+
+<p>渡すパラメータはほとんどが静的に指定された値ですが、緯度と経度だけは<code>@location</code>オブジェクトから取得した値です。観光スポットのページを見てみると、その場所の地図が表示されています。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/702/original/E273I05.png" width="828" height="753" alt="観光スポットのページに地図が表示される"/>
+</div>
+
+<p>静的な画像よりも手が込んだものが欲しければ、JavaScript APIとのやりとりを簡単にしてくれる<a href="https://github.com/apneadiving/Google-Maps-for-Rails">Google Maps For Rails gem</a>を見てみることをお勧めします。これを使えば、あなたのRailsアプリケーションに簡単にインタラクティブな地図を追加することができます。</p>

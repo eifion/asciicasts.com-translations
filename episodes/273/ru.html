@@ -1,0 +1,163 @@
+<p>Если вам приходится обрабатывать географические данные в Rails приложении, то <a href="http://rubygeocoder.com/">Geocoder гем</a> может упросить задачу в разы. Он может конвертировать названия мест в координаты и наоборот, и даже конвертировать IP адрес в почтовый. Он также позволяет находить места поблизости в зависимости от расстояния и направления, и имеет еще много полезных фич.</p>
+
+<p>В этом выпуске мы создадим приложение Siteseer, которое даст возможность людям рассказывать о туристических местах. После того, как мы создали приложение, создадим <code>Location</code> скафолд с полями под адрес, широту и долготу.</p>
+
+<pre class="terminal">$ rails g nifty:scaffold location address:string latitude:float longitude:float</pre>
+  
+<p>Поля <code>latitude</code>(широта) и <code>longitude</code>(долгота) важно назвать именно так, потому что Geocoder будет их использовать для хранения координат местоположения, хотя значения по умолчанию могут быть переопределены. Оба поля должны быть <code>floats</code> для координат, которые представляют собой числа с плавающей точкой. Запускаем выполнение миграции и создаем новую таблицу для местоположений.</p>
+
+<pre class="terminal">$ rake db:migrate</pre>
+
+<p>После этого, на руках имеем развернутый скафолд, который позволяет создавать точки местоположения, только широту и долготу приходится вбивать ручками. Через пару минут мы обновим наше приложение таким образом, что поля будут заполняться автоматически Geocoder'ом.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/698/original/E273I01.png" width="813" height="438" alt="The scaffold-generated new location page."/>
+</div>
+ 
+<h3>Установка и использование Geocoder</h3>
+
+<p>Установка Geocoder производится как обычно. Сначала мы указываем на гем в <code>Gemfile</code>, после выполняем команду <code>bundle</code> для установки гема.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.9&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+
+gem &#x27;geocoder&#x27;</pre>
+
+<p>Теперь, внесем изменения в модель <code>Location</code> и добавим метод <code>geocoded_by</code>, чтобы определить аттрибут, по чему нам хочется, чтобы Geocoder конвертировал, в данном случае - по адресу (<code>address</code>).</p>
+
+<p class="codeFilePath">/app/models/location.rb</p>
+<pre class="ruby">class Location &lt; ActiveRecord::Base
+  attr_accessible :address, :latitude, :longitude
+  geocoded_by :address
+end</pre>
+
+<p>Если наш адрес хранится в нескольких кусками в нескольких полях, то можно написать метод, который будет возвращать полный адрес.</p>
+
+<p>Нам нужно вызывать метод <code>geocode</code>, который выполняет геокодирование, во время создания или обновления местоположения. Обычно для таких целей используется колбэк <code>after_validation</code>.</p>
+
+<p class="codeFilePath">/app/models/location.rb</p>
+<pre class="ruby">class Location &lt; ActiveRecord::Base
+  attr_accessible :address, :latitude, :longitude
+  geocoded_by :address
+  after_validation :geocode
+end</pre>
+
+<p>Геокодирование использует внешний API (по умолчанию это <a href="http://code.google.com/apis/maps/index.html">Google Maps API</a>), а следовательно, отправляет туда запросы. Поэтому, лучше всего помещать этот вызов в фоновый режим. Этого в данном случае мы делать не будем, но узнать, как это сделать можно в выпуске Resque [<a href="http://railscasts.com/episodes/271-resque">смотреть</a>, <a href="http://asciicasts.com/episodes/271-resque">читать</a>].</p>
+
+<p>Ну что же, опробуем Geocoder. Запускаем наше приложение. Когда мы вводим новое местоположение, скажем &ldquo;St Pancras Station, London&rdquo;, без указания широты и долготы, Geocoder получает эти данные через внешний API и добавляет информацию в местоположение.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/699/original/E273I02.png" width="800" height="372" alt="The new location showing the data from Geocoder."/>
+</div>
+
+<p>Обращение к внешнему API будет происходить при каждом обновлении местоположения, но на самом деле это нужно только при смене адреса, если поле <code>address</code> меняется. Сделаем небольшое изменение в колбэке <code>after_validation</code>, чтобы исправить недоразумение.</p>
+
+<p class="codeFilePath">/app/models/location.rb</p>
+<pre class="ruby">class Location &lt; ActiveRecord::Base
+  attr_accessible :address, :latitude, :longitude
+  geocoded_by :address
+  after_validation :geocode, :if =&gt; :address_changed?
+end</pre>
+
+<p>Таким образом, мы отследим и определим момент, когда адрес изменится и только в этом случае будет выполнено обращение к API.</p>
+
+<p>Можно было бы использовать и <code>reverse_geocoded_by</code>, метод, который конвертирует широту и долготу в адрес. Работает он таким же образом, как и метод <code>geocoded_by</code>, но мы не будем использовать его в нашем приложении.</p>
+
+<h3>Места поблизости</h3>
+
+<p>Было бы здорово, во время просмотра какого-то местоположения, видеть еще и список мест поблизости. В нашей базе уже много различных мест, так что добавим эту фичу прямо на страничку местоположения.</p>
+
+<p>Мы хотим отобразить список всех мест на заданном расстоянии, и это лего сделать с помощью метода <code>nearbys</code> гема Geocoder. По умолчанию, возвратятся места в радиусе 20 миль (~32,2км), но мы ограничимся десятью (~16,1км). Чтобы вывести список, мы проходимся по каждому местоположению из <code>@location.nearbys</code> и выводим ссылку на него вместе с расстоянием в милях.</p>
+
+<p class="codeFilePath">/app/views/locations/show.html.erb</p>
+<pre class="ruby">&lt;ul&gt;
+&lt;% for location in @location.nearbys(10) %&gt;
+  &lt;li&gt;&lt;%= link_to location.address, location %&gt; &crarr;
+    (&lt;%= location.distance.round(2) %&gt; miles)&lt;/li&gt;
+&lt;% end %&gt;
+&lt;/ul&gt;&lt;% title &quot;Location&quot; %&gt;
+
+&lt;p&gt;
+  &lt;strong&gt;Address:&lt;/strong&gt;
+  &lt;%= @location.address %&gt;
+&lt;/p&gt;
+&lt;p&gt;
+  &lt;strong&gt;Latitude:&lt;/strong&gt;
+  &lt;%= @location.latitude %&gt;
+&lt;/p&gt;
+&lt;p&gt;
+  &lt;strong&gt;Longitude:&lt;/strong&gt;
+  &lt;%= @location.longitude %&gt;
+&lt;/p&gt;
+
+&lt;h3&gt;Nearby Locations&lt;/h3&gt;
+&lt;ul&gt;
+&lt;% for location in @location.nearbys(10) %&gt;
+  &lt;li&gt;&lt;%= link_to location.address, location %&gt; &crarr;
+    (&lt;%= location.distance.round(2) %&gt; miles)&lt;/li&gt;
+&lt;% end %&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;
+  &lt;%= link_to &quot;Edit&quot;, edit_location_path(@location) %&gt; |
+  &lt;%= link_to &quot;Destroy&quot;, @location, :confirm =&gt; &crarr;
+    &#x27;Are you sure?&#x27;, :method =&gt; :delete %&gt; |
+  &lt;%= link_to &quot;View All&quot;, locations_path %&gt;
+&lt;/p&gt;</pre>
+
+<p>Теперь во время просмотра места мы видим еще и список мест поблизости, но местоположение, которое находится в Ливерпуле, за 200 миль от Гринвической обсерватории, в списке не отобразится.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/700/original/E273I03.png" width="800" height="438" alt="The location page showing nearby locations."/>
+</div>
+
+<p>Следующим шагом добавим строку поиска на страничку местоположений, чтобы можно было искать различные места в указанном городе. Сделаем новую форму наверху вида index.</p>
+
+<p class="codeFilePath">/app/views/locations/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Locations&quot; %&gt;
+
+&lt;%= form_tag locations_path, :method =&gt; :get do %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag &quot;Search Near&quot;, :name =&gt; nil %&gt;
+&lt;% end %&gt;
+&lt;!-- rest of page --&gt;</pre>
+
+<p>Форма использует GET запрос и будет получать <code>index</code> страничку при передаче параметров <code>search</code>. В <code>LocationsController</code> <code>index</code> экшене мы проверяем параметр, и если он задан, то делаем поиск ближайших местечек.</p>
+
+<p class="codeFilePath">/app/controllers/locations_controller.rb</p>
+<pre class="ruby">def index
+  if params[:search].present?
+    @locations = Location.near(params[:search], 50, &crarr;
+      :order =&gt; :distance)
+  else
+    @locations = Location.all
+  end
+end</pre>
+
+<p>Если перезагрузить страничку и поискать &ldquo;Manchester&rdquo;, то мы найдем местоположение одной точки в Ливерпуле аж за 30 миль оттуда.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/701/original/E273I04.png" width="800" height="341" alt="The results of a city search."/>
+</div>
+
+<p>Это всё, что нужно, чтобы найти места поблизости с заданным городом.</p>
+
+<h3>Добавляя карты</h3>
+
+<p>Так как мы работаем с географическими данными о местоположениях, то неплохо еще и карту для их отображения использовать. Мы добавим одну на страничке местоположения, чтобы показать, где на самом деле находится это место. Google Maps API предоставляет много разных способов, как добавить карту на сайт, но для простоты мы будем использовать <a href="http://code.google.com/apis/maps/documentation/staticmaps/">Static Maps API</a>. Карты добавляются просто через вставку изображения, в url которого передаются различные определяющие параметры, включая широту и долготу, размер, приближение и так далее. Добавим карту сразу над списком ближайших адресов.</p>
+
+<p class="codeFilePath">/app/views/locations/show.html.erb</p>
+<pre class="ruby">&lt;%= image_tag &quot;http://maps.google.com/maps/api/staticmap?size=450x300&amp;sensor=false&amp;zoom=16&amp;markers=#{@location.latitude}%2C#{@location.longitude}&quot; %&gt;</pre>
+
+<p>Как мы видим, большинство передаваемых параметров, за исключением широты и долготы, которые мы получаем из объекта <code>@location</code>. Если теперь откроем страничку местоположения, то увидим его и на карте.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/702/original/E273I05.png" width="828" height="753" alt="The location showing the map."/>
+</div>
+
+<p>Если вам хочется чего-то более интересного, чем просто статическая картинка, то разберитесь с <a href="https://github.com/apneadiving/Google-Maps-for-Rails">Google Maps For Rails гемом</a>, который упращает работу с джаваскриптовым JavaScript API. Это очень простой способ добавить интерактивную карту в ваше rails приложение.</p>

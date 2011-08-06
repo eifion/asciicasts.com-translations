@@ -1,0 +1,196 @@
+<p>En el episodio 240 [<a href="http://railscasts.com/episodes/240-search-sort-paginate-with-ajax">verlo</a>, <a href="http://es.asciicasts.com/episodes/240-ordenacion-paginacion-y-busqueda-con-ajax">leerlo</a>] vimos c&oacute;mo utilizar AJAX para  ordenar, paginar y buscar sobre una tabla de productos.  Uno de los problemas de este uso de AJAX es que la URL de la p&aacute;gina no cambia cuando ordenamos o filtramos la tabla, lo que significa que no podemos usar el bot&oacute;n de vuelta atr&aacute;s del navegador para volver al estado original de la tabla, ni podemos guardarnos un marcador de un estado de filtrado de la p&aacute;gina para poder volver a ver los mismos resultados.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/536/original/E246I01.png" width="800" height="374" alt="The sortable and searchable table of products."/>
+</div>
+
+<p>Se trata de un problema muy habitual cuando se a&ntilde;ade funcionalidad AJAX a un sitio y ser&iacute;a muy &uacute;til dar con una soluci&oacute;n.  En este episodio veremos c&oacute;mo hacerlo.</p>
+
+<h3>El m&eacute;todo <code>history.pushState</code></h3>
+
+<p>Ya vimos en el episodio 175 [<a href="http://railscasts.com/episodes/175-ajax-history-and-bookmarks">verlo</a>, <a href="http://asciicasts.com/episodes/175-ajax-history-and-bookmarks">leerlo (en ingl&eacute;s)</a>] que podemos hacer que una aplicaci&oacute;n AJAX respete la historia de navegaci&oacute;n y  pueda ser guardada com un marcador mediante la manipulaci&oacute;n de la URL.  En dicho episodio cuando pagin&aacute;bamos por los resultados se a&ntilde;ad&iacute;a un ancla a la URL de forma que, por ejemplo, la URL de la tercera p&aacute;gina fuese <code>http://localhost:3000/#page=3</code>.  Esto permite guardar la p&aacute;gina como marcador y adem&aacute;s hace que el bot&oacute;n de vuelta atr&aacute;s funcione como es de esperar.  Este enfoque funciona bien pero se complica r&aacute;pidamente en escenarios m&aacute;s sofisticados como el que tenemos aqu&iacute; donde tenemos que poder ordenar, buscar y paginar sobre un conjunto de resultados.</p>
+
+<p>La t&eacute;cnica que vamos a emplear aqu&iacute; es la usada por GitHub en su visor de archivos.  Cuando se hace clic en una carpeta de un repositorio en GitHub la p&aacute;gina del navegador se actualiza mediante AJAX y se modifica por JavaScript toda la URL, no s&oacute;lo un ancla.  Se trata de una soluci&oacute;n mucho m&aacute;s completa que nos permite recargar la p&aacute;gina o guardarla como marcador y adem&aacute;s respeta la historia de navegaci&oacute;n.</p>
+
+<p>En GitHub <a href="https://github.com/blog/760-the-tree-slider">escribieron una anotaci&oacute;n al respecto</a> y es interesante leer los detalles de implementaci&oacute;n.  Esta funcionalidad requiere de una versi&oacute;n reciente de Safari, pero merece la pena.  La  &ldquo;magia&rdquo; que est&aacute; detr&aacute;s de todo esto son las funciones <code>pushState</code> y <code>replaceState</code> del objeto <code>history</code> as&iacute; como el evento <code>popstate</code>.  En la anotaci&oacute;n del blog de GitHub hay varios enlaces interesantes que dan m&aacute;s informaci&oacute;n sobre el funcionamiento de estas funciones y demuestra su uso.</p>
+
+<p>Veamos c&oacute;mo de f&aacute;cil es a&ntilde;adir esta funcionalidad a nuestra sencilla aplicaci&oacute;n de tienda cuando paginamos, ordenamos o hacemos una b&uacute;squeda en el listado de productos.  El JavaScript que pusimos en la aplicaci&oacute;n original tiene el siguiente aspecto:</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(&#x27;#products th a, #products .pagination a&#x27;).live(&#x27;click&#x27;,
+    function () {
+      $.getScript(this.href);
+      return false;
+    }
+  );
+  
+  $(&#x27;#products_search input&#x27;).keyup(function () {
+    $.get($(&#x27;#products_search&#x27;).attr(&#x27;action&#x27;), $(&#x27;#products_search&#x27;).serialize(), null, &#x27;script&#x27;);
+    return false;
+  });
+})</pre>
+
+<p>Los que no est&eacute;n familiarizados con el c&oacute;digo anterior pueden echar un vistazo al episodio 240 para ver los detalles.  Estamos usando jQuery pero esta t&eacute;cnica funciona tambi&eacute;n con Prototype (al menos en lo que se refiere a &lt;ocde&gt;pushState&lt;/ocde&gt; y <code>replaceState</code>).</p>
+
+<p>La primera parte del c&oacute;digo de arriba maneja la funcionalidad AJAX de la ordenaci&oacute;n y paginaci&oacute;n.  Vamos a a&ntilde;adir una llamada a <code>history.pushState</code> para que se a&ntilde;ada la URL al hist&oacute;rico del navegador cuando se haga clic en alguno de los enlaces de paginaci&oacute;n.</p>
+
+<p>En el sitio para desarrolladores de Mozilla se puede encontrar la <a href="https://developer.mozilla.org/en/DOM/Manipulating_the_browser_history#Adding_and_modifying_history_entries">documentaci&oacute;n de <code>pushState</code></a> donde se indica que recibe tres par&aacute;metros.  El primero es un objeto de estado, que puede ser cualquier cosa, y que ser&aacute; devuelto cuando se active el evento <code>popState</code>.  El segundo argumento es el t&iacute;tulo y el tercero una URL.  Ahora que ya sabemos esto ya podemos a&ntilde;adir la llamada a <code>pushState</code>.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(&#x27;#products th a, #products .pagination a&#x27;).live(&#x27;click&#x27;, 
+  function () {
+    $.getScript(this.href);
+    history.pushState(null, &quot;&quot;, this.href);
+    return false;
+  });</pre>
+
+<p>Aqu&iacute; todav&iacute;a no tenemos que almacenar ning&uacute;n estado por lo que pasamos <code>null</code> como primer par&aacute;metro.  De la misma manera tampoco necesitamos el t&iacute;tulo por lo que pasamos una cadena vac&iacute;a, y como URL pasaremos <code>this.href</code> que es la URL del enlace activado.</p>
+
+<p>Si ahora recargamos la p&aacute;gina y seguimos algunos de los enlaces de paginaci&oacute;n u ordenaci&oacute;n AJAX la p&aacute;gina se actualizar&aacute; sin recargar, pero ahora con cada clic veremos que la URL de la barra de direccion cambia para reflejar lo que hayamos pasado en la funci&oacute;n <code>pushState</code> y adem&aacute;s esta URL ser&aacute; guardada en la historia del navegador.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/537/original/E246I02.png" width="801" height="474" alt="Cuando se hace clic en la columna de ordenación la URL cambia."/>
+</div>
+
+<p>As&iacute; que ya podemos ordenar y paginar la tabla y guardarlo todo en un marcador y cuando lo recuperemos se preservar&aacute; la ordenaci&oacute;n y paginaci&oacute;n, aunque la p&aacute;gina se actualice din&aacute;micamente mediante AJAX.  El bot&oacute;n de volver atr&aacute;s, sin embargo, no funciona como ser&iacute;a de espera porque no estamos atendiendo al evento <code>popstate</code>.  Podemos arreglarlo activando una funci&oacute;n cuando se dispare el evento <code>popstate</code>.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  // (se omiten otras funciones)
+  $(window).bind(&quot;popstate&quot;, function () {
+    $.getScript(location.href);
+  });
+})</pre>
+
+<p>Para cuando se active el evento <code>popstate</code> la URL ya habr&aacute; cambiado (a la anterior en la historia de navegaci&oacute;n) por lo que ya podemos actualizar la tabla de productos invocando <code>$.getScript</code> y pas&aacute;ndole la URL actual.</p>
+
+<p>Si recargamos la p&aacute;gina y ordenamos o paginamos la tabla un par de veces comprobaremos que el bot&oacute;n de vuelta atr&aacute;s funciona y que podemos navegar por todos los cambios que hemos ido haciendo.</p>
+
+<h3>B&uacute;squeda</h3>
+
+<p>Veamos a continuaci&oacute;n la funcionalidad de b&uacute;squeda.  Si buscamos ahora un producto en nuestra aplicaci&oacute;n se filtrar&aacute;n los resultados pero la URL permanecer&aacute; igual lo que significa, como ya sabemos, que  si guardamos un marcador de la p&aacute;gina o la recargamos perderemos la b&uacute;squeda realizada.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/538/original/E246I03.png" width="801" height="474" alt="Al recargar la página se pierde la búsqueda."/>
+</div>
+
+<p>El JavaScript para la b&uacute;squeda por AJAX es el siguiente:</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  // Other functions omitted.
+  $(&#x27;#products_search input&#x27;).keyup(function () {
+    $.get($(&#x27;#products_search&#x27;).attr(&#x27;action&#x27;), $(&#x27;#products_search&#x27;).serialize(), null, &#x27;script&#x27;);
+    return false;
+  });
+})</pre>
+
+<p>Aqu&iacute; usaremos <code>pushState</code> de la misma manera que hicimos cuando modificamos el c&oacute;digo de ordenaci&oacute;n.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  // Other functions omitted.
+  $(&#x27;#products_search input&#x27;).keyup(function () {
+    var action = $(&#x27;#products_search&#x27;).attr(&#x27;action&#x27;);
+    var formData = $(&#x27;#products_search&#x27;).serialize();
+    $.get(action, formData, null, &#x27;script&#x27;);
+    history.pushState(null, &quot;&quot;, action + &quot;?&quot; + formData);
+    return false;
+  }); 
+})</pre>
+
+<p>Aqu&iacute; usaremos <code>pushState</code> para guardar una URL que ser&aacute; una combinaci&oacute;n de la acci&oacute;n del formulario de b&uacute;squeda y los datos serializados del formulario, unidos mediante una interrogaci&oacute;n para formar una URL v&aacute;lida.</p>
+
+<p>Si ahora recargamos la p&aacute;gina veremos que la URL cambia cada vez que escribimos una letra en el campo de b&uacute;squeda.  Pero si pulsamos en el bot&oacute;n de volver atr&aacute;s veremos que en la historia del navegador se ha guardado una URL para cada una de estas letras, lo que dista de ser ideal.  Esto ocurre porque estamos invocando a <code>pushState</code> cada vez que se pulsa una tecla.  Lo ideal ser&iacute;a que cada vez que se pulsase una tecla se modificase el estado actual de lugar de crearse un nuevo estado.  Por suerte esto es f&aacute;cil de hacer y s&oacute;lo hay que llamar a <code>replaceState</code> en lugar de <code>pushState</code>.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  // Other functions omitted.
+  $(&#x27;#products_search input&#x27;).keyup(function () {
+    var action = $(&#x27;#products_search&#x27;).attr(&#x27;action&#x27;);
+    var formData = $(&#x27;#products_search&#x27;).serialize();
+    $.get(action, formData, null, &#x27;script&#x27;);
+    history.replaceState(null, &quot;&quot;, action + &quot;?&quot; + formData);
+    return false;
+  }); 
+})</pre>
+
+<p>Si abrimos la p&aacute;gina de productos en una nueva ventana y buscamos algo veremos que la URL va cambiando pero que estos cambios no se guardan en el hist&oacute;rico del navegador.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/539/original/E246I04.png" width="801" height="474" alt="Se añade el término de búsqueda en la URL."/>
+</div>
+
+<p>No se trata exactamente de la funcionalidad que queremos; en teor&iacute;a tendr&iacute;amos que usar <code>pushState</code> cuando el usuario empieza a buscar y luego ir&iacute;amos haciendo <code>replaceState</code> para que se a&ntilde;ada el t&eacute;rmino de b&uacute;squeda en la historia.  Esto est&aacute; un poco fuera del alcance del episodio, as&iacute; que no lo veremos.</p>
+
+<h3>Un t&iacute;tulo para cada estado</h3>
+
+<p>Si ordenamos los productos de varias maneras y luego mantenemos pulsado el bot&oacute;n de volver atr&aacute;s para ver la historia de navegaci&oacute;n veremos la URL de cada p&aacute;gina, lo que puede ponernos dif&iacute;cil el decidir a qu&eacute; p&aacute;gina queremos volver.   Ser&iacute;a mucho m&aacute;s amistoso que se viese un t&iacute;tulo junto a cada p&aacute;gina, y esto lo podemos hacer estableciendo el segundo argumento de cada llamada <code>pushState</code> con el t&iacute;tulo de la p&aacute;gina.</p>
+
+<p>&iquest;C&oacute;mo hacemos que el t&iacute;tulo de la p&aacute;gina muestre algo &uacute;til?  Lo que haremos ser&aacute; establecer el t&iacute;tulo de cada p&aacute;gina en el fichero <code>index.js.erb</code> que devuelve la tabla actualizada por AJAX y luego usaremos este t&iacute;tulo en <code>pushState</code>.</p>
+
+<p class="codeFilePath">/app/views/products/index.js.erb</p>
+<pre class="javascript">$(&#x27;#products&#x27;).html(&#x27;&lt;%= escape_javascript(render(&quot;products&quot;)) %&gt;&#x27;);
+document.title = &quot;&lt;%= escape_javascript(&quot;#{params[:search].to_s.titleize} Products by #{(params[:sort] || &#x27;name&#x27;).titleize} - Page #{(params[:page] || 1)}&quot;) %&gt;&quot;</pre>
+
+<p>Haremos que el t&iacute;tulo muestre los t&eacute;rminos de b&uacute;squeda y ordenaci&oacute;n, as&iacute; como la p&aacute;gina actual, de forma que se muestre toda la informaci&oacute;n relevante.  Luego actualizaremos las llamadas a <code>pushState</code> y <code>replaceState</code> para que establezcan el segundo par&aacute;metro conforme al t&iacute;tulo de la p&aacute;gina.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(&#x27;#products th a, #products .pagination a&#x27;).live(&#x27;click&#x27;, function () {
+    $.getScript(this.href);
+    history.pushState(null, document.title, this.href);
+    return false;
+  });
+  
+  $(&#x27;#products_search input&#x27;).keyup(function () {
+    var action = $(&#x27;#products_search&#x27;).attr(&#x27;action&#x27;);
+    var formData = $(&#x27;#products_search&#x27;).serialize();
+    $.get(action, formData, null, &#x27;script&#x27;);
+    history.replaceState(null, document.title, action + &quot;?&quot; + formData);
+    return false;
+  });
+  
+  $(window).bind(&quot;popstate&quot;, function () {
+    $.getScript(location.href);
+  });
+})</pre>
+
+<p>Ahora el t&iacute;tulo de la p&aacute;gina cambiar&aacute; cada vez que busquemos u ordenemos el listado de productos, y si inspeccionamos la historia de navegaci&oacute;n veremos un listado de t&iacute;tulos en vez de URLs.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/540/original/E246I05.png" width="801" height="476" alt="Ahora aparece el título de cada página en la historia del navegador."/>
+</div>
+
+<h3>Comportamiento con navegadores antiguos</h3>
+
+<p>La nueva funcionalidad de nuestra aplicaci&oacute;n ya funciona bien pero hemos estado asumiendo que el m&eacute;todo <code>history.pushState</code> se encuentra disponible en el navegador del usuario, algo que no es del todo seguro porque s&oacute;lo lo soportan las &uacute;ltimas versiones de Safari, Chrome y Firefox.   Para poder trabajar con todos los navegadores tenemos primero que comprobar que tenemos disponible esta funci&oacute;n y si no es as&iacute; modificar el comportamiento de la aplicaci&oacute;n.</p>
+
+<p>Lo que haremos ser&aacute; comprobar que existen el objeto <code>history</code> y su funci&oacute;n <code>history.pushState</code>, y si no es as&iacute; desactivaremos la funcionalidad AJAX por completo para que la aplicaci&oacute;n pase a usar enlaces HTML est&aacute;ndar.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">if (history &amp;&amp; history.pushState) {
+  $(function () {
+    $(&#x27;#products th a, #products .pagination a&#x27;).live(&#x27;click&#x27;, function () {
+      $.getScript(this.href);
+      history.pushState(null, document.title, this.href);
+      return false;
+    });
+  
+    $(&#x27;#products_search input&#x27;).keyup(function () {
+      var action = $(&#x27;#products_search&#x27;).attr(&#x27;action&#x27;);
+      var formData = $(&#x27;#products_search&#x27;).serialize();
+      $.get(action, formData, null, &#x27;script&#x27;);
+      history.replaceState(null, document.title, action + &quot;?&quot; + formData);
+      return false;
+    });
+  
+    $(window).bind(&quot;popstate&quot;, function () {
+      $.getScript(location.href);
+    });
+  })
+}</pre>
+
+<p>Con esto concluye este episodio.  Aunque no ha estado espec&iacute;ficamente dedicado a Rails, s&iacute; que hemos visto problemas con los que nos podemos topar cuando trabajemos con AJAX en nuestras aplicaciones.  Con la capacidad de modificar la URL podemos tratar los enlaces AJAX al mismo nivel que los enlaces HTML tradicionales.</p>

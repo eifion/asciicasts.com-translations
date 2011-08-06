@@ -1,0 +1,300 @@
+<p>Con este episodio concluye esta breve serie que hemos dedicado a la creaci&oacute;n de aplicaciones web que funcionan sin conexi&oacute;n.  En la primera parte utilizamos la gema  <a href="https://github.com/wycats/rack-offline">rack-offline gem</a> para crear un  manifiesto de cach&eacute;.  Cuando se visita un sitio web que dispone de un manifiesto de cach&eacute; el navegador descargar&aacute; y cachear&aacute; los ficheros que aparecen en el manifiesto, as&iacute; como aquellos que los referencien, como por ejemplo la portada de la aplicaci&oacute;n.  Esto significa que una vez que hayamos visitado la aplicaci&oacute;n podremos acceder a ella incluso cuando no estemos conectados.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/548/original/E248I01.png" width="800" height="305" alt="Nuestra aplicaci&oacute;n de lista de la compra."/>
+</div>
+
+<h3>Control de los cambios cuando no hay conexi&oacute;n</h3>
+
+<p>Uno de los principales problemas que se nos presentan al desarrollar aplicaciones sin conexi&oacute;n consiste en la manipulaci&oacute;n de las p&aacute;ginas que presentan contenido din&aacute;mico, como es el caso de nuestra lista de la compra.  Si intentamos actualizar la lista a&ntilde;adiendo un nuevo elemento mientras nuestra aplicaci&oacute;n se encuentra en producci&oacute;n, el manifiesto de cach&eacute; no ser&aacute; actualizado y por tanto el navegador ignorar&aacute; que la p&aacute;gina ha cambiado.  Vemos que cuando se a&ntilde;ade un nuevo elemento s&iacute; que aparece en la lista pero esto es s&oacute;lo porque al a&ntilde;adir un elemento se hace una petici&oacute;n POST al servidor.  Si tras a&ntilde;adir el elemento volvemos a cargar la p&aacute;gina el navegador mostrar&aacute; la versi&oacute;n cacheada y por lo tanto el elemento desaparecer&aacute; de la lista.  Como el navegador ignora que la cach&eacute; ya no es v&aacute;lida podemos cargar la p&aacute;gina todas las veces que queramos que seguir&aacute; vi&eacute;ndose mal.</p>
+
+<p>Una posible soluci&oacute;n ser&iacute;a actualizar la cach&eacute; cada vez que se modifique el contenido din&aacute;mico.  Si se actualiza la suma de control del manifiesto de cach&eacute; el navegador se ver&aacute; obligado a descartar su cach&eacute;.  El problema que tiene este enfoque es que har&aacute; que el naveagdor descargue todos los ficheros del servidor cosa que que no es muy eficiente (sobre todo si esperamos que el contenido din&aacute;mico de la p&aacute;gina cambie con cierta frecuencia).  Adem&aacute;s, con este m&eacute;todo la aplicaci&oacute;n no funcionar&aacute; sin conexi&oacute;n.  Una idea mejor es quitar el contenido din&aacute;mico de los contenidos que est&aacute;n en el manifiesto de cach&eacute;.</p>
+
+<p>Vamos a modificar la aplicaci&oacute;n de forma que la lista de elementos no se cargue directamente desde el servidor.  En su lugar, la p&aacute;gina de elementos ser&aacute; est&aacute;tica y el listado se rellenar&aacute; mediante una petic&iacute;on AJAX al servidor que se efectuar&aacute; despu&eacute;s de que la p&aacute;gina est&aacute;tica haya cargado.  Para ello vamos a escribir bastante c&oacute;digo JavaScript lo que quiere decir que el resto de este episodio ser&aacute; espec&iacute;fico de jQuery.</p>
+
+<p>Hay un excelente plugin para jQuery que se llama <a href="https://github.com/jquery/jquery-tmpl">jQuery Templates</a> y que hace que sea muy f&aacute;cil generar HTML din&aacute;mico a partir de objetos JSON, lo usaremos para mostrar el listado de recados de la compra  Podemos copiar el fichero JavaScript del <em>plugin</em> lanzando la siguiente orden desde el directorio de la aplicaci&oacute;n:</p>
+
+<pre class="terminal">$ curl https://github.com/jquery/jquery-tmpl/raw/master/ 
+  jquery.tmpl.js &gt; public/javascripts/jquery.tmpl.js</pre>
+
+<p>Antes de empezar a implementar esta funcionalidad en la aplicaci&oacute;n tenemos que modificar el fichero de configuraci&oacute;n en desarrollo.  En el &uacute;ltimo episodio pusimos <code>config.cache_clasess</code> a <code>true</code> para as&iacute; poder simular el modo de producci&oacute;n.  Lo cambiaremos a <code>false</code> para poder continuar el desarrollo de nuestra aplicaci&oacute;n.</p>
+
+<p class="codeFilePath">/config/environments/development.rb</p>
+<pre class="ruby">config.cache_classes = false</pre>
+
+<h3>Uso de jQuery Template</h3>
+
+<p>El primer paso es a&ntilde;adir una referencia al fichero de jQuery Template en el <em>layout</em> de la aplicaci&oacute;n.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= javascript_include_tag :defaults, &quot;jquery.tmpl&quot; %&gt;</pre>
+
+<p>En la acci&oacute;n <code>index</code> del controlador <code>ItemsController</code> podemos ver el c&oacute;digo que genera la lista de elementos:</p>
+
+<p class="codeFilePath">/app/views/items/index.html.erb</p>
+<pre class="ruby">&lt;ol id=&quot;items&quot; &gt;
+  &lt;% @items.each do |item| %&gt;
+  &lt;li&gt;&lt;%= item.name %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ol&gt;</pre>
+
+<p>En lugar de usar erb en el servidor tenemos que generar este contenido mediante JavaScript en el cliente, y para esto es para lo que escribiremos una plantilla de jQuery con la librer&iacute;a que acabamos de instalar.</p>
+
+<p>Vamos a poner la plantilla en un elemento <code>&lt;script&gt;</code> de tipo <code>text/html</code> al que le daremos un <code>id</code> para poder identificarlo desde JavaScript.  En lugar de erb ahora usaremos el lenguaje de plantillas de jQuery Template para determinar d&oacute;nde va el contenido din&aacute;mico, y pondremos el contenido dentro de <code>${}</code>, en este caso vamos a mostrar el nombre de los elementos igual que hac&iacute;amos con el c&oacute;digo erb.</p>
+
+
+<p class="codeFilePath">/app/views/items/index.html.erb</p>
+<pre class="ruby">&lt;script type=&quot;text/html&quot; id=&quot;item_template&quot;&gt;
+  &lt;li&gt;${item.name}&lt;/li&gt;
+&lt;/script&gt;
+
+&lt;ol id=&quot;items&quot;&gt;
+&lt;/ol&gt;</pre>
+
+<p>Obs&eacute;rvese que seguimos dejando el elemento vac&iacute;o <code>&lt;ol&gt;</code> en su sitio para poder a&ntilde;adir el contenido din&aacute;mico m&aacute;s tarde con jQuery Template desde el c&oacute;digo que tenemos en el fichero <code>application.js</code> .  Antes de rellenarlo con datos reales vamos a intentarlo con un elemento de prueba.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(window.applicationCache).bind(&#x27;error&#x27;, function () {
+    alert(&#x27;There was an error when loading the cache manifest.&#x27;);
+  });
+
+  $(&quot;#items&quot;).html($(&quot;#item_template&quot;).tmpl({&quot;item&quot;:{&quot;name&quot;:&quot;cake&quot;}}));  
+});</pre>
+
+<p>En el c&oacute;digo anterior obtenemos el elemento <code>&lt;ol&gt;</code> por su <code>id</code> y luego llamamos a la funci&oacute;n <code>html</code> de jQuery para cambiar su contenido.  Dicho contenido vendr&aacute; dado por la plantilla, as&iacute; que recuperamos tambi&eacute;n la plantilla por su <code>id</code> (<code>item_template</code>) y luego llamamos a <code>tmpl</code>.  Esta funci&oacute;n recibe un objeto Javascript (o un array de objetos) como argumento, en este caso le pasamos un objeto literal que tiene definida la propiedad <code>name</code>.</p>
+
+<p>Si ahora recargamos la p&aacute;gina un par de veces veremos la lista de elementos, generada por jQuery Template</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/549/original/E248I02.png" width="800" height="299" alt="Se a&ntilde;ade un item sin conexi&oacute;n."/>
+</div>
+
+<p>Por supuesto lo sigueinte que queremos es que los &iacute;tems de la lista sean los que est&aacute;n en la base de datos, por lo que los recuperaremos de verdad usando una petici&oacute;n AJAX al servidor que devolver&aacute; los elementos de la base de datos como JSON.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(window.applicationCache).bind(&#x27;error&#x27;, function () {
+    alert(&#x27;There was an error when loading the cache manifest.&#x27;);
+  });
+  
+  $.getJSON(&quot;/items.json&quot;, function(data) {
+    $(&quot;#items&quot;).html($(&quot;#item_template&quot;).tmpl(data));    
+  });
+});</pre>
+
+<p>Tenemos que modificar la acci&oacute;n <code>index</code> de <code>ItemsController</code> para que pueda devolver JSON bas&aacute;ndonos en el m&eacute;todo <code>respond_to</code> de Rails.</p>
+
+<p class="codeFilePath">/app/controllers/items_controller.rb</p>
+<pre class="ruby">class ItemsController &lt; ApplicationController
+  respond_to :html, :json
+  
+  def index
+    @items = Item.all
+    respond_with(@items)
+  end
+  
+  def create
+    @item = Item.new(params[:item])
+    @item.save
+    redirect_to items_path
+  end
+
+end</pre>
+
+<p>Cuando ahora invoquemos <code>/items.json</code> el servidor devolver&aacute; el listado de elementos en JSON.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/550/original/E248I03.png" width="801" height="280" alt="Los elementos de la base de datos en JSON."/>
+</div>
+
+<p>Esta p&aacute;gina no se encuentra en el manifiesto de cach&eacute; por lo que no ser&aacute; cacheada, as&iacute; que no tenemos que preocuparnos de que no se actualicen los resultados.  Si volvemos a visitar la p&aacute;gina de elementos ahora ya veremos todos los que hay en la tabla <code>items</code> de la base de datos, rellenados a partir de los datos de la petici&oacute;n JSON.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/551/original/E248I04.png" width="801" height="314" alt="La lista de elementos generada a partir de los datos JSON."/>
+</div>
+
+<h3>Almacenamiento local de datos</h3>
+
+<p>El siguiente paso es hacer que nuestra aplicaci&oacute;n funcione sin conexi&oacute;n.  &iquest;Qu&eacute; ocurre si paramos el servidor Rails y recargamos la p&aacute;gina?</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/552/original/E248I05.png" width="801" height="314" alt="Cuando no hay conexi&oacute;n los elementos no se pueden recuperar."/>
+</div>
+
+<p>Como el navegador no puede recuperar los datos, la lista aparecer&aacute; vac&iacute;a.  Podemos utilizar otra extensi&oacute;n de jQuery para solucionar esto: <a href="https://github.com/wycats/jquery-offline">jQuery-Offline</a>.  Con este <em>plugin</em> se pueden guardar los datos JSON utilizando el  <a href="https://developer.mozilla.org/en/dom/storage"><code>almacenamiento local del navegador</code></a> para que estos est&eacute;n disponibles cuando no hay conexi&oacute;n.  Para usarla tan s&oacute;lo tenemos que copiar los dos ficheros del directorio <code>lib</code> del <em>plugin</em> (<code>jquery.offline.js</code> y <code>json.js</code> al directorio <code>public/javascripts</code> de nuestra aplicaci&oacute;n.  Hag&aacute;moslo con <code>curl</code> en dos pasos.</p>
+
+<pre class="terminal">$ curl https://github.com/wycats/jquery-offline/raw/master/lib 
+  jquery.offline.js &gt; public/javascripts/jquery.offline.js</pre>
+
+<pre class="terminal">$ curl https://github.com/wycats/jquery-offline/raw/master/lib/ 
+  json.js &gt; public/javascripts/json.js</pre>
+
+<p>A continuaci&oacute;n tenemos que incluir estos ficheros en el fichero <em>layout</em> de la aplicaci&oacute;n.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= javascript_include_tag :defaults, &quot;jquery.tmpl&quot;, &quot;json&quot;,  
+  &quot;jquery.offline&quot; %&gt;</pre>
+
+<p>Ya podemos cambiar en el fichero <code>application.js</code> la llamada a <code>getJSON</code> por <code>retrieveJSON</code>.  La funci&oacute;n <code>retrieveJSON</code> act&uacute;a de forma similar a <code>getJSON</code> pero almacena el JSON recuperado en el objeto <code>localStorage</code> del navegador.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(window.applicationCache).bind(&#x27;error&#x27;, function () {
+    alert(&#x27;There was an error when loading the cache manifest.&#x27;);
+  });
+  
+  $.retrieveJSON(&quot;/items.json&quot;, function(data) {
+    $(&quot;#items&quot;).html($(&quot;#item_template&quot;).tmpl(data));    
+  });
+});</pre>
+
+<p>Si arrancamos el servidor y visitamos la p&aacute;gina de elementos veremos nuevamente la lista correcta.  Si luego paramos el servidor y recargamos la p&aacute;gina veremos que el listado permanece porque los datos se encuentran almacenados en <code>localStorage</code> y <code>retrieveJSON</code> intentar&aacute; recuperar los datos del almacenamiento local cuando no hay conexi&oacute;n disponible.</p>
+
+<h3>A&ntilde;adir elementos sin conexi&oacute;n</h3>
+
+<p>La aplicaci&oacute;n ya puede mostrar la lista incluso cuando no hay conexi&oacute;n a Internet pero no podemos a&ntilde;adir elementos a la lista mientras estemos sin conexi&oacute;n.  Si intentamos hacerlo el navegador har&aacute; una petici&oacute;n POST normal al servidor que, por supuesto, fallar&aacute;.  Tendremos que hacer cambios de forma que si se a&ntilde;ade un elemento mientras la aplicaci&oacute;n est&aacute; desconectada, &eacute;ste se muestre en la p&aacute;gina y se guarde en una lista de pendientes para ser enviados a la base de datos cuando la aplicaci&oacute;n vuelva a estar disponible.</p>
+
+<p>Por desgracia jQuery Offline funciona s&oacute;lo recuperando elementos del servidor, no envi&aacute;ndolos.  Tendremos que hacerlo de forma manual, lo que implica vamos a escribir bastante m&aacute;s JavaScript que si hubiese un <em>plugin</em> disponible.</p>
+
+<p>Para guardar los elementos pendientes en el navegador crearemos un nuevo objeto en el almac&eacute;n <code>localStorage</code> llamado <code>pendingItems</code>.  Cuando se muestre la lista de elementos queremos ver tanto los que han venido originalmente del servidor como los que est&aacute;n a&uacute;n pendientes de env&iacute;o, as&iacute; que los concatenaremos todos juntos.</p>
+
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(window.applicationCache).bind(&#x27;error&#x27;, function () {
+    alert(&#x27;There was an error when loading the cache manifest.&#x27;);
+  });
+  
+  if (!localStorage[&quot;pendingItems&quot;]) {
+    localStorage[&quot;pendingItems&quot;] = JSON.stringify([]);
+  }
+  
+  $.retrieveJSON(&quot;/items.json&quot;, function(data) {
+    var pendingItems = $.parseJSON(localStorage[&quot;pendingItems&quot;]);
+    $(&quot;#items&quot;).html($(&quot;#item_template&quot;).tmpl(data.concat(pendingItems)));    
+  });
+});</pre>
+
+<p>Cuando alguien env&iacute;a el formulario para a&ntilde;adir un nuevo elemento queremos capturar el evento en JavaScript para a&ntilde;adir dicho elemento a la lista de env&iacute;os pendientes.  El c&oacute;digo ir&aacute; justo despu&eacute;s de la llamada a <code>$.retrieveJSON</code>.</p>
+
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(&#x27;#new_item&#x27;).submit(function (e) {
+  var pendingItems = $.parseJSON(localStorage[&quot;pendingItems&quot;]);
+  var item = {&quot;data&quot;:$(this).serialize(), &quot;item&quot;:{&quot;name&quot;:$(&quot;#item_name&quot;).val()}};
+  $(&quot;#item_template&quot;).tmpl(item).appendTo(&quot;#items&quot;);
+  pendingItems.push(item);
+  localStorage[&quot;pendingItems&quot;] = JSON.stringify(pendingItems);
+  $(&quot;#item_name&quot;).val(&quot;&quot;);
+  e.preventDefault();
+});</pre>
+
+<p>Con este c&oacute;digo se captura el evento <code>submit</code>.  Cuando se env&iacute;e el formulario la funci&oacute;n obtendr&aacute; la lista de &iacute;tems pendientes del <code>localStorage</code> para a&ntilde;adirle un nuevo elemento que tendr&aacute; dos atributos: el primero llamado <code>data</code> son los datos del formulario serializados (lo que nos permitir&aacute; luego envi&aacute;rselos al servidor) y el segundo atributo llamado <code>item</code> tiene su propio atributo <code>name</code> (igual que los elementos que hemos recuperado de la llamada a <code>/items.json</code>) por lo que podemos usarlo en nuestra plantilla para mostrar el listado.</p>
+
+<p>Esto lo hacemos en la tercera l&iacute;nea de la funci&oacute;n donde obtenemos la plantilla, llamamos a <code>tmpl</code> (pas&aacute;ndo el elemento reci&eacute;n creado), y concatenamos el resultado en el listado de elementos.  Luego a&ntilde;adimos el nuevo &iacute;tem a la lista de pendientes (que volvemos a guardar en el <code>localStorage</code>) y por &uacute;ltimo limpiamos el campo de texto del formulario e invocamos <code>preventDefault</code> para evitar que el formulario se env&iacute;e al servidor.</p>
+
+<p>Veamos si esto funciona.  Tenemos el servidor levantado y recargaremos la p&aacute;gina un par de veces para asegurarnos de tener la &uacute;ltima versi&oacute;n.  Cuando introduzcamos  un nuevo elemento en el campo de texto (por ejemplo  &ldquo;cake&rdquo;) y pulsamos el bot&oacute;n veremos que el elemento aparece en el listado inmediatamente  y que se a&ntilde;ade tambi&eacute;n a la lista de pendientes.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/553/original/E248I06.png" width="841" height="355" alt="El nuevo elemento aparece inmediatamente en la lista."/>
+</div>
+
+<h3>Env&iacute;o de elementos pendientes al servidor</h3>
+
+<p>Los elementos que vayamos a&ntilde;adiendo de esta manera ir&aacute;n quedando almacenados en el navegador, por lo que si abrimos la p&aacute;gina en otro navegador tan s&oacute;lo veremos tres elementos.  Cuando la aplicaci&oacute;n vuelva a estar disponible debemos enviar una petici&oacute;n POST por cada elemento pendiente, lo que haremos con el siguiente fragmento de c&oacute;digo:</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+   
+   // Other functions omitted.
+   function sendPending() {
+    if (window.navigator.onLine) {
+      var pendingItems = $.parseJSON(localStorage[&quot;pendingItems&quot;]);
+      if (pendingItems.length &gt; 0) {
+        var item = pendingItems[0];
+        $.post(&quot;/items&quot;, item.data, function (data) {
+          var pendingItems = $.parseJSON(localStorage[&quot;pendingItems&quot;]);
+          pendingItems.shift();
+          localStorage[&quot;pendingItems&quot;] = JSON.stringify(pendingItems);
+          setTimeout(sendPending, 100);
+        });
+      }
+    }
+  }
+  sendPending();
+});</pre>
+
+<p>La funci&oacute;n <code>sendPending</code> primero comprueba  si el navegador dispone de conexi&oacute;n usando <code>navigator.online</code>.  Luego recupera la lista de pendientes del <code>localStorage</code> y comprueba cu&aacute;ntos hay, cogiendo el primero y enviando la petici&oacute;n POST a <code>/items</code> con los datos serializados del formulario (que guardamos previamente cuando se a&ntilde;adi&oacute; el elemento mientras est&aacute;bamos desconectados).  Cuando vuelva la respuesta volvemos a recuperar la lista de pendientes (por si mientras tanto se ha a&ntilde;adido alguno nuevo), eliminamos el primero y volvemos a guardar la lista en <code>localStorage</code>.  Luego esperamos durante una d&eacute;cima de segundo antes de volver a invocar otra vez la funci&oacute;n con el siguiente elemento de la lista.  Invocamos a nuestra funci&oacute;n <code>sendPending</code> tan pronto como cargue la p&aacute;gina.</p>
+
+<p>Con la aplicaci&oacute;n levantada podemos refrescar la p&aacute;gina un par de veces (para asegurarnos de que se carga el nuevo JavaScript).  Si luego abrimos otro navegador veremos que ya aparece el elemento que a&ntilde;adimos mientras est&aacute;bamos sin conexi&oacute;n.</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/554/original/E248I07.png" width="804" height="340" alt="El elemento que se a&ntilde;adi&oacute; mientras est&aacute;bamos sin conexi&oacute;n aparece en otro navegador."/>
+</div>
+
+<h3>Algunos ajustes finales</h3>
+
+<p>La aplicaci&oacute;n ya funciona como quer&iacute;amos pero hay un par de peque&ntilde;os cambios que podemos hacer en el JavaScript para mejorarlo.  El primero es llamar a <code>sendPending</code> tan pronto como se a&ntilde;ada un elemento a los pendientes para intentar enviarlo al servidor inmediatamente.</p>
+
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(&#x27;#new_item&#x27;).submit(function (e) {
+    var pendingItems = $.parseJSON(localStorage[&quot;pendingItems&quot;]);
+    var item = {&quot;data&quot;:$(this).serialize(),  &quot;item&quot;:{&quot;name&quot;:$(&quot;#item_name&quot;).val()}};
+    $(&quot;#item_template&quot;).tmpl(item).appendTo(&quot;#items&quot;);
+    pendingItems.push(item);
+    localStorage[&quot;pendingItems&quot;] = JSON.stringify(pendingItems);
+    $(&quot;#item_name&quot;).val(&quot;&quot;);
+    sendPending();
+    e.preventDefault();
+  });</pre>
+
+<p>Otro cambio que se puede hacer es vincular la funci&oacute;n <code>sendPending</code> al evento <code>online</code> porque si estamos en un dispositivo m&oacute;vil puede ser que estemos constantemente perdiendo y recuperando la conexi&oacute;n.  Cuando esto &uacute;ltimo ocurra se activar&aacute; este evento, por lo que vincul&aacute;ndonos a &eacute;l el navegador intentar&aacute; enviar los mensajes pendientes tan pronto como el dispositivo vuelva a tener una conexi&oacute;n activa.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(window).bind(&quot;online&quot;, sendPending);</pre>
+
+<p>Tambi&eacute;n podemos cambiar el mensaje de alerta que mostramos cuando hay un error con <code>applicationCache</code> para que se muestre en la consola.</p>
+
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(window.applicationCache).bind(&#x27;error&#x27;, function () {
+  console.log(&#x27;There was an error when loading the cache manifest.&#x27;);
+});
+</pre>
+
+<p>El &uacute;ltimo cambio que haremos al fichero de JavaScript es rodear con un condicional la llamada a <code>localStorage</code> porque no todos los navegadores la soportan, mostrando un mensaje al usuario para que actualice su navegador si es el caso.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  if ($.support.localStorage)
+  {
+	// Other code omitted.
+  }
+  else {
+    alert(&quot;Time to upgrade your browser.&quot;)
+  }
+});</pre>
+
+<p>De vuelta en la plantilla del listado de elementos a&ntilde;adiremos un elemento por defecto en el listado que diga que se est&aacute;n recuperando los elementos del servidor, y as&iacute; el usuario al menos ver&aacute; algo si el navegador va un poco lento.</p>
+
+<p class="codeFilePath">/app/views/items/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Grocery List&quot; %&gt;
+
+&lt;%= form_for Item.new do |f| %&gt;
+ &lt;%= f.text_field :name %&gt;
+ &lt;%= f.submit &quot;Add Another Item&quot; %&gt;
+&lt;% end %&gt;
+
+&lt;script type=&quot;text/html&quot; id=&quot;item_template&quot;&gt;
+  &lt;li&gt;${item.name}&lt;/li&gt;
+&lt;/script&gt;
+
+&lt;ol id=&quot;items&quot;&gt;
+  &lt;li&gt;&lt;em&gt;Loading items...&lt;/em&gt;&lt;/li&gt;
+&lt;/ol&gt;</pre>
+
+<p>Con esto concluimos este episodio, un poco inusual porque se centra sobre todo en JavaScript, pero la posibilidad de crear aplicaciones que pueden funcionar sin conexi&oacute;n es bastante impresionante.  Los que tengan un iPhone u otro dispositivo m&oacute;vil podr&aacute;n probar la aplicaci&oacute;n en modo desconectado cargando la direcci&oacute;n IP con el navegador y luego configurando el tel&eacute;fono en modo avi&oacute;n.</p>

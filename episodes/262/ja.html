@@ -1,0 +1,234 @@
+<p>たとえばメッセージを登録できるアプリケーションがあるとします。メッセージページにはすべてのメッセージの一覧とその下には新しいメッセージを追加できるテキストフィールドがあります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/641/original/E262I01.png" width="800" height="469" alt="メッセージ登録用アプリケーション"/>
+</div>
+
+<p>新しいメッセージはすべて一覧の一番下に現れます。今回はこのアプリケーションを改良して、メッセージをスレッド表示する機能を追加したいと思います。各メッセージに「Reply(返信)」リンクを追加して、特定のメッセージに返信できるようにします。これによって、新しいメッセージは一覧中の親メッセージのすぐ下に現れるようになります。</p>
+
+<p>エピソード162[<a href="http://railscasts.com/episodes/162-tree-based-navigation">動画を見る</a>, <a href="http://asciicasts.com/episodes/162-tree-based-navigation">読む</a>]では、acts_as_treeプラグインを使ってツリー構造を作りました。今回もこの方法でうまくいくかもしれませんが、最高の速度を得ることはできません。この方法では、各メッセージの子供を特定するために、メッセージごとに個別にSQLを発行しなくてはいけないからです。あるメッセージのすべての子孫を一度の問い合わせで取得できればずっと効率的でしょう。</p> 
+
+<p>ネストされたセットを扱うプラグインはいくつかありますが、ここで紹介するのは<a href="https://github.com/stefankroes/ancestry">Ancestry</a>というgemですこのgemのユニークな特徴は、数値フィールドに親レコードの<code>id</code>を持つ方式ではなく、すべての階層情報をひとつの文字列フィールドに保持する点です。これによって各レコードが関連レコードを取得するのに必要な情報を持っているのに加え、Ancestryはそのための<code>parent</code>、 <code>siblings</code>、<code>children</code>などのメソッドを提供します。</p>
+
+<p>アプリケーションにAncestryを追加するために、<code>Gemfile</code>にgemの参照情報を追記し、<code>bundle</code>コマンドを実行してインストールします。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.6'
+gem 'sqlite3'
+gem 'nifty-generators'
+gem 'ancestry'</pre>
+
+<p>次にマイグレーションを実行して<code>messages</code>テーブルにAncestryの機能を追加します。</p>
+
+<pre class="terminal">$ rails g migration add_ancestry_to_message ancestry:string</pre>
+
+<p>AncestryのREADMEファイルではancestryフィールドに索引を追加することを推奨しているので、マイグレーションの実行前にそれも追加しておきます。</p>
+
+<p class="codeFilePath">/db/migrate/20110418204049_add_ancestry_to_message.rb</p>
+<pre class="ruby">class AddAncestryToMessage &lt; ActiveRecord::Migration
+  def self.up
+    add_column :messages, :ancestry, :string
+    add_index :messages, :ancestry
+  end
+
+  def self.down
+    remove_index :messages, :ancestry
+    remove_column :messages, :ancestry
+  end
+end</pre>
+
+<p>通常のとおり、<code>rake db:migrate</code>でマイグレーションを実行します。</p> 
+
+<p>最後に<code>Message</code>モデルのファイルに<code>has_ancestry</code>の呼び出しを追加します。</p>
+
+<p class="codeFilePath">/app/models/message.rb</p>
+<pre class="ruby">class Message &lt; ActiveRecord::Base
+  has_ancestry
+end</pre>
+
+<p>これで完成です。Ancestryが設定されました。</p>
+
+<h3>メッセージのスレッド表示機能を追加する</h3>
+
+<p>Ancestryが設定できたので、アプリケーションを修正していきます。まず最初にメッセージのリストを表示するビューコードを修正して、各メッセージの下に「Reply」リンクを追加します。これを新規メッセージのページにリンクし、新規メッセージがどのメッセージへの返信かがわかるように、現在のメッセージの<code>id</code>を<code>parent_id</code>パラメータとして渡します。</p>
+
+<p class="codeFilePath">/app/views/messages/index.html.erb</p>
+<pre class="ruby">&lt;% title "Messages" %&gt;
+
+&lt;% for message in @messages %&gt;
+  &lt;div class="message"&gt;
+    &lt;div class="created_at"&gt;&lt;%= message.created_at.strftime("%B %d, %Y") %&gt;&lt;/div&gt;   
+    &lt;div class="content"&gt;
+      &lt;%= message.content %&gt;
+    &lt;/div&gt;
+    &lt;div class="actions"&gt;
+      &lt;%= link_to "Reply", new_message_path(:parent_id =&gt; message) %&gt; |
+      &lt;%= link_to "Destroy", message, :confirm =&gt; "Are you sure?", :method =&gt; :delete %&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+&lt;% end %&gt;
+
+&lt;%= render "form" %&gt;</pre>
+
+<p><code>MessageController</code>の<code>new</code>アクションで、<code>parent_id</code>パラメータを新規メッセージに渡します。Ancestryはこの<code>parent_id</code>パラメータを使ってメッセージの親を設定します。</p>
+
+<p class="codeFilePath">/app/controllers/messages_controller.rb</p>
+<pre class="ruby">def new
+  @message = Message.new(:parent_id =&gt; params[:parent_id])
+end</pre>
+
+<p>最後に新規メッセージフォームで<code>parent_id</code>をhiddenフィールドとして追加し、新規メッセージが、返信されようとしているメッセージの子供として識別できるようにします。</p>
+
+<p class="codeFilePath">/app/views/messages/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for @message do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= f.hidden_field :parent_id %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :content, "New Message" %&gt;&lt;br /&gt;
+    &lt;%= f.text_area :content, :rows =&gt; 8 %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit "Post Message" %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>では試してみましょう。メッセージ一覧のページを再度読み込むと、各メッセージに「Reply」リンクが付いています。リンクをクリックすると、返信しようとするメッセージの<code>id</code>をクエリ文字列に含んだ新規メッセージページに切り替わります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/642/original/E262I02.png" width="800" height="425" alt="親メッセージのidをクエリ文字列に持つ新規メッセージフォーム"/>
+</div>
+
+<p>このときに返信しようとしている元メッセージがフォーム上に表示されていた方が便利でしょう。理想的には「Reply」リンクがクリックされたときにAJAXベースの機能で動的に入力フォームを表示できればいいのですが、アプリケーションをシンプルにするために、新規メッセージページのフォームの上に親メッセージを表示することにします。これを簡単におこなうために、メッセージを表示する部分のコードをindexビューから切り出してpartialファイルにします。</p>
+
+<p class="codeFilePath">/app/views/messages/_message.html.erb</p>
+<pre class="ruby">&lt;div class="message"&gt;
+  &lt;div class="created_at"&gt;&lt;%= message.created_at.strftime("%B %d, %Y") %&gt;&lt;/div&gt;
+  &lt;div class="content"&gt;
+    &lt;%= message.content %&gt;
+  &lt;/div&gt;
+  &lt;div class="actions"&gt;
+    &lt;%= link_to "Reply", new_message_path(:parent_id =&gt; message) %&gt; |
+    &lt;%= link_to "Destroy", message, :confirm =&gt; "Are you sure?", :method =&gt; :delete %&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</pre>
+
+<p><code>index</code>ビューのコードも修正し、新しく作ったpartialを利用するように書き換えます。</p>
+
+<p class="codeFilePath">/app/views/messages/index.html.erb</p>
+<pre class="ruby">&lt;% title "Messages" %&gt;
+
+&lt;%= render @messages %&gt;
+
+&lt;%= render "form" %&gt;</pre>
+
+<p>新しいテンプレートでは、親メッセージがあればこのpartialを使ってそれらを表示します。</p>
+
+<p class="codeFilePath">/app/views/messages/new.html.erb</p>
+<pre class="ruby">&lt;% title "Reply" %&gt;
+
+&lt;%= render @message.parent if @message.parent %&gt;
+
+&lt;%= render "form" %&gt;
+
+&lt;p&gt;&lt;%= link_to "Back to Messages", messages_path %&gt;&lt;/p&gt;</pre>
+
+<p>既存のメッセージで「Reply」をクリックすると、入力フォームの上にそのメッセージが表示されます。返信を入力し、どうなるか見てみましょう。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/643/original/E262I03.png" width="800" height="493" alt="返信されているメッセージがフォームの上に表示される"/>
+</div>
+
+<p>「Post Message(メッセージを送信)」ボタンをクリックすると、<code>index</code>アクションにリダイレクトされ、新規メッセージがリストに追加されます。新規メッセージの親はAncestryによって記録されますが、先に定義したリストの表示方法に従い、新規メッセージは親の下ではなくリストの最後に表示されています。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/644/original/E262I04.png" width="800" height="594" alt="新規メッセージがフォームの上に表示される"/>
+</div>
+
+<h3>メッセージを並び替える</h3>
+
+<p>Ancestryには<code>arrange</code>というメソッドがあり、複数のレコードがネストされたハッシュの集合として返されるので、メッセージをスレッド表示させるに非常に適しています。このメソッドに<code>:order</code>句を渡して、レコードの並び順を指定できます。</p> 
+
+<p><code>index</code>テンプレートで、<code>arrange</code>を用いて希望する順番でメッセージを返すように指定します。<code>arrange</code>はハッシュを返すので、出力を直接<code>render</code>に渡すことはできないため、各メッセージをループ処理する必要があります。これを<code>nested_messages</code>というヘルパーメソッド内で行い、<code>render</code>に代わって、スレッド化されたメッセージのリストを表示させます。</p>
+
+<p class="codeFilePath">/app/views/messages/index.html.erb</p>
+<pre class="ruby">&lt;% title "Messages" %&gt;
+
+&lt;%= nested_messages @messages.arrange(:order =&gt; :created_at) %&gt;
+
+&lt;%= render "form" %&gt;</pre>
+
+<p><code>MessagesHelper</code>内に<code>nested_messages</code>を作成し、これがネストされたメッセージのハッシュの集合を受け取ります。このメソッドは、各ハッシュをループ処理するために<code>map</code>を利用し、最後にまたすべてをひとつに結合します。<code>map</code>がとるブロックは、キーとして一つのメッセージを、値としてその子メッセージを持ちます。</p>
+
+<p>ブロック内では、まず現在のメッセージを表示し、その後再帰的に<code>nested_messages</code>を呼び出して現在のメッセージの子を渡します。子メッセージの外観は後ほど修正するとして、<code>content_tag</code>を用いて子メッセージを<code>nested_messages</code>というクラスを定義した<code>div</code>に入れます。すべてのメッセージの表示が定義できたらすべてを結合して、<code>html_safe</code>で出力します。</p>
+
+<p class="codeFilePath">/app/helpers/messages_helper.rb</p>
+<pre class="ruby">module MessagesHelper
+  def nested_messages(messages)
+    messages.map do |message, sub_messages|
+      render(message) + content_tag(:div, nested_messages(sub_messages), :class =&gt; "nested_messages")
+    end.join.html_safe
+  end
+end</pre>
+
+<p>メッセージのページを再度読み込むと、最初のメッセージへの返信が、親の下の正しい場所に表示されています。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/645/original/E262I05.png" width="800" height="590" alt="メッセージが正しい順番で表示される"/>
+</div>
+
+<p>子メッセージに<code>class</code>を追加したので、スタイルを適用してインデントをかけ各メッセージと返信の関係がわかりやすくなるように修正します。</p>
+
+<p class="codeFilePath">/public/stylesheets/application.css</p>
+<pre class="css">.nested_messages {
+  margin-left: 30px;
+}</pre>
+
+<p>メッセージへの返信数が多いとマージンが増えすぎてスクリーンから溢れてしまいます。そこで次のようなスタイル規則を追加して、例えば3階層よりも深い場合はインデントしないようにします。</p>
+
+<p class="codeFilePath">/public/stylesheets/application.css</p>
+<pre class="css">.nested_messages .nested_messages .nested_messages {
+  margin-left: 0;
+}</pre>
+
+<p>メッセージページを再度読み込むと、ネストされたメッセージが正しくインデントされています。元からある返信に対してさらに返信を追加しても、正しくインデントされます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/646/original/E262I06.png" width="800" height="590" alt="返信がインデントされている"/>
+</div>
+
+<h3>ひとつのスレッドのみを表示する</h3>
+
+<p>今回の締めくくりに、もう一つ小さな機能を追加します。アプリケーションを修正して、メッセージをクリックするとそのメッセージとそれへの返信だけが表示されるようにします。</p> 
+
+<p>まず初めにメッセージのテキストをリンクに変更し、そのメッセージの<code>show</code>アクションにリンクします。</p>
+
+<p class="codeFilePath">/app/views/messages/_message.html.erb</p>
+<pre class="ruby">&lt;div class="message"&gt;
+  &lt;div class="created_at"&gt;&lt;%= message.created_at.strftime("%B %d, %Y") %&gt;&lt;/div&gt;
+  &lt;div class="content"&gt;
+    &lt;%= link_to message.content, message %&gt;
+  &lt;/div&gt;
+  &lt;div class="actions"&gt;
+    &lt;%= link_to "Reply", new_message_path(:parent_id =&gt; message) %&gt; |
+    &lt;%= link_to "Destroy", message, :confirm =&gt; "Are you sure?", :method =&gt; :delete %&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</pre>
+
+<p>次に<code>show</code>テンプレートを修正して、メッセージを表示させます。メッセージで<code>subtree</code>を呼び出して、そのメッセージとそのすべての子供を取得して、<code>arrange</code>で作成日順に並び替えます。</p>
+
+<p class="codeFilePath">/app/views/messages/show.html.erb</p>
+<pre class="ruby">&lt;% title "Message" %&gt;
+
+&lt;%= nested_messages @message.subtree.arrange(:order =&gt; :created_at) %&gt;
+
+&lt;p&gt;&lt;%= link_to "Back to All Messages", messages_path %&gt;&lt;/p&gt;</pre>
+
+<p>メッセージのページを再度読み込んで、いずれかのメッセージをクリックすると、そのメッセージとその子供を見ることができます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/647/original/E262I07.png" width="804" height="375" alt="個別のスレッドのメッセージ"/>
+</div>
+
+<p>あるメッセージにどれだけ多くの返信がついていたとしても、データベースへの1回の問い合わせですべてを取得できるので、アプリケーションのパフォーマンスへの影響を心配する必要はありません。</p>
+
+<p>Ancestryについての今回のエピソードは以上です。Railsのモデルをツリー構造で保存する場合の優れた解決方法であり、このような処理が必要な場合は検討する価値があるでしょう。</p>

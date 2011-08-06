@@ -1,0 +1,335 @@
+<p>Casi todas las aplicaciones Rails utilizan alg&uacute;n tipo de autenticaci&oacute;n.  Las librer&iacute;as m&aacute;s usadas para implementar autenticaci&oacute;n basada en claves son <a href="https://github.com/binarylogic/authlogic">Authlogic</a>, <a href="https://github.com/plataformatec/devise">Devise</a>, <a href="https://github.com/technoweenie/restful-authentication">Restful Authentication</a> y <a href="https://github.com/thoughtbot/clearance">Clearance</a>,  &iquest;cu&aacute;l deber&iacute;amos usar?  Han transcurrido varios meses desde las &uacute;ltimas versiones de  Authlogic y Restful Authentication, lo cual nos deja s&oacute;lo con Devise y Clearance, que son <em>engines</em> de Rails lo que quiere decir que incorporan controladores y vistas que gestionar&aacute;n la autenticaci&oacute;n por nosotros.  Esto puede que no sea del todo ideal porque en algo tan importante con la autenticaci&oacute;n podemos acabar sobreescribiendo mucha de la funcionalidad que proporcionan estas capas de controladores y vistas.  En estos casos los <em>engines</em> pierden gran parte de su atractivo y nuestra aplicaci&oacute;n se complica.</p>
+
+<p>Por supuesto los <em>engines</em> tienen su utilidad  y no hay ninguna raz&oacute;n para dejar de usarlos pero cabe considerar otras alternativas.  En lo que a la autenticaci&oacute;n se refiere, los generadores pueden ser una soluci&oacute;n mejor porque todo el c&oacute;digo reside en nuestra aplicaci&oacute;n, lo que  hace que sea m&aacute;s f&aacute;cil de personalizar.  Por ejemplo, los  <a href="https://github.com/ryanb/nifty-generators">Nifty Generators</a>  de Ryan Bates incluyen un generador de autenticaci&oacute;n que entrega un c&oacute;digo muy simple para implementar la autenticaci&oacute;n basada en claves en nuestras aplicaciones.  Pero en este episodio no vamos a hablar de Nifty Authentication, en vez de eso vamos a ver c&oacute;mo implementar la autenticaci&oacute;n basada en claves desde cero.  As&iacute;, la pr&oacute;xima vez que usemos para estos menesteres un <em>engine</em> o un generador tendremos mejor idea de qu&eacute; es lo que est&aacute; ocurriendo por debajo.</p>
+
+<h3>Empezando</h3>
+
+<p>Como vamos a hacer la autenticaci&oacute;n desde cero, iremos creando una nueva aplicaci&oacute;n Rails 3 a la que bautizaremos <code>auth</code>.</p>
+
+<pre class="terminal">$ rails new auth</pre>
+
+<p>A continuaci&oacute;n cambiaremos al nuevo directorio  <code>auth</code> y crearemos el proceso de registro.  Necesitamos un controlador para crear usuarios, as&iacute; que creamos el controlador <code>UsersController</code> que tendr&aacute; una acci&oacute;n <code>new</code>.</p>
+
+<pre class="terminal">$ rails g controller users new</pre>
+
+<p>Nos har&aacute; falta tambi&eacute;n un modelo <code>User</code> donde guardar las direcciones de correo de los usuarios y sus claves.  Por razones obvias no deber&iacute;amos jam&aacute;s guardar las claves en texto claro, por lo que guardaremos la clave con una clave y una <em>sal</em>.</p>
+
+<pre class="terminal">$ rails g model user email:string password_hash:string password_salt:string</pre>
+
+<p>Una vez que hemos creado el modelo podemos migrar la base de datos para crear la tabla de los usuarios.</p>
+
+<pre class="terminal">$ rake db:migrate</pre>
+
+<p>A continuaci&oacute;n tenemos que escribir el c&oacute;digo de las acciones <code>new</code> y <code>create</code> en el controlador <code>UsersController</code>.</p>
+
+<p class="codeFilePath">/app/controllers/users_controller.rb</p>
+<pre class="ruby">class UsersController &lt; ApplicationController
+  def new
+    @user = User.new
+  end
+  
+  def create
+    @user = User.new(params[:user])
+    if @user.save
+      redirect_to root_url, :notice =&gt; &quot;Signed up!&quot;
+    else
+      render &quot;new&quot;
+    end
+  end
+end</pre>
+
+<p>Se trata de un controlador normal.  En la acci&oacute;n <code>new</code> creamos un nuevo <code>User</code>, mientras que en la acci&oacute;n <code>create</code> creamos un nuevo <code>User</code> bas&aacute;ndonos en los par&aacute;metros recibidos (que vendr&aacute;n del formulario).  Si ese nuevo <code>User</code> es v&aacute;lido redirigimos a la portada del sitio (que todav&iacute;a no existe) y de lo contrario volvemos a mostrar la plantilla <code>new</code>.</p>
+
+<p>Escribamos ahora la plantilla de <code>new</code>.  Tendr&aacute; un formulario con los campos <code>email</code>, <code>password</code> y <code>password_confirmation</code>, as&iacute; como el c&oacute;digo necesario para mostrar los errores de validaci&oacute;n.</p>
+
+<p class="codeFilePath">/app/views/users/new.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Sign Up&lt;/h1&gt;
+
+&lt;%= form_for @user do |f| %&gt;
+  &lt;% if @user.errors.any? %&gt;
+    &lt;div class=&quot;error_messages&quot;&gt;
+      &lt;h2&gt;Form is invalid&lt;/h2&gt;
+      &lt;ul&gt;
+        &lt;% for message in @user.errors.full_messages %&gt;
+          &lt;li&gt;&lt;%= message %&gt;&lt;/li&gt;
+        &lt;% end %&gt;
+      &lt;/ul&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :email %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :email %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :password %&gt;&lt;br /&gt;
+    &lt;%= f.password_field :password %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :password_confirmation %&gt;
+    &lt;%= f.password_field :password_confirmation %&gt;
+  &lt;/p&gt;
+  &lt;p class=&quot;button&quot;&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>El modelo <code>User</code> no posee los atributos <code>password</code> o <code>password_confirmation</code> pero m&aacute;s adelante crearemos  m&eacute;todos de acceso que los gestionen. Tambi&eacute;n haremos un par de cambios al fichero de rutas.  El generador de controlador ha generado la siguiente ruta.</p>
+
+<pre class="ruby">get &quot;users/new&quot;</pre>
+
+<p>Vamos a cambiar esta ruta para que sea <code>/sign_up</code>, que apuntar&aacute; a <code>users#new</code>, y le daremos el nombre &lt;ocde&gt;sign_up&lt;/ocde&gt;.  Tambi&eacute;n crearemos una ruta ra&iacute;z que apunte al formulario de registro.  Por &uacute;ltimo, a&ntilde;adiremos un recurso para el modelo usuario de forma que  la acci&oacute;n <code>create</code> funcione correctamente.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Auth::Application.routes.draw do
+  get &quot;sign_up&quot; =&gt; &quot;users#new&quot;, :as =&gt; &quot;sign_up&quot;
+  root :to =&gt; &quot;users#new&quot;
+  resources :users
+end</pre>
+
+<p>Si ahora arrancamos el servidor y visitamos la p&aacute;gina de registro veremos un mensaje de error.</p>
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/557/original/E250I01.png" width="800" height="514" alt="El error que recibimos al ver el formulario."/>
+</div>
+
+<p>El error se produce porque en el formulario aparece el campo <code>password</code> para el modelo <code>User</code> pero en la base de datos no existe dicha columna y por consiguiente el atributo no existe.  Vamos a crear este atributo en el modelo, as&iacute; como un atributo para controlar la confirmaci&oacute;n de clave.  Para <code>password_confirmation</code> podemos utilizar <code>validates_confirmation_of</code>, que tambi&eacute;n comprueba si la clave y su validaci&oacute;n coinciden.  Tambi&eacute;n podemos a&ntilde;adir otras validaciones al formulario, tales como comprobar la presencia de una direcci&oacute;n de correo.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  attr_accessor :password
+  validates_confirmation_of :password
+  validates_presence_of :password, :on =&gt; :create
+  validates_presence_of :email
+  validates_uniqueness_of :email
+end</pre>
+
+<p>Cuando creamos el modelo <code>User</code> incorporamos los campos <code>password_hash</code> y <code>password_salt</code> en la base de datos donde se guardar&aacute; la versi&oacute;n encriptada de la clave.  Cuando se env&iacute;e el formulario tendremos que cifrar el valor del campo <code>password</code> y guardar el <em>hash</em> y la sal en estos dos campos.   Para cifrar las claves podemos usar  <a href="http://bcrypt.sourceforge.net/">bcrypt</a>, incorpor&aacute;ndolo en nuestra aplicaci&oacute;n mediante la gema <a href="http://bcrypt-ruby.rubyforge.org/">bcrypt-ruby</a>.  Primero a&ntilde;adiremos una referencia a dicha gema en el Gemfile y luego la instalaremos con Bundler.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.3&#x27;
+
+gem &#x27;sqlite3-ruby&#x27;, :require =&gt; &#x27;sqlite3&#x27;
+gem &#x27;bcrypt-ruby&#x27;, :require =&gt; &#x27;bcrypt&#x27;</pre>
+
+<p>Lo siguiente ser&aacute; modificar el modelo <code>User</code> para que cifre la clave antes de guardarla.  Podemos hacerlo utilizando un filtro <code>before_save</code> que invoque a un nuevo m&eacute;todo llamado  <code>encrypt_password</code>, que comprobar&aacute; que la clave est&eacute; presente y, en su caso, generar&aacute; la sal y el <em>hash</em> correspondiente utilizando los m&eacute;todos <code>generate_salt</code> y <code>hash_secret</code> de <code>BCrypt::Engine</code>.</p>
+ 
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  attr_accessor :password
+  before_save :encrypt_password
+  
+  validates_confirmation_of :password
+  validates_presence_of :password, :on =&gt; :create
+  validates_presence_of :email
+  validates_uniqueness_of :email
+  
+  def encrypt_password
+    if password.present?
+      self.password_salt = BCrypt::Engine.generate_salt
+      self.password_hash = BCrypt::Engine.hash_secret(password, password_salt)
+    end
+  end
+end</pre>
+
+<p>Cuando ahora un usuario se de de alta en la base de datos se guardar&aacute;n correctamente los atributos <code>password_hash</code> y <code>password_salt</code>.  Si visitamos el formulario de registro veremos que funciona: si lo rellenamos correctamente seremos redirigidos a la p&aacute;gina principal. Si luego miramos la tabla <code>users</code> de la base de datos veremos que  el nuevo usuario aparece con su clave cifrada.</p>
+
+<pre class="terminal">$ rails dbconsole
+SQLite version 3.6.12
+Enter &quot;.help&quot; for instructions
+Enter SQL statements terminated with a &quot;;&quot;
+sqlite&gt; .mode column
+sqlite&gt; .header on
+sqlite&gt; SELECT * FROM users;
+id          email                  password_hash                                                 password_salt                  created_at                  updated_at                
+----------  ---------------------  ------------------------------------------------------------  -----------------------------  --------------------------  --------------------------
+1           eifion@asciicasts.com  $2a$10$Jh./oyCeThSChUCY8Of6F.fiHP8m4gMkZNjUR3vsDgvupUPgumNs.  $2a$10$Jh./oyCeThSChUCY8Of6F.  2011-01-26 21:51:56.399518  2011-01-26 21:51:56.399518</pre>
+
+<h3>Inicio de sesi&oacute;n</h3>
+
+<p>Ya estamos a mitad de camino.  Los usuarios se pueden registrar pero todav&iacute;a no pueden iniciar la sesi&oacute;n.  Para ello vamos a crear un nuevo controlador llamado <code>sessions</code> que controlar&aacute; el  inicio de sesi&oacute;n.</p>
+
+<pre class="terminal">$ rails g controller sessions new</pre>
+
+<p>En el fichero <code>new</code> reci&eacute;n generado crearemos el formulario para iniciar la sesi&oacute;n.</p>
+
+<p class="codeFilePath">/app/views/sessions/new.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Log in&lt;/h1&gt;
+
+&lt;%= form_tag sessions_path do %&gt;
+  &lt;p&gt;
+    &lt;%= label_tag :email %&gt;&lt;br /&gt;
+    &lt;%= text_field_tag :email, params[:email] %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= label_tag :password %&gt;&lt;br /&gt;
+    &lt;%= password_field_tag :password %&gt;
+  &lt;/p&gt;
+  &lt;p class=&quot;button&quot;&gt;&lt;%= submit_tag %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>Hemos utilizado <code>form_tag</code> en lugar de <code>form_for</code> porque este &uacute;ltimo implica que existe un recurso detr&aacute;s del formulario y dado que no tenemos un modelo <code>Session</code>, est&aacute; claro que este no es nuestro caso.  El formulario env&iacute;a un POST a <code>sessions_path</code>, que coincidir&aacute; con la acci&oacute;n <code>create</code> de <code>SessionController</code>.  El formulario tiene dos campos, uno para la direcci&oacute;n de correo y otro para la clave.</p>
+
+<p>Tenemos que hacer algunos ajustes en las rutas.  Cambiaremos la ruta <code>sessions/new</code> (que hab&iacute;a creado el generador) por una llamada <code>log_in</code>.  Tambi&eacute;n tendremos que a&ntilde;adir <code>resources :sessions</code> para que funcione bien el formulario de inicio de sesi&oacute;n.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Auth::Application.routes.draw do
+  get &quot;log_in&quot; =&gt; &quot;sessions#new&quot;, :as =&gt; &quot;log_in&quot;
+
+  get &quot;sign_up&quot; =&gt; &quot;users#new&quot;, :as =&gt; &quot;sign_up&quot;
+  root :to =&gt; &quot;users#new&quot;
+  resources :users
+  resources :sessions
+end</pre>
+
+<p>En <code>SessionsController</code> tenemos que escribir la acci&oacute;n <code>create</code> para controlar la autenticaci&oacute;n cuando el usuario inicia la sesi&oacute;n, en la que tendremos que validar al usuario llamando a un nuevo m&eacute;todo de clase en el modelo <code>User</code>.  Este m&eacute;todo devolver&aacute; una instancia de <code>User</code> si el usuario ha sido autenticado correctamente, en cuyo caso adem&aacute;s guardaremos el <code>id</code> del usuario en una variable de sesi&oacute;n y luego redirigiremos a la p&aacute;gina principal, mostrando un mensaje para que el usuario sepa que ha iniciado la sesi&oacute;n adecuadamente.  Si el intento falla, lo indicaremos con un mensaje distinto y volveremos a mostrar el formulario.  N&oacute;tese que usamos <code>flash.now</code> porque estamos mostrando una p&aacute;gina, mas que redirigiendo a otra.</p>
+	
+<p class="codeFilePath">/app/controllers/sessions_controller.rb</p>
+<pre class="ruby">class SessionsController &lt; ApplicationController
+  def new
+  end
+  
+  def create
+    user = User.authenticate(params[:email], params[:password])
+    if user
+      session[:user_id] = user.id
+      redirect_to root_url, :notice =&gt; &quot;Logged in!&quot;
+    else
+      flash.now.alert = &quot;Invalid email or password&quot;
+      render &quot;new&quot;
+    end
+  end
+end</pre>
+
+<p>Ahora tenemos que escribir el m&eacute;todo <code>User.authenticate</code>.  Primero intentar&aacute; encontrar el usuario por la direcci&oacute;n de correo recibida, si lo encuentra cifrar&aacute; la clave del formulario de la misma manera que hizo cuando el usuario inici&oacute; sesi&oacute;n, utilizando el campo <code>password_salt</code>.  Si esto es correcto y el <em>hash</em> cifrado coincide con el que hay almacenado en la base de datos, entonces la clave es correcta y se devolver&aacute; la instancia del usuario, en caso contrario se devolver&aacute; <code>nil</code>.  La sentencia <code>else</code> no es estrictamente necesaria en Ruby, porque siempre se devuelve <code>nil</code> por defecto, pero se deja aqu&iacute; por claridad.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">def self.authenticate(email, password)
+    user = find_by_email(email)
+    if user &amp;&amp; user.password_hash == BCrypt::Engine.hash_secret &crarr;
+      (password, user.password_salt)
+      user
+    else
+      nil
+    end
+  end
+end</pre>
+
+<p>Antes de probar este &uacute;ltimo c&oacute;digo modificaremos el <em>layout</em> de la aplicaci&oacute;n para que se muestren los mensajes recibidos por <em>flash</em>:</p>
+
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Auth&lt;/title&gt;
+  &lt;%= stylesheet_link_tag :all %&gt;
+  &lt;%= javascript_include_tag :defaults %&gt;
+  &lt;%= csrf_meta_tag %&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;% flash.each do |name, msg| %&gt;
+    &lt;%= content_tag :div, msg, :id =&gt; &quot;flash#{name}&quot; %&gt;
+  &lt;% end %&gt;
+
+&lt;%= yield %&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+
+<p>Si ahora intentamos iniciar la sesi&oacute;n con un nombre de usuario o clave incorrectos veremos otra vez el formulario de inicio de sesi&oacute;n y el mensaje nos dir&aacute; que no hemos iniciado sesi&oacute;n.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/558/original/E250I02.png" width="801" height="343" alt="Si no se inicia la sesión se muestra un mensaje."/>
+</div>
+
+<p>Si introducemos la informaci&oacute;n de inicio de sesi&oacute;n correcta seremos redirigidos a la p&aacute;gina prinicpal con un mensaje que indica que tenemos una sesi&oacute;n iniciada.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/559/original/E250I03.png" width="800" height="434" alt="somos dirigidos a la página principal si iniciamos la sesión correctamente."/>
+</div>
+
+<h3>Cierre de sesi&oacute;n</h3>
+
+<p>A&uacute;n nos queda por implementar una manera de cerrar la sesi&oacute;n.  Lo primero que haremos ser&aacute; implementar una nueva ruta:  <code>&quot;log_out&quot;</code>.</p>
+
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Auth::Application.routes.draw do
+  get &quot;log_in&quot; =&gt; &quot;sessions#new&quot;, :as =&gt; &quot;log_in&quot;
+  get &quot;log_out&quot; =&gt; &quot;sessions#destroy&quot;, :as =&gt; &quot;log_out&quot;
+
+  get &quot;sign_up&quot; =&gt; &quot;users#new&quot;, :as =&gt; &quot;sign_up&quot;
+  root :to =&gt; &quot;users#new&quot;
+  resources :users
+  resources :sessions
+end</pre>
+
+<p>Esta ruta apunta al m&eacute;todo <code>destroy</code> de <code>SessionsController</code>, el cual cerrar&aacute; la sesi&oacute;n del usuario simplemente eliminando la variable de sesi&oacute;n <code>user_id</code> y dirigiendo a la p&aacute;gina principal.</p>
+
+<p class="codeFilePath">/app/controllers/sessions_controller.rb</p>
+<pre class="ruby">def destroy
+  session[:user_id] = nil
+  redirect_to root_url, :notice =&gt; &quot;Logged out!&quot;
+end</pre>
+
+<p>Podemos hacer la prueba si visitamos <code>/log_out</code>.  Al hacerlo seremos llevados a la p&aacute;gina principal y veremos el mensaje correspondiente.</p>
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/560/original/E250I04.png" width="800" height="434" alt="Hemos sido llevados a la página principal al cerrar la sesión."/>
+</div>
+
+<h3>Mostrando enlaces</h3>
+
+<p>En lugar de tener que teclear URLs en la barra de direcciones para iniciar y cerrar la sesi&oacute;n, estar&iacute;a mucho mejor que tuvi&eacute;semos enlaces en la p&aacute;gina para poder hacer esto.  Esto se hace a&ntilde;adiendo el siguiente c&oacute;digo en el fichero de <em>layout</em> justo antes del c&oacute;digo que muestra los mensajes <em>flash</em>:</p>
+
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;div id=&quot;user_nav&quot;&gt;
+  &lt;% if current_user %&gt;
+    Logged in as &lt;%= current_user.email %&gt;
+    &lt;%= link_to &quot;Log out&quot;, log_out_path %&gt;
+  &lt;% else %&gt;
+    &lt;%= link_to &quot;Sign up&quot;, sign_up_path %&gt; or 
+    &lt;%= link_to &quot;Log in&quot;, log_in_path %&gt;
+  &lt;% end %&gt;
+&lt;/div&gt;</pre>
+
+<p>Todav&iacute;a no tenemos el m&eacute;todo <code>current_user</code> as&iacute; que vamos a escribirlo.  Lo pondremos en <code>ApplicationController</code>.</p>
+
+<p class="codeFilePath">/app/controllers/application_controller.rb</p>
+<pre class="ruby">class ApplicationController &lt; ActionController::Base
+  protect_from_forgery
+  helper_method :current_user
+  
+  private
+  def current_user
+    @current_user ||= User.find(session[:user_id]) if &crarr;
+      session[:user_id]
+  end
+end</pre>
+
+<p>Este m&eacute;todo recuperar&aacute; el usuario actual por su <code>id</code> (utilizando el valor de la variable de sesi&oacute;n) y cachea el resultado en una variable de instancia.   Haremos tambi&eacute;n que sea un m&eacute;todo <em>helper</em> para poder usarlo en el c&oacute;digo de las vistas.</p>
+
+<p>Si se recarga la p&aacute;gina ya veremos los enalces de registro e inicio de sesi&oacute;n.  Si iniciamos la sesi&oacute;n veremos tanto la informaci&oacute;n de la cuenta actual como un enlace para cerrar la sesi&oacute;n.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/561/original/E250I05.png" width="803" height="437" alt="También tenemos enlaces para iniciar y cerrar la sesión."/>
+</div>
+
+<p>En este episodio hemos visto mucho c&oacute;digo pero ya tenemos un sistema de autenticaci&oacute;n completamente funcional.  Toda la l&oacute;gica de autenticaci&oacute;n sucede en el modelo <code>User</code>, principalmente en los m&eacute;todos <code>self.authenticate</code> y <code>encrypt_password</code>, que tienen un c&oacute;digo muy sencillo.</p>
+
+<p>Hemos visto que no es muy complicado construir nuestro propio sistema de autenticaci&oacute;n en lugar de usar un <em>engine</em>.  Podemos adem&aacute;s personalizar los controladores y vistas exactamente como neceistamos.  Lo que hemos hecho aqu&iacute; es pr&aacute;cticamente el m&iacute;nimo imprescindible y en una aplicaci&oacute;n de producci&oacute;n tendr&iacute;amos que a&ntilde;adir m&aacute;s validaciones al modelo <code>User</code>, tales como validar la longitud de la clave y el formato del e-mail.</p>
+
+<p>Es importante a&ntilde;adir al modelo <code>User</code> c&oacute;digo para restringir los atributos que se pueden asignar masivamente.  Esto se puede hacer con  <code>attr_accessible</code> en el modelo <code>User</code>.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  attr_accessible :email, :password, :password_confirmation
+  
+  #rest of code omitted
+end</pre>
+
+<p>As&iacute; evitaremos que nadie actualice el <code>password_hash</code> u otros campos en el modelo <code>User</code>.</p>
+
+
+<p>Con esto termina este episodio.  Aunque las gemas de autenticaci&oacute;n ya existentes son muy buenas, siempre viene bien saber c&oacute;mo funcionan por dentro.  Si adem&aacute;s de la autenticaci&oacute;n basada en claves queremos a&ntilde;adir autenticaci&oacute;n de terceras partes podemos ver el episodio 241 [<a href="http://railscasts.com/episodes/241-simple-omniauth">verlo</a>, <a href="http://es.asciicasts.com/episodes/241-simplemente-omniauth">leerlo</a>] que trata de OmniAuth.</p>

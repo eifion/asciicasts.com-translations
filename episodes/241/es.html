@@ -1,0 +1,206 @@
+<p>Vimos OmniAuth hace unas semanas en los episodios 235 [<a href="http://railscasts.com/episodes/235-omniauth-part-1">verlo</a>, <a href="http://es.asciicasts.com/episodes/235-omniauth-part-1">leerlo</a>] y 236 [<a href="http://railscasts.com/episodes/236-omniauth-part-2">verlo</a>, <a href="http://es.asciicasts.com/episodes/236-omniauth-y-ii">leerlo</a>].  OmniAuth viene muy bien para integrar servicios de autenticaci&oacute;n de terceros como Twitter y Facebook en nuestras aplicaciones Rails.  El escenario que se presentaba en dichos episodios era bastante complejo porque est&aacute;bamos integrando OmniAuth sobre una aplicaci&oacute;n que ya ten&iacute;a implementado un sistema de autenticaci&oacute;n por clave de usuario basado en Devise.  Tambi&eacute;n est&aacute;bamos gestionando  m&uacute;ltiples autenticaciones por usuario.  En este episodio veremos que si podemos prescindir de todos estos requisitos extra podremos realizar la autenticaci&oacute;n con OmniAuth de forma mucho m&aacute;s simple.</p>
+
+<p>La aplicaci&oacute;n que usaremos en este episodio es el sencillo <em>blog</em> que hemos visto anterioremente.  Ahora mismo no dispone de autenticaci&oacute;n, as&iacute; que la a&ntilde;adiremos via Twitter usando s&oacute;lamente OmniAuth.  No utilizaremos Authlogic, Devise o ning&uacute;n otro tipo de soluci&oacute;n de autenticaci&oacute;n, y as&iacute; veremos lo simple que es OmniAuth en realidad.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/522/original/E241I01.png" width="800" height="465" alt="The homepage of our blogging app."/>
+</div>
+
+<p>Lo primero es a&ntilde;adir la dependencia de la gema de OmniAuth.  Nuestra aplicaci&oacute;n est&aacute; escrita en Rails 3 por lo que lo a&ntilde;adiremos a nuestro <code>Gemfile</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem &quot;omniauth&quot;</pre>
+
+
+<p>No debemos olvidar ejecutar <code>bundler</code> para asegurarnos de que todas las gemas necesarias est&aacute;n instaladas.  A continuaci&oacute;n crearemos un fichero de inicializaci&oacute;n llamado <code>omniauth.rb</code>.  En este fichero a&ntilde;adiremos el c&oacute;digo necesario para cargar OmniAuth y configurarlo para usar Twitter.</p>
+
+<p class="codeFilePath">/config/initializers/omniauth.rb</p>
+<pre class="ruby">Rails.application.config.middleware.use OmniAuth::Builder do
+  provider :twitter, &#x27;CONSUMER_KEY&#x27;, &#x27;CONSUMER_SECRET&#x27;
+end</pre>
+
+<p>Obs&eacute;rvese que hemos a&ntilde;adido OmniAuth a nuestra aplicaci&oacute;n como <em>middleware</em>.  OmniAuth es simplemente un <em>middleware</em> de Rack, lo que es muy &uacute;til porque significa que est&aacute; desacoplado del resto de nuestra aplicaci&oacute;n, y as&iacute; podemos implementar la autenticaci&oacute;n en nuestra aplicaci&oacute;n como queramos.</p>
+
+<p>Unicamente tenemos un proveedor de autenticaci&oacute;n: Twitter.  Tenemos que cambiar los valores de <code>CONSUMER_KEY</code> y &lt;coce&gt;CONSUMER_SECRET&lt;/coce&gt; en el c&oacute;digo anteiror con valores reales.   Podemos conseguirlos entrando en  <a href="http://dev.twitter.com">la p&aacute;gina para desarroladores en Twitter</a> y registrando nuestra aplicaci&oacute;n.  Una vez que hayamos hecho esto podemos comenzar a a&ntilde;adir la autenticaci&oacute;n en nuestra aplicaci&oacute;n.</p>
+
+<p>En el fichero de <em>layout</em> de nuestra aplicaci&oacute;n mostramos un texto por defecto que queremos que sea reemplazado por un enlace de inicio de sesi&oacute;n.  Este texto llevar&aacute; a la URL para Twitter de OmniAuth que ser&aacute; <code>/auth/twitter</code>.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;div id=&quot;user_nav&quot;&gt;
+  &lt;%= link_to &quot;Sign in with Twitter&quot;, &quot;/auth/twitter&quot; %&gt;
+&lt;/div&gt;</pre>
+
+<p>La aplicaci&oacute;n ahora tiene un enlace de inicio de sesi&oacute;n que, cuando hagamos clic en &eacute;l, nos redirigir&aacute; a la web de Twitter donde se nos consultar&aacute; si queremos dar acceso a la aplicaci&oacute;n.  Si se pulsa el bot&oacute;n  &lsquo;allow&rsquo; seremos redirigidos de vuelta a nuestra aplicaci&oacute;n donde veremos un error de rutas.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/523/original/E241I02.png" width="798" height="280" alt="The routing error we get when returning from authenticating."/>
+</div>
+
+<p>Este error se debe a que el navegador es dirigido de vuelta a una URL dispuesta por OmniAuth despu&eacute;s de recibir la autenticaci&oacute;n satisfactoriamente, y debemos implementar la entrada correspondiente en nuestro fichero de rutas.  Para gestionar la autenticaci&oacute;n vamos a crear un nuevo <code>SessionsController</code> y haremos que la ruta se corresponda con  su acci&oacute;n <code>create</code>.</p>
+
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Blog::Application.routes.draw do |map|
+  root :to =&gt; &quot;articles#index&quot;
+  
+  match &quot;/auth/:provider/callback&quot; =&gt; &quot;sessions#create&quot;
+  
+  resources :comments
+  resources :articles
+end</pre>
+
+<p>N&oacute;tese que hemos cambiado la parte de <code>twitter</code> en la URL por un par&aacute;metro <code>:provider</code> para que la ruta funcione con cualquier otro proveedor de autenticaci&oacute;n que queramos implementar.</p>
+
+<p>Lo siguiente ser&aacute; generar el controlador propiamente dicho.</p>
+
+<pre class="terminal">$ rails g controller sessions</pre>
+
+<p>Cuando la aplicaci&oacute;n vuelva de la autenticaci&oacute;n existe una variable de entorno llamada <code>omniauth.auth</code> que contiene un diccionario con informaci&oacute;n acerca del proceso de autenticaci&oacute;n.  Por ahora simplemente mostraremos esta informaci&oacute;n elevando una excepci&oacute;n.</p>
+
+<p class="codeFilePath">/app/controllers/sessions_controller.rb</p>
+<pre class="ruby">class SessionsController &lt; ApplicationController
+  def create
+    raise request.env[&quot;omniauth.auth&quot;].to_yaml
+  end
+end</pre>
+
+<p>Si ahora intentamos iniciar la sesi&oacute;n se nos mostrar&aacute; esta informaci&oacute;n cuando seamos redirigidos de vuelta a la aplicaci&oacute;n.</p>
+
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/524/original/E241I03.png" width="798" height="537" alt="The information in the omniauth.auth hash."/>
+</div>
+
+<p>Podemos usar la informaci&oacute;n de este <em>hash</em> bien para iniciar la sesi&oacute;n de un usuario existente o crear uno nuevo si no tenemos una cuenta ya creada.  Tendremos que generar un modelo <code>User</code> porque la aplicaci&oacute;n todav&iacute;a no tiene ninguno.</p>
+
+<pre class="terminal">$ rails g model user provider:string uid:string name:string</pre>
+
+<p>Es importante que en este modelo existan las columnas <code>provider</code> y <code>uid</code> porque ser&aacute;n los campos que identificar&aacute;n a este usuario cuando inicie la sesi&oacute;n.  Le daremos tambi&eacute;n al modelo una columna <code>name</code>.  A continuaci&oacute;n migraremos la base de datos.</p>
+
+
+<pre class="terminal">$ rake db:migrate</pre>
+
+<p>Ya podemos volver al controlador <code>SessionsController</code> y utilizar la informaci&oacute;n que nos pasa OmniAuth para recuperar o crear a un nuevo usuario.</p>
+
+<p class="codeFilePath">/app/controllers/sessions_controller.rb</p>
+<pre class="ruby">class SessionsController &lt; ApplicationController
+  def create
+    auth = request.env[&quot;omniauth.auth&quot;]
+    user = User.find_by_provider_and_uid(auth[&quot;provider&quot;], auth[&quot;uid&quot;]) || User.create_with_omniauth(auth)
+  end
+end</pre>
+
+<p>En el m&eacute;todo <code>create</code> tratamos de encontrar un usuario que tenga los valores <code>provider</code> y <code>uid</code> recibidos del <em>hash</em> de OmniAuth.  Si no encontramos ninguno, invocaremos al m&eacute;todo de clase <code>create_with_omniauth</code> en el modelo <code>User</code>, que pasamos a escribir.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  def self.create_with_omniauth(auth)
+    create! do |user|
+      user.provider = auth[&quot;provider&quot;]
+      user.uid = auth[&quot;uid&quot;]
+      user.name = auth[&quot;user_info&quot;][&quot;name&quot;]
+    end
+  end
+end</pre>
+
+<p>En el m&eacute;todo anterior le pasamos un bloque a <code>create!</code>.  Esto es &uacute;til porque nos permite modificar el nuevo usuario antes de guardarlo en la base de datos y porque tambi&eacute;n devuelve la instancia reci&eacute;n creada.  Con este m&eacute;todo escrito podemos volver al controlador y terminar de escribir el m&eacute;todo <code>create</code>.  Guardaremos el <code>id</code> del usuario en la sesi&oacute;n y luego redirigiremos a la p&aacute;gina principal y mostraremos un mensaje de bienvenida.</p>
+
+<p class="codeFilePath">/app/controllers/sessions_controller.rb</p>
+<pre class="ruby">class SessionsController &lt; ApplicationController
+  def create
+    auth = request.env[&quot;omniauth.auth&quot;]
+    user = User.find_by_provider_and_uid(auth[&quot;provider&quot;], auth[&quot;uid&quot;]) || User.create_with_omniauth(auth)
+    session[:user_id] = user.id
+    redirect_to root_url, :notice =&gt; &quot;Signed in!&quot;
+  end
+end</pre>
+
+<p>Si ahora hacemos clic en el enlace &ldquo;Sign in with Twitter&rdquo; se iniciar&aacute; la sesi&oacute;n autom&aacute;ticamente (asumiendo que sigamos estando logados en la misma cuenta de Twitter).</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/525/original/E241I04.png" width="800" height="504" alt="Signed in successfully."/>
+</div>
+ 
+<p>Tenemos, sin embargo, un problema con la p&aacute;gina.  Aunque hemos iniciado la sesi&oacute;n con el enlace de arriba, &eacute;ste a&uacute;n sigue diciendo  &ldquo;sign in&rdquo;. En su lugar, deber&iacute;a mostrar el nombrel del usuario con sesi&oacute;n iniciada y un enlace para cerrar la sesi&oacute;n.</p>
+
+
+<p>Tenemos que ser capaces de acceder al usuario en la sesi&oacute;n por lo que a&ntilde;adiremos un m&eacute;todo <code>current_user</code> en la clase <code>ApplicationController</code>.  Este m&eacute;todo devolver&aacute; el usuario actual bas&aacute;ndose en el <code>user_id</code> almacenado en la sesi&oacute;n y cachear&aacute; el resultado en una variable de instancia.  Haremos que sea un m&eacute;todo <em>helper</em> al que se pueda acceder desde vistas y controladores.</p>
+
+<p class="codeFilePath">/app/controllers/application_controller.rb</p>
+<pre class="ruby">class ApplicationController &lt; ActionController::Base
+  protect_from_forgery
+  helper_method :current_user
+  
+  private
+  def current_user
+    @current_user ||= User.find(session[:user_id]) if session[:user_id]
+  end
+end</pre>
+
+<p>Ya podemos modificar el fichero de <em>layout</em> para que el enlace de inicio de sesi&oacute;n s&oacute;lo aparezca cuando no tengamos sesi&oacute;n iniciada, en cuyo caso mostraremos el nombre del usuario.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;div id=&quot;user_nav&quot;&gt;
+  &lt;% if current_user %&gt;
+    Welcome, &lt;%= current_user.name %&gt;!
+  &lt;% else %&gt;
+    &lt;%= link_to &quot;Sign in with Twitter&quot;, &quot;/auth/twitter&quot; %&gt;
+  &lt;% end %&gt;
+&lt;/div&gt;</pre>
+
+<p>Si ahora recargamos la p&aacute;gina veremos el mensaje  &ldquo;Welcome, Eifion!&rdquo; en la parte superior, porque es el usuario con el que hemos iniciado sesi&oacute;n en Twitter.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/526/original/E241I05.png" width="790" height="280" alt="The user name is now shown when we're logged in."/>
+</div>
+
+<p>Ser&iacute;a &uacute;til mostrar un enlace para cerrar la sesi&oacute;n, por lo que lo mostraremos despu&eacute;s del nombre del usuario, con un enlace a <code>signout_path</code> que todav&iacute;a no tenemos.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;div id=&quot;user_nav&quot;&gt;
+  &lt;% if current_user %&gt;
+    Welcome, &lt;%= current_user.name %&gt;!
+    &lt;%= link_to &quot;Sign Out&quot;, signout_path %&gt;
+  &lt;% else %&gt;
+    &lt;%= link_to &quot;Sign in with Twitter&quot;, &quot;/auth/twitter&quot; %&gt;
+  &lt;% end %&gt;
+&lt;/div&gt;</pre>
+
+<p>A continuaci&oacute;n mapearemos <code>signout_path</code> a la acci&oacute;n <code>destroy</code> de <code>SessionController</code>.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">match &quot;/signout&quot; =&gt; &quot;sessions#destroy&quot;, :as =&gt; :signout</pre>
+
+<p>Si a&ntilde;adimos <code>:as =&gt; :signout</code> a la ruta podremos referenciarla por <code>signout_path</code>.  Escribamos ahora la acci&oacute;n <code>destroy</code>.</p>
+
+<p class="codeFilePath">/app/controllers/sessions_controller.rb</p>
+<pre class="ruby">def destroy
+  session[:user_id] = nil
+  redirect_to root_url, :notice =&gt; &quot;Signed out!&quot;
+end</pre>
+
+<p>Si ahora recargamos la p&aacute;gina veremos el enlace para serrar sesi&oacute;n, lo que ocurrir&aacute; si hacemos clic en &eacute;l.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/527/original/E241I06.png" width="800" height="505" alt="Our sign-out link now works."/>
+</div>
+
+<h3>Otros proveedores</h3>
+
+<p>Es f&aacute;cil a&ntilde;adir otros servicios de autenticaci&oacute;n, precisamente esa es la ventaja de OmniAuth.  Por ejemplo, para a&ntilde;adir la autenticaci&oacute;n mediante Facebook tan s&oacute;lo tenemos que a&ntilde;adir un nuevo enlace en el <em>layout</em> de la p&aacute;gina.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;div id=&quot;user_nav&quot;&gt;
+  &lt;% if current_user %&gt;
+    Welcome, &lt;%= current_user.name %&gt;!
+    &lt;%= link_to &quot;Sign Out&quot;, signout_path %&gt;
+  &lt;% else %&gt;
+    &lt;%= link_to &quot;Sign in with Twitter&quot;, &quot;/auth/twitter&quot; %&gt;
+    &lt;%= link_to &quot;Sign in with Facebook&quot;, &quot;/auth/facebook&quot; %&gt;
+  &lt;% end %&gt;
+&lt;/div&gt;</pre>
+
+<p>Tendremos que a&ntilde;adir las credenciales apropiadas en el fichero <code>omniauth.rb</code> para inicializar OmniAuth y s&oacute;lo con eso nuestra aplicaci&oacute;n soportar&aacute; el inicio de sesi&oacute;n mediante Facebook.  Podr&iacute;amos a&ntilde;adir OpenId, LinkedIn, o cualquier otro de los proveedores soportados.</p>
+
+<p>Esta soluci&oacute;n funciona muy bien y es f&aacute;cil de a&ntilde;adir a cualquier aplicaci&oacute;n, siempre y cuando no nos haga falta una autenticaci&oacute;n tradicional basada en usuario y clave y tampoco necesitemos a&ntilde;adir diferentes tipos de autenticaci&oacute;n por usuario, .</p>

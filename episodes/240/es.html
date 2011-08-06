@@ -1,0 +1,337 @@
+<p>En el episodio 228  [<a href="http://railscasts.com/episodes/228-sortable-table-columns">verlo</a>, <a href="http://es.asciicasts.com/episodes/228-ordenacion-de-tablas-por-columnas">leerlo</a>] creamos una tabla de productos que se pod&iacute;a ordenar haciendo clic en un enlace en la cabecera de cada columna.  En este episodio llevaremos esta idea a&uacute;n m&aacute;s lejos y a&ntilde;adiremos funcionalidades de b&uacute;squeda y paginaci&oacute;n.  Adem&aacute;s a&ntilde;adiremos JavaScript no intrusivo para que dicha funcionalidad est&eacute; disponible con AJAX de forma que la tabla se pueda buscar, ordenar y paginar sin necesidad de recargar toda la p&aacute;gina.</p>
+
+<p>Todas estas t&eacute;cnicas ya han sido vistas individualmente en anteriores episodios pero puede resultar dif&iacute;cil combinar todas estas funcionalidades especialmente si queremos que la aplicaci&oacute;n ofrezca la funcionalidad mediante AJAX y que sea compatible con Rails 3.  Dado que la parte m&aacute;s complicada de esto es crear una tabla con columnas ordenables y esto ya lo tenemos empezaremos con el c&oacute;digo del episodio 228.  Se puede obtener el c&oacute;digo del episodio de <a href="https://github.com/ryanb/railscasts-episodes/tree/master/episode-228/">las p&aacute;ginas de Ryan Bates</a> y cuando la aplicaci&oacute;n se ejecute tendr&aacute; el siguiente aspecto.  N&oacute;tese que no hay ni paginaci&oacute;n ni b&uacute;squeda y que la ordenaci&oacute;n se hace recargando la p&aacute;gina, enviando los par&aacute;metros de b&uacute;squeda en la URL.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/513/original/E240I01.png" width="800" height="515" alt="Tabla de productos."/>
+</div>
+
+<h3>Paginaci&oacute;n y B&uacute;squeda</h3>
+
+<p>El primer cambio que haremos ser&aacute; a&ntilde;adir paginaci&oacute;n y b&uacute;squeda.  Para empezar, lo haremos sin AJAX y una vez que tengamos las nuevas funcionalidades a&ntilde;adiremos el JavaScript necesario para que funcione sin recargar la p&aacute;gina.</p>
+
+<p>Empezaremos por la paginaci&oacute;n.  La gema <a href="https://github.com/mislav/will_paginate/wiki/">will_paginate</a> hace que sea f&aacute;cil, aunque la &uacute;nica versi&oacute;n que funciona con Rails 3 es la de pre-lanzamiento (actualmente la <code>3.0.pre2</code>) por lo que tendremos que especificar este n&uacute;mero de versi&oacute;n cuando a&ntilde;adamos will_paginate al <code>Gemfile</code> de la aplicaci&oacute;n.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem &#x27;will_paginate&#x27;, &#x27;3.0.pre2&#x27;</pre>
+
+<p>Como es habitual tendremos que ejecutar <code>bundle install</code> despu&eacute;s de haber modificado el <code>Gemfile</code> para asegurarnos de que la gema queda instalada correctamente.  Cuando Bundler haya terminado modificaremos la acci&oacute;n <code>index</code> de nuestro <code>ProductsController</code> para a&ntilde;adir la paginaci&oacute;n en el listado de productos a&ntilde;adiendo el m&eacute;todo <code>paginate</code> al final.  Este m&eacute;todo recibe dos par&aacute;metros: el primero es el n&uacute;mero de &iacute;tems que queremos mostrar en cada p&aacute;gina (en nuestro caso lo dejaremos a 5) y el segundo es el n&uacute;mero de p&aacute;gina que podemos recuperar del par&aacute;metro <code>page</code> de la URL.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def index
+  @products = Product.order(sort_column + &#x27; &#x27; + sort_direction).paginate(:per_page =&gt; 5, :page =&gt; params[:page])
+end</pre>
+
+<p>En la vista <code>index</code> a&ntilde;adiremos la siguiente l&iacute;nea debajo de la tabla de productos para que en la p&aacute;gina aparezcan los enlaces de paginaci&oacute;n.</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">&lt;%= will_paginate @products %&gt;</pre>
+
+<p>Si ahora recargamos la p&aacute;gina veremos que la p&aacute;gina muestra los enlaces de paginaci&oacute;n y podemos recorrer el listado de productos de cinco en cinco.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/514/original/E240I02.png" width="800" height="436" alt="La tabla ya tiene paginación."/>
+</div>
+
+<p>La paginaci&oacute;n ya est&aacute; en su sitio, si bien no funciona con AJAX.  Pasaremos a la b&uacute;squeda.  Ha habido <a href="http://railscasts.com/episodes?search=search">varios episodios de Railscasts dedicados a las b&uacute;squedas</a>, el primero de ellos  <a href="http://railscasts.com/episodes/37-simple-search-form">&ldquo;Simple Search Form&rdquo;</a> tiene ya m&aacute;s de 3 a&ntilde;os pero sigue siendo aplicable por lo que podemos copiar y pegar en nuestra aplicaci&oacute;n el c&oacute;digo de ejemplo con cambios m&iacute;nimos.  Primero a&ntilde;adiremos el formulario de b&uacute;squeda a nuestro listado de productos.</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">&lt;%= form_tag products_path, :method =&gt; &#x27;get&#x27; do %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag &quot;Search&quot;, :name =&gt; nil %&gt;
+  &lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>Para que funcione el c&oacute;digo de ejemplo del episodio 37 hemos tenido que cambiar <code>projects_path</code> por <code>products_path</code> en el <code>form_tag</code>, y tambi&eacute;n hemos tenido que a&ntilde;adir el s&iacute;mbolo de igualdad en la apertura de la etiqueta para hacer que sea compatible con Rails 3.</p>
+
+<p>En la acci&oacute;n <code>index</code> del controlador tenemos que invocar a <code>search</code>  sobre el modelo.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def index
+  @products = Product.search(params[:search]).order(sort_column + &#x27; &#x27; + sort_direction).paginate(:per_page =&gt; 5, :page =&gt; params[:page])
+end</pre>
+
+<p>N&oacute;tese que estamos invocando a <code>search</code> antes que a <code>order</code> por lo que tenemos que asegurarnos de que <code>search</code> devuelve un &aacute;mbito en lugar de un <em>array</em> de registros.  A&ntilde;adiremos el m&eacute;todo de clase <code>search</code> al modelo <code>Product</code>, haciendo algunos cambios al c&oacute;digo del episodio 37 para hacer que funcione con Rails 3.  &Eacute;ste era el c&oacute;digo original:</p>
+
+<pre class="ruby">def self.search(search)
+  if search
+    find(:all, :conditions =&gt; [&#x27;name LIKE ?&#x27;, &quot;%#{search}%&quot;])
+  else
+    find(:all)
+  end
+end</pre>
+
+<p>El c&oacute;digo anterior utiliza <code>find(:all)</code>, que devuelve un <em>array</em> de registros en lugar de un &aacute;mbito y que adem&aacute;s est&aacute; obsoleto en Rails 3.0 por lo que en su lugar utilizaremos <code>where</code>.  En la condici&oacute;n <code>else</code> donde el c&oacute;digo devuelve todos los registros podr&iacute;amos  utilizar <code>all</code>, pero esto tambi&eacute;n devolver&iacute;a un listado de registros en lugar del &aacute;mbito que queremos, por lo que utilizaremos <code>scope</code>, que devolver&aacute; un &aacute;mbito vac&iacute;o sobre los productos y permitir&aacute; que a&ntilde;adamos otras consultas m&aacute;s adelante.  Con estos cambios el modelo <code>Product</code> quedar&iacute;a as&iacute;:</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">class Product &lt; ActiveRecord::Base
+  attr_accessible :name, :price, :released_at
+
+  def self.search(search)
+    if search
+      where(&#x27;name LIKE ?&#x27;, &quot;%#{search}%&quot;)
+    else
+      scoped
+    end
+  end
+end</pre>
+
+<p>Obs&eacute;rvese que estamos lanzando una b&uacute;squeda muy simple contra el campo <code>name</code>.  En una aplicaci&oacute;n m&aacute;s compleja tendr&iacute;amos que utilizar un motor de b&uacute;squeda de texto completo como <a href='http://sphinxsearch.com'>Sphinx</a>.  Si este es el caso merecer&aacute; la pena leer el <a href="http://railscasts.com/episodes/120-thinking-sphinx">episodio dedicado a Thinking Sphinx</a>.</p>
+
+<p>Si ahora recargamos la p&aacute;gina de productos otra vez veremos que aparece el campo de b&uacute;squeda y si buscamos por ejemplo  &ldquo;video&rdquo; veremos un listado filtrado de productos.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/515/original/E240I03.png" width="800" height="371" alt="La tabla tiene la búsqueda implementada."/>
+</div>
+
+<p>A&uacute;n quedan un par de cosas por corregir.  Se pierde el t&eacute;rmino de b&uacute;squeda si se hace clic en una de las columnas para ordenar los resultados filtrados, y otro problema es que si por ejemplo se ordena por precio y luego se lanza una b&uacute;squeda la ordenaci&oacute;n vuelve a efectuarse por nombre.  Tenemos que corregir la b&uacute;squeda y la ordenaci&oacute;n para que tengan en cuenta sus configuraciones entre s&iacute;.</p>
+
+
+<p>Para que la ordenaci&oacute;n permanezca cuando se realice una b&uacute;squeda tenemos que pasar los par&aacute;metros de ordenaci&oacute;n como campos ocultos en el formulario de b&uacute;squeda.  Esto puede hacerse simplemente a&ntilde;adiendo un par de campos ocultos al formulario que guarden los campos de orden y sentido obtenidos a partir de la URL.</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">&lt;%= form_tag products_path, :method =&gt; &#x27;get&#x27; do %&gt;
+  &lt;%= hidden_field_tag :direction, params[:direction] %&gt;
+  &lt;%= hidden_field_tag :sort, params[:sort] %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag &quot;Search&quot;, :name =&gt; nil %&gt;
+  &lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>A continuaci&oacute;n tenemos que hacer que la b&uacute;squeda persista cuando cambie el campo de ordenaci&oacute;n.  Para esto tenemos que cambiar el c&oacute;digo que genera los enlaces de ordenaci&oacute;n.   Si repasamos  el episodio 228 veremos que esto se encuentra en el m&eacute;todo <code>sortable</code> en un <em>helper</em> de la aplicaci&oacute;n.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def sortable(column, title = nil)
+    title ||= column.titleize
+    css_class = (column == sort_column) ? &quot;current &crarr; 
+      #{sort_direction}&quot; : nil
+    direction = (column == sort_column &amp;&amp; sort_direction == &crarr; 
+      &quot;asc&quot;) ? &quot;desc&quot; : &quot;asc&quot;
+    link_to title, {:sort =&gt; column, :direction =&gt; direction}, &crarr;
+      {:class =&gt; css_class}
+  end
+end</pre>
+
+<p>El enlace se devuelve en la &uacute;ltima l&iacute;nea del m&eacute;todo y est&aacute; claro que para que el t&eacute;rmino de b&uacute;squeda  persista tenemos que a&ntilde;adirlo como par&aacute;metro en el enlace.  Esto implica, sin embargo, que tendremos que cambiar este m&eacute;todo cada vez que a&ntilde;adamos  par&aacute;metros nuevos a la funcionalidad de b&uacute;squeda.   En Rails 2 hubi&eacute;ramos podido usar <code>overwrite_params</code>, que ha sido eliminado en Rails 3.  La soluci&oacute;n que podemos usar es utilizar <code>params.merge</code>.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">link_to title, params.merge(:sort =&gt; column, :direction =&gt; &crarr;
+  direction), {:class =&gt; css_class}</pre>
+
+<p>Haciendo esto conseguiremos propagar todos los par&aacute;metros que no sean los usados para la ordenaci&oacute;n.  Dicho lo cual,  no queremos que el n&uacute;mero de p&aacute;gina est&eacute; incluido porque siempre querremos que la paginaci&oacute;n  comience por la primera p&aacute;gina cuando se cambie el campo de ordenaci&oacute;n, as&iacute; que asignaremos el valor <code>nil</code> al par&aacute;metro <code>page</code>.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">link_to title, params.merge(:sort =&gt; column, :direction =&gt; direction, :page =&gt; nil), {:class =&gt; css_class}</pre>
+
+<p>Ya podemos probarlo.  Si ordenamos la lista por precio y luego buscamos  &ldquo;video&rdquo; veremos que se mantiene el sentido de la ordenaci&oacute;n.</p>
+
+<img src="/system/photos/516/original/E240I04.png" width="800" height="374" alt="La ordenación se mantiene al realizar una búsqueda."/>
+
+
+<p>Si ahora cambiamos la ordenaci&oacute;n veremos que tambi&eacute;n el t&eacute;rmino de b&uacute;squeda tambi&eacute;n permanece.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/517/original/E240I05.png" width="800" height="374" alt="También se persite el término de búsqueda al cambiar la ordenación"/>
+</div>
+
+<h3>Incorporando AJAX</h3>
+
+<p>Una vez que funcionan la b&uacute;squeda, ordenaci&oacute;n y paginaci&oacute;n, vamos a a&ntilde;adir algo de AJAX para que todo esto ocurra sin tener que recargar la p&aacute;gina.  Antes de hacer esto en nuestras propias aplicaciones deber&iacute;amos preguntarnos si el uso de AJAX realmente va a mejorar la experiencia de usuario.  A menudo es mejor dejarlo en este punto porque el uso de AJAX hace que sea dif&iacute;cil que funcionen como es debido los marcadores del navegador y el bot&oacute;n de volver atr&aacute;s.  Sigamos leyendo si, por el contrario, tenemos claro que la interfaz de usuario de nuestra aplicaci&oacute;n se beneficiar&iacute;a de utilizar AJAX.</p>
+
+<p>Para hacer esto vamos a utilizar jQuery.  La manera m&aacute;s f&aacute;cil de a&ntilde;adir jQuery a una aplicaci&oacute;n Rails es utilizando una gema llamada jquery-rails, por lo que la a&ntilde;adiremos a la aplicaci&oacute;n y ejecutaremos <code>bundle install</code> una vez m&aacute;s.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem &#x27;jquery-rails&#x27;</pre>
+
+<p>Para la instalaci&oacute;n de los archivos de jQuery en la aplicaci&oacute;n ejecutaremos la orden <code>jquery:install</code>.</p>
+
+<pre class="terminal">$ rails g jquery:install</pre>
+
+<p>Tal vez aparezca un error cuando ejecutemos esta orden. Este error ya se ha corregido en la &uacute;ltima versi&oacute;n de la gema por lo que si lo vemos tendremos que solicitar la instalaci&oacute;n de un n&uacute;mero de versi&oacute;n superior a la 0.2.5.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem &#x27;jquery-rails&#x27;, &#x27;&gt;=0.2.5&#x27;</pre>
+
+<p>Con la &uacute;ltima versi&oacute;n de la gema instalada mediante <code>bundle</code> todo deber&iacute;a funcionar sin problemas.  Nos avisar&aacute; que hay un conflicto con el fichero <code>rails.js</code>, pero podemos sobreescribirlo sin problema.</p>
+
+<p>Ahora que tenemos jQuery instalado podemos a&ntilde;adir un poco de AJAX a la p&aacute;gina.  Lo primero que tenemos que hacer es identificar la parte de la p&aacute;gina que queremos actualizar.  En este caso se trata de la tabla que muestra el listado de productos por lo que la moveremos de la vista <code>index</code> a su propio parcial.</p>
+
+<p class="codeFilePath">/app/views/products/_products.html.erb</p>
+<pre class="ruby">&lt;table class=&quot;pretty&quot;&gt;
+  &lt;tr&gt;
+    &lt;th&gt;&lt;%= sortable &quot;name&quot; %&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;%= sortable &quot;price&quot; %&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;%= sortable &quot;released_at&quot;, &quot;Released&quot; %&gt;&lt;/th&gt;
+  &lt;/tr&gt;
+  &lt;% for product in @products %&gt;
+  &lt;tr&gt;
+    &lt;td&gt;&lt;%= product.name %&gt;&lt;/td&gt;
+    &lt;td class=&quot;price&quot;&gt;&lt;%= number_to_currency(product.price, :unit =&gt; &quot;&amp;pound;&quot;) %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= product.released_at.strftime(&quot;%B %e, %Y&quot;) %&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;% end %&gt;
+&lt;/table&gt;</pre>
+
+<p>Rodearemos el parcial de un <code>div</code> que tendr&aacute; un <code>id</code> que podamos usar para identificarlo desde JavaScript.</p>
+
+<p class="codeFilePath">app/views/products/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Products&quot; %&gt;
+
+&lt;%= form_tag products_path, :method =&gt; &#x27;get&#x27; do %&gt;
+  &lt;%= hidden_field_tag :direction, params[:direction] %&gt;
+  &lt;%= hidden_field_tag :sort, params[:sort] %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag &quot;Search&quot;, :name =&gt; nil %&gt;
+  &lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;div id=&quot;products&quot;&gt;&lt;%= render &#x27;products&#x27; %&gt;&lt;/div&gt;
+
+&lt;%= will_paginate @products %&gt;
+&lt;p&gt;&lt;%= link_to &quot;New Product&quot;, new_product_path %&gt;&lt;/p&gt;</pre>
+
+<p>Ya podemos a&ntilde;adir el c&oacute;digo JavaScript que a&ntilde;adir&aacute; la funcionalidad AJAX.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(&#x27;#products th a&#x27;).live(&#x27;click&#x27;, function () {
+    $.getScript(this.href);
+    return false;
+  });
+})</pre>
+
+<p>El c&oacute;digo empieza con la funci&oacute;n <code>$</code> de jQuery.  Si a esta funci&oacute;n se le pasa como argumento otra funci&oacute;n, &eacute;sta ser&aacute; ejecutada cuando el DOM de la p&aacute;gina haya terminado de cargarse.  El c&oacute;digo dentro de esta funci&oacute;n utiliza un selector de jQuery para encontrar todas las etiquetas ancla dentro de las celdas de la cabecera y les a&ntilde;ade un evento <code>click</code>.  Utilizamos la funci&oacute;n <code>live</code> en lugar de <code>click</code> para adjuntar los eventos de forma que cuando se recargue la p&aacute;gina no tengamos que volver a asociar el evento.</p>
+
+<p>Cuando se haga clic en uno de los enlaces se invocar&aacute; a la funci&oacute;n <code>$.getScript</code> de jQuery, que cargar&aacute; y ejecutar&aacute; JavaScript desde el servidor.  El fichero que queremos cargar tiene la misma URL que el enlace por lo que podemos pasar el atributo <code>href</code> del enlace como argumento.  Por &uacute;ltimo la funci&oacute;n devuelve <code>false</code> para que el navegador no abra el propio enlace.</p>
+
+<p>Si ahora recargamos la p&aacute;gina veremos que no pasar&aacute; nada si intentamos hacer clic en alguno de los enlaces en la parte superior de la tabla. Esto ocurre porque a&uacute;n no hemos escrito una plantilla JavaScript para la acci&oacute;n <code>index</code> a la que llaman los enlaces.  Y eso es lo que haremos ahora.</p>
+
+<p>Queremos que el c&oacute;digo de esta plantilla actualice el <code>div</code> de productos con la salida del parcial <code>_products</code>, lo que no nos costar&aacute; demasiado.</p>
+
+<p class="codeFilePath">/app/views/products/index.js.erb</p>
+<pre class="javascript">$(&#x27;#products&#x27;).html(&#x27;&lt;%= escape_javascript(render(&quot;products&quot;)) %&gt;&#x27;);</pre>
+
+<p>Si ahora recargamos la p&aacute;gina veremos que los enlaces de ordenaci&oacute;n ya funcionan y la tabla se ordena sin recargar la p&aacute;gina.  Obviamente esto es dif&iacute;cil de capturar con pantallazos, pero si abrimos la p&aacute;gina en Firefox y utilizamos Firefox para ver las peticiones XMLHTTP podremos verlas, as&iacute; como la respuesta devuelta.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/518/original/E240I06.png" width="821" height="624" alt="Ya se hace la ordenación por AJAX."/>
+</div>
+
+<p>Con todo esto ya es muy f&aacute;cil hacer que funcionen tambi&eacute;n los enlaces de paginaci&oacute;n.  Lo &uacute;nico que hay que hacer es a&ntilde;adir esos enlaces a la lista de elementos que invocan la llamada AJAX.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(&#x27;#products th a, #products .pagination a&#x27;).live(&#x27;click&#x27;, &crarr; 
+    function () {
+      $.getScript(this.href);
+      return false;
+    }
+  );
+});</pre>
+
+<p>Y eso es todo.  Ahora podemos ver las distintas p&aacute;ginas del listado sin tener que recargar la p&aacute;gina.</p>
+
+<h3>El formulario de b&uacute;squeda</h3>
+
+<p>La &uacute;ltima secci&oacute;n de la p&aacute;gina que nos queda por hacer mediante AJAX es el formulario de b&uacute;squeda.  Lo primero que tenemos que hacer es darle al elemento del formulario un <code>id</code> para que sea seleccionable mediante jQuery.</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">&lt;%= form_tag products_path, :method =&gt; &#x27;get&#x27;, :id =&gt; &crarr;
+  &quot;products_search&quot; do %&gt;
+  &lt;%= hidden_field_tag :direction, params[:direction] %&gt;
+  &lt;%= hidden_field_tag :sort, params[:sort] %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag &quot;Search&quot;, :name =&gt; nil %&gt;
+  &lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>Ahora s&oacute;lo tenemos que a&ntilde;adir un poco m&aacute;s de JavaScript en el fichero <code>application.js</code>.</p>
+
+<p class="codeFilePath">/public/application.js</p>
+<pre class="javascript">$(function () {
+  // Sorting and pagination links.
+  $(&#x27;#products th a, #products .pagination a&#x27;).live(&#x27;click&#x27;, 
+    function () {
+      $.getScript(this.href);
+      return false;
+    }
+  );
+  
+  // Search form.
+  $(&#x27;#products_search&#x27;).submit(function () {
+    $.get(this.action, $(this).serialize(), null, &#x27;script&#x27;);
+    return false;
+  });
+});</pre>
+
+<p>El nuevo c&oacute;digo selecciona el formulario de b&uacute;squeda y se queda esperando a su evento <code>submit</code>.  Cuando esto ocurre se usa la funci&oacute;n <code>$.get</code> para hacer una petici&oacute;n AJAX a la acci&oacute;n del formulario, pasando los datos del formulario con <code>$(this).serialize</code>, <code>null</code>  porque no queremos que se ejecute ninguna funci&oacute;n a la vuelta, y <code>&#x27;script&#x27;</code> para que la respuesta se ejecute como JavaScript.  Tras esto, devolvemos <code>false</code> para que no se env&iacute;e el formulario.</p>
+
+<p>Ya podemos enviar la b&uacute;squeda y la tabla filtrar&aacute; los resultados sin cargar la  p&aacute;gina entera. Una vez m&aacute;s usaremos Firefox y Firebug para ver la petici&oacute;n AJAX y su respuesta.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/519/original/E240I07.png" width="822" height="556" alt="Las búsquedas ya van por AJAX también."/>
+</div>
+
+<p>Tambi&eacute;n podemos cambiar f&aacute;cilmente el JavaScript para que la b&uacute;squeda tambi&eacute;n se haga en vivo y los resultados se actualicen autom&aacute;ticamente con cada pulsaci&oacute;n (t&eacute;ngase en cuenta que esto es una demostraci&oacute;n y no es la mejor forma de hacerlo, hay varias extensiones de jQuery que permiten hacer esto en nuestras aplicaciones de producci&oacute;n):</p>
+
+<p class="codeFilePath">/public/application.js</p>
+<pre class="javascript">$(&#x27;#products_search input&#x27;).keyup(function () {
+  $.get($(&#x27;#products_search&#x27;).attr(&#x27;action&#x27;), &crarr; 
+    $(&#x27;#products_search&#x27;).serialize(), null, &#x27;script&#x27;);
+  return false;
+});</pre>
+
+<p>Ahora cada vez que introducimos un car&aacute;cter en la caja de texto se realiza la petici&oacute;n AJAX y se actualiza la tabla.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/520/original/E240I08.png" width="822" height="556" alt="La búsqueda se hace 'en vivo'"/>
+</div>
+
+<p>Pero ahora hemos introducido un <em>bug</em> al hacer que caja de b&uacute;squeda funcione mediante AJAX.  Cuando se realiza una b&uacute;squeda la ordenaci&oacute;n vuelve a su comportamiento por defecto de ordenar por nombres.  Esto es porque los campos ocultos que almacen en campo de ordenaci&oacute;n y el sentido de ordenaci&oacute;n no se actualizan autom&aacute;ticamente cuando se lleva a cabo la petici&oacute;n AJAX.  Para corregir esto tenemos que mover estos campos tambi&eacute;n al parcial de productos.</p>
+
+<p class="codeFilePath">/app/views/products/_products.html.erb</p>
+<pre class="ruby">&lt;%= hidden_field_tag :direction, params[:direction] %&gt;
+&lt;%= hidden_field_tag :sort, params[:sort] %&gt;
+&lt;table class=&quot;pretty&quot;&gt;
+  &lt;tr&gt;
+    &lt;th&gt;&lt;%= sortable &quot;name&quot; %&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;%= sortable &quot;price&quot; %&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;%= sortable &quot;released_at&quot;, &quot;Released&quot; %&gt;&lt;/th&gt;
+  &lt;/tr&gt;
+  &lt;% for product in @products %&gt;
+  &lt;tr&gt;
+    &lt;td&gt;&lt;%= product.name %&gt;&lt;/td&gt;
+    &lt;td class=&quot;price&quot;&gt;&lt;%= number_to_currency(product.price, :unit =&gt; &quot;&amp;pound;&quot;) %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= product.released_at.strftime(&quot;%B %e, %Y&quot;) %&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+  &lt;% end %&gt;
+&lt;/table&gt;
+&lt;%= will_paginate @products %&gt;</pre>
+
+<p>Tamb&eacute;n moveremos el parcial al formulario.</p>
+
+<p class="codeFilePath">/app/view/products/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Products&quot; %&gt;
+
+&lt;%= form_tag products_path, :method =&gt; &#x27;get&#x27;, :id =&gt; &quot;products_search&quot; do %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag &quot;Search&quot;, :name =&gt; nil %&gt;
+  &lt;/p&gt;
+ &lt;div id=&quot;products&quot;&gt;&lt;%= render &#x27;products&#x27; %&gt;&lt;/div&gt;
+&lt;% end %&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;New Product&quot;, new_product_path %&gt;&lt;/p&gt;</pre>
+
+<p>Ahora cuando realicemos una b&uacute;squeda se mantendr&aacute; el orden.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/521/original/E240I09.png" width="800" height="406" alt="Ya funciona todo como queremos."/>
+</div>
+
+<p>Con esto es todo, ya hemos terminado y tenemos una interfaz atractiva con paginaci&oacute;n, ordenaci&oacute;n y b&uacute;squeda con AJAX.</p>

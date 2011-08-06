@@ -1,0 +1,127 @@
+<p>In this episode we&rsquo;re going to be working with a very simple Rails application called &ldquo;Grocery List&rdquo;. It stores a list of items and to use it we just type in the name of the item we want to add and click the &ldquo;Add Item&rdquo; button. The page will then reload with the new item added to the list.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/541/original/E247I01.png" width="800" height="289" alt="Our Grocery List application."/>
+</div>
+
+<p>While this application works fine while we&rsquo;re online, if we use it on a mobile phone we might not always have reception and so won&rsquo;t be able to access our grocery list. It would be useful if we could modify this application so that it works offline and we&rsquo;ll show you how to do that in this episode.</p>
+
+<h3>Introducing The Cache Manifest</h3>
+
+<p>We&rsquo;ll be demonstrating this application in a desktop browser but generally we&rsquo;ll only want the mobile version of a site to be available offline. Episode 199 [<a href="http://railscasts.com/episodes/199-mobile-devices">watch</a>, <a href="http://railscasts.com/episodes/199-mobile-devices">read</a>] covered making a separate version of a site dedicated to mobile devices. Taking this approach means that we can make the mobile version simpler which will make it easier to make it available offline.</p>
+
+<p>To get our site working offline we&rsquo;ll be using a technique introduced in HTML5 called the cache manifest. One of the best sources of documentation on this is the site <a href="http://diveintohtml5.org/">Dive Into HTML5</a>. This site has a page on <a href="http://diveintohtml5.org/offline.html">offline applications</a> which covers this subject in some detail and is well worth reading in order to get up to speed on this topic.</p>
+
+<p>The first step is to create a <a href="http://diveintohtml5.org/offline.html#manifest">cache manifest file</a> and there is a gem called <a href="https://github.com/wycats/rack-offline">rack-offline</a> that can help with this. The simplest way to do use it is to add the following route to your application.</p>
+
+<pre class="ruby">match &quot;/application.manifest&quot; =&gt; Rails::Offline</pre>
+
+<p>This route points to a <code>Rails::Offline</code> Rack application. When we visit <code>/application.manifest</code> a cache manifest file will be generated with some default settings. We&rsquo;ll need to add a reference to the rack-offline gem in our Grocery List application&rsquo;s <code>Gemfile</code> and then run the bundle command to ensure that it is installed.</p>
+
+<p class="codeFilePat">/Gemfile</p>
+<pre class="ruby">gem &#x27;rack-offline&#x27;</pre>
+
+<p>Next we&rsquo;ll add the <code>application.manifest</code> route.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">match &quot;/application.manifest&quot; =&gt; Rails::Offline</pre>
+
+<p>If we point a browser at <a href="http://localhost:3000/application.manifest"><code>http://localhost:3000/application.manifest</code></a> now it will return a cache manifest file. This file contains a list of the files that need to be downloaded for the application to work offline. By default the rack-offline gem will add all of the HTML, CSS and JavaScript files in the <code>/public</code> directory. This default behaviour will work for small applications but it can be customized and there are details on how to do this in the <a href="https://github.com/wycats/rack-offline#readme">rack-offline documentation</a> so that you can choose which files will be included in the manifest.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/542/original/E247I02.png" width="800" height="286" alt="The contents of the Cache Manifest file."/>
+</div>
+
+<p>Note that there is a hash at the top of the manifest file. Rack-offline uses this to identify specific revisions of the cache manifest. While our application is in development mode this hash will change every time we reload the page. In production mode, however, this hash only changes when one of the files listed in the manifest changes. When the hash changes this instructs the browser that the cache manifest has changed and that the files it lists need to be downloaded again. This will happen with every request in development mode but in production it will only happen when one of the files changes.</p>
+
+<p>Even though we now have a cache manifest we still need to instruct our application to use it. We do that by adding a <code>manifest</code> attribute to the HTML tag in the application&rsquo;s layout file.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="javascript">&lt;html manifest=&quot;/application.manifest&quot;&gt;</pre>
+
+<p>Every time someone visits a page in this application now the manifest attribute will ensure that all of the files included in the cache <code>manifest</code> file are downloaded and also save the current page so that it is available for offline browsing.</p>
+
+<p>If we visit the items page of our Grocery List application then all of the files listed in the manifest file are downloaded along with the items page itself. We can test this by visiting the page and then stopping the Rails server for the application. If we then open a new browser window and visit  <a href="http://localhost:3000/items"><code>http://localhost:3000/items</code></a> we&rsquo;ll still see the page even though the server is down as it will be served from the offline cache.</p>
+
+<p>We still have a problem, though. If we try to reload the page we appear to lose the stylesheet.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/543/original/E247I03.png" width="800" height="286" alt="The stylesheet appears to be lost when we refresh the page."/>
+</div>
+
+<p>In fact the browser cannot load the stylesheets or any of the application&rsquo;s JavaScript files and the reason for this is the timestamps that Rails appends as a querystring to these files.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/544/original/E247I04.png" width="801" height="203" alt="The browser tries to download the files from the server."/>
+</div>
+
+<p>These timestamps mean that the browser considers the files to be different from the ones specified in the cache manifest and it therefore tries to download them from the server. We can solve this problem by removing the timestamps entirely by setting an environment variable in our application. If we add the line below near the top of the <code>/config/application.rb</code> file the timestamps will be removed.</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby">ENV[&quot;RAILS_ASSET_ID&quot;] = &quot;&quot;</pre>
+
+<p>To get this working we&rsquo;ll need to restart the server and visit the page again, refreshing it once of twice to ensure that everything is loaded and cached correctly. Once we&rsquo;ve done that we&rsquo;ll be able to stop the server again and the application will now work offline correctly and the JavaScript and CSS will be loaded from the cache as the timestamps will no longer be added to their filenames.</p>
+
+<h3>Problems With Caching</h3>
+
+<p>For the rest of this episode we&rsquo;ll start up the server again so that we can simulate online browsing and we&rsquo;ll show you a few potential problems. One thing that you&rsquo;ll quickly notice is that changes that you make to your application won&rsquo;t take effect immediately. Let&rsquo;s say, for example, that we want to change the text on the button from &ldquo;Add Item&rdquo; to &ldquo;Add&rdquo;. Of course this is an easy change to make, we just need to change the button&rsquo;s text in the form&rsquo;s view code.</p>
+
+<p class="codeFilePath">/app/views/items/index.html.erb</p>
+<pre class="ruby">&lt;%= form_for Item.new do |f| %&gt;
+ &lt;%= f.text_field :name %&gt;
+ &lt;%= f.submit &quot;Add&quot; %&gt;
+&lt;% end %&gt;</pre>
+
+<p>When we save this file and reload the page in the browser we would expect the button&rsquo;s text to change, but it doesn&rsquo;t. The reason for this is that the browser returns the cached version of the page, even though the application is online. The browser doesn&rsquo;t wait to see if the browser is online, it just returns the cached page immediately. Then, in the background it will check the cache manifest to see if it has updated, downloading the updated files if it has. If we reload the page a second time the button&rsquo;s text will change as the latest version of the page will have be then been downloaded and cached.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/545/original/E247I05.png" width="800" height="286" alt="With the timestamps removed the cached are now fetched from the cache again."/>
+</div>
+
+<p>This means that when you make a change in development you should get into the habit of hitting reload twice in order to make those changes take effect.</p>
+
+<p>Another problem can occur when the cache points to a file that&rsquo;s been renamed or removed. For example, if we were to remove the <code>422.html</code> file from the <code>/public</code> directory then the manifest will no longer work. To demonstrate this we&rsquo;ll change the button&rsquo;s text again to &ldquo;Add Another Item&rdquo;.</p>
+
+<p class="codeFilePath">/app/views/items/index.html.erb</p>
+<pre class="ruby">&lt;%= form_for Item.new do |f| %&gt;
+ &lt;%= f.text_field :name %&gt;
+ &lt;%= f.submit &quot;Add Another Item&quot; %&gt;
+&lt;% end %&gt;</pre>
+
+<p>We can refresh the page as much as we want now and the button&rsquo;s text won&rsquo;t update. This is because the manifest is aborting when it gets to the <code>422.html</code> file that we removed and therefore never updates the cache for the grocery list page. Even though our application is online we&rsquo;ll never see our changes.</p> 
+
+<p>This kind of problem can be difficult to debug as there&rsquo;s no sign that an error is happening with the cache manifest. To help with this we can add some JavaScript that listens to the error event on the <code>applicationCache</code> object. This way we can detect these errors and handle them.</p> 
+
+<p>Our application has jQuery installed and so we can add this error detection by adding the following code to our <code>application.js</code> file.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(windows.applicationCache.bind(&#x27;error&#x27;, function () {
+    alert(&#x27;There was an error when loading the cache manifest.&#x27;);
+  }))
+})</pre>
+
+<p>For our application&rsquo;s problem this alert won&rsquo;t show as the broken manifest won&rsquo;t load the updated <code>application.js</code> file but the next time we have a similar problem we&rsquo;ll see a JavaScript alert so that we know that something&rsquo;s wrong.</p>
+
+<p>To fix the cache manifest we just need to restart the web server so that the manifest file updates itself. Now, when we make changes to our application the previous behaviour will be restored and refreshing the page twice will show any changes we make to our application.</p> 
+
+<p>There are some problems with offline caching that we might only notice in production and not while we&rsquo;re developing our application. If we add an item to our grocery list, say, eggs, then the new item is added to the database. The list page is then dynamically updated from the database and we see both items listed. In development mode this seems to work: the item is added to the list and, when we refresh the page, it stays there.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/546/original/E247I06.png" width="802" height="306" alt="Adding a item to the list works."/>
+</div>
+
+<p>What if we try this in production? To show this we&rsquo;ll make a change to <code>development.rb</code> and set <code>cache_classes</code> to true. (If you&rsquo;re using this technique in your own applications then you should test  thoroughly in production mode.)</p>
+
+<p class="codeFilePath">/config/development.rb</p>
+<pre class="ruby">config.cache_classes = true</pre>
+
+<p>We&rsquo;ll have to restart the server so that this change is picked up. Once we have we can try adding another item to the list, say &ldquo;chunky bacon&rdquo;.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/547/original/E247I07.png" width="802" height="311" alt="Adding a item seems to work in production, too."/>
+</div>
+
+<p>The item we&rsquo;ve added shows up as we&rsquo;ve just made a POST request but if we reload the page then the item will disappear and this is because the old cached version of the page is shown. The cause of this is the cache manifest file. Now that we&rsquo;re running our application in production mode the cache&rsquo;s hash doesn&rsquo;t change which means that the browser doesn&rsquo;t know that the page has changed and shows the cached version. This problem is only visible in production mode, not in development.</p>
+
+<p>The big question is: how do we handle dynamic content like this? This is a bigger issue than you might expect. The page can&rsquo;t be updated dynamically from the server as it&rsquo;s cached by the browser. What we can do is update the content with JavaScript and that&rsquo;s what we&rsquo;ll be looking at in the next episode.</p>

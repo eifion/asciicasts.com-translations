@@ -1,0 +1,271 @@
+<p>Let&rsquo;s say that we&rsquo;re developing a bookstore application. Currently it&rsquo;s in a fairly basic state and we can only give a new book a name.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/606/original/E258I01.png" width="800" height="345" alt="Our simple book store application."/>
+</div>
+
+<p>We want to be able to assign a number of authors to a given book and we already have some of the code in place to do this as the application has a many-to-many relationship between <code>Book</code> and <code>Author</code> via a join model called <code>Authorship</code>. Let&rsquo;s take a look at the <code>Book</code> model.</p>
+
+<p class="codeFilePath">/app/models/book.rb</p>
+<pre class="ruby">class Book &lt; ActiveRecord::Base
+  attr_accessible :name
+  has_many :authorships
+  has_many :authors, :through =&gt; :authorships
+end</pre>
+
+<p>The association is set up so that a book <code>has_many</code> authors through an <code>Authorship</code>, a standard <code>has_many :through</code> relationship.</p> 
+
+<p>How should we handle this many-to-many relationship in the form? One solution would be to use checkboxes, and this approach was demonstrated way back in episode 17 [<a href="http://railscasts.com/episodes/17-habtm-checkboxes">watch</a>, <a href="http://asciicasts.com/episodes/17-habtm-checkboxes">read</a>]. The problem here is that we have such a large number of authors to choose from that a list of checkboxes is impractical. It would be much better if we could enter the authors through a text box that autocompletes from the list of authors as we type and allows us to enter multiple authors for each book. This is similar to the interface used by Facebook for sending messages and it handles many-to-many relationships nicely.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/607/original/E258I02.png" width="803" height="386" alt="The application as it will look when we&rsquo;re done."/>
+</div>
+
+<p>In this episode we&rsquo;ll show you how to implement this functionality in a Rails application with a jQuery plugin.</p>
+
+<h3>Tokeninput</h3>
+
+<p>One potential way to do this is to use the jQuery UI&rsquo;s <a href="http://jqueryui.com/demos/autocomplete/">Autocomplete plugin</a>. This would, however, require a lot of custom code to handle to tokenized inputs. A better alternative is <a href="http://loopj.com/jquery-tokeninput/">jQuery Tokeninput</a> which does exactly what we need and has several different themes available.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/608/original/E258I03.png" width="800" height="345" alt="The demo on the jQuery Token input site."/>
+</div>
+
+<p>Any textfield that uses this plugin is will have its value submited as a comma-separated list of numeric <code>id</code>s which is easy to parse on the server. (We&rsquo;ll see where these ids come from shortly).</p> 
+
+<p>The plugin is made up from the following files. To use it in our application we&rsquo;ll need to copy the <code>jquery.tokeninput.js</code> file into the <code>public/javascripts</code> directory and the files in the <code>styles</code> directory into <code>public/stylesheets</code>.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/609/original/E258I04.png" width="803" height="284" alt="The directory structure for the Tokeninput plugin."/>
+</div>
+
+<p>We haven&rsquo;t set up our application to use jQuery yet so we&rsquo;ll need to add the <code>jquery-rails</code> gem to the <code>Gemfile</code> then run <code>bundle</code> to install it.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;jquery-rails&#x27;</pre>
+
+<p>We can then install jQuery by running</p>
+
+<pre class="terminal">$ rails g jquery:install</pre>
+
+<p>Finally we need to include Tokeninput&rsquo;s JavaScript and CSS files in the application&rsquo;s layout file.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+  &lt;head&gt;
+    &lt;title&gt;&lt;%= content_for?(:title) ? yield(:title) : &crarr;
+      &quot;Untitled&quot; %&gt;&lt;/title&gt;
+    &lt;%= stylesheet_link_tag &quot;application&quot;, &quot;token-input&quot; %&gt;
+    &lt;%= javascript_include_tag :defaults, &quot;jquery.tokeninput&quot; %&gt;
+    &lt;%= csrf_meta_tag %&gt;
+    &lt;%= yield(:head) %&gt;
+  &lt;/head&gt;
+  &lt;body&gt;
+  &lt;!-- Rest of file... --&gt;</pre>
+  
+<p>Now that we have everything set up we can add the authors field. First we&rsquo;ll add a new text field to the form and call it <code>author_tokens</code>.</p>
+
+<p class="codeFilePath">/app/views/books/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for @book do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :author_tokens, &quot;Authors&quot; %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :author_tokens %&gt;    
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>We don&rsquo;t have an <code>author_tokens</code> attribute in the <code>Book</code> model so we&rsquo;ll add getter and setter methods for it now.</p>
+
+<p class="codeFilePath">/app/models/book.rb</p>
+<pre class="ruby">class Book &lt; ActiveRecord::Base
+  attr_accessible :name, :author_tokens
+  has_many :authorships
+  has_many :authors, :through =&gt; :authorships
+  attr_reader :author_tokens
+  
+  def author_tokens=(ids)
+    self.author_ids = ids.split(&quot;,&quot;)
+  end
+  
+end</pre>
+
+<p>We can use <code>attr_reader</code> for the getter method but the setter is a little more complex as it needs to parse the comma-separated list of ids that are submitted by the text field. In the setter method we&rsquo;ll split the list into separate ids and then set the <code>author_ids</code> to that list to set the book&rsquo;s authors. Finally we need to add the new field to the <code>attr_accessible</code> list so that we can accept both fields from the form.</p>
+
+<p>When we reload the form now it will have the new <code>Authors</code> field. We could insert ids manually into this field but obviously we want to use the Tokeninput plugin so let&rsquo;s get it set up to work with this form field.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/610/original/E258I05.png" width="800" height="386" alt="Manually adding ids in the author field."/>
+</div>
+
+<p>The <a href="http://loopj.com/jquery-tokeninput/">Tokeninput page</a> has some documentation on how to use the plugin. All we need to do is call <code>tokenInput</code> on the text field and pass in a URL. The URL will need to return some JSON in the following format for the items that will appear in the autocomplete list as the user is typing.</p>
+
+<pre class="javascript">[
+    {&quot;id&quot;:&quot;856&quot;,&quot;name&quot;:&quot;House&quot;},
+    {&quot;id&quot;:&quot;1035&quot;,&quot;name&quot;:&quot;Desperate Housewives&quot;},
+    ...
+]</pre>
+
+<p>If we want to filter the list, the text that is currently in the text box is passed in to the URL&rsquo;s querystring as a parameter called <code>q</code>.</p>
+
+<p>Let&rsquo;s start to apply this to our application. The first thing to do is to write the JavaScript that will add the Tokeninput functionality to the author tokens. This will go in the <code>application.js</code> file.</p>
+
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(&#x27;#book_author_tokens&#x27;).tokenInput(&#x27;/authors.json&#x27;, { crossDomain: false });
+});</pre>
+
+<p>This code finds the author tokens text box by its <code>id</code> then calls <code>tokenInput</code> on it to enable the plugin, passing in a URL that will return some JSON to populate the autocomplete options. This URL will be <code>/authors.json</code> and we&rsquo;ll write the code to handle it next. We can pass in some options as to the <code>tokenInput</code> function as a second argument and it appears to be necessary to pass in a <code>crossDomain:false</code> option here in order to stop the results being sent as JSONP. Setting this options will ensure that the response is sent in the standard JSON format.</p>
+
+<p>Next we&rsquo;ll need to get that URL working. We already have an <code>AuthorsController</code> so we just need to make the <code>index</code> action able to respond to JSON requests. To do this we add a call to <code>respond_to</code> with two formats inside its block, the default HTML one and a JSON one which will return the list of authors in JSON format.</p>
+
+<p class="codeFilePath">/app/controllers/authors_controller.rb</p>
+<pre class="ruby">class AuthorsController &lt; ApplicationController
+  def index
+    @authors = Author.all
+    respond_to do |format|
+      format.html
+      format.json { render :json =&gt; @authors }
+    end
+  end
+end</pre>
+
+<p>If we visit <code><a href="http://localhost:3000/authors.json">http://localhost:3000/authors.json</a></code> now we&rsquo;l see the JSON that the URL returns.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/611/original/E258I06.png" width="800" height="386" alt="The JSON returned from authors.json"/>
+</div>
+
+<p>We can return a list of authors in JSON now but each one is nested within an <code>author</code> object. This is not the format that Tokeninput expects, it wants an array of <code>id</code> and <code>name</code> parameters. If the model we were working with didn&rsquo;t have a <code>name</code> attribute we&rsquo;d need to customize it to have one, but we need to do here is remove the root author object from each author in the list. There are ways to remove the root option globally but for a quick fix here all we have to do is map the array to the attributes list for each author.</p>
+
+<p class="codeFilePath">/app/controllers/authors_controller.rb</p>
+<pre class="ruby">def index
+  @authors = Author.all
+  respond_to do |format|
+    format.html
+    format.json { render :json =&gt; @authors.map(&amp;:attributes) }
+  end
+end</pre>
+
+<p>If we reload the page now the root options is removed and we have a list of attributes for each author in a format that Tokeninput can work with.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/612/original/E258I07.png" width="800" height="386" alt="The modifed JSON in a format that Tokeninput can parse."/>
+</div>
+
+<p>The attributes other than <code>id</code> and <code>name</code> will be ignored by Tokeninput but in a production application we might consider removing them to minimize the bandwidth used.</p> 
+
+<p>We can visit our New Book form our now and try the plugin out. When we start typing in the authors field we&rsquo;ll see a list all of the authors returned.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/613/original/E258I08.png" width="800" height="386" alt="The autocomplete list shows all the authors."/>
+</div>
+
+<p>But instead of having all of the authors returned we just want the authors whose name matches our search term. In the <code>AuthorsController</code> we&rsquo;ll filter the list of authors by the text in the text box which is passed to the controller in the <code>q</code> parameter in the query string.</p>
+
+<p class="codeFilePath">/app/controllers/authors_controller.rb</p>
+<pre class="ruby">def index
+  @authors = Author.where(&quot;name like ?&quot;, &quot;%#{params[:q]}%&quot;)
+  respond_to do |format|
+    format.html
+    format.json { render :json =&gt; @authors.map(&amp;:attributes) }
+  end
+end</pre>
+
+<p>We&rsquo;ll replace <code>Author.all</code> with <code>Author.where</code> and search for the authors whose name is LIKE the term passed in. Not that the search term is wrapped in percentage signs so that it&rsquo;s matched anywhere in the name field. If we search for an author now, only the matching names are returned.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/614/original/E258I09.png" width="800" height="386" alt="The list is now filtered by the text in the textbox."/>
+</div>
+
+<p>Now that the autocomplete field is filtering correctly we can try adding a book. If we create a book with two authors it will be saved correctly and we&rsquo;ll see the authors listed on the book&rsquo;s page when we&rsquo;re redirected there after the book is saved.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/615/original/E258I10.png" width="800" height="394" alt="The authors are correctly added to the book when it is saved."/>
+</div>
+
+<h3>Editing a Book</h3>
+
+<p>We have a problem, however, when we try editing a book as the form doesn&rsquo;t display the book&rsquo;s authors. We need to pre-populate the form with the correct authors&rsquo; names.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/616/original/E258I11.png" width="800" height="394" alt="The authors are missing when we edit a book."/>
+</div>
+
+<p>The Tokeninput plugin supports a <code>prePopulate</code> option and if we pass it some JSON it will pre-populate the list based on that. We can add this option into the call to <code>tokenInput</code> in our <code>application.js</code> file but how should we pass in the relevant data? One way is to add an HTML 5 data attribute to the text field and read the data from there and this is what we&rsquo;ll do.</p>
+
+<p class="codeFilePath">/app/views/books/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for @book do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :author_tokens, &quot;Authors&quot; %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :author_tokens, &quot;data-pre&quot; =&gt; &crarr;
+      @book.authors.map(&amp;:attributes).to_json %&gt;    
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>We&rsquo;ll call the attribute <code>data-pre</code>. Its value will be set to the attributes of the book&rsquo;s authors in a similar way to the way we create the JSON for the auto complete list.</p> 
+
+<p>We can now read this data in the JavaScript file and use it to pre-populate the authors list.</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function () {
+  $(&#x27;#book_author_tokens&#x27;).tokenInput(&#x27;/authors.json&#x27;, { 
+    crossDomain: false,
+    prePopulate: $(&#x27;#book_author_tokens&#x27;).data(&#x27;pre&#x27;)
+  });
+});</pre>
+
+<p>If we reload the edit page now the authors list is populated.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/617/original/E258I12.png" width="800" height="443" alt="The authors are now shown."/>
+</div>
+
+<p>If we update the authors, say removing one and then adding another, everything will update correctly.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/618/original/E258I13.png" width="800" height="443" alt="The authors are updated correctly."/>
+</div>
+
+<h3>Themes</h3>
+
+<p>We&rsquo;re currently using the default theme that comes with the Tokeninput plugin. If we want to change this we need to make two changes. First we need to go to our layout file and change the Tokeninput CSS file from the default one, <code>token-input</code>, to the one for the theme we want to use. There&rsquo;s a Facebook theme available and we&rsquo;ll use that to demonstrate theming.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= stylesheet_link_tag &quot;application&quot;, &quot;token-input-facebook&quot; %&gt;</pre>
+
+<p>Next we&rsquo;ll modify the JavaScript that creates the Tokeninput field and set the theme option there.</p> 
+
+<pre class="codeFilePath">/public/javascripts/application.js</pre>
+<pre class="javascript">$(function () {
+  $(&#x27;#book_author_tokens&#x27;).tokenInput(&#x27;/authors.json&#x27;, { 
+    crossDomain: false,
+    prePopulate: $(&#x27;#book_author_tokens&#x27;).data(&#x27;pre&#x27;),
+    theme: &#x27;facebook&#x27;
+  });
+});</pre>
+
+<p>We can add any theme we like here and customize it to suit our application. If we reload the edit page now we&rsquo;ll see the new theme applied.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/619/original/E258I14.png" width="800" height="390" alt="The autocomplete textfield using the Facebook theme."/>
+</div>
+
+<p>That&rsquo;s it for this episode. Tokeninput is a great solution for handling many-to-many relationships in Rails forms and I hope we&rsquo;ve demonstrated that here.</p>

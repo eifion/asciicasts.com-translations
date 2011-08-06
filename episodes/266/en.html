@@ -1,0 +1,256 @@
+<p>In this episode we&rsquo;ll continue our series on some of the features of the first Rails 3.1 beta release. This time we&rsquo;ll take a look at HTTP streaming. This subject has been covered fairly well in <a href="http://weblog.rubyonrails.org/2011/4/18/why-http-streaming">a post on the Ruby on Rails Weblog</a> and it&rsquo;s worth taking a look at that article first. We&rsquo;ll take a look here at getting it set up in a Rails application and covering some of the potential problems you might have when using it.</p>
+
+<p>To demonstrate HTTP streaming we&rsquo;ll use the simple ToDo application that we wrote in the last episode. We enable streaming in an application&rsquo;s controllers, either on a per-action or a per-controller basis; it isn&rsquo;t enabled by default.</p> 
+
+<p>To enable streaming we use render, passing it the <code>:stream =&gt; true</code> option.</p>
+
+<p class="codeFilePath">/app/controllers/projects_controller.rb</p>
+<pre class="ruby">def index
+  @projects = Project.all
+  render :stream =&gt; true
+end</pre>
+
+<p>To enable streaming across the whole controller we use the class method <code>stream</code>.</p>
+
+<p class="codeFilePath">/app/controllers/projects_controller.rb</p>
+<pre class="ruby">class ProjectsController &lt; ApplicationController
+  stream
+
+  def index
+    # rest of controller code
+  end
+end</pre>
+
+<p>The default webserver in Rails 3, WEBrick, doesn&rsquo;t support streaming so to see it in action we&rsquo;ll need to switch to another that does, such as Unicorn.</p>
+
+<p>The Unicorn gem is listed in the application&rsquo;s <code>Gemfile</code> but it&rsquo;s commented out by default. To use it we uncomment this line and then run bundle to install it.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby"># Use unicorn as the web server
+gem &#x27;unicorn&#x27;</pre>
+
+
+<p>We need to configure Unicorn to get it to use streaming. Rails has some <a href="https://github.com/rails/rails/blob/master/actionpack/lib/action_controller/metal/streaming.rb">internal documentation on streaming</a> that includes information on how to do this. All we need to do is create a configuration file that we&rsquo;ll put in the <code>config</code> directory.</p>
+
+<p class="codeFilePath">/config/unicorn.rb</p>
+<pre class="ruby">listen 3000, :tcp_nopush =&gt; false</pre>
+
+<p>We can then start up Unicorn and point it to that configuration file.</p>
+
+<pre class="terminal">$ unicorn_rails --config-file config/unicorn.rb</pre>
+
+<p>If you have trouble running this command make sure that you ran <code>bundle</code> after uncommenting the <code>gem &#x27;unicorn&#x27;</code> line in the <code>Gemfile</code>. If it still doesn&rsquo;t work try prefixing the command with <code>bundle exec</code>.</p>
+
+<p>We can now open our application in a browser on port 3000, just as we would if we were running it with the default Rails server.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/660/original/E266I01.png" width="800" height="290" alt="Our application running under Unicorn."/>
+</div>
+
+<h3>Simulating Streaming</h3>
+
+<p>The page above now uses streaming but we can&rsquo;t really see its effects. We&rsquo;ll need to simulate something that takes a few seconds to run in the view layer so that we can see the response being returned in chunks. The simplest way to do this is to add a <code>sleep</code> call at the top of one of the views.</p>
+
+<p class="codeFilePath">/app/views/projects/index.html.erb</p>
+<pre class="ruby">&lt;% sleep 5 %&gt;
+&lt;h1&gt;Listing projects&lt;/h1&gt;
+
+&lt;table&gt;
+  &lt;tr&gt;
+    &lt;th&gt;Name&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+  &lt;/tr&gt;
+
+&lt;% @projects.each do |project| %&gt;
+  &lt;tr&gt;
+    &lt;td&gt;&lt;%= project.name %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &#x27;Show&#x27;, project %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &#x27;Edit&#x27;, edit_project_path(project) %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &#x27;Destroy&#x27;, project, confirm: &#x27;Are you sure?&#x27;, method: :delete %&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+&lt;% end %&gt;
+&lt;/table&gt;
+
+&lt;br /&gt;
+
+&lt;%= link_to &#x27;New Project&#x27;, new_project_path %&gt;</pre>
+
+<p>We can see the chunked response by fetching this page with <code>curl</code>. If we use it to get the application&rsquo;s home page we&rsquo;ll get part of the response returned immediately.</p>
+
+<pre class="terminal">$ curl -i localhost:3000
+HTTP/1.1 200 OK 
+Date: Wed, 18 May 2011 08:18:56 GMT
+Status: 200 OK
+Connection: close
+Cache-control: no-cache
+Transfer-Encoding: chunked
+Content-Type: text/html; charset=utf-8
+X-UA-Compatible: IE=Edge
+X-Runtime: 0.023745
+
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Todo&lt;/title&gt;
+  &lt;link href=&quot;/assets/application.css&quot; media=&quot;screen&quot; rel=&quot;stylesheet&quot; type=&quot;text/css&quot; /&gt;
+  &lt;script src=&quot;/assets/application.js&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+  &lt;meta content=&quot;authenticity_token&quot; name=&quot;csrf-param&quot; /&gt;
+&lt;meta content=&quot;0eBxvhbMH6HA8ocRLw06uNnmh7zqWo5dGSeFIA8sfj8=&quot; name=&quot;csrf-token&quot; /&gt;
+&lt;/head&gt;
+&lt;body&gt;</pre>
+
+<p>There will then be a few seconds&rsquo; delay before the rest is returned. Note in the header information above that <code>Transfer-Encoding</code> is set to <code>chunked</code> and that there is no <code>Content-Length</code> header as the server can&rsquo;t know what size the full page will be when the first part of the response is sent.</p>
+
+<pre class="terminal">&lt;h1&gt;Listing projects&lt;/h1&gt;
+
+&lt;table&gt;
+  &lt;tr&gt;
+    &lt;th&gt;Name&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+    &lt;th&gt;&lt;/th&gt;
+  &lt;/tr&gt;
+
+  &lt;tr&gt;
+    &lt;td&gt;Housework&lt;/td&gt;
+    &lt;td&gt;&lt;a href=&quot;/projects/1&quot;&gt;Show&lt;/a&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;a href=&quot;/projects/1/edit&quot;&gt;Edit&lt;/a&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;a href=&quot;/projects/1&quot; data-confirm=&quot;Are you sure?&quot; data-method=&quot;delete&quot; rel=&quot;nofollow&quot;&gt;Destroy&lt;/a&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+&lt;/table&gt;
+
+&lt;br /&gt;
+
+&lt;a href=&quot;/projects/new&quot;&gt;New Project&lt;/a&gt;
+
+
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+
+<p>Without streaming enabled there would be a five-second delay before we saw any response from the server. Having the head section of the page returned immediately allows the web browser to start processing this part of the page and to load any JavaScript and CSS files that are referenced there while it waits for the rest of the main page to be returned from the server.</p>
+
+<p>If we view this page in a browser it will still take at least five seconds to before we see anything but in the background it will be fetching the application&rsquo;s JavaScript and CSS files while it waits for the Rails app to send the rest of the main page.</p>
+
+<p>To get the most from streaming we need to move as much processing as we can into the view layer so that the server can start streaming the page as soon as possible. In our index action we&rsquo;re using <code>Project.all</code> to fetch the projects to display on the page. The server cannot begin to stream this page until this command has run and so we should replace it with something like <code>scoped</code>, which uses lazy loading, so that the database call is not made until the view layer starts iterating over the collection of projects.</p>
+
+<p class="codeFilePath">/app/controllers/projects_controller.rb</p>
+<pre class="ruby">def index
+  @projects = Project.scoped
+end
+</pre>
+
+<h3>Potential Issues With Streaming</h3>
+
+<p>So far streaming sounds great but there are a few drawbacks to it that we&rsquo;ll need to be aware of before deciding to use it. The first is that the layout and template rendering is reversed. Normally in a Rails request the action&rsquo;s template is rendered first, followed by the layout. In a streaming request we need to render the layout&rsquo;s content as soon as possible as this usually contains the head section. The action&rsquo;s template won&rsquo;t be rendered until we reach the <code>yield</code> command in the layout.</p>
+
+<p>This means that if we try to do something like setting an instance variable in the template we won&rsquo;t be access that variable in the layout as the template won&rsquo;t have yet been rendered. For example let&rsquo;s try to try set a <code>@title</code> instance variable in the <code>index</code> action.</p>
+
+<p class="codeFilePath">/app/views/projects/index.html.erb</p>
+<pre class="ruby">&lt;% @title = &quot;Projects &quot;%&gt;
+&lt;% sleep 5 %&gt;
+&lt;h1&gt;Listing projects&lt;/h1&gt;
+
+&lt;table&gt;
+&lt;!-- Rest of file omitted. --&gt;</pre>
+
+<p>We&rsquo;ll then try to use that variable in the layout:</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;&lt;%= @title %&gt;&lt;/title&gt;
+  &lt;%= stylesheet_link_tag    &quot;application&quot; %&gt;
+  &lt;%= javascript_include_tag &quot;application&quot; %&gt;
+  &lt;%= csrf_meta_tags %&gt;
+&lt;/head&gt;
+&lt;body&gt;
+
+&lt;%= yield %&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+
+<p>If we fetch the page with <code>curl</code> and look at the <code>head</code> section the <code>title</code> element is empty. The layout is rendered before the template and so the <code>@title</code> variable won&rsquo;t have been set when it&rsquo;s read in the layout file. This isn&rsquo;t the case for non-streaming requests as the template is read first.</p>
+
+<pre class="terminal">&lt;head&gt;
+  &lt;title&gt;&lt;/title&gt;
+  &lt;link href=&quot;/assets/application.css&quot; media=&quot;screen&quot; rel=&quot;stylesheet&quot; type=&quot;text/css&quot; /&gt;
+  &lt;script src=&quot;/assets/application.js&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+  &lt;meta content=&quot;authenticity_token&quot; name=&quot;csrf-param&quot; /&gt;
+  &lt;meta content=&quot;x0CtIY+0vEbfkh6gohZp/WdOd0ZanobQHZT8+HUC/OE=&quot; name=&quot;csrf-token&quot; /&gt;
+&lt;/head&gt;</pre>
+
+<p>Of course the correct way to pass information from a template to the layout is to use <code>content_for</code> but this won&rsquo;t work either. If we try it and then use <code>curl</code> to view the page the output will stop just before the title element.</p> 
+
+<p>This fails because of how <code>content_for</code> works. If we have multiple calls to <code>content_for</code> for the same item Rails concatenates them together. Rails cannot know, therefore, that when it sees <code>content_for :title</code> at the top that there aren&rsquo;t more calls to it further down the page.</p>
+
+<p>Rails 3.1 provides a new method called <code>provide</code> that behaves exactly like <code>content_for</code> except that it doesn&rsquo;t concatenate values. We can use this to set the page&rsquo;s title.</p>
+
+<p class="codeFilePath">/app/views/projects/index.html.erb</p>
+<pre class="ruby">&lt;% provide :title, &quot;Projects&quot; %&gt;</pre>
+
+<p>In the layout we use <code>yield</code>, just as we would with <code>content_for</code>.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;title&gt;&lt;%= yield :title %&gt;&lt;/title&gt;</pre>
+
+<p>If we view the page now the <code>title</code> element contains the title that we set.</p>
+
+<pre class="terminal">
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Projects&lt;/title&gt;
+  &lt;link href=&quot;/assets/application.css&quot; media=&quot;screen&quot; rel=&quot;stylesheet&quot; type=&quot;text/css&quot; /&gt;
+  &lt;script src=&quot;/assets/application.js&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+  &lt;meta content=&quot;authenticity_token&quot; name=&quot;csrf-param&quot; /&gt;
+  &lt;meta content=&quot;NzdFt92dDBSXRRgFR0pRZRizirN87Qb5CVdqgGEAvTU=&quot; name=&quot;csrf-token&quot; /&gt;
+&lt;/head&gt;
+&lt;!-- rest of page --&gt;</pre>
+
+<p>Another problem we need to be wary of when using streaming is what happens when as exception is raised. We can show this by adding a call to a non-existent method in the <code>index</code> template.</p>
+
+<p class="codeFilePath">/app/views/projects/index.html.erb</p>
+<pre class="ruby">&lt;% provide :title, &quot;Projects&quot; %&gt;
+
+&lt;% fall_over %&gt;
+
+&lt;% sleep 5 %&gt;
+&lt;h1&gt;Listing projects&lt;/h1&gt;
+&lt;!-- rest of page --&gt;</pre>
+
+<p>If we look at the page now we&rsquo;ll see some interesting output.</p> 
+
+<pre class="terminal">$ curl -i http://localhost:3000/
+
+(header information omitted)
+
+&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Projects&lt;/title&gt;
+  &lt;link href=&quot;/assets/application.css&quot; media=&quot;screen&quot; rel=&quot;stylesheet&quot; type=&quot;text/css&quot; /&gt;
+  &lt;script src=&quot;/assets/application.js&quot; type=&quot;text/javascript&quot;&gt;&lt;/script&gt;
+  &lt;meta content=&quot;authenticity_token&quot; name=&quot;csrf-param&quot; /&gt;
+&lt;meta content=&quot;rhFAQuK2s5Rxi6jjC3jA12k07GjD75VeWlbsyf47bLc=&quot; name=&quot;csrf-token&quot; /&gt;
+&lt;/head&gt;
+&lt;body&gt;
+
+&quot;&gt;&lt;script type=&quot;text/javascript&quot;&gt;window.location = &quot;/500.html&quot;&lt;/script&gt;&lt;/html&gt;</pre>
+
+<p>When an exception is raised Rails sends a script element back to the browser containing a line of JavaScript that redirects the browser to the <code>500.html</code> page. If we view this page in the browser we&rsquo;ll be redirected to the standard error page that Rails applications show when running in production mode.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/661/original/E266I02.png" width="800" height="290" alt="The production 500 error page shows even in development mode."/>
+</div>
+
+<p>This means that we don&rsquo;t get the debugging information that we usually see when an error is thrown in development mode and we have to look for the error in the development log.</p>
+
+<p>Setting session and cookie information inside the template also won&rsquo;t work if we&rsquo;re using streaming. If we try setting a session variable in the template Rails will have already sent the header information to the browser so there&rsquo;s no way we can send further header information in the template. This also applies to cookies and to flash messages, which use the session. Session and cookie information needs to be set in the controller when we&rsquo;re using streaming.</p>
+
+<p>Two final potential issues are that Rails&rsquo; HTTP streaming feature makes use of Ruby fibres so we&rsquo;ll need to be running Ruby 1.9 to use it. Also, streaming is incompatible with some middleware. If the middleware modifies the response then it will not work with streaming. You can probably understand now why streaming isn&rsquo;t enabled by default. There are a number of potential problems that we need to be aware of when using streaming and so it&rsquo;s best to restrict its use to only those pages in which you need as much performance as possible.</p> 
+
+<p>Even with all of these problems streaming is well worth considering as it can improve the end-user experience, especially on pages that include a number of JavaScript and CSS files as the browser can get on with loading and processing these files as quickly as possible.</p>

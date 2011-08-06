@@ -1,0 +1,258 @@
+<p>Una de las  funcionalidades m&aacute;s destacadas de Rails 3 es la nueva sintaxis de consultas de ActiveRecord.  En el episodio 202 [<a href="http://railscasts.com/episodes/202-active-record-queries-in-rails-3">verlo</a>, <a href="http://es.asciicasts.com/episodes/202-consultas-activerecord-en-rails-3">leerlo</a>] estudiamos esta nueva sintaxis con cierto detalle por lo que los lectores que no est&eacute;n familiarizados con ella deber&iacute;an leerse dicho episodio antes de empezar con este.  Podr&iacute;a parecernos cuando utilicemos la nueva sintaxis que hay algo m&aacute;gico funcionando por detr&aacute;s, pero en este episodio veremos qu&eacute; partes del c&oacute;digo fuente de Rails entran en juego.</p>
+
+<h3>Descarga del c&oacute;digo fuente</h3>
+
+<p>Si a&uacute;n no tenemos a mano una copia del c&oacute;digo fuente de Rails deber&iacute;amos descargar una copia para poder seguir este episodio.  Lo &uacute;nico que tenemos que hacer es clonar el repositorio Git desde Github con la siguiente orden:</p>
+
+<pre class="terminal">$ git clone git://github.com/rails/rails.git</pre>
+
+<p>Cuando el repositorio haya terminado de descargarse podemos cambiar a la versi&oacute;n que usaremos aqu&iacute; haciendo un <em>checkout</em> de la rama apropiada.</p>
+
+<pre class="terminal">$ git checkout v3.0.1</pre>
+
+<p>Nos interesar&aacute; sobre todo el c&oacute;digo de ActiveRecord, por lo que nos cambiaremos a dicho directorio.</p>
+
+<pre class="terminal">$ cd activerecord/lib/active_record</pre>
+
+<p>El c&oacute;digo de ActiveRecord es enorme y se encuentra repartido a lo largo de un n&uacute;mero de archivos; en este episodio s&oacute;lo veremos unos pocos.</p>
+
+<pre class="terminal">$ ls -F
+aggregations.rb           nested_attributes.rb
+association_preload.rb    observer.rb
+associations/             persistence.rb
+associations.rb           query_cache.rb
+attribute_methods/        railtie.rb
+attribute_methods.rb      railties/
+autosave_association.rb   reflection.rb
+base.rb                   relation/
+callbacks.rb              relation.rb
+connection_adapters/      schema.rb
+counter_cache.rb          schema_dumper.rb
+dynamic_finder_match.rb   serialization.rb
+dynamic_scope_match.rb    serializers/
+errors.rb                 session_store.rb
+fixtures.rb               test_case.rb
+locale/                   timestamp.rb
+locking/                  transactions.rb
+log_subscriber.rb         validations/
+migration.rb              validations.rb
+named_scope.rb            version.rb</pre>
+
+<h3>Experimentos en la consola</h3>
+
+<p>Antes de sumergirnos en el c&oacute;digo vamos a hacernos una idea de qu&eacute; estamos buscando haciendo algunos sencillos experimentos con la consola de una aplicaci&oacute;n Rails 3.  Se trata de una sencilla aplicaci&oacute;n de tareas pendientes que tiene varios modelos <code>Task</code>.  Podemos recuperar todas las tareas utilizando <code>Task.all</code>.</p>
+
+<pre class="terminal">&gt; Task.all
+ =&gt; [#&lt;Task id: 1, project_id: 1, name: &quot;paint fence&quot;, completed_at: nil, created_at: &quot;2010-11-08 21:25:05&quot;, updated_at: &quot;2010-11-08 21:32:21&quot;, priority: 2&gt;, 
+ #&lt;Task id: 2, project_id: 1, name: &quot;weed garden&quot;, completed_at: nil, created_at: &quot;2010-11-08 21:25:29&quot;, updated_at: &quot;2010-11-08 21:27:04&quot;, priority: 3&gt;, 
+ #&lt;Task id: 3, project_id: 1, name: &quot;mow lawn&quot;, completed_at: nil, created_at: &quot;2010-11-08 21:25:37&quot;, updated_at: &quot;2010-11-08 21:26:42&quot;, priority: 3&gt;]</pre>
+
+<p>La nueva sintaxis de consultas en ActiveRecord hace que sea muy sencillo, por ejemplo, recuperar todas las tareas que tengan una prioridad de <code>3</code>.</p>
+
+<pre class="terminal">&gt; Task.where(:priority =&gt; 3)
+ =&gt; [#&lt;Task id: 2, project_id: 1, name: &quot;weed garden&quot;, completed_at: nil, created_at: &quot;2010-11-08 21:25:29&quot;, updated_at: &quot;2010-11-08 21:27:04&quot;, priority: 3&gt;, 
+ #&lt;Task id: 3, project_id: 1, name: &quot;mow lawn&quot;, completed_at: nil, created_at: &quot;2010-11-08 21:25:37&quot;, updated_at: &quot;2010-11-08 21:26:42&quot;, priority: 3&gt;]</pre>
+
+<p>Lo que ha devuelto esta consulta tiene el aspecto de una lista de registros pero si invocamos <code>class</code> resulta que es en realidad una instancia de <code>ActiveRecord::Relation</code>.</p>
+
+<pre class="terminal">&gt; Task.where(:priority =&gt; 3).class
+ =&gt; ActiveRecord::Relation</pre>
+ 
+<p>Si a&ntilde;adimos otra opci&oacute;n a la consulta e invocamos <code>class</code> veremos que se trata de un objeto del mismo tipo.</p>
+
+
+<pre class="terminal">&gt; Task.where(:priority =&gt; 3).limit(2).class
+ =&gt; ActiveRecord::Relation</pre>
+
+<h3>La clase Relation</h3>
+
+<p>El que las consultas devuelvan un objeto <code>ActiveRecord::Relation</code> es lo que nos permite encadenar consultas seguidas, y l&oacute;gicamente la clase <code>Relation</code> est&aacute; en el centro de la nueva sintaxis.  Aprenderemos m&aacute;s de esta clase buscando en el directorio de c&oacute;digo fuente de ActiveRecord un fichero llamado <code>relation.rb</code>.</p>
+
+
+<p>Al comienzo de la clase se definen un n&uacute;mero de constantes, una de las cuales es un <code>Struct</code> (para los que no est&eacute;n familiarizados con esta clase, se trata de una forma r&aacute;pida de definir una clase din&aacute;micamente pas&aacute;ndole una lista de atributos en el constructor).</p>
+
+<p class="codeFilePath">/rails/active_record/lib/active_record/relation.rb</p>
+<pre class="ruby">require &#x27;active_support/core_ext/object/blank&#x27;
+
+module ActiveRecord
+  # = Active Record Relation
+  class Relation
+    JoinOperation = Struct.new(:relation, :join_class, :on)
+    ASSOCIATION_METHODS = [:includes, :eager_load, :preload]
+    MULTI_VALUE_METHODS = [:select, :group, :order, :joins, :where, :having]
+    SINGLE_VALUE_METHODS = [:limit, :offset, :lock, :readonly, :create_with, :from]
+
+    include FinderMethods, Calculations, SpawnMethods, QueryMethods, Batches</pre>
+
+<p>Seguidamente la clase incluye varios m&oacute;dulos que suministran la mayor parte de la funcionalidad de la clase.  Dichos m&oacute;dulos est&aacute;n en el directorio <code>relation/</code> dentro del directorio <code>active_record</code>.  Vamos a echarle un vistazo a uno de estos m&oacute;dulos: <code><a href="https://github.com/rails/rails/blob/v3.0.0/activerecord/lib/active_record/relation/query_methods.rb">query_methods.rb</a></code>.</p> 
+
+<p>Esta clase contiene los m&eacute;todos que utilizaremos en la nueva sintaxis de consultas: <code>includes</code>, <code>select</code>, <code>group</code>, <code>order</code>, <code>joins</code>, etc&eacute;tera.  Todos estos m&eacute;todos se comportan de forma parecida, invocando a <code>clone</code>.  Lo que hace esto es clonar el objeto <code>Relation</code>, devolviendo un nuevo objeto <code>Relation</code> en lugar de modificar el ya existente.  Despu&eacute;s se invoca <code>tap</code> en el objeto clonado, lo que devuelve el objeto tras ejecutar el bloque sobre &eacute;l.  En cada bloque a&ntilde;adimos los argumentos recibidos en el m&eacute;todo al conjunto apropiado de valores del objeto <code>Relation</code>.</p>
+
+<p class="codeFilePath">/rails/active_record/lib/active_record/relation/query_methods.rb</p>
+<pre class="ruby">def group(*args)
+  clone.tap {|r| r.group_values += args.flatten if args.present? }
+end
+
+def order(*args)
+  clone.tap {|r| r.order_values += args if args.present? }
+end
+
+def reorder(*args)
+ clone.tap {|r| r.order_values = args if args.present? }
+end</pre>
+
+<p>As&iacute; que cuando antes en la consola invocamos <code>Task.where:(priority =&gt;3)</code> nos devolvi&oacute; una instancia de <code>Relation</code>, y cuando sobre dicho objeto invocamos <code>limit(2)</code>, se invoc&oacute; al m&eacute;todo <code>limit</code> del m&oacute;dulo <code>QueryMethods</code> que nos devuelve una versi&oacute;n clonada del objeto <code>Relation</code>.  Pero, &iquest;qu&eacute; pas&oacute; con la llamada inicial a <code>where</code>?  Sabemos que <code>limit</code> est&aacute; siendo invocado sobre un objeto <code>Relation</code> pero la llamada a <code>where</code> se lanza directamente sobre el modelo <code>Task</code> y por tanto en <code>ActiveRecord::Base</code> en lugar de <code>Relation</code>.  &iquest;D&oacute;nde se crea el objeto <code>Relation</code> original?</p>
+
+<p>Para encontrar la respuesta tenemos que indagar m&aacute;s en el c&oacute;digo fuente de ActiveRecord.  Si buscamos &ldquo;<code>def where</code>&rdquo; s&oacute;lo lo encontraremos en el m&oacute;dulo <code>QueryMethods</code> que ya estamos viendo.   Tampoco encontraremos &ldquo;<code>def self.where</code>&rdquo;.   Pero hay una forma distinta de definir m&eacute;todos con <code>delegate</code> as&iacute; que buscaremos en el c&oacute;digo esta expresi&oacute;n: &ldquo;<code>delegate.+ :where</code>&rdquo; y encontraremos resultados sumamente interesantes.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/512/original/E239I01.png" width="796" height="374" alt="Búsqueda del método where."/>
+</div>
+
+<p>El segundo resultado delega un gran n&uacute;mero de m&eacute;todos de consulta, as&iacute; que parece que es lo que est&aacute;bamos buscando.</p>
+
+<p class="codeFilePath">rails/activerecord/lib/active_record/base.rb</p>
+<pre class="ruby">delegate :select, :group, :order, :reorder, :limit, :joins, :where, :preload, :eager_load, :includes, :from, :lock, :readonly, :having, :create_with, :to =&gt; :scoped</pre>
+
+<p>En esta l&iacute;nea aparecen todos los m&eacute;todos de consulta, que se delegan a <code>scoped</code>.  Y &iquest;qu&eacute; hace <code>scope</code>?  Si buscamos otra vez en el proyecto veremos que este m&eacute;todo aparece en el fichero <code>named_scope.rb</code>.</p>
+
+<p>El m&oacute;dulo <code>NamedScope</code> se incluye en <code>ActiveRecord::Base</code>, por lo que tenemos acceso a todos sus m&eacute;todos.  El m&eacute;todo <code>scoped</code> es bastante sencillo, pues s&oacute;lo invoca a <code>relation</code> para mezclar las opciones que haya recibido.</p>
+
+<p class="codeFilePath">rails/activerecord/lib/active_record/named_scope.rb</p>
+<pre class="ruby">def scoped(options = nil)
+  if options
+    scoped.apply_finder_options(options)
+  else
+    current_scoped_methods ? relation.merge &crarr;
+      (current_scoped_methods) : relation.clone
+  end
+end</pre>
+
+<p>Veamos el m&eacute;todo <code>relation</code>, que ha sido definido en <code>ActiveRecord::Base</code>.</p>
+
+
+<p class="codeFilePath">rails/activerecord/lib/active_record/base.rb</p>
+<pre class="ruby">private
+def relation #:nodoc:
+  @relation ||= Relation.new(self, arel_table)
+  finder_needs_type_condition? ? @relation.where(type_condition) &crarr;
+    : @relation
+end</pre>
+
+<p>Aqu&iacute; es donde se instancia el objeto <code>Relation</code>.  Se le pasa <code>self</code>, que es una clase de modelo ActiveRecord y <code>arel_table</code>, que es un objeto de tipo <code>Arel::Table</code>, y devuelve dicha <code>Relation</code> (la otra l&iacute;nea a&ntilde;ade una condici&oacute;n <code>where</code> extra para el caso de herencias de tabla &uacute;nica).  El m&eacute;todo <code>arel_table</code> est&aacute; definido en la misma clase y tan s&oacute;lo crea un objeto de  clase <code>Arel::Table</code>.</p>
+
+<p class="codeFilePath">rails/activerecord/lib/active_record/base.rb</p>
+<pre class="ruby">def arel_table
+  @arel_table ||= Arel::Table.new(table_name, arel_engine)
+end</pre>
+
+<h3>Arel</h3>
+
+<p>Ahora la siguiente pregunta es: &iquest;qu&eacute; es Arel?  Es una dependencia externa, por lo que no la encontraremos en el c&oacute;digo fuente de Rails, pero  su c&oacute;digo fuente  <a href="https://github.com/rails/arel">se encuentra en Github</a>. Arel es una librer&iacute;a que simplifica la generaci&oacute;n de consultas complejas de SQL, y es para eso para lo que la utiliza ActiveRecord:</p>
+
+<pre class="ruby">users.where(users[:name].eq(&#x27;amy&#x27;))
+# =&gt; SELECT * FROM users WHERE users.name = &#x27;amy&#x27;</pre>
+
+<p>Ahora que ya sabemos lo que es <code>Arel::Table</code> podemos volver al m&eacute;todo <code>relation</code>.  Devuelve un objeto <code>Relation</code>, por lo que nos iremos a la definici&oacute;n de esta clase, cuyo inicializador tan s&oacute;lo recibe la clase y tabla que se le pasan y los almacena en una variable de instancia.</p>
+
+<p>Volviendo a la consola de Rails, ya sabemos qu&eacute; es lo que ocurre cuando se invoca</p>
+
+<pre class="terminal">Task.where(:priority =&gt; 3).limit(2).class</pre>
+
+<p>Al invocar <code>where</code> sobre el modelo se crea un nuevo objeto <code>Relation</code> sobre el cual volvemos a invocar <code>limit</code> lo que hace que se clone la relaci&oacute;n con argumentos adicionales en el objeto clonado.  Cuando se invoca <code>class</code> no se ejecuta la consulta, pero si quitamos <code>.class</code> al final de la l&iacute;nea, la consulta ser&aacute; lanzada y veremos la lista de objetos devueltos.</p>
+
+<pre class="terminal">&gt; Task.where(:priority =&gt; 3).limit(2)
+ =&gt; [#&lt;Task id: 2, project_id: 1, name: &quot;weed garden&quot;, completed_at: nil, created_at: &quot;2010-11-08 21:25:29&quot;, updated_at: &quot;2010-11-08 21:27:04&quot;, priority: 3&gt;, 
+ #&lt;Task id: 3, project_id: 1, name: &quot;mow lawn&quot;, completed_at: nil, created_at: &quot;2010-11-08 21:25:37&quot;, updated_at: &quot;2010-11-08 21:26:42&quot;, priority: 3&gt;]</pre> 
+
+<p>Comprobamos que la consulta termina lanz&aacute;ndose de alguna manera: lo que ocurre entre bambalinas es que se invoca al m&eacute;todo <code>inspect</code> sobre la orden que se est&aacute; ejecutando.  <code>Relation</code> redefine el m&eacute;todo <code>inspect</code>.  Veamos qu&eacute; aspecto tiene.</p>
+
+<p class="codeFilePath">/rails/active_record/lib/active_record/relation.rb</p>
+<pre class="ruby">def inspect
+  to_a.inspect
+end</pre>
+
+<p>Lo &uacute;nico que hace el m&eacute;todo <code>inspect</code> es invocar a <code>to_a.inspect</code> sobre la relaci&oacute;n.  Rastreando el c&oacute;digo en <code>Relation</code> podemos ver que el m&eacute;todo <code>to_a</code> se define as&iacute;:</p>
+
+
+<p class="codeFilePath">/rails/active_record/lib/active_record/relation.rb</p>
+<pre class="ruby">def to_a
+  return @records if loaded?
+
+  @records = eager_loading? ? find_with_associations : &crarr;
+    @klass.find_by_sql(arel.to_sql)
+
+  preload = @preload_values
+  preload +=  @includes_values unless eager_loading?
+  preload.each {|associations| @klass.send(:preload_associations,&crarr;
+    @records, associations) }
+
+  # @readonly_value is true only if set explicitly. &crarr;
+    @implicit_readonly is true if there
+  # are JOINS and no explicit SELECT.
+  readonly = @readonly_value.nil? ? @implicit_readonly : &crarr;
+    @readonly_value
+  @records.each { |record| record.readonly! } if readonly
+
+  @loaded = true
+  @records
+end</pre>
+
+<p>Este m&eacute;todo devuelve los registros si ya existen, de lo contrario los recupera y los devuelve.  La parte m&aacute;s interesante de este m&eacute;todo es la que recupera los m&eacute;todos:  <code>@klass.find_by_sql(arel.to_sql)</code>.  Este c&oacute;digo ejecuta <code>find_by_sql</code> en el modelo, en nuestro caso el modelo <code>Task</code>, pas&aacute;ndole <code>arel.to_sql</code>.  El m&eacute;todo <code>arel</code> est&aacute; definido el m&oacute;dulo <code>QueryMethods</code> que vimos anteriormente, y lo &uacute;nico que hace es invocar a otro m&eacute;todo llamado <code>build_arel</code> y cachear los resultados en una variable de instancia:</p>
+
+<p class="codeFilePath">/rails/active_record/lib/active_record/relation/query_methods.rb</p>
+<pre class="ruby">def build_arel
+  arel = table
+  
+  arel = build_joins(arel, @joins_values) unless &crarr; 
+    @joins_values.empty?
+
+  (@where_values - [&#x27;&#x27;]).uniq.each do |where|
+    case where
+    when Arel::SqlLiteral
+      arel = arel.where(where)
+    else
+      sql = where.is_a?(String) ? where : where.to_sql
+      arel = arel.where(Arel::SqlLiteral.new(&quot;(#{sql})&quot;))
+    end
+  end
+
+  arel = arel.having(*@having_values.uniq.select{|h| &crarr;
+    h.present?}) unless @having_values.empty?
+
+  arel = arel.take(@limit_value) if @limit_value
+  arel = arel.skip(@offset_value) if @offset_value
+
+  arel = arel.group(*@group_values.uniq.select{|g| g.present?}) &crarr;
+    unless @group_values.empty?
+
+  arel = arel.order(*@order_values.uniq.select{|o| o.present?}) &crarr;
+    unless @order_values.empty?
+
+  arel = build_select(arel, @select_values.uniq)
+
+  arel = arel.from(@from_value) if @from_value
+  arel = arel.lock(@lock_value) if @lock_value
+
+  arel
+end</pre>
+
+<p>Este m&eacute;todo recupera el objeto <code>Arel::Table</code> que vimos anteriormente y luego construye la consulta, convirtiendo todos los datos que hemos ido arrastrando en el objeto <code>Relation</code> en una consulta de Arel, la cual se termina devolviendo.  Una vez en la clase <code>Relation</code>, el m&eacute;todo <code>to_a</code> invoca <code>to_sql</code> sobre esta consulta Arel para convertirla a SQL y luego invoca <code>find_by_sql</code> sobre el modelo para que se devuelva el correspondiente <em>array</em> de registros.</p>
+
+<p>Con este conocimiento b&aacute;sico de c&oacute;mo funciona la clase ya podemos explicarnos c&oacute;mo trabajan muchos otros m&eacute;todos simplemente viendo el c&oacute;digo de <code>Relation</code>.  Por ejemplo el m&eacute;todo <code>create</code> llama a otro m&eacute;todo llamado <code>scoping</code> y llama a  <code>create</code> sobre la <code>@klass</code>.  Esto crear&aacute; una nueva instancia de un modelo y el m&eacute;todo de &aacute;mbito se a&ntilde;adir&aacute; &eacute;l solo a los m&eacute;todos de &aacute;mbito de <code>@klass</code>.  Lo que esto quiere decir es que cualquier cosa que se ejecute sobre un bloque de &aacute;mbito tendr&aacute; su &aacute;mbito restringido como si se invocase directamente sobre dicho objeto de relaci&oacute;n.  Merece la pena explorar el resto de m&oacute;dulos, especialmente <code>QueryMethods</code>.  Hay algunos m&eacute;todos que tal vez nos sean nuevos como por ejemplo <code>reorder</code>, que reiniciar&aacute; todos los argumentos de ordenaci&oacute;n en lugar de a&ntilde;adir uno nuevo como hace <code>order</code>.</p>
+
+<p class="codeFilePath">/rails/active_record/lib/active_record/relation/query_methods.rb</p>
+<pre class="ruby">def order(*args)
+  clone.tap {|r| r.order_values += args if args.present? }
+end
+
+def reorder(*args)
+  clone.tap {|r| r.order_values = args if args.present? }
+end</pre>
+
+<p>Tambi&eacute;n hay un m&eacute;todo <code>reverse_order</code> que ordenar&aacute; al rev&eacute;s el resultado de la cl&aacute;usula <code>order</code>.</p>
+
+<p>El m&oacute;dulo <code>Calculations</code> contiene m&eacute;todos para realizar c&aacute;lculos sobre los campos de un modelo tales como <code>average</code>, <code>minimum</code> y <code>maximum</code>.  El m&oacute;dulo <code>SpawnMethods</code> es interesante porque permite manipular objetos <code>Relation</code> diferentes (por ejemplo para mezclar dos relaciones) y existen tambi&eacute;n los m&eacute;todos <code>except</code> y <code>only</code> con los cuales todav&iacute;a no hemos tenido tiempo de experimentar, la mejor manera de hacerlo ser&aacute; lanzando una consola de aplicaci&oacute;n Rails 3 y probar estos m&eacute;todos para ver qu&eacute; hacen.  Se pueden descubrir muchas t&eacute;cnicas interesantes simplemente leyendo el c&oacute;digo fuente y haciendo pruebas con los m&eacute;todos que vayamos encontrando.</p>
+
+<p>Con esto cerramos este episodio en el que hemos visto <code>ActiveRecord::Relation</code> por dentro.  Os aninamos a explorar el c&oacute;digo fuente de Rails y experimentar con los m&eacute;todos que os parezcan interesantes.</p>
+

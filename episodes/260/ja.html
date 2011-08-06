@@ -1,0 +1,243 @@
+<p>今回のエピソードでは、Railsアプリケーションに簡単なインスタントメッセージの機能を追加します。すでにいくつかの機能を実装済みで、あるページ上のテキストフィールドにメッセージを入力できます。「送信」をクリックすると、入力されたメッセージはJavaScriptとAJAXによってチャットウィンドウに追加されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/622/original/E260I01.png" width="800" height="393" alt="チャットページ"/>
+</div>
+
+<p>ここまではよさそうですが、実はこのアプリケーションには問題があります。別のチャットクライアントとして、別のウィンドウあるいはブラウザを開くと、最初のウィンドウで入力されたメッセージは別のウィンドウには表示されません。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/623/original/E260I02.png" width="800" height="400" alt="新規メッセージはひとつのウィンドウのみに追加される"/>
+</div>
+
+<p>ここで必要なのは、プッシュ通知によって他のすべてのクライアントに新規メッセージが追加されたことを知らせて表示させることです。この機能を実装する方法はいくつかありますが、その前に今までにできているコードを見てみます。これはAJAXとjQueryを使用した簡単なフォームです。特に複雑な点はありませんが、もしjQueryがよくわからない場合はこれ以降読み進める前にエピソード136[<a href="http://railscasts.com/episodes/136-jquery">動画を見る</a>, <a href="http://asciicasts.com/episodes/136-jquery">読む</a>]を参照することをお勧めします。</p> 
+
+<p>このアプリケーションではjQueryを使用するため、まず最初に<code>Gemfile</code>に<a href="https://github.com/indirect/jquery-rails">jquery-rails gem</a>を追加します。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.5'
+gem 'sqlite3'
+gem 'nifty-generators'
+gem 'jquery-rails'</pre>
+
+<p>次にチャットページのビューのコードを見てみます。メッセージを一覧表示する、<code>chat</code>の<code>id</code>のリストと、<code>:remote =&gt; true</code>を使用してAJAXでメッセージを送信するフォームがあります。</p> 
+
+<p class="codeFilePath">/app/views/messages/index.html.erb</p>
+<pre class="ruby">&lt;% title "Chat" %&gt;
+
+&lt;ul id="chat"&gt;
+  &lt;%= render @messages %&gt;
+&lt;/ul&gt;
+
+&lt;%= form_for Message.new, :remote =&gt; true do |f| %&gt;
+  &lt;%= f.text_field :content %&gt;
+  &lt;%= f.submit "Send" %&gt;
+&lt;% end %&gt;</pre>
+
+<p>フォームは<code>MessagesController</code>の<code>create</code>アクションに送信されます。</p> 
+
+
+<p class="codeFilePath">/app/controllers/messages_controller.rb</p>
+<pre class="ruby">class MessagesController &lt; ApplicationController
+  def index
+    @messages = Message.all
+  end
+  
+  def create
+    @message = Message.create!(params[:message])
+  end
+
+end</pre>
+
+<p><code>create</code>アクションにはJavaScriptのテンプレートがあり、 新しいメッセージをリストに追加してフォームをリセットしています。</p>
+
+<p class="codeFilePath">/app/views/messages/create.js.erb</p>
+<pre class="ruby">$("#chat").append("&lt;%= escape_javascript render(@message) %&gt;");
+$("#new_message")[0].reset();</pre>
+
+<p>これはごく標準的なJavaScriptのコードです。ここで上のコードの１行目を書き換えして、新規メッセージがすべてのクライアントに送信されるように変更します。</p>
+
+<p>これをどう実現すればいいでしょうか? 実はRailsは非同期イベントの処理はあまり得意ではありません。それは、Railsアプリケーションに対してソケットを開いたままにできないからです。ひとつの対応策として、この種の問題を処理するのに適した別のWeb開発フレームワークの採用を検討できるかも知れません。<a href="http://nodejs.org/">Node.js</a>のようなフレームワークで<a href="http://socket.io/">Socket.IO</a>を使用するか、あるいはRubyにこだわりたければ、<a href="https://github.com/lifo/cramp">Cramp</a>や<a href="https://github.com/raggi/async_sinatra">async_sinatra</a>、または新しいフレームワークである<a href="http://postrank-labs.github.com/goliath/">Goliath</a>などの優れた解決方法があります。しかしRailsにこだわるとしたらどうでしょう? アプリケーションの開発にRailsを使い続けながら、配信と購読の仕組みを使って非同期イベント処理を扱うことができればいいのですが。</p>
+
+<p>そこで<a href="http://faye.jcoglan.com/">Faye</a>の登場です。Fayeは非同期に配信と購読を処理するサーバです。Railsアプリケーションと一緒に使用でき、その特別な機能が必要なときに呼び出すことができます。Fayeには２つのタイプがあります。Node.jsサーバとRubyサーバです。どちらも同じプロトコルを使用するので、我々がより慣れている言語用の方を選択できます。言うまでもなく、ここではRubyサーバの方を選択します。</p> 
+
+<p>Fayeを使えるようにするために、まずFaye gemをインストールします。</p>
+
+<pre class="terminal">$ gem install faye</pre>
+
+<p>次にRailsアプリケーションのappディレクトリの直下に<code>faye.ru</code>というRackupファイルを作成します。そのファイルでは、Fayeのドキュメントにある１行のコードをそのまま貼付けて新規Rackアプリケーションを作成し、続いてそれを実行します。</p>
+
+<p class="codeFilePath">/faye.ru</p>
+<pre class="ruby">require 'faye'
+faye_server = Faye::RackAdapter.new(:mount =&gt; '/faye', :timeout =&gt; 45)
+run faye_server</pre>
+
+<p><code>rackup</code>コマンドを実行してサーバを起動します。これは<a href="http://code.macournoyer.com/thin/">Thin</a>サーバでproductionモードで動くように設定されているので、２つのオプションを指定します。　</p>
+
+<pre class="terminal">$ rackup faye.ru -s thin -E production
+&gt;&gt; Thin web server (v1.2.11 codename Bat-Shit Crazy)
+&gt;&gt; Maximum connections set to 1024
+&gt;&gt; Listening on 0.0.0.0:9292, CTRL+C to stop</pre>
+
+<p>Fayeアプリケーションが9292ポートで起動しました。サーバにはJavaScriptファイルがあり、レイアウトファイルでincludeします。このファイルは<code>http://localhost:9292/faye.js</code>にあり、上で設定した<code>:mount</code>オプションに基づいて名前がついています。</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= javascript_include_tag :defaults, "http://localhost:9292/faye.js" %&gt;</pre>
+
+<p>もちろんproductionモードでは、正しいサーバを指定するようURLを変更する必要があります。</p>
+
+<p>Fayeのサイトの<a href="http://faye.jcoglan.com/browser.html">Documentation</a>にブラウザからの利用方法がありますが、それによるとFayeのJavaScriptをincludeしたら新規クライアントを作成します。そのためにapplication.jsファイルにコードを追加します。</p>
+
+<pre class="codeFilePath">/public/javascripts/application.js</pre>
+<pre class="javascript">$(function() {
+  var faye = new Faye.Client('http://localhost:9292/faye');
+});</pre>
+
+<p><code>$</code>関数を使って、ページのDOMがロードされるまでコードが実行されないようにしています。このファイルについても、productionモードではURLを変更する必要があります。</p>
+
+<p>Fayeクライアントが設定できたら、チャンネルを購読できるようになります。作成中のアプリケーションには１ページしかないので、チャンネルは１つあればいいでしょう。それを<code>/messages/new</code>とします。チャンネルを購読するには、<code>subscribe</code>関数を呼び出してチャンネル名とコールバック関数を渡します。メッセージを受信するとコールバック関数が起動され、データが渡されます。今のところは、返されたデータを見るために<code>alert</code>するだけにします。</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function() {
+  var faye = new Faye.Client('http://localhost:9292/faye');
+  faye.subscribe('/messages/new', function (data) {
+    alert(data);
+  });
+});</pre>
+
+<p>では試してみましょう。作成中のRailsアプリケーションを起動してチャットページを開きます。JavaScriptが読み込まれ、Fayeクライアントがメッセージの受信状態になります。<code>curl</code>を使ってコールバックを手動で起動して、チャンネルにメッセージを送ります。</p> 
+
+<pre class="terminal">$ curl http://localhost:9292/faye -d 'message={"channel":"/messages/new", "data":"hello"}'</pre>
+
+<p>POSTデータは正しく動作させるために、メッセージパラメータとJSONデータという形式で送信します。JSONにはchannelとdataというキーを持たせます。</p>
+
+<p><code>curl</code>コマンドを実行すると、すぐにブラウザにアラートメッセージが出て、送信したデータが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/624/original/E260I03.png" width="804" height="456" alt="コマンドが送信されるとアラートが表示される"/>
+</div>
+
+<p>これでFayeにPOSTリクエストを送信することでRailsアプリケーションを介して通知を送信できるようになりました。</p>
+
+<h3>メッセージを配信する</h3>
+
+<p>次に<code>create.js.erb</code>ファイルを編集して、メッセージが送信されたらFayeを介してすべての購読しているブラウザにメッセージが配信されるように修正します。例えば、<code>channel</code>パラメータとブロックを持つ<code>broadcast</code>というメソッドがあれば便利でしょう。ブロックに渡されるものはすべてチャンネルに対して配信されます。</p>
+
+<p>このメソッドを<code>ApplicationHelper</code>に作ってみましょう。そこで、<code>channel</code>パラメータとブロックの出力からメッセージを組み立て、<code>Net::HTTP.post_form</code>を使ってデータをFayeサーバにPOSTします。</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def broadcast(channel, &amp;block)
+    message = {:channel =&gt; channel, :data =&gt; capture(&amp;block)}
+    uri = URI.parse("http://localhost:9292/faye")
+    Net::HTTP.post_form(uri, :message =&gt; message.to_json)
+  end
+end</pre>
+
+<p><code>Net::HTTP</code>を使いますが、これはデフォルトではRailsに含まれていないため<code>require</code>する必要があります。これを<code>/config/application.rb</code>ファイルに記述します。</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby">require File.expand_path('../boot', __FILE__)
+
+require 'rails/all'
+require 'net/http'
+# rest of file...</pre>
+
+<p>新しいbroadcastメソッドができたので<code>create.js.erb</code>で使用します。</p>
+
+<p class="codeFilePath">/app/views/messages/create.js.erb</p>
+<pre class="ruby">&lt;% broadcast "/messages/new" do %&gt;
+$("#chat").append("&lt;%= escape_javascript render(@message) %&gt;");
+&lt;% end %&gt;
+$("#new_message")[0].reset();</pre>
+
+<p>ここで動作を試してみましょう。アプリケーションに戻ってチャットメッセージを入力すると、Fayeを介して配信され、新しいメッセージをリストに追加するためのJavaScriptを確認することができます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/625/original/E261I04.png" width="803" height="458" alt="送り返されたJavaScriptが警告メッセージに表示される"/>
+</div>
+
+<p>ブラウザがJavaScriptを表示するのではなく評価させるために、<code>alert</code>を<code>eval</code>に変更します。</p>
+
+<p class="codeFilePath">/public/javascripts/application.js</p>
+<pre class="javascript">$(function() {
+  var faye = new Faye.Client('http://localhost:9292/faye');
+  alert('subscribing!')
+  faye.subscribe('/messages/new', function (data) {
+    eval(data);
+  });
+});</pre>
+
+<p>ページを再度読み込み、別のウィンドウを開いてこの機能を試します。チャットウィンドウにメッセージを入力すると、すぐに別のウィンドウにも表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/626/original/E261I05.png" width="882" height="495" alt="送信されたメッセージが両方のウィンドウで表示される"/>
+</div>
+
+<p>これで設定ができたので、シンプルな<code>broadcast</code>ブロックを用いて、AJAXリクエストを受け付けて購読しているすべてのクライアントにJavaScriptを配信できるようになりました。各クライアントでJavaScriptを実行する代わりにJSONを扱いたければ、同じような方法でJavaScriptの代わりにJSONを返して評価されるようにもできます。</p>
+
+<h3>セキュリティ</h3>
+
+<p>ここまでで書いたコードはうまく動きましたが、安全ではありません。前半でコマンドラインから<code>curl</code>を呼び出してメッセージを配信しましたが、今のコードのままでは誰でも同じようにJavaScriptを送信して、あるチャンネルを聞いているすべてのクライアントで評価されてしまいます。</p>
+
+<p>この問題はFayeの拡張機能を利用することで解決できます。<a href="http://faye.jcoglan.com/ruby.html">Documentation</a>にも説明がありますが、ここで簡単に触れておきます。それらを使うにはRubyクラスを作成し、<code>incoming</code>あるいは<code>outgoing</code>メソッドを追加します。作成したメソッドが認証トークンを読み、それが期待したものでなかったらエラーを返します。それからRackupファイルで、Fayeの<code>add_extension</code>メソッドを使ってFayeサーバの機能拡張としてクラスを追加します。</p>
+
+<p>FayeサーバとRailsアプリケーションで共有するトークンを作成し、毎回メッセージを受けつける前にトークンが一致するかをチェックします。このためにRailsアプリケーションに<code>faye_token.rb</code>という初期設定ファイルを追加します。このアプリケーションを利用するときに、各システムでこの値がユニークである必要があるため、このファイルをGitリポジトリには含んでいないことに注意してください。このファイルで、どのような値も持つことができる<code>FAYE_TOKEN</code>という定数を設定します。</p>
+
+<p class="codeFilePath">/config/initializers/faye_token.rb</p>
+<pre class="ruby">FAYE_TOKEN = "anything_here"</pre>
+
+<p>次に<code>broadcast</code>メソッドを書き換えて、このトークンと送信メッセージを含むように修正します。拡張機能の情報を<code>:ext</code>パラメータに含むようにして、そのパラメータ内で<code>:auth_token</code>という名前でトークンを送信します。</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def broadcast(channel, &amp;block)
+    message = {:channel =&gt; channel, :data =&gt; capture(&amp;block), :ext =&gt; {:auth_token =&gt; FAYE_TOKEN}}
+    uri = URI.parse("http://localhost:9292/faye")
+    Net::HTTP.post_form(uri, :message =&gt; message.to_json)
+  end
+end</pre>
+
+<p>最後に<code>faye.ru</code>ファイルを修正して認証を処理する拡張機能を追加します。</p> 
+
+<p class="codeFilePath">/faye.ru</p>
+<pre class="ruby">require 'faye'
+require File.expand_path('../config/initializers/faye_token.rb', __FILE__)
+
+class ServerAuth
+  def incoming(message, callback)
+    if message['channel'] !~ %r{^/meta/}
+      if message['ext']['auth_token'] != FAYE_TOKEN
+        message['error'] = 'Invalid authentication token.'
+      end
+    end
+    callback.call(message)
+  end
+end
+
+faye_server = Faye::RackAdapter.new(:mount =&gt; '/faye', :timeout =&gt; 45)
+faye_server.add_extension(ServerAuth.new)
+run faye_server</pre>
+
+<p>前に作成した初期設定ファイルからFayeトークンを読み込み、incomingメソッドを持つ<code>ServerAuth</code>という新規クラスを作成します。このメソッドでまずチャンネル名の初めに「meta」がついていないことを確認します。「meta」はFayeが内部的に使用する名前につくもので、そのようなチャンネルは認証対象ではないからです。次に<code>auth_token</code>が正しく、エラーメッセージがないことを確認します。そしてコールバックを呼び出します。これにより、エラーが含まれるメッセージを受け付けないようにします。最後にファイルの最下部で、Fayeサーバを生成した直後に拡張機能メソッドを追加しています。</p>
+
+<p>両方のサーバを再起動して<code>curl</code>コマンドを送信すると、認証された要求ではないためBad Request responseが返されます。</p> 
+
+<pre class="terminal">$ curl http://localhost:9292/faye -d 'message={"channel":"/messages/new", "data":"hello"}'
+HTTP/1.1 400 Bad Request
+Content-Type: application/json
+Connection: close
+Server: thin 1.2.11 codename Bat-Shit Crazy
+Content-Length: 11</pre>
+
+<p>一方、Railsアプリケーションは正しい認証トークンを送信するので、正常に動作します。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/627/original/E261I06.png" width="899" height="654" alt="認証されたのでメッセージが送信される"/>
+</div>
+
+<p>Fayeの利用方法についての今回のエピソードはここまでです。Fayeは、Webフレームワークを完全に入れ替えることなくプッシュ通知機能を取り扱えるようにする優れた方法です。Railsのロジックはすべてそのままで、プッシュ通知の利点を享受できます。</p> 
+
+<p>自分でFayeサーバを管理したくないという場合は、<a href="http://pusherapp.com/">Pusher</a>というサーバがありイベント処理を代行してくれるので一度見てみてはいかがでしょうか?</p>

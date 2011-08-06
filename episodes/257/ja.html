@@ -1,0 +1,358 @@
+<p>ハイレベルテストは、Railsアプリケーションをテストする優れた方法です。この種のテストでよく用いられるCucumberについて、エピソード155[<a href="http://railscasts.com/episodes/155-beginning-with-cucumber">動画を見る</a>, <a href="http://asciicasts.com/episodes/155-beginning-with-cucumber">読む</a>]で取り上げました。Cucumberの、アプリケーションの振る舞いを英語の文法で定義するやり方が好きではない人もいるでしょう。そこで今回はハイレベルテストを実行する別の方法を見てみます。</p>
+
+<p>普段はテスト駆動開発を奨励していますが、今回はすでに完成したアプリケーションにテストを追加することにします。それによって、実装の詳細やアプリケーションが正常動作するかどうかに気をとられることがなくなります。これからテストを追加するアプリケーションは、単純な１ページのみのTo Doリストです。タスクのリストを表示し、新規タスクを追加するためのフォームがあります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/603/original/E257I01.png" width="800" height="321" alt="簡単なタスクリスト"/>
+</div>
+
+<p>このアプリケーションをテストするために、RSpec 2.0のrequest specを使用します。まず最初に、<code>Gemfile</code>のdevelopementとtestグループにRSpec Rails gemを追加し、<code>bundle</code>コマンドを実行します。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.5'
+gem 'sqlite3'
+gem 'nifty-generators'
+
+group :development, :test do
+  gem 'rspec-rails'
+end</pre>
+
+<p>Bundlerを実行後、以下のコマンドを実行してアプリケーションにRSpecを設定します。</p>
+
+<pre class="terminal">$ rails g rspec:install</pre>
+
+<p>request specは、Railsに標準でついている統合テスト(エピソード187[<a href="http://railscasts.com/episodes/187-testing-exceptions">動画を見る</a>, <a href="http://asciicasts.com/episodes/187-testing-exceptions">読む</a>])に相当する機能のRSpec版です。request specを作成するためには、統合テストジェネレータを呼び出します。</p>
+
+<pre class="terminal">$ rails g integration_test task</pre>
+
+<p>これによって、<code>spec/requests</code>ディレクトリに次のような<code>tasks_spec.rb</code>ファイルが生成されます。 </p>
+
+<p class="codeFilePath">/spec/requests/tasks_spec.rb</p>
+<pre class="ruby">require 'spec_helper'
+
+describe "Tasks" do
+  describe "GET /tasks" do
+    it "works!(now write some real specs)" do
+      # Run the generator again with the --webrat flag if you want to use webrat methods/matchers
+      get tasks_path
+      response.status.should be(200)
+    end
+  end
+end</pre>
+
+<p>このファイルの内容は標準的なRSpecテストに見えますが、違いとしては、<code>get</code>のようなメソッドを使ってアプリケーションのページを呼び出せたり、<code>response</code>を呼び出してリクエストに対するレスポンスを確認することができます。このファイルに標準で含まれるspecでは、上で示したタスクページを要求し、応答状態が<code>200</code>、すなわち応答が成功であることをチェックします。このspecはそのまま修正なしで成功するはずなので、試してみましょう。<code>rake spec:requests</code>を実行して、request specだけを実行します。</p>
+
+<pre class="terminal">$ rake spec:requests
+(in /Users/eifion/code/tasklist)
+/Users/eifion/.rvm/rubies/ruby-1.9.2-p0/bin/ruby -S bundle exec rspec ./spec/requests/tasks_spec.rb
+DEPRECATION WARNING: &lt;% %&gt; style block helpers are deprecated. Please use &lt;%= %&gt;. (called from _app_views_tasks_index_html_erb___875755388255758006_2152410020_3563250333774836596 at /Users/eifion/code/tasklist/app/views/tasks/index.html.erb:3)
+<span class="passed">.</span>
+
+Finished in 0.18535 seconds
+<span class="passed">1 example, 0 failures</span>
+</pre>
+
+<p>specは成功しますが、非推奨の警告が表示されています。これがまさに、このようなテストを行うことで見つけることができるもので、直接ブラウザでテストしていたら見落とされてしまいます。どうやらブロックヘルパーでイコール記号(=)をつけ忘れたようです。request specを書くことで、さっそく有用なフィードバックを得ることができました。</p>
+
+<p>フォームのビューファイルを見ると、最初の<code>form_for</code>タグで、Rails 3では必要とされるイコール記号が抜けているのを確認できます。</p>
+
+<p class="codeFilePath">/app/views/tasks/index.html.erb</p>
+<pre class="ruby">&lt;% form_for Task.new do |f| %&gt;</pre>
+
+<p>これを以下のように修正します。</p>
+
+<p class="codeFilePath">/app/views/tasks/index.html.erb</p>
+<pre class="ruby">&lt;%= form_for Task.new do |f| %&gt;</pre>
+<p>ここで再度specを実行すると、specは成功し警告は出ません。</p>
+<pre class="terminal">$ rake spec:requests
+(in /Users/eifion/code/tasklist)
+/Users/eifion/.rvm/rubies/ruby-1.9.2-p0/bin/ruby -S bundle exec rspec ./spec/requests/tasks_spec.rb
+<span class="passed">.</span>
+
+Finished in 0.16725 seconds
+<span class="passed">1 example, 0 failures</span></pre>
+
+<h3>最初の本格的なRequest Spec</h3>
+
+<p>通常はrequest specで単に応答状態のテストだけをしたいわけではありません。デフォルトのspecを書き換えて、ページにタスクが正しく表示されることをテストしてみます。</p>
+
+<p class="codeFilePath">/specs/requests/tasks_spec.rb</p>
+<pre class="ruby">require 'spec_helper'
+
+describe "Tasks" do
+  describe "GET /tasks" do
+    it "displays tasks" do
+      Task.create!(:name =&gt; "paint fence")
+      get tasks_path
+      response.body.should include("paint fence")
+    end
+  end
+end</pre>
+
+<p>このspecはわかりやすいでしょう。新しいタスクを作成して、<code>tasks</code>ページにアクセスして、タスク名が表示されていることを確認します。<code>rake spec:requests</code>を実行すると、ページにその文字列が含まれているので、specは成功します。</p>
+
+<p>request specはRailsの統合テストの上で動作するので、統合テストが持つすべてのメソッドをサポートしています。例えば新規タスクの作成をテストしたい場合、<code>post_via_redirect</code>メソッドを利用して、タスクが作成された後に正しくリダイレクトされたかを確認できます。</p>
+
+<p>ではそのspecを書いてみましょう。まず<code>post_via_redirect</code>を呼び出して、<code>index</code>ページにPOSTで引数を渡して“mow lawn(芝を刈る)”という新規タスクを作成します。その後で、結果として表示されるページにその文字列が存在するかどうかをチェックします。</p>
+
+<p class="codeFilePath">/specs/requests/tasks_spec.rb</p>
+<pre class="ruby">require 'spec_helper'
+
+describe "Tasks" do
+  
+  # Other task omitted.
+  
+  describe "POST /tasks" do
+    it "creates a task" do
+      post_via_redirect tasks_path, ↵
+	   :task =&gt; { :name =&gt; "mow lawn" }
+      response.body.should include("mow lawn")
+    end
+  end
+end</pre>
+
+<p>ここでspecを実行すると、2つが成功しているので、コードが期待通りに動いたことがわかります。テスト駆動開発をおこなっている場合、失敗したspecに対して成功するようにコードを直すというように作業を進めます。これがテスト駆動開発の利点であり、これによりテストが正しく機能していることが保証されます。今回のアプリケーションでは、すでに稼働しているシステムなのでテストはいきなり成功してしまいました。すでにあるコードに対してテストを追加する場合、意図的にコードの一部を壊してテストが失敗することを確認し、その後また元に戻すという手順をふむのが重要です。</p> 
+
+<h3>Capybaraでユーザインターフェイスをテストする</h3>
+
+<p>request specの問題の一つは、すべてのユーザ体験をテストするわけではないという点です。新規タスクの登録フォームを完全に壊したとしても、それをspecでとらえることはできません。これは、直接createアクションにPOSTしているからで、ユーザが実際にするようにフォームを介しているわけではないからです。</p>
+
+<p>これを解決するためにはユーザの動作を真似る必要がありますが、<a href="https://github.com/jnicklas/capybara">Capybara</a>を使うことで実現できます。これはWebrat(エピソード156[<a href="http://railscasts.com/episodes/156-webrat">動画を見る</a>, <a href="http://asciicasts.com/episodes/156-webrat">読む</a>])の代替になるものです。Capybaraを利用すれば、ウェプアプリケーションでの利用者の振る舞いを真似ることが可能になります。Capybaraはgemなので、通常の方法でインストールします。同時に<a href="http://rubygems.org/gems/launchy">launchy</a> gemも追加します。理由は後ほど説明します。<code>Gemfile</code>でdevelopmentとtestの両方のグループにgemを追加し、 <code>bundle</code>コマンドを実行してインストールを行います。</p> 
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.5'
+gem 'sqlite3'
+gem 'nifty-generators'
+
+group :development, :test do
+  gem 'rspec-rails'
+  gem 'capybara'
+  gem 'launchy'
+end</pre>
+
+<p>Capybaraが自動的にrequest specに追加されるので、最初のspecで<code>get</code>を呼び出す代わりにCapybaraの<code>visit</code>メソッドを利用します。また<code>response.body.should include</code>を<code>page.should have_content</code>に置き換えます。</p> 
+
+<p>二つ目のspecでは、直接createアクションにPOSTする代わりに、Capybaraを利用してフォームへのデータ入力と登録をシミュレートします。<code>fill_in</code>メソッドは “Name”のラベルがついたテキストボックスを探して値を設定し、<code>click_button</code>メソッドが文字列からフォーム上のボタンを探しクリックします。</p>
+
+
+
+<p class="codeFilePath">/specs/requests/task_spec.rb</p>
+<pre class="ruby">require 'spec_helper'
+
+describe "Tasks" do
+  describe "GET /tasks" do
+    it "displays tasks" do
+      Task.create!(:name =&gt; "paint fence")
+      visit tasks_path
+      page.should have_content("paint fence")
+    end
+  end
+  
+  describe "POST /tasks" do
+    it "creates a task" do
+      visit tasks_path
+      fill_in "Name", :with =&gt; "mow lawn"
+      click_button "Add"
+	 page.should have_content("Successfully added task.")
+      page.should have_content("mow lawn")
+    end
+  end
+end</pre>
+
+<p>これを実行するとspecは今回も成功します。そこでフォームもテストするために何か動作に問題が出る変更をしてみると、それが発見されます。</p>
+
+<h3>ページをデバッグする</h3>
+
+<p>想定通りspecが失敗したとして、その問題をどのようにデバッグすればいいのでしょうか? ここでlaunchyが登場します。Capybaraを使っている場合、どの時点でも<code>save_and_open_page</code>メソッドを呼び出すことによってそのページをブラウザで開いて確認することができます。これを<code>click_button "Add"</code>のすぐ後に追加し再度specを実行すると、内容をチェックする直前のタスクページを見ることができます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/604/original/E257I02.png" width="801" height="321" alt="specの途中で表示されるページ"/>
+</div>
+
+<p>ここで、その時点でのページの状態が表示されるとともに、フラッシュメッセージと、Capybaraによって追加されたタスクを見ることができます。</p>
+
+<h3>JavaScriptをテストする</h3>
+
+<p>アプリケーションのテストが十分に行われました。これらのテストは、request specとCapybaraを用いることによって簡単に追加することができました。しかし、もしアプリケーションにJavaScriptが含まれていてそれをテストしたい場合は、どうすればいいでしょうか? これは簡単に対応可能です。その方法を説明しましょう。</p>
+
+<p><code>index</code>テンプレートにJavaScript を追加してテストできるようにします。単純にするため、コードは別ファイルにせず直接記述します。<code>link_to_function</code>を使って、 JavaScript関数を呼び出すリンクを追加します。このリンクをクリックするとリンクの文字列が「js works」に変わります。実行されるスクリプトにはjQueryが必要なため、アプリケーションのレイアウトファイルで参照情報を追加しています。(ところで、Rails 3.1ではPrototypeに代わってjQueryがデフォルトのJavaScriptライブラリになります。)</p>
+
+<p class="codeFilePath">/app/views/tasks/index.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Task List&lt;/h1&gt;
+
+&lt;%= link_to_function "test js", '$(this).html("js works")' %&gt;
+
+&lt;%= form_for Task.new do |f| %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;
+    &lt;%= f.text_field :name %&gt;
+    &lt;%= f.submit "Add" %&gt;
+  &lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;ul&gt;
+  &lt;% @tasks.each do |task| %&gt;
+    &lt;li&gt;&lt;%= task.name %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;</pre>
+
+<p>ページに「test js」というリンクが表示され、クリックすると表示が変わります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/605/original/E257I03.png" width="801" height="321" alt="JavaScriptリンクをクリックし、表示が変わった"/>
+</div>
+
+<p>この新しく作成した機能を、Capybaraでテストしてみましょう。まず新しいspecを作成します。</p>
+
+<p class="codeFilePath">/spec/requests/tasks_spec.rb</p>
+<pre class="ruby">it "supports js" do
+  visit_tasks_path
+  click_link "test js"
+  page.should have_content("js works")
+end</pre>
+
+<p>request specを実行すると、1件の失敗が発生しています。</p>
+
+<pre class="terminal">$ rake spec:requests
+(in /Users/eifion/code/tasklist)
+/Users/eifion/.rvm/rubies/ruby-1.9.2-p0/bin/ruby -S bundle exec rspec ./spec/requests/tasks_spec.rb
+.<span class="failed">F</span>.
+
+Failures:
+
+  1) Tasks GET /tasks supports js
+     <span class="failed">Failure/Error: page.should have_content("js works")</span>
+       <span class="failed">expected #has_content?("js works") to return true, got false</span>
+     # ./spec/requests/tasks_spec.rb:14:in `block (3 levels) in &lt;top (required)&gt;'
+
+Finished in 0.83232 seconds
+<span class="failed">3 examples, 1 failure</span>
+rake aborted!ruby -S bundle exec rspec ./spec/requests/tasks_spec.rb failed
+
+(See full trace by running task with --trace)</pre>
+
+<p>specが失敗した原因は、そのページにJavaScriptで設定された文字列がなかったからです。デフォルトではCapybaraはJavaScriptをサポートしていません。そこでSeleniumを介してJavaScriptを使うよう指示します。</p>
+
+<p>ここで示そうとしている機能は、現行バージョンのCapybaraではサポートされていません。Bundlerを利用して最新版をGitHubから入手します。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.5'
+gem 'sqlite3'
+gem 'nifty-generators'
+
+group :development, :test do
+  gem 'rspec-rails'
+  gem 'capybara', :git =&gt; 'git://github.com/jnicklas/capybara.git'
+  gem 'launchy'
+end</pre>
+
+<p>再度<code>bundle</code>を実行すると、Capybara gemの最新版がダウンロードされてインストールされます。</p>
+
+<p>さらに、JavaScriptのテストを可能にするために、 <code>spec_helper</code>ファイルを修正して<code>require 'rspec/rails'</code>という1行を追加します。</p> 
+
+<p class="codeFilePath">/spec/spec_helper.rb</p>
+<pre class="ruby"># This file is copied to spec/ when you run 'rails generate rspec:install'
+ENV["RAILS_ENV"] ||= 'test'
+require File.expand_path("../../config/environment", __FILE__)
+require 'rspec/rails'
+require 'capybara/rspec'
+
+# rest of file...</pre>
+
+<p>この作業は正式リリース版では必要ないかも知れませんが、今のところは必要です。これで、Capybaraに対してspecでJavaScriptドライバを使用するように簡単に指定できるようになりました。specに<code>:js =&gt; true</code>オプションを追加するだけです。</p>
+
+<p class="codeFilePath">/spec/requests/tasks_spec.rb</p>
+<pre class="ruby">it "supports js", :js =&gt; true do
+  visit tasks_path
+  click_link "test js"
+  page.should have_content("js works")
+end</pre>
+
+<p>specを実行すると、Firefoxが開いてJavaScriptを必要とするspecを実行します。これで再度すべてのspecが成功しました。</p>
+
+<p>これは素晴らしい機能ですが、データベースのレコードに関連する問題がおそらく発生すると思われます。デモの目的で、最初の2つのspec(うちひとつは新しい <code>Task</code>を作成するもの)に<code>:js =&gt; true</code>オプションを追加します。</p>
+
+<p class="codeFilePath">/spec/requests/tasks_spec.rb</p>
+<pre class="ruby">describe "Tasks" do
+  describe "GET /tasks", :js =&gt; true do
+    it "displays tasks" do
+      Task.create!(:name =&gt; "paint fence")
+      visit tasks_path
+      page.should have_content("paint fence")
+    end
+    
+    it "supports js" do
+      visit tasks_path
+      click_link "test js"
+      page.should have_content("js works")
+    end    
+  end
+end</pre>
+
+<p>ここでspecを実行すると、最初の2つのリクエストにSeleniumが使用されます。</p> 
+
+<pre class="terminal">$ rake spec:requests
+(in /Users/eifion/code/tasklist)
+/Users/eifion/.rvm/rubies/ruby-1.9.2-p0/bin/ruby -S bundle exec rspec ./spec/requests/tasks_spec.rb
+<span class="failed">F</span>..
+
+Failures:
+
+  1) Tasks GET /tasks displays tasks
+     <span class="failed">Failure/Error: page.should have_content("paint fence")</span>
+       <span class="failed">expected there to be content "paint fence" in "Task List\ntest js\n\nName"</span>
+     # ./spec/requests/tasks_spec.rb:8:in `block (3 levels) in &lt;top (required)&gt;'
+
+Finished in 7.69 seconds
+<span class="failed">3 examples, 1 failure</span></pre>
+
+<p>今度は、最初のspecは「paint fence」がページにないということで失敗します。作成されるデータベースのレコードは、Seleniumテストからは見えません。これは、ここで試しているspecがデータベースのトランザクションを使用しているのですが、Seleniumとの互換性がないからです。これを修正するには、<code>spec_helper</code> <code>ファイル</code>の<code>config.use_transactional_fixtures</code>の設定 をfalseにします。</p>
+
+<p class="codeFilePath">/spec/spec_helper.rb</p>
+<pre class="ruby"># If you're not using ActiveRecord, or you'd prefer not to run each of your
+# examples within a transaction, remove the following line or assign false
+# instead of true.
+config.use_transactional_fixtures = false</pre>
+
+<p>これでテストは再度成功しますが、それはデータベースのレコードがspec間で流用されているということであり、これは望ましくありません。この問題を解決するために、<a href="https://github.com/bmabey/database_cleaner">database_cleaner</a>というgemを利用して、specを実行するごとにデータベースを空にします。<a href="https://github.com/bmabey/database_cleaner#readme">ドキュメント</a>に、指定できるオプションについての説明があります。</p>
+
+<p>このgemを使用するために、<code>Gemfile</code>に参照情報を記述し、再度bundleコマンドを実行してインストールします。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.5'
+gem 'sqlite3'
+gem 'nifty-generators'
+
+group :development, :test do
+  gem 'rspec-rails'
+  gem 'capybara', :git =&gt; 'git://github.com/jnicklas/capybara.git'
+  gem 'launchy'
+  gem 'database_cleaner'
+end</pre>
+
+<p>次に<code>spec_helper</code>ファイルを再度修正して、spec毎にデータベースを空にするためのコードを追加します。</p>
+
+<pre class="ruby">/spec/spec_helper.rb</pre>
+<pre class="ruby">config.before(:suite) do
+  DatabaseCleaner.strategy = :truncation
+end
+
+config.before(:each) do
+  DatabaseCleaner.start
+end
+
+config.after(:each) do
+  DatabaseCleaner.clean
+end</pre>
+
+<p>specを実行すると、最初の2つは再度Seleniumを介して実行され、今回はデータベーストランザクションを使用していないので、テストは成功します。これは煩雑な作業に思われるかも知れませんが、一度設定ができてしまえば、ただ<code>:js =&gt; true</code>オプションを追加するだけで、あらゆるspecについてJavaScriptを簡単にテストできるようになります。</p>
+
+<p>Capybaraの次のリリースに含まれる、今回触れることができなかった機能として、specを定義するための新しいDSLがあります。新しく<code>feature</code>、<code>background</code>、<code>scenario</code>の各メソッドを利用して、<a href="https://github.com/cavalle/steak">Steak</a> gemと同じ要領でspecを定義できるようになります。そのようにDSLを利用したい場合、Capybaraにその機能が組み込まれることによってSteakを使用せずにすみます。</p>

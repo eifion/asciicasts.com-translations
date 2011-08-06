@@ -1,0 +1,111 @@
+<p>Avatar images are playing a bigger role on the web these days, especially in &ldquo;social&rdquo; web applications. If you want to add avatar images to one of your own applications you might want to consider using <a href="http://en.gravatar.com">Gravatar</a> which provides a convenient way to do this. All you need is an email address for each user so there&rsquo;s no need for your application to handle file attachments, image cropping or to worry about users uploading inappropriate images as all of this is handled by Gravatar. Just give it an email address and the avatar for that user is returned.</p>
+
+<p>In this episode we&rsquo;ll add Gravatar to a simple Rails application with a <code>User</code> model. It currently has three users, each with a different email address and the <code>index</code> page shows an <code>avatar</code> column marked &ldquo;TODO&rdquo;. We&rsquo;ll use Gravatar to add an avatar for each user.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/531/original/E244I01.png" width="800" height="347" alt="The users page of our application."/>
+</div>
+
+<p>There are a number of plugins available for adding Gravatar to Rails but it&rsquo;s so easy to do from scratch that we won&rsquo;t use one. We&rsquo;ll start by modifying the view code that renders the table shown above, which looks like this:</p>
+
+<p class="codeFilePath">/app/views/users/index.html.erb</p>
+<pre class="ruby">&lt;% for user in @users %&gt;
+  &lt;tr&gt;
+    &lt;td&gt;TODO&lt;/td&gt;
+    &lt;td&gt;&lt;%= user.email %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &quot;Show&quot;, user %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &quot;Edit&quot;, edit_user_path(user) %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &quot;Destroy&quot;, user, :confirm =&gt; &#x27;Are you &crarr;
+      sure?&#x27;, :method =&gt; :delete %&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+&lt;% end %&gt;</pre>
+
+<p>We&rsquo;ll replace the TODO text in the first table cell with an <code>image_tag</code>. The image&rsquo;s URL will come from a helper method that we&rsquo;ll write called <code>avatar_url</code> that takes a user an an argument.</p>
+
+<p class="codeFilePath">/app/views/users/index.html.erb</p>
+<pre class="ruby">&lt;% for user in @users %&gt;
+  &lt;tr&gt;
+    &lt;td&gt;&lt;%= image_tag avatar_url(user) %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= user.email %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &quot;Show&quot;, user %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &quot;Edit&quot;, edit_user_path(user) %&gt;&lt;/td&gt;
+    &lt;td&gt;&lt;%= link_to &quot;Destroy&quot;, user, :confirm =&gt; &#x27;Are you &crarr;
+      sure?&#x27;, :method =&gt; :delete %&gt;&lt;/td&gt;
+  &lt;/tr&gt;
+&lt;% end %&gt;</pre>
+
+<p>Next we&rsquo;ll write the <code>avatar_url</code> method in the <code>ApplicationHelper</code> class. The only slightly tricky part of this is generating the id that gravatar expects. This is a lowercase MD5 hash of the user&rsquo;s email address, so even this is fairly straightforward.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def avatar_url(user)
+    gravatar_id = Digest::MD5::hexdigest(user.email).downcase
+    &quot;http://gravatar.com/avatar/#{gravatar_id}.png&quot;
+  end
+end</pre>
+
+<p>When we reload the page now we&rsquo;ll see the avatar images for the two accounts below that have Gravatar images associated with them. For the one that hasn&rsquo;t we instead get the default Gravatar image.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/532/original/E244I02.png" width="800" height="539" alt="Images from Gravatar are now shown."/>
+</div>
+
+<h3>Customizing Gravatar Images</h3>
+
+<p>There are a number of parameters that can be passed to the querystring in the Gravatar URL to customize its behaviour and you can find details of these on the <a href="http://en.gravatar.com/site/implement/images">Gravatar site</a>. For example, passing an s parameter will change the size of the avatar, like this:</p>
+
+<pre class="ruby">http://gravatar.com/avatar/9a295994737a47683a4da4ed47aef7dd.png?s=200</pre>
+
+<p>The <code>d</code> option can be used to supply an alternative default image if no avatar is found for a user, like this:</p>
+
+<pre class="ruby">http://gravatar.com/avatar/84ce1adb94b67014236a909fa4c1269d.png?d=http%3A%2F%2Fasciicasts.com%2Fimages%2Frails.png</pre>
+
+<p>We can also pass in an <code>r</code> option to change the rating and if our site uses HTTPS then we can get images securely by using <code>https://secure.gravatar.com/</code> at the start of the URL. We&rsquo;ll use a couple of these options now to resize our application&rsquo;s avatars to 48 pixels, as it&rsquo;s the same size that Twitter uses, and to provide a different default image.</p>
+
+<p class="codeFilePath">/application/helpers/application_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def avatar_url(user)
+    default_url = &quot;#{root_url}images/guest.png&quot;
+    gravatar_id = Digest::MD5::hexdigest(user.email).downcase
+    &quot;http://gravatar.com/avatar/#{gravatar_id}.png?s=48&amp;d=#{CGI.escape(default_url)}&quot;
+  end
+end</pre>
+
+<p>When we reload the page now the images will be smaller and our custom default image is shown for the account that has no Gravatar image.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/533/original/E244I03.png" width="800" height="442" alt="Our custom default avatar is now shown."/>
+</div>
+
+<h3>Using Images From Other Sites With OmniAuth</h3>
+
+<p>This avatar solution works especially well when it&rsquo;s paired up with OmniAuth. If you&rsquo;re not familiar with OmniAuth episode 241 [<a href="http://railscasts.com/episodes/241-simple-omniauth">watch</a>, <a href="http://asciicasts.com/episodes/241-simple-omniauth">read</a>] covered how to get started with using it in a Rails application. The reason OmniAuth works well here is that if a user signs in to your website with Facebook or Twitter then they&rsquo;ll already have an avatar image from those services and this image can be fetched from the <code>image</code> property of <code>user_info</code> hash that OmniAuth returns. If a user hasn&rsquo;t signed in with one of these services them we can use Gravatar as a fallback so that each user always has an avatar.</p> 
+
+<p>We won&rsquo;t add OmniAuth to this application, instead we&rsquo;ve added an <code>avatar_url</code> field to our <code>User</code> model to simulate this part of the OmniAuth data. First we&rsquo;ll modify one of the users to add an avatar image from Twitter.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/534/original/E244I04.png" width="801" height="351" alt="Adding an avatar_url to a user."/>
+</div>
+
+<p>Next we need to modify our <code>avatar_url</code> method in the <code>ApplicationHelper</code> so that it will use a user&rsquo;s stored avatar if one is present.</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def avatar_url(user)
+    if user.avatar_url.present?
+      user.avatar_url
+    else
+      default_url = &quot;#{root_url}images/guest.png&quot;
+      gravatar_id = Digest::MD5::hexdigest(user.email).downcase
+      &quot;http://gravatar.com/avatar/#{gravatar_id}.png?s=48&amp;d=#{CGI.escape(default_url)}&quot;
+    end
+  end
+end</pre>
+
+<p>When we reload the page now the account with its own avatar image will display that image while the others will still be fetched from Gravatar.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/535/original/E244I05.png" width="802" height="468" alt="The avatar from Twitter is now shown."/>
+</div>
+
+<p>That&rsquo;s it for this episode. It&rsquo;s been a short one but hopefully it has covered enough to get you started if you want to use avatars in your Rails applications.</p>

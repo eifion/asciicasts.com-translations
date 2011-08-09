@@ -1,7 +1,7 @@
 ascicasts.com-translations
 ==========================
 
-- ein gemeinsamer Ort, der jeden dazu einl&auml;dt, &Uuml;bersetzungen f&uuml;r asciicasts.com Episoden zu erstellen, zu pr&uuml;fen, zu diskutieren und (nat&uuml;rlich auch) zu korrigieren. [http://www.asciicasts.com](http://www.asciicasts.com) ist eine coole Seite mit dem Ziel die gro&szuml;artige [railscasts](http://www.railscasts.com) Serie von [Ryan Bates](http://github.com/ryanb) zug&auml;nglicher f&uuml;r Volltextsuchen nach ganz speziellen Themen bzw. Schlagworten zu gestalten.
+Ein gemeinsamer Ort, der jeden dazu einl&auml;dt, &Uuml;bersetzungen f&uuml;r asciicasts.com Episoden zu erstellen, zu pr&uuml;fen, zu diskutieren und (nat&uuml;rlich auch) zu korrigieren. [http://www.asciicasts.com](http://www.asciicasts.com) ist eine coole Seite mit dem Ziel die gro&szlig;artige [railscasts](http://www.railscasts.com) Serie von [Ryan Bates](http://github.com/ryanb) zug&auml;nglicher f&uuml;r Volltextsuchen nach ganz speziellen Themen bzw. Schlagworten zu gestalten.
 
 Wie funktiert es
 ----------------

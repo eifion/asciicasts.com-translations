@@ -1,0 +1,200 @@
+<p>前回のエピソードでは、テスト駆動開発の作業の流れを実際に見ていきました。ほとんどの部分については紹介したパターンでうまくいきますが、アプリケーションの一部にテストを行うのが難しい機能がある場合もあります。今回のエピソードでは、そのようなケースを2つ紹介します。</p>
+
+<h3>現在の時刻をテストする</h3>
+
+<p>前回は<code>User</code>モデルをテストするspecをいくつか作成しました。これらを早足で書いたので、そのひとつについて今度はよく中身を見ていきます。</p>
+
+<p class="codeFilePath">/spec/models/user.rb</p>
+<pre class="ruby">it "saves the time the password reset was sent" do
+  user.send_password_reset
+  user.reload.password_reset_sent_at.should be_present
+end</pre>
+
+<p>このspecは、パスワードリセット用のEメールが送信されたときに、その時刻が<code>password_reset_sent_at</code>フィールドに保存されることをチェックします。これはRSpecの<code>be_present</code> matcherを用いてテストされます。このmatcherは、オブジェクトが存在することをチェックする、Railsが提供する<code>present?</code>というメソッドを呼び出します。</p>
+
+<p>このspecは完全ではありません。<code>password_reset_sent_at</code>の値が存在することはチェックしますが、その値が現在の時刻かどうかはチェックしません。<code>User</code>モデルの<code>send_password_reset</code>メソッドで<code>password_reset_sent_at</code>に<code>Time.zone.now</code>を設定していますが、ここにどのような値を設定したとしてもspecは成功します。理想的には次のようなコードを書いて、値が現在の時刻かどうかをテストするべきでしょう。</p>
+
+<p class="codeFilePath">/spec/models/user.rb</p>
+<pre class="ruby">it "saves the time the password reset was sent" do
+  user.send_password_reset
+  user.reload.password_reset_sent_at.should eq(Time.zone.now)
+end</pre>
+
+<p>しかし残念ながらこれはうまくいきません。テストが実行された時点での現在の時刻は、テスト対象のコードが実行された時刻の少し後だからです。このような問題に直面した場合には、テストを完全に行うためにそこまでテストを複雑にする価値があるかどうかを自問してみるのがいいでしょう。多くの場合、今回もそうですが、タイムスタンプの値が存在することをテストするだけで十分でしょう。ここで時刻を設定する1行のコードにバグがあるという可能性はほとんどないでしょう。しかしときには現在の時刻をテストしなくてはいけない場合もあるかも知れません。そこでspecでそれを行う方法を調べてみることにしましょう。</p>
+
+<p>Guardが実行中で、specが失敗しているのがわかります。タイムスタンプは秒単位では同じなのですが、まったく同じ値ではないため当然specは失敗します。</p>
+
+<pre class="terminal">Failures:
+
+  1) User#send_password_reset saves the time the password reset was sent
+     Failure/Error: user.reload.password_reset_sent_at.should eq(Time.zone.now)
+       
+       expected Mon, 25 Jul 2011 20:34:46 UTC +00:00
+            got Mon, 25 Jul 2011 20:34:46 UTC +00:00
+       
+       (compared using ==)
+       
+       Diff:
+     # ./spec/models/user_spec.rb:16:in `block (3 levels) in &lt;top (required)&gt;'
+
+Finished in 1.95 seconds
+9 examples, 1 failure</pre>
+
+<p><a href="https://github.com/jtrupiano/timecop/">Timecop</a>というgemを使えば、このような問題に対応することができます。このgemを使えば、現在の時刻をいろいろな方法で操作でき、時刻を凍結することもできます。つまりspecを実行している間現在の時刻を凍結することができるので、タイムスタンプが設定されるときの時刻が値をチェックするときの時刻と同じになります。</p>
+
+<p>Timecopをアプリケーションに追加するために<code>Gemfile</code>に追記し、<code>bundle</code>を実行します。必要なのはテスト時だけなので、<code>test</code> groupに追加します。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.1.0.rc4'
+
+gem 'sqlite3'
+
+# Asset template engines
+gem 'sass-rails', "~&gt; 3.1.0.rc"
+gem 'coffee-script'
+gem 'uglifier'
+
+gem 'jquery-rails'
+
+gem "rspec-rails", :group =&gt; [:test, :development]
+group :test do
+  gem "factory_girl_rails"
+  gem "capybara"
+  gem "guard-rspec"
+  gem "timecop"
+end</pre>
+
+<p>ここで<code>spec_helper</code>ファイルの<code>config.before(:each)</code>ブロックに<code>Timecop.return</code>の呼び出しを追加しておきましょう。これによって、Timecopで加えたすべての修正は、各specの実行前に取り消されます。</p>
+
+<p>これでどのspecからでも<code>Timecop.freeze</code>を呼び出して、specが実行される間現在の時刻を凍結できるようになりました。つまり2つのタイムスタンプの比較が可能になったということです。</p>
+
+<p class="codeFilePath">/spec/models/user.rb</p>
+<pre class="ruby">it "saves the time the password reset was sent" do
+  Timecop.freeze
+  user.send_password_reset
+  user.reload.password_reset_sent_at.should eq(Time.zone.now)
+end</pre>
+
+<p>Guardが実行されると、specはすべて成功します。</p>
+
+<p>もうひとつ、予期せずテストが失敗するケースを紹介します。別のタイムゾーンで開催されているRubyカンファレンスに参加していて、時間に関連するテストが突然失敗することに気づきました。そのようなときは地球を半周するよりもspecでタイムゾーンを設定する方がずっと安上がりでしょう。<code>Time.zone</code>を設定してこれをおこないます。</p>
+
+<pre class="terminal">Time.zone = "Paris"</pre>
+
+<p>ひとつのspec内で一時的にタイムゾーンを設定する場合は、<code>Time.use_zone</code>を呼び出します。</p>
+
+<p class="codeFilePath">/spec/model/user_spec.rb</p>
+
+<pre class="ruby">it "saves the time the password reset was sent" do
+  Timecop.freeze
+  user.send_password_reset
+  Time.use_zone("Paris") do
+    user.reload.password_reset_sent_at.should eq(Time.zone.now)
+  end
+end</pre>
+
+<p>ブロック内のコードは、パリにいるものとして実行されます。これを用いれば、違うタイムゾーンにいたとしてもspecは変わらずに成功します。</p>
+
+<p>現在の時刻を扱うテストを行う場合は常にTimecopのようなツールを使って、タイムゾーンが変わったり夏時間の季節でも時間を変わりなく正しく処理できるようにするべきでしょう。また違うタイムゾーンでコードをテストして、アプリケーションが世界のどこでも正しく動作することを確認できるといいでしょう。</p>
+
+<h3>外部Webリクエストをテストする</h3>
+
+<p>次は外部Webリクエストをテストする方法を見ていきます。このセクションは、Ryan BatesがRailscastsサイトを書き直した際、複数あるビデオフォーマットのダウンロードリンクの上にカーソルを置いたときにファイルサイズを表示する機能を書いているときに経験した問題に基づいています。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/708/original/E276I01.png" width="798" height="411" alt="ファイルサイズが各ビデオフォーマットごとに表示される"/>
+</div>
+
+<p>動画ファイルは別のサーバでホストされているため、ファイルサイズは外部Webサーバから取得されます。つまり外部に向けてWebリクエストが発行されるということで、これをどうテストしたかを紹介します。小さなサンプルアプリケーションを用いてこの問題を見ていきます。このアプリケーションはWebRequestリソースと、URLを保持するテキストフィールドを含むフォームを持っています。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/709/original/E276I02.png" width="800" height="322" alt="Webリクエスト用アプリケーション"/>
+</div>
+
+<p>ビデオのURLをテキストボックスに入力してフォームを送信すると、URLとともに0バイトというファイルサイズが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/710/original/E276I03.png" width="800" height="322" alt="ファイルサイズはつねに0バイトと表示される"/>
+</div>
+
+<p>ファイルサイズが0になるのは、この機能をまだ実装していないためです。<code>WebRequest</code>モデルに<code>content_length</code>メソッドがあるのですが、これが<code>0</code>を返すように決め打ちされています。このメソッドをTDDによって実装していきます。</p>
+
+<p class="codeFilePath">/app/models/web_request.rb</p>
+<pre class="ruby">class WebRequest &lt; ActiveRecord::Base
+  def content_length
+    0
+  end
+end</pre>
+
+<p>外部webリクエストをテストするのに役立つgemはいくつかありますが、今回は<a href="https://github.com/chrisk/fakeweb">Fakeweb</a>を使用します。このgemは、URIを登録してどのようなレスポンスを返すべきかを定義して使用します。そのURIを取得するために<code>Net::HTTP</code>を使用すると、外部リクエストを行う代わりに先ほど定義したレスポンスを返します。</p>
+
+<p>Fakewebは通常の方法でインストールできるので、<code>Gemfile</code>に追記後に<code>bundle</code>を実行します。次にFakewebの設定を追加するために、<code>spec_helper</code>ファイルを２ヶ所修正します。</p>
+
+<p class="codeFilePath">/spec/spec_helper.rb</p>
+<pre class="ruby">ENV["RAILS_ENV"] ||= 'test'
+require File.expand_path("../../config/environment", __FILE__)
+require 'rspec/rails'
+require 'capybara/rspec'
+
+Dir[Rails.root.join("spec/support/**/*.rb")].each {|f| require f}
+
+FakeWeb.allow_net_connect = false
+
+RSpec.configure do |config|
+  config.mock_with :rspec
+  config.use_transactional_fixtures = true
+  config.include(MailerMacros)
+  config.before(:each) do
+    Timecop.return
+    reset_email 
+    FakeWeb.clean_registry
+  end
+end</pre>
+
+<p>ファイルの一番上近くで<code>Fakeweb.allow_net_connect</code>を<code>false</code>に設定してspecが外部にHTTP接続を行わないようにします。これが便利なのは、spec中に外部リクエストを残していた場合に、テストの全体の動きを遅くしてしまうことなく、specが外部に接続しようとしていることをFakewebが教えてくれるからです。また<code>before(:each)</code>の中で<code>Fakeweb.clean_registry</code>を呼び出して、各specが同じ状態で開始されるようにしています。</p>
+
+<p><code>WebRequest</code>のspecでは、content lengthが取得されることをテストするspecを書きます。</p> 
+
+<p class="codeFilePath">/spec/models/web_request_spec.rb</p>
+<pre class="ruby">require 'spec_helper'
+
+describe WebRequest do
+  it "fetches the content length" do
+    FakeWeb.register_uri(:head, "http://example.com", :content_length =&gt; 123)
+    WebRequest.new(:url =&gt; "http://example.com").content_length.should eq(123)
+  end
+end</pre>
+
+<p>ここで<code>FakeWeb.register_uri</code>を呼び出して、偽のURLを登録します。このメソッドが取る最初の引数は、発行したいリクエストのタイプです。ヘッダ情報からファイルのサイズを取得できるので、ここで<code>:head</code>を使用します。その他の引数は、URLとその他の取得したいヘッダ情報で、今回はContent Lengthだけです。次にこのURLを呼び出す<code>WebRequest</code>オブジェクトを新規作成し、<code>content_length</code>メソッドから返される値がヘッダで設定された値と同じかどうかをチェックします。</p>
+
+<p>このspecを実行すると、<code>content_length</code>メソッドが常に<code>0</code>を返すため当然失敗します。specが成功するようにするためには、このメソッドを編集して、リクエストしているファイルの実際のcontent lengthの値を返すように修正する必要があります。</p>
+
+<p class="codeFilePath">/app/models/web_request.rb</p>
+<pre class="ruby">class WebRequest &lt; ActiveRecord::Base
+  def content_length
+    uri = URI.parse(url)
+    response = Net::HTTP.start(uri.host, uri.port) { |http| http.request_head(uri.path) }
+    response["content-length"].to_i
+  end
+end</pre>
+
+<p>これでメソッドが、モデルに渡されたURLを使って<code>Net::HTTP.start</code>を呼び出すようになります。メソッドが取るブロックが、レスポンスヘッダを取得するために<code>request_head</code>を呼び出します。最後に<code>content-length</code>ヘッダの値が返されます。</p> 
+
+<p>Railsにはデフォルトでは<code>Net::HTTP</code>が含まれないため、アプリケーション内で<code>require</code>する必要があります。これを<code>application.rb</code>ファイルに記述します。</p>
+
+<p class="codeFilePath">/config/auth.rb</p>
+<pre class="ruby">require File.expand_path('../boot', __FILE__)
+
+require 'net/http'
+require 'rails/all'
+# rest of file</pre>
+
+<p>これですべてのspecが成功し、Webリクエストを行っているページを再読み込みすると正しいファイルサイズが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/711/original/E276I04.png" width="800" height="322" alt="正しいファイルサイズが表示される"/>
+</div>
+
+<p>テストで外部Webリクエストを処理する必要がある場合は、Fakewebが優れた解決策となるでしょう。</p>

@@ -16,7 +16,7 @@ Contributing is easy: You can point out typos or translation errors by simply op
 Organization
 ------------
 
-If you want to participate, simply head over to the [Wiki](https://github.com/defaude/asciicasts.com-translations/wiki) and look up any episode in your prefered language that's not marked **pending** or **translated**. When you start working on your translation, please update the wiki entry for that specific episode in your language as **pending** so others can avoid doing redundant work.
+If you want to participate, simply head over to the [Wiki](https://github.com/defaude/asciicasts.com-translations/wiki) and look up any episode in your preferred language that's not marked **pending** or **translated**. When you start working on your translation, please update the wiki entry for that specific episode in your language as **pending** so others can avoid doing redundant work.
 
 Project Structure
 -----------------

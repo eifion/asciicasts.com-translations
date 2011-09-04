@@ -1,0 +1,74 @@
+<p>Ryan Batesが最近Twitterで、Railsアプリケーションの開発モード(development mode)で、依存するバックグラウンドプロセスを管理する最善の方法は何かと質問を投げかけました。何人かが<a href="https://github.com/ddollar/foreman">Foreman</a>を推奨していたので、今回のエピソードで紹介します。</p>
+
+<p>例えばRyanの<a href="https://github.com/ryanb/govsgo">GoVsGo</a>アプリケーションを開発に利用するには、事前にいくつかのバックグラウンドプロセスを起動する必要があります。この中には、Beanstalkd、<code>script/worker</code>プロセス、Fayeサーバが含まれます。開発でこのアプリケーションを使用するたびに、これらすべての起動作業が発生します。これらのプロセスすべてを簡単に管理する方法があればとても便利でしょう。そこでForemanの登場です。</p>
+
+<h3>Foremanのインストールと使用</h3>
+
+<p>Foremanはgemの形で提供され、通常の方法でインストールします。</p>
+
+<pre class="terminal">$ gem install foreman</pre>
+
+<p>Foremanは管理対象のプロセスを、 Railsアプリケーションのrootディレクトリにある<code>Procfile</code>というファイルから読み込むので、このファイルを作成します。このファイルに、Foremanに管理させたいプロセスのリストを記述します。各プロセスの定義は、名称、コロン、起動したいプロセス名という形式なので、今回の対象の3つのプロセスを以下のように記述します。</p>
+
+<p class="codeFilePath">/Procfile</p>
+<pre class="ruby">beanstalk:  beanstalkd
+worker:     ./script/worker
+faye:       rackup faye.ru -s thin -E production</pre>
+
+<p><code>Procfile</code>が完成したら、内容が正当かどうかを<code>foreman check</code>コマンドを実行してチェックします。</p>
+
+<pre class="terminal">$ foreman check
+valid procfile detected (beanstalk, worker, faye)</pre>
+
+<p>名称とコマンドの間の区切りをスペースではなくタブにするとdeprecationエラーが表示されるので、<code>Procfile</code>を記述するときは留意しておいてください。ファイルが正当であることが確認できたら、<code>foreman start</code>コマンドでForemanを起動してみます。</p>
+
+<pre class="terminal">$ foreman start
+20:06:35 beanstalk.1  | started with pid 23140
+20:06:35 worker.1     | started with pid 23141
+20:06:35 faye.1       | started with pid 23143
+20:06:36 faye.1       | &gt;&gt; Thin web server (v1.2.11 codename Bat-Shit Crazy)
+20:06:36 faye.1       | &gt;&gt; Maximum connections set to 1024
+20:06:36 faye.1       | &gt;&gt; Listening on 0.0.0.0:9292, CTRL+C to stop
+20:06:38 worker.1     | [2011-08-29 20:06:38 +0100] Working 1 jobs: [ Game.move ]</pre>
+
+<p>すると<code>Procfile</code>で指定した各プロセスが実行され、その出力と一緒にターミナルにリスト表示されます。ターミナルウインドウで<code>CTRL+C</code>をタイプするとプロセスが停止します。</p> 
+
+<p>Foremanには便利な<a href="http://ddollar.github.com/foreman/">マニュアルページ</a>があり、機能や指定できるオプションについての説明があるので、ここでいくつか見てみます。プロセスを1つだけ起動したい場合はその名称を直接指定します。</p> 
+
+<pre class="terminal">$ foreman start faye
+20:35:41 faye.1       | started with pid 23322
+20:35:41 faye.1       | &gt;&gt; Thin web server (v1.2.11 codename Bat-Shit Crazy)
+20:35:41 faye.1       | &gt;&gt; Maximum connections set to 1024
+20:35:41 faye.1       | &gt;&gt; Listening on 0.0.0.0:9292, CTRL+C to stop</pre>
+
+<p>プロセスのコピーを複数起動させたい場合は、<code>-c</code>フラグを使用します。例えば4つのworkerプロセスを起動したい場合は、<code>foreman start -c worker=4</code>を実行します。</p>
+
+<pre class="terminal">$ foreman start -c worker=4
+20:39:41 beanstalk.1  | started with pid 23366
+20:39:41 worker.1     | started with pid 23368
+20:39:41 worker.2     | started with pid 23370
+20:39:41 worker.3     | started with pid 23372
+20:39:41 worker.4     | started with pid 23374
+20:39:41 faye.1       | started with pid 23376
+20:39:42 faye.1       | &gt;&gt; Thin web server (v1.2.11 codename Bat-Shit Crazy)
+20:39:42 faye.1       | &gt;&gt; Maximum connections set to 1024
+20:39:42 faye.1       | &gt;&gt; Listening on 0.0.0.0:9292, CTRL+C to stop
+20:39:46 worker.3     | [2011-08-29 20:39:46 +0100] Working 1 jobs: [ Game.move ]
+20:39:46 worker.1     | [2011-08-29 20:39:46 +0100] Working 1 jobs: [ Game.move ]
+20:39:46 worker.2     | [2011-08-29 20:39:46 +0100] Working 1 jobs: [ Game.move ]
+20:39:47 worker.4     | [2011-08-29 20:39:47 +0100] Working 1 jobs: [ Game.move ]</pre>
+
+<p>このコマンドで、すべてのプロセスが1回起動され、workerのみ4回起動されます。</p>
+
+<h3>プロセスをエクスポートする</h3>
+
+<p>Foremanには<code>export</code>コマンドがあり、本番のサーバで使用できるフォーマットでプロセスのリストをエクスポートするときに便利です。現在は<code>inittab</code>と<code>upstart</code>フォーマットがサポートされています。<code>foreman export upstart .</code>を実行すると、Foremanがカレントディレクトリにいくつかのupstart 用設定ファイルを書き出します。その一つを見てみると、そのファイルが<code>beanstalkd</code>を起動するコマンドを実行しログを処理することがわかります。</p>
+
+<p class="codeFilePath">/govsgo-beanstalk-1.conf</p>
+<pre class="terminal">start on starting govsgo-beanstalk
+stop on stopping govsgo-beanstalk
+respawn
+
+exec su - govsgo -c 'cd /Users/eifion/govsgo; export PORT=5000; beanstalkd &gt;&gt; /var/log/govsgo/beanstalk-1.log 2&gt;&amp;1'</pre>
+
+<p>Foremanに関する今回のエピソードは以上です。今回はいつものエピソードよりも短めでしたが、Foremanは特定の問題を解決するシンプルなツールで、その仕事をうまくこなしてくれます。Railsアプリケーションを、開発モードで稼働状態にするためにいくつものプロセスを起動させなくてはいけないというときには、Foremanの利用を検討する価値があるでしょう。</p>

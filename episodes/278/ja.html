@@ -1,0 +1,271 @@
+<p><a href="http://outoftime.github.com/sunspot">Sunspot</a>はRubyアプリケーションに全文検索機能を追加するためのソリューションです。バックグラウンドで<a href="http://lucene.apache.org/solr/">Solr</a>を利用し、多くの優れた機能を提供します。今回のエピソードでは、過去のエピソードで使用したブログアプリケーションを例にして、Sunspotを使ってRailsアプリケーションに全文検索機能を追加します。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/718/original/E278I01.png" width="800" height="432" alt="ブログアプリケーション"/>
+</div>
+
+<p>このアプリケーションは複数の記事を表示するページを持っており、それらを横断して検索を行う機能を実装していきます。これをSQLを使って行うのは困難になりやすく、多くの場合最善のアプローチとは言えません。Sunspotのような専用の全文検索ツールの方が、この機能を実装するにはずっと適した方法です。</p>
+
+<h3>Sunspotのインストール</h3>
+
+<p>Sunspotはgem形式で提供されるので、通常のように<code>Gemfile</code>に追記して<code>bundle</code>を実行することでインストールされます。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.9'
+gem 'sqlite3'
+gem 'nifty-generators'
+gem 'sunspot_rails'</pre>
+
+<p>gemとその依存関係がインストールされたら、Sunspotの設定ファイルを生成するために次のコマンドを実行します。</p>
+
+<pre class="terminal">$ rails g sunspot_rails:install</pre>
+
+<p>このコマンドによって<code>/config/sunspot.yml</code>にYMLファイルが作成されます。このファイルのデフォルト設定に修正を加える必要はありません。</p>
+
+<p>Sunspotはgemの内部にSolrを組み込んでいるので、別途インストールする必要はありません。つまりインストールした素の状態で機能するので、開発時にはとても簡単に作業できます。起動させるために次のコマンドを実行します。</p>
+
+<pre class="terminal">$ rake sunspot:solr:start</pre>
+
+<p>OS X Lionを利用していてJavaランタイムをまだインストールしていない場合、このコマンドを実行したときにランタイムをインストールするようプロンプトが出るでしょう。同じく非推奨の警告(deprecation warning)が表示されるかも知れませんが、これは無視しても問題ありません。このコマンドにより、詳細設定のための追加の設定ファイルが作成されます。それらについてはここでは触れませんが、<a href="http://outoftime.github.com/sunspot/docs/index.html">ドキュメンテーション</a>にこれらのファイルの修正方法の詳細情報があります。</p>
+
+<h3>Sunspotの利用</h3>
+
+<p>Sunspotをインストールできたので、<code>Article</code>モデルから利用します。全文検索機能を追加するためには<code>searchable</code>メソッドを使用します。</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :published_at
+  has_many :comments
+  
+  searchable do
+    text :name, :content
+  end
+end</pre>
+
+<p>このメソッドはブロックをとり、その中で検索したい属性を定義してSunspotにどのデータに索引を設定すればいいかを知らせます。<code>text</code>メソッドを使用して、全文検索を実行する対象とする属性を定義します。今回の記事の検索のためには、nameとcontentのフィールドを指定します。</p>
+
+<p>Sunspotは自動的に新しいレコードに対して索引を作成しますが、既存のレコードに対してはそれを行いません。Sunspotに対して既存のレコードに索引を作成し直させる場合は、次のコマンドを実行します。</p>
+
+<pre class="terminal">$ rake sunspot:reindex</pre>
+
+<p>これですべての記事がSolrのデータベースに入って検索できる状態になったので、indexページの一番上に検索フィールドを追加します。</p>
+
+<p class="codeFilePath">/app/views/articles/index.html.erb</p>
+<pre class="ruby">&lt;% title "Articles" %&gt;
+
+&lt;%= form_tag articles_path, :method =&gt; :get do %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag "Search", :name =&gt; nil %&gt;
+&lt;% end %&gt;
+&lt;!-- rest of view omitted --&gt;</pre>
+
+<p>このフォームはGETを用いてindexアクションに送信されるので、入力された検索パラメータがすべて検索文字列に追加されます。では次にコントローラを修正して、<code>search</code>パラメータによって記事を取得するようにします。Sunspotで検索を行うには、モデルで<code>search</code>を呼び出してブロックを渡します。ブロック内では複雑な検索を処理するためにいろいろなメソッドを呼び出すことができます。ここでは<code>fulltext</code>メソッドを使用して、それに対してフォームからの検索パラメータを渡します。最後にこの結果のすべてを<code>@search</code>に割り当てます。これの結果を呼び出して、一致した記事のリストを取得します。</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">def index
+  @search = Article.search do
+    fulltext params[:search]
+  end
+  @articles = @search.results
+end</pre>
+
+<p>ここまでの部分をテストするために記事のページを再読み込みしてキーワードで検索を行います。すると一致する記事のリストが返されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/719/original/E278I02.png" width="800" height="565" alt="フィルタリングされた記事のリスト"/>
+</div>
+
+<p>検索は、それが記事の<code>name</code>か<code>content</code>かに関わらず、検索語を含んだ記事のリストを返します。</p>
+
+<p><code>Article</code>モデルの<code>searchable</code>ブロックでは、これ以外にも多くのことが可能です。例えば<code>boost</code>を使って、タイトルが一致する記事の方が本文が一致する記事よりも重要性が高いというように、結果に重み付けをつけることができます。</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :published_at
+  has_many :comments
+  
+  searchable do
+    text :name, :boost =&gt; 5
+    text :content
+  end
+end</pre>
+
+<p>これは、結果をrelevance(適合度)で並べたい場合に重要です。今回の場合はタイトルに検索語を含む記事が本文に検索語を含む記事よりも検索結果リストの上位に現れます。</p>
+
+<p><code>searchable</code>ブロックで指定する属性はデータベースの実際の列名である必要はなく、モデル内で定義するメソッドを使用することもできます。記事が発行された月と年を含む文字列を返す<code>publish_month</code>という列を作成し、データベースの列と同じようにそのメソッドに対して検索を行います。</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :published_at
+  has_many :comments
+  
+  searchable do
+    text :name, :boost =&gt; 5
+    text :content, :publish_month
+  end
+  
+  def publish_month
+    published_at.strftime("%B %Y")
+  end
+  
+end</pre>
+
+<p>この新しい列で検索できるように<code>rake sunspot:reindex</code>を再度実行してレコードに索引を設定し直す必要がありますが、そうすることで月名で記事を検索することができるようになります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/720/original/E278I03.png" width="800" height="420" alt="記事に発行月でフィルタがかけられる"/>
+</div>
+
+<p>メソッドを作成する代わりに、ブロックを渡してブロックの戻り値に対して検索を行うことができます。記事には多くのコメントがついているので、ブロックを用いてコメントの内容を検索する機能を追加します。</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :published_at
+  has_many :comments
+  
+  searchable do
+    text :name, :boost =&gt; 5
+    text :content, :publish_month
+    text :comments do
+      comments.map(&amp;:content)
+    end
+  end
+  
+  def publish_month
+    published_at.strftime("%B %Y")
+  end
+  
+end</pre>
+
+<p>ブロック内のコンテキストは<code>Article</code>のインスタンスなので、 その中で記事に対するコメントを取得して各コメントの本文にマッピングすることができます。これは配列を返しますが、Sunspotはコメントのすべてに索引を作成し検索可能にします。</p>
+
+<h3>属性に対する検索</h3>
+
+<p>単純な全文検索以上の検索機能を、ある特定の属性に対して追加したい場合はどうすればいいでしょうか。このためには、検索対象にしたい属性のタイプ(文字列か整数か浮動小数かタイムスタンプか)を渡します。検索フィールドに<code>published_at</code>属性を追加するので、<code>time</code>メソッドを利用します。</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :published_at
+  has_many :comments
+  
+  searchable do
+    text :name, :boost =&gt; 5
+    text :content, :publish_month
+    text :comments do
+      comments.map(&amp;:content)
+    end
+    time :published_at
+  end
+  
+  def publish_month
+    published_at.strftime("%B %Y")
+  end
+  
+end</pre>
+
+<p><code>ArticlesController</code>でこれを利用して、検索対象を<code>published_at</code>の日付が現在の時刻よりも前のものに制限します。そのために<code>with</code>メソッドを利用します。</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">def index
+  @search = Article.search do
+    fulltext params[:search]
+    with(:published_at).less_than(Time.zone.now)
+  end
+  @articles = @search.results
+end</pre>
+
+<p>これを設定することで、発行されていない記事は検索されなくなります。渡すことができる属性に関する優れたドキュメンテーションが<a href="https://github.com/outoftime/sunspot/wiki/Scoping-by-attribute-fields">Sunspotのwikiページ</a>にあります。</p>
+
+<h3>ファセット検索</h3>
+
+<p>ファセット検索を使用すると、ある属性、例えば記事が発行された月で検索結果をフィルタリングできます。例えば、発行された記事が存在する月のリンクの一覧リストを追加したいとしましょう。リンクをクリックすると、記事のリストにフィルタがかけられて、その月に発行された記事だけを表示します。 </p>
+
+<p>これを行うためにまず、<code>publish_month</code>メソッドの<code>searchable</code>ブロックに<code>string</code>属性を追加します。 </p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :published_at
+  has_many :comments
+  
+  searchable do
+    text :name, :boost =&gt; 5
+    text :content, :publish_month
+    text :comments do
+      comments.map(&amp;:content)
+    end
+    time :published_at
+    string :publish_month
+  end
+  
+  def publish_month
+    published_at.strftime("%B %Y")
+  end
+  
+end</pre>
+
+<p><code>ArticlesController</code>の<code>search</code>ブロックで<code>facet</code>を呼び出すことでこれをファセットに変えることができます。</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">def index
+  @search = Article.search do
+    fulltext params[:search]
+    with(:published_at).less_than(Time.zone.now)
+    facet(:publish_month)
+  end
+  @articles = @search.results
+end</pre>
+
+<p>以下のコードを検索ボックスと記事の一覧の間に追加することで、<code>index</code>ページにこれらのファセットを表示できます。</p>
+
+<p class="codeFilePath">/app/views/articles/index.html.erb</p>
+<pre class="ruby">&lt;div id="facets"&gt;
+  &lt;h3&gt;Published&lt;/h3&gt;
+  &lt;ul&gt;
+    &lt;% for row in @search.facet(:publish_month).rows %&gt;
+      &lt;li&gt;
+        &lt;% if params[:month].blank? %&gt;
+          &lt;%= link_to row.value, :month =&gt; row.value %&gt; (&lt;%= row.count %&gt;)
+        &lt;% else %&gt;
+          &lt;strong&gt;&lt;%= row.value %&gt;&lt;/strong&gt; (&lt;%= link_to "remove", :month =&gt; nil %&gt;)
+        &lt;% end %&gt;
+      &lt;/li&gt;
+    &lt;% end %&gt;
+  &lt;/ul&gt;
+&lt;/div&gt;</pre>
+
+<p>このコードで、<code>publish_month</code>の各ファセット項目をループして表示しています。<code>@search</code>オブジェクトで<code>.facet</code>を呼び出して、ファセットの並び順として指定する属性を渡します。今回の例で言うと<code>:publish_month</code>、そしてそれに対して<code>.rows</code>を呼び出すと、その属性でのファセットオプションを返します。</p> 
+
+<p><code>row.value</code>を呼び出すと、その属性の値、例えば「January 2011」を返します。また<code>row.count</code>を呼び出せば、その値に一致する記事数が返されます。もし検索文字列に<code>month</code>パラメータがあったら、その値を、パラメータを削除するための「remove(削除)」リンクと共に表示します。これによって、与えられたファセットを選択して、それを<code>month</code>パラメータを介して渡すという便利な機能を利用できます。</p>
+
+<p>ここでページを読み込み直すと、レコードの索引を設定し直したので、パネルにファセットのリストが月名とその月に発行された記事数という形で表示されます。月を選択すると、検索文字列に<code>month</code>パラメータとして表示されますが、記事はフィルタリングされません。これを修正するために、コントローラの<code>search</code>にもう一つ<code>with</code>パラメータを追加して、<code>month</code>パラメータが存在したら月でフィルタリングするようにします。</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">def index
+  @search = Article.search do
+    fulltext params[:search]
+    with(:published_at).less_than(Time.zone.now)
+    facet(:publish_month)
+    with(:publish_month, params[:month]) ↵ 
+      if params[:month].present?
+  end
+  @articles = @search.results
+end</pre>
+
+<p>月を選択すると、その月に発行された記事で正しくフィルタリングされたリストが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/721/original/E278I04.png" width="800" height="439" alt="ファセットを用いて月でフィルタリングされた記事"/>
+</div>
+
+<p>「remove」リンクをクリックすると全リストが返されます。検索結果もこれに合わせて動作します。検索語を入力すると、一致する記事がある月がリスト表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/722/original/E278I05.png" width="800" height="581" alt="フィルタリングされた記事に一致する月がサイドバーに表示される"/>
+</div>
+
+<p>ファセットは検索と合わせて利用できる優れた機能です。</p>
+
+<p>Sunspotに関する今回のエピソードは以上です。SunspotはRailsアプリケーションに全文検索機能を追加する優れた方法で、ここで触れることができなかった多くの追加機能を持っています。さらに情報を得るために、忘れずに<a href="https://github.com/outoftime/sunspot/wiki/">wiki</a>を参照してください。</p>

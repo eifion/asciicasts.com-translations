@@ -1,0 +1,110 @@
+<p>Asset PipelineはRails 3.1のもっとも大きな新機能ですが、同時にもっとも混乱しやすい機能でもあります。今回のエピソードでは、このAsset PipelineがどのようにRailsアプリケーションのアセットを管理するかを見ることによって、少しその神秘性を取り除いていきたいと思います。もしAsset Pipelineについてまったく知識がない場合は、<a href="http://ryanbigg.com/guides/asset_pipeline.html">Rails GuideのAsset Pipelineのページ</a>が多くの機能を説明しているので、まずそこから始めるのがいいでしょう。</p>
+
+<p>Rails 3.1アプリケーションを書いたことがある方なら、<code><a href="http://localhost:3000/assets/application.js">http://localhost:3000/assets/application.js</a></code>にアクセスすればアプリケーションのすべてのJavaScriptを含んだファイルがあることをご存知でしょう。しかしこれはどのような仕組みになっているのでしょうか? </p>
+
+<p><code>application.js</code>ファイルには何も特別なことはありません。<code>/app/assets/javascripts</code>ディレクトリの下に置かれたファイルも同じくアクセス可能です。例えばもしそのディレクトリにgreeting.txtというファイルを作成したら、ブラウザで同じように<a href="http://localhost:3000/assets/greeting.txt"><code>http://localhost:3000/assets/greeting.txt</code></a>にアクセスして中身を見ることができます。ファイルが<code>/app/assets/javascripts</code>にあったとしても、アクセスするURLは<code>/assets/greeting.txt</code>になります。これは、<code>/app/assets</code>の下のどのサブディレクトリにファイルを置いても同じです。任意の新規ディレクトリを作成してそこにファイルを置いたとしても、同じURLからアクセス可能です。ただし新規ディレクトリを作成した場合は、その中のファイルにアクセスするためにサーバを再起動する必要があります。</p>
+
+<p>アセットを追加できる場所は<code>/app/assets</code>ディレクトリだけではありません。<code>/lib</code>の下にassetsディレクトリを作成した場合、そこに追加したすべてのファイルは、メインの<code>/app/assets</code>ディレクトリに置いたかのようにアクセス可能になります。これは<code>/vendor/assets</code>ディレクトリ下のすべてのファイルにも当てはまります。</p> 
+
+<p>現在のアプリケーションに固有ではない汎用的なアセットがある場合、<code>/lib</code>か<code>/vendor</code>の下のassetsディレクトリにそれらを置くのが理想でしょう。アプリケーションがjQueryプラグインを使用している場合、そのJavaScriptファイルは、別の人が管理することになるので<code>/vendor/assets</code>ディレクトリにを置くのが適しています。自分で管理はするがアプリケーションに固有ではないアセットについては、<code>/lib</code>ディレクトリに置くのがいいでしょう。</p>
+
+<p>もっとも基本的な部分では、Asset Pipelineはロードパスの一覧です。このリストを見るために、コンソールを実行して<code>Rails.application.config.assets.paths</code>を見ます。出力を読みやすくするためにYAML形式で表示させます。</p>
+<pre class="terminal">&gt; y Rails.application.config.assets.paths
+--- 
+- /Users/eifion/store/app/assets/images
+- /Users/eifion/store/app/assets/javascripts
+- /Users/eifion/store/app/assets/stylesheets
+- /Users/eifion/store/lib/assets/greeting.txt
+- /Users/eifion/store/vendor/assets/stylesheets
+- /Users/eifion/.rvm/gems/ruby-1.9.2-p180@railspre/gems/jquery-rails-1.0.13/vendor/assets/javascripts</pre>
+
+<p>出力には、<code>app/assets</code>、<code>/lib/assets</code>、<code>/vendor/assets</code> 以下のすべてのディレクトリが表示されています。リストの最後に、アプリケーションに含んだ<code>jquery-rails</code> gemに由来する興味深いディレクトリがあります。<code>bundle open</code>コマンドでその中身を見ることができます。</p>
+
+<pre class="terminal">$ bundle open jquery-rails</pre>
+
+<p>このコマンドは、シェルの環境変数の<code>BUNDLER_EDITOR</code>か<code>EDITOR</code>で定義されたテキストエディタでgemを開きます。gemのファイルを見ると、<code>vendor/asset/javascripts</code>ディレクトリにAsset Pipelineを介して読み込むことができるjQueryのファイルがいくつか含まれているのがわかります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/723/original/E279I01.png" width="801" height="377" alt="jquery-rails gemのファイルとディレクトリの構成"/>
+</div>
+
+<p>予想される通り、ブラウザからこれらすべてのファイルに<code>assets</code>パスの下でアクセス可能ですが、それはそれらのディレクトリがAsset Pipelineのロードパスに含まれるからです。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/724/original/E279I02.png" width="801" height="437" alt="jquery.jsファイルはassetsフォルダからアクセスできる"/>
+</div>
+
+<p>興味深いことに、つまりこれはRuby gemが単にRubyコードを管理するためだけのものではないということを意味しています。Javascriptやその他のアセットも、gemの中で同じように管理することができるのです。おそらく今後は、JavaScriptライブラリがRuby gemの形式で公開される事例が増え、それによって、それらもBundlerの依存関係管理の利点を享受できるようになるでしょう。</p>
+
+<h3>Sprocketsでアセットを管理する</h3>
+
+<p>ここでアプリケーションの<code>application.js</code>ファイルに戻って、中身を見ていくことにしましょう。</p>
+
+<p class="codeFilePath">/app/assets/javascripts/application.js</p>
+<pre class="javascript">// This is a manifest file that'll be compiled into including all the files listed below.
+// Add new JavaScript/Coffee code in separate files in this directory and they'll automatically
+// be included in the compiled file accessible from http://example.com/assets/application.js
+// It's not advisable to add code directly here, but if you do, it'll appear at the bottom of the
+// the compiled file.
+//
+//= require jquery
+//= require jquery_ujs
+//= require_tree .</pre>
+
+<p>ファイルにはコメントしかありませんが、その一部は重要な意味を持っています。この種のファイルはmanifestとよばれ、内部的には<a href="http://getsprockets.org/">Sprockets</a>に管理されます。このファイルへのリクエストを受け取ると、Sprocketsはmanifestを見て、 そこに記述されているすべてのファイルを結合して、このファイルのコードの前にその内容をインクルードします。</p> 
+
+<p>ここでもロードパスが機能します。このファイルには<code>require jquery</code>(拡張子の<code>.js</code>は任意のため、省略できます)が含まれています。Sprocketsはロードパスの中からこのファイルを探し、今回の場合は<code>jquery-rails</code>エンジンの<code>vendor/asset/javascripts</code>ディレクトリからロードします。</p> 
+
+<p>このロードパスに存在するすべてのJavaScriptファイルを追加できます。そのため、ファイルに<code>require jquery-ui</code>を追加すると、gemの<code>jquery-ui.js</code>ファイルがインクルードされます。これはCoffeeScriptファイルにも当てはまります。<code>require home</code>を含めると <code>/app/assets/javascripts/home.js.coffee</code>ファイルが解析されてインクルードされます。</p>
+
+<p>しかし<code>home</code>ファイルを含める必要はありません。というのも、ファイルの一番下に<code>require_tree .</code>があり、ここでのドット(.)はカレントディレクトリを表しているからです。これは、そのディレクトリやそのサブディレクトリにあるすべてのJavaScriptやCoffeeScriptのファイルが含まれるということです。</p> 
+
+<p>階層の中の特定のファイルを除外したければ、それも可能です。例えば、サイトにadminページがあり、これらのページを見るときだけ特定のJavaScriptファイルが含まれるようにしたいとします。デフォルトではこれらのファイルはサイトのすべてのページに含まれてしまいます。</p>
+
+<p>含まれたファイルを見たい場合は、URLに<code>debug_assets=1</code>パラメータを追加します。この指定によってJavaScriptファイルは結合されず、ページのソースを見ると、Sprocketsがインクルードするファイルがadminディレクトリの中のものも含めてすべて表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/725/original/E279I03.png" width="789" height="322" alt="debug_assetsパラメータを検索文字列に含めた場合、JavaScriptファイルは結合されない"/>
+</div>
+
+<p>この問題への対処方法はいくつかあります。<code>require_tree</code>の代わりに<code>require_directory</code>を使用すれば、カレントディレクトリにあるファイルのみを読み込み、サブディレクトリのファイルは読み込みません。インクルードされるファイルをより詳細に制御したければ、ディレクトリ全体をインクルードするのではなく、個別のファイルを<code>require</code>することも可能です。もう一つの方法として、すべてのページに含めたいJavaScriptファイルを<code>public</code>サブディレクトリに移動します。その上で<code>require_tree ./public</code>を使用して、それらのファイルだけをインクルードできます。</p>
+
+<p>Sprockets manifestにどのようなコマンドを使用できるかを知りたい方もいるでしょう。まだいいドキュメントがないのですが、<a href="https://github.com/sstephenson/sprockets/blob/master/lib/sprockets/directive_processor.rb"><code>directive_processor.rb</code>ファイル</a>のソースコードのコメントには、動作の仕組みの説明とともに、使用できるコマンドが記載されています。</p>
+
+<h3>プリプロセス</h3>
+
+<p>Asset Pipelineはプリプロセスにも対応しています。この仕組みを説明するために、新たに作成した<code>/app/assets/anything</code>ディレクトリに<code>greeting.txt</code>というファイルを作成します。そのままでは、このファイルは単なる静的なテキストファイルですが、ファイル名にもう一つ拡張子を追加します。ここではこのファイルにERBコードを追加すると、それが処理されます。</p> 
+
+<p class="codeFilePath">/app/assets/anything/greeting.txt.erb</p>
+<pre class="ruby">hello world &lt;%= 1 + 1 %&gt;</pre>
+
+<p>このファイルをブラウザで見てみるとERBコードが処理されているのがわかります。URLにはプロセッサの拡張子は含んでいません。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/726/original/E279I04.png" width="801" height="280" alt="ブラウザに送信される前にerbコードがプリプロセスされる"/>
+</div>
+
+<p>基本的にこれがSASSとCoffeeScriptが動作するしくみです。もしファイルに<code>.scss</code>拡張子がついていたら、これがプリプロセッサ拡張子として扱われて、ファイルはSASS プロセッサに渡されます。拡張子を連結して、例えば<code>.scss.erb</code>という拡張子をつけてファイルを作ることもできます。このファイルはまずERBプロセッサに渡され、その後SASSプロセッサに渡されます。</p>
+
+<p>プリプロセッサは自由に設定を変えることができます。独自のプロセッサを追加したり、既存のものと置き換えたりすることができます。これはすべて<a href="https://github.com/rtomayko/tilt/">Tilt gem</a>によって処理されます。サイトには動作のしくみや利用できる拡張機能についての情報もあります。</p>
+
+<h3>本番モード(Production Mode)での相違点</h3>
+
+<p>Asset Pipelineの機能についての簡単な概要紹介は以上です。Asset Pipelineは本番モードでの動作にいくつか相違点があるので、エピソードの残りを使って説明します。まずサーバを本番モードで起動します。</p>
+
+<pre class="terminal">$ rails s -e production</pre>
+
+<p>アプリケーションのトップページにアクセスしてソースを表示させると、アセットが違う形で配信されていることがわかるでしょう。</p>
+
+<pre class="terminal">&lt;link href="/assets/application-412fe22651f4486c51e54176003a9f57.css" media="screen" rel="stylesheet" type="text/css" /&gt;
+  &lt;script src="/assets/application-3e3a5167191afa70c7b72440eee7dd40.js" type="text/javascript"&gt;&lt;/script&gt;</pre>
+  
+<p>ファイル名にハッシュ値が含まれていますが、これはキャッシュするためです。Rails 3.0で用いられていたクエリ文字列を追加する以前の方法と比べると、実際にファイル名を変えるこの方法の方が優れています。またファイル自身を見てみると、通信コストを少なくするためにJavaScriptが縮小化(minify)されているのがわかります。</p>
+
+<p>これらのアセットは自動的にキャッシュされ、Rack Cacheミドルウェアによって配信されるので速度はかなり速いです。もし代わりにWebサーバ自身にアセットの配信とホストをさせたい場合は、次のコマンドを使って事前にプリコンパイルします。</p> 
+
+<pre class="terminal">$ rake assets:precompile</pre>
+
+<p>このコマンドで、アセットは<code>/public</code>ディレクトリにプリコンパイルされ、Webサーバから簡単にアクセスできます。</p> 
+
+<p>Asset Pipelineに関する今回のエピソードは以上です。忘れずに<a href="http://ryanbigg.com/guides/asset_pipeline.html">Rails Guide</a>でより詳しい情報をチェックしてください。</p>

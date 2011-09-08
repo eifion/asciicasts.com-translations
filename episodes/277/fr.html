@@ -1,0 +1,255 @@
+<p>Le Rails&nbsp;3.1 HackFest a eu lieu le week-end dernier et, gr&acirc;ce au dur travail des participants, la cinqui&egrave;me release candidate de Rails&nbsp;3.1 est maintenant disponible. Cette release contient d&#x27;importantes corrections pour les mountable engines. Les mountable engines nous permettent de monter une application Rails &agrave; l&#x27;int&eacute;rieur d&#x27;une autre. Nous allons voir cela dans cet &eacute;pisode.</p>
+
+<p>Vous vous souvenez peut &ecirc;tre du plugin Notification Exception, couvert dans l&#x27;&eacute;pisode 104 [ <a href="http://railscasts.com/episodes/104-exception-notifications">regarder</a> ]. Il peut &ecirc;tre ajout&eacute; &agrave; une application et stocke en base chaque exception lev&eacute;e par l&#x27;application. Il fournit &eacute;galement une interface utilisateur permettant de consulter les exceptions. Dans cet &eacute;pisode, nous allons recr&eacute;er ce plugin sous forme de mountable engine.</p>
+
+<h3>Mise en route</h3>
+
+<p>Avant de commencer &agrave; &eacute;crire notre engine, nous devons nous assurez que nous utilisons Rails&nbsp;3.1 Release&nbsp;Candidate&nbsp;5 ou une version plus r&eacute;cente. Nous pouvons installer la derni&egrave;re version en date gr&acirc;ce &agrave;</p>
+
+<pre class="terminal">$ gem install rails --pre</pre>
+
+<p>Une fois cela fait, nous pouvons commencer &agrave; g&eacute;n&eacute;rer notre mountable engine. Nous n&#x27;avons pas besoin de le cr&eacute;er dans une application existante, cr&eacute;er un engine revient &agrave; cr&eacute;er un nouvelle application Rails avec la commande <code>rails new</code>. La seule diff&eacute;rence est que nous lan&ccedil;ons <code>rails plugin new</code> &agrave; la place. Comme notre application s&#x27;occupe d&#x27;exceptions, nous l&#x27;appellerons <code>uhoh</code>. Nous devons passer l&#x27;option <code>--mountable</code> pour en faire un mountable engine.</p>
+
+<pre class="terminal">$ rails plugin new uhoh --mountable</pre>
+
+<p>La structure du dossier de notre engine ressemble beaucoup &agrave; celle d&#x27;une application Rails classique et c&#x27;en est pratiquement une. Elle est simplement con&ccedil;ue pour &ecirc;tre mont&eacute;e &agrave; l&#x27;int&eacute;rieur d&#x27;une autre. Il existe cependant quelques diff&eacute;rences. Il existe un certain nombre de dossier sous namespace dans l&#x27;application&nbsp;; par exemple, le fichier <code>application_controller</code> est dans le dossier <code>/app/controllers/uhoh</code>. Le principe est le m&ecirc;me pour les fichiers des dossiers <code>assets</code>, <code>helpers</code> et <code>views</code>. Cela permet de garder le code de l&#x27;engine s&eacute;par&eacute; de celui de l&#x27;application dans laquelle il sera mont&eacute;. La pr&eacute;sence du dossier <code>assets</code> signifie qu&#x27;il n&#x27;est plus besoin de copier les ressources media dans le dossier <code>public</code> de l&#x27;application lorsque l&#x27;engine est mont&eacute;. Gr&acirc;ce &agrave; l&#x27;asset pipeline, tout est g&eacute;r&eacute; pour nous.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/712/original/E277I01.png" width="800" height="502" alt="La structure de dossiers de notre engine."/>
+</div>
+
+<p>Les assets (ressources media) sont &eacute;galement encapsul&eacute;s dans un namespace, nous devons donc passer par ce dossier lorsque nous cr&eacute;ons un lien vers ceux-ci. Nous pouvons &eacute;galement voir cela dans le dossier <code>layouts</code>. Il semble y avoir un bug en RC5, nous voyons deux fichiers <code>application.html.erb</code>&nbsp;. Nous pouvons supprimer celui situ&eacute; en dehors du dossier <code>uhoh</code>. Si nous regardons l&#x27;autre, nous allons voir que les r&eacute;f&eacute;rences aux assets que l&#x27;on y trouve contiennent le dossier <code>uhoh</code>. Chaque fois que nous cr&eacute;ons un liens vers ces assets, nous devons inclure ce namespace.</p>
+
+<p class="codeFilePath">/app/views/layouts/uhoh/application.html.erb</p>
+<pre class="ruby">&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Uhoh&lt;/title&gt;
+  &lt;%= stylesheet_link_tag    &quot;uhoh/application&quot; %&gt;
+  &lt;%= javascript_include_tag &quot;uhoh/application&quot; %&gt;
+  &lt;%= csrf_meta_tags %&gt;
+&lt;/head&gt;
+&lt;body&gt;
+
+&lt;%= yield %&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+
+<p>Nous allons ensuite regarder l&#x27;un des fichiers cl&eacute;s d&#x27;un engine, <code>engine.rb</code> dans le dossier <code>/lib/uhoh</code>.</p>
+
+<p class="codeFilePath">/lib/uhoh/engine.rb</p>
+<pre class="ruby">module Uhoh
+  class Engine &lt; Rails::Engine
+    isolate_namespace Uhoh
+  end
+end</pre>
+
+<p>C&#x27;est une classe h&eacute;ritant de <code>Rails::Engine</code> et c&#x27;est l&#x27;endroit o&ugrave; la configuration est centralis&eacute;e. Il existe d&eacute;j&agrave; un appel &agrave; <code>isolate_namespace</code> dans la classe et cela signifie que l&#x27;engine sera trait&eacute; comme une unit&eacute; isol&eacute;e et nous n&#x27;avons donc pas &agrave; nous inqui&eacute;ter pour l&#x27;application dans laquelle il sera mont&eacute;.</p>
+
+<p>La derni&egrave;re partie de l&#x27;engine que nous allons voir est situ&eacute;e dans le dossier <code>/test/dummy</code>. On y trouve une application Rails permettant de montrer comment marche notre engine lorsqu&#x27;il est mont&eacute;. Le dossier <code>config</code> de l&#x27;application contient un fichier <code>routes.rb</code>. Ce dernier contient un appel &agrave; <code>mount</code> auquel est pass&eacute;e la classe principale de l&#x27;engine qui sera attach&eacute; &agrave; l&#x27;URL.</p>
+
+<p class="codeFilePath">/test/dummy/config/routes.rb</p>
+<pre class="ruby">Rails.application.routes.draw do
+  mount Uhoh::Engine =&gt; &quot;/uhoh&quot;
+end</pre>
+
+<p>C&#x27;est ce qu&#x27;un utilisateur devra faire lorsqu&#x27;il installera votre engine dans une application, le monter sur une URL de leur choix. C&#x27;est une application Rack et, par cons&eacute;quent, si une requ&ecirc;te arrive sur /uhoh elle sera pass&eacute;e &agrave; notre class <code>Engine</code>. Une bonne pratique est d&#x27;ajouter cette ligne aux instructions d&#x27;installation dans le fichier README de l&#x27;engine. Cela permettra aux utilisateurs de savoir comment le monter dans le fichier routes de leur application.</p>
+
+<p>Bien que cette application d&#x27;exemple soit situ&eacute;e dans le dossier <code>/test</code>, elle est &eacute;galement utile pour tester &agrave; la main. Si nous lan&ccedil;ons <code>rails s</code> depuis le dossier de notre engine, l&#x27;application d&#x27;exemple va se lancer. Si nous visitons <a href="http://localhost:3000/uhoh/"><code>http://localhost:3000/uhoh/</code></a>, nous serons men&eacute;s &agrave; notre engine puisque c&#x27;est l&#x27;URL &agrave; laquelle il est mont&eacute;. Nous allons voir une erreur lors de la visite de cette page. C&#x27;est tout &agrave; fait normal puisque nous n&#x27;avons pas encore &eacute;crit le contr&ocirc;leur correspondant.</p>
+
+<p>Nous allons donc cr&eacute;er un contr&ocirc;leur <code>failures</code> dans l&#x27;engine. Nous pouvons utiliser les g&eacute;n&eacute;rateurs de Rails pour le faire, tout comme nous le ferions dans une application Rails classique. Bien que nous soyons dans un engine, nous n&#x27;avons pas besoin de sp&eacute;cifier le namespace, tout cela est fait pour nous.</p>
+
+<pre class="terminal">$ rails g controller failures index</pre>
+
+<p>Cela g&eacute;n&egrave;re les m&ecirc;mes fichiers que pour un contr&ocirc;leur classique, &agrave; la diff&eacute;rence que tout est dans le bon dossier de namespace. Nous allons ensuite modifier les routes de l&#x27;engine pour fournir une route <code>root</code> pointant vers l&#x27;action index de notre contr&ocirc;leur. Cela se fait dans le fichier <code>/config/routes.rb</code> de l&#x27;engine.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Uhoh::Engine.routes.draw do
+  root :to =&gt; &quot;failures#index&quot;
+end</pre>
+
+<p>Lorsque nous visitons la page <a href="http://localhost:3000/uhoh/"><code>http://localhost:3000/uhoh/</code></a>, nous allons maintenant voir la vue de l&#x27;action.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/713/original/E277I02.png" width="801" height="280" alt="Le text par d&eacute;faut dans la vue index."/>
+</div>
+
+<p>Sur cette page, nous voulons afficher une liste des exceptions lev&eacute;es. Nous allons avoir besoin d&#x27;un mod&egrave;le pour stocker cette information et nous allons donc cr&eacute;er un simple mod&egrave;le <code>Failure</code> avec un champ message.</p>
+
+<pre class="terminal">$ rails g model failure message:text</pre>
+
+<p>Maintenant que nous avons cr&eacute;&eacute; le mod&egrave;le, comment lan&ccedil;ons nous la migration ? Dans l&#x27;engine lui-m&ecirc;me, nous pouvons lancer <code>rake db:migrate</code> comme d&#x27;habitude et tout fonctionnera comme pr&eacute;vu. Cela ne marchera pas lorsque quelqu&#x27;un tentera de monter l&#x27;engine dans une application car <code>rake</code> ne prendra pas les migrations de celui-ci. Nous devons dire aux utilisateurs d&#x27;utiliser <code>rake uhoh:install:migrations</code>. Cela va copier les migrations de l&#x27;engine dans l&#x27;application afin qu&#x27;ils puissent faire appel &agrave; <code>rake db:migrate</code> normalement. Inclure cette information dans les instructions d&#x27;installation de l&#x27;engine semble une bonne id&eacute;e.</p>
+
+<p>La console Rails fonctionne &eacute;galement comme attendu et nous allons maintenant l&#x27;utiliser pour cr&eacute;er une <code>Failure</code> d&#x27;exemple.</p>
+
+<pre class="ruby">Uhoh::Failure.create!(:message =&gt; &quot;hello world!&quot;)</pre>
+
+<p>Notez que nous devons inclure le namespace chaque fois que nous r&eacute;f&eacute;ren&ccedil;ons une classe. Maintenant que nous avons une entr&eacute;e <code>Failure</code>, nous allons l&#x27;afficher dans l&#x27;action index de <code>FailuresController</code>.</p>
+
+<p class="codeFilePath">/app/controllers/uhoh/failures_controller.rb</p>
+<pre class="ruby">module Uhoh
+  class FailuresController &lt; ApplicationController
+    def index
+      @failures = Failure.all
+    end
+  end
+end</pre>
+
+<p>Dans la console, au contraire, nous n&#x27;avons pas besoin de sp&eacute;cifier le namespace car nous somme d&eacute;j&agrave; dans le module <code>Uhoh</code>. Dans la vue, nous allons &eacute;crire un peu de code pour parcourir les exceptions et les afficher sous forme de liste.</p>
+
+<p class="codeFilePath">/app/views/uhoh/failures/index.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Failures&lt;/h1&gt;
+&lt;ul&gt;
+  &lt;% for failure in @failures %&gt;
+  &lt;li&gt;&lt;%= failure.message %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;</pre>
+
+<p>Lorsque nous rechargeons la page, nous allons voir la <code>Failure</code> que nous avons ajout&eacute;e.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/714/original/E277I03.png" width="801" height="280" alt="Our failure shown in the list."/>
+</div>
+
+<h3>Noter les exceptions</h3>
+
+<p>Maintenant que nous avons une m&eacute;thode pour enregistrer une <code>Failure</code>, nous allons devoir en g&eacute;n&eacute;rer une chaque fois que l&#x27;application dans laquelle est mont&eacute; l&#x27;engine l&egrave;ve une exception. Pour tester cela, nous devons simuler une exception dans l&#x27;application de d&eacute;monstration. Nous allons donc nous placer dans le dossier de cette derni&egrave;re et g&eacute;n&eacute;rer un contr&ocirc;leur nomm&eacute; <code>simulate</code> avec une action <code>failure</code>.</p>
+
+<pre class="terminal">$ rails g controller simulate failure</pre>
+
+<p>Dans l&#x27;action, nous allons lever une exception.</p>
+
+<p class="codeFilePath">/test/dummy/app/controllers/simulate_controller.rb</p>
+<pre class="ruby">class SimulateController &lt; ApplicationController
+  def failure
+    raise &quot;Simulating an exception&quot;
+  end
+end</pre>
+
+<p>Si nous visitons cette action dans le navigateur, nous allons voir l&#x27;exception, comme attendu.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/715/original/E277I04.png" width="800" height="420" alt="L'exception montr&eacute;e dans le navigateur."/>
+</div>
+
+<p>Nous allons devoir changer notre engine de fa&ccedil;on &agrave; ce qu&#x27;il note les exceptions et cr&eacute;e une nouvelle <code>Failure</code> lorsqu&#x27;elles sont lev&eacute;es. La solution que nous allons utiliser n&#x27;est pas la plus efficace mais elle est simple et fonctionnera dans notre cas. Nous allons commencer par cr&eacute;er un initializer dans notre engine. Il n&#x27;y a pas de dossier <code>initializers</code> dans le dossier config de l&#x27;engine mais nous pouvons en cr&eacute;er un et les initializers plac&eacute;s dedans fonctionneront. Dans ce dossier, nous allons cr&eacute;er un fichier nomm&eacute; <code>exception_handler.rb</code>.</p>
+
+<p class="codeFilePath">/app/config/initializers/exception_handler.rb</p>
+<pre class="ruby">ActiveSupport::Notifications.subscribe &crarr;
+  &quot;process_action.action_controller&quot; do &crarr;
+  |name, start, finish, id, payload|
+  if payload[:exception]
+    name, message = *payload[:exception]
+    Uhoh::Failure.create!(:message =&gt; message)
+  end
+end</pre>
+
+<p>Dans ce fichier, nous souscrivons &agrave; une notification (les notifications sont vues dans l&#x27;&eacute;pisode 249 [<a href="http://railscasts.com/episodes/249-notifications-in-rails-3">regarder</a>, <a href="http://fr.asciicasts.com/episodes/249-notifications-in-rails-3">lire</a>]) qui nous indique lorsqu&#x27;une action est trait&eacute;e. Lorsque c&#x27;est le cas, nous pouvons v&eacute;rifier si le <code>payload</code> contient une exception. Si oui, nous savons donc qu&#x27;un exception a &eacute;t&eacute; lev&eacute;e et nous pouvons stocker son message dans une nouvelle <code>Failure</code>.</p>
+
+<p>Nous devons red&eacute;marrer le serveur avant de tester. Nous pouvons ensuite visiter <a href="http://localhost:3000/simulate/failure"><code>http://localhost:3000/simulate/failure</code></a> de nouveau pour lever une exception. Une fois l&#x27;exception vue, nous pouvons ensuite v&eacute;rifier qu&#x27;elle est list&eacute;e en allant sur <a href="http://localhost:3000/uhoh"><code>http://localhost:3000/uhoh</code></a>.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/716/original/E277I05.png" width="800" height="420" alt="Notre nouvelle exception affich&eacute;e dans la liste."/>
+</div>
+
+<h3>G&eacute;rer les URLs dans l&#x27;engine</h3>
+
+<p>Tout helper d&#x27;URL que nous utilisons dans l&#x27;engine va g&eacute;n&eacute;rer des URLs pour cet engine. Par exemple, si nous ajoutons un lien vers l&#x27;URL root depuis page <code>index</code> des <code>failures</code>, ce lien pointera vers l&#x27;URL root de cet engine et non vers celle de l&#x27;application dans laquelle il est mont&eacute;.</p>
+
+<p class="codeFilePath">/app/views/uhoh/failures/index.html.erb</p>
+<pre class="ruby">&lt;p&gt;&lt;%= link_to &quot;Failures&quot;, root_url %&gt;&lt;/p&gt;</pre>
+
+<p>Ce lien pointe vers <a href="http://localhost:3000/uhoh"><code>http://localhost:3000/uhoh</code></a> qui est l&#x27;URL root de l&#x27;engine. C&#x27;est la m&ecirc;me page que celle contenant le lien car l&#x27;URL root est d&eacute;finie dans les routes pour pointer sur l&#x27;action <code>index</code> de <code>FailuresController</code>. Nous pouvons cr&eacute;er des liens vers l&#x27;application elle-m&ecirc;me en appelant le helper d&#x27;URL sur <code>main_app</code> comme ceci&nbsp;:</p>
+
+<p class="codeFilePath">/app/views/uhoh/failures/index.html.erb</p>
+<pre class="ruby">&lt;p&gt;&lt;%= link_to &quot;Failures&quot;, root_url %&gt;&lt;/p&gt;
+&lt;p&gt;&lt;%= link_to &quot;Simulate Failure&quot;, main_app.simulate_failure_path %&gt;&lt;/p&gt;</pre>
+
+<p>Cela nous donne un lien vers la page de simulation d&#x27;exception de l&#x27;application, <a href="http://localhost:3000/simulate/failure"><code>http://localhost:3000/simulate/failure</code></a>.</p>
+
+<p>Que se passe-t-il si nous voulons faire cela dans l&#x27;autre sens et avoir un lien vers l&#x27;engine dans l&#x27;application&nbsp;? La premi&egrave;re chose &agrave; faire est de changer la ligne dans le fichier de routes de l&#x27;application pour donner un nom &agrave; la route qui monte l&#x27;engine. Cela se fait avec l&#x27;option <code>:as</code>.</p>
+
+<p class="codeFilePath">/test/dummy/config/routes.rb</p>
+<pre class="ruby">Rails.application.routes.draw do
+
+  get &quot;simulate/failure&quot;
+
+  mount Uhoh::Engine =&gt; &quot;/uhoh&quot;, :as =&gt; &quot;uhoh_engine&quot;
+end</pre>
+
+<p>Nous pouvons ensuite acc&eacute;der aux helpers d&#x27;URLs de l&#x27;engine en les appelant comme des m&eacute;thodes de <code>uhoh_engine</code>. Pour d&eacute;montrer ceci, nous allons changer temporairement notre action <code>failure</code> de fa&ccedil;on &agrave; ce que, au lieu de lever une exception, elle redirige vers l&#x27;URL root de l&#x27;engine.</p>
+
+<p class="codeFilePath">/test/dummy/app/controllers/simulate_controller.rb</p>
+<pre class="ruby">class SimulateController &lt; ApplicationController
+  def failure
+    redirect_to uhoh_engine.root_url
+  end
+end</pre>
+
+<p>Si nous visitons <a href="http://localhost:3000/simulate/failure"><code>http://localhost:3000/simulate/failure</code></a>, nous allons &ecirc;tre redirig&eacute;s vers <a href="http://localhost:3000/uhoh"><code>http://localhost:3000/uhoh</code></a> puisque nous utilisons le helper de l&#x27;engine pour rediriger vers l&#x27;une des ses URLs. C&#x27;est une autre fonctionnalit&eacute; qu&#x27;il peut &ecirc;tre bon de mentionner dans le README de votre engine.</p>
+
+<p>La fonctionnalit&eacute; de notre engine est presque compl&egrave;te mais la page listant les <code>failures</code> est plut&ocirc;t terne. Nous allons donc l&#x27;&eacute;gayer un peu en ajoutant quelques assets. Tout d&#x27;abord, nous allons ajouter une image. Nous en avons d&eacute;j&agrave; trouv&eacute; une et l&#x27;avons plac&eacute;e dans le dossier <code>/app/assets/images/uhoh</code>. Pour l&#x27;inclure dans la page, nous pouvons utiliser <code>image_tag</code> comme pour n&#x27;importe quelle autre image.</p>
+
+<p class="codeFilePath">/app/views/uhoh/failures/index.html.erb</p>
+<pre class="ruby">&lt;%= image_tag &quot;uhoh/alert.png&quot; %&gt;
+&lt;h1&gt;Failures&lt;/h1&gt;
+&lt;ul&gt;
+  &lt;% for failure in @failures %&gt;
+  &lt;li&gt;&lt;%= failure.message %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;Failures&quot;, root_url %&gt;&lt;/p&gt;
+&lt;p&gt;&lt;%= link_to &quot;Simulate Failure&quot;, &crarr;
+  main_app.simulate_failure_path %&gt;&lt;/p&gt;</pre>
+
+<p>Nous allons &eacute;galement inclure un peu de CSS. SASS et CoffeeScript ne sont pas disponibles par d&eacute;faut dans les engines, bien qu&#x27;ils puissent &ecirc;tre ajout&eacute;s comme d&eacute;pendances. Si nous ajoutons quelques CSS au fichier <code>failures.css</code>, il sera inclus automatiquement.</p>
+
+<p class="codeFilePath">/app/assets/stylesheets/uhoh/failures.css</p>
+<pre class="css">html, body {
+  background-color: #DDD;
+  font-family: Verdana;
+}
+
+body {
+  padding: 20px 200px;
+}
+
+img {
+  display: block;
+  margin: 0 auto;
+}
+
+a {
+  color: #000;
+}
+
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+li {
+  background-color: #FFF;
+  margin-bottom: 10px;
+  padding: 5px 10px;
+}</pre>
+
+<p>Ceci est &eacute;galement valable pour JavaScript. Tout code plac&eacute; dans le fichier <code>failures.js</code> sera automatiquement inclus.</p>
+
+<p class="codeFilePath">/app/assets/javascripts/uhoh/failures.js</p>
+<pre class="javascript">$(function() {
+  $(&quot;li&quot;).click(function() {
+    $(this).slideUp();
+  });
+});</pre>
+
+<p>Lorsque nous rechargeons la page, elle sera bien mieux et nous pourrons masquer les exceptions en cliquant dessus. Cela nous montre que le JavaScript a &eacute;t&eacute; inclus.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/717/original/E277I06.png" width="799" height="436" alt="Notre page failures avec les CSS et le JavaScript inclus."/>
+</div>
+
+<p>C&#x27;est tout pour cet &eacute;pisode. Les mountable engines sont une tr&egrave;s bonne fonctionnalit&eacute; de Rails&nbsp;3.1 et valent vraiment la peine d&#x27;y jeter un &oelig;il.</p>

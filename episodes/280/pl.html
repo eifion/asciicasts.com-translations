@@ -1,0 +1,216 @@
+<p><a href="http://pry.github.com/">Pry</a> jest alternatywą dla IRB i tak, jak IRB, pozwala na wykonywanie kodu Ruby, ale posiada sporo dodatkowych cech. W tym odcinku pokażemy Wam, jak działa Pry i jak zintegrować go z Twoimi aplikacjami w Rails.</p>
+
+<p>Pry jest gemem i prosto go zainstalować. Zainstalujemy dodatkowo gem <code>pry-doc</code>, do czego wrócimy później.</p>
+
+<pre class="terminal">$ gem install pry pry-doc</pre>
+
+<p>Jako, że używamy gemsetów w RVM, zainstalujemy Pry tak, żeby był dostępny globalnie we wszystkich gemsetach. Można to zrobić za pomocą poniższego polecenia.</p>
+
+<pre class="terminal">$ rvm gemset use global
+$ gem install pry pry-doc</pre>
+
+<p>Po zainstalowaniu Pry możemy uruchomić go za pomocą polecenia <code>pry</code> i wykonać kod Ruby tak, jakbyśmy używali zwykłego <code>irb</code>.</p>
+
+<pre class="terminal">$ pry
+pry(main)&gt; 1 + 2
+=&gt; 3</pre>
+
+<p>Pry jest czymś więcej, jak tylko zwykłym kalkulatorem, ale zanim przejdziemy dalej, przyjrzymy się, jak zmusić go do pracy z aplikacją w Rails. Aplikacja, którą używamy jest znajomy blog, który pojawiał się w kilku poprzednich odcinkach.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/727/original/E280I01.png" width="815" height="452" alt="Nasz blog."/>
+</div>
+
+<p>If we run <code>rails c</code> from the application&rsquo;s directory IRB will start up. To use Pry instead all we need to do is run <code>pry</code> and pass in the Rails environment file. When we do we&rsquo;ll have access to our application&rsquo;s models just as we would in the standard Rails console.</p>
+
+<p>Jeżeli uruchomimy <code>rails c</code> w katalogu naszej aplikacji, to uruchomi się IRB. Żeby użyć Pry, musimy jedynie uruchomić <code>pry</code> i przekazać ścieżkę do pliku environment. Po tym będziemy mieli dostęp do wszelkich modeli naszej aplikacji, jak w standardowej konsoli Rails.</p>
+
+<pre class="terminal">$ pry -r ./config/environment
+pry(main)&gt; Article.count
+=&gt; 3</pre>
+
+<p>Teraz, gdy Pry jest skonfigurowany, możemy spojrzeć na niektóre jego cechy. Jeżeli wpiszemy <code>help</code>, dostaniemy listę wszystkich poleceń, które są wspierane przez Pry. Dwiema najczęściej używanymi będą <code>cd</code> oraz <code>ls</code>, więc przyjrzyjmy się im. Komenda <code>cd</code> zmienia bieżący zasięg (scope). Tak więc, jeżeli wpiszemy <code>cd Article</code>, znajdziemy się wewnątrz klasy <code>Article</code>. Bieżący zasięg możemy zawsze sprawdzić, wydając polecenie <code>self</code>.
+
+<pre class="terminal">pry(main)&gt; cd Article
+pry(#&lt;Class:0x1022f60e0&gt;):1&gt; self
+=&gt; Article(id: integer, name: string, content: text, created_at: datetime, updated_at: datetime, published_at: datetime)</pre>
+
+<p>Będąc wewnątrz klasy Article, możemy wywołać dowolną jej metodę, jak np. <code>first</code>, która zwróci pierwszy artykuł.</p>
+
+<pre class="terminal">pry(#&lt;Class:0x1022f60e0&gt;):1&gt; first
+=&gt; #&lt;Article id: 1, name: &quot;What is Music&quot;, content: &quot;Music is an art form in which the medium is sound o...&quot;, created_at: &quot;2011-08-24 20:35:29&quot;, updated_at: &quot;2011-08-24 20:37:22&quot;, published_at: &quot;2011-05-13 23:00:00&quot;&gt;</pre>
+
+<p>Możemy użyć <code>cd</code> w stosunku do dowolnego obiektu. Jeśli wpiszemy <code>cd first</code> będąc wewnątrz klasy <code>Article</code>, zmienimy bieżący zasięg na ten konkretny artykuł. Możemy wywoływać dowolne metody i modyfikować dowolne właściwości, jak <code>name</code>.</p>
+
+<pre class="terminal">pry(#&lt;Class:0x1022f60e0&gt;):1&gt; cd first
+pry(#&lt;Article:0x102300c98&gt;):2&gt; name
+=&gt; &quot;What is Music&quot;</pre>
+
+<p>Możemy nawet dostać się do wewnątrz właściwości <code>name</code> i sięgać do metod łańcucha znaków.</p>
+
+<pre class="terminal">pry(#&lt;Article:0x102300c98&gt;):2&gt; cd name
+pry(&quot;What is Music&quot;):3&gt; upcase
+=&gt; &quot;WHAT IS MUSIC&quot;</pre>
+
+<p>Pry śledzi nasz poziom zagnieżdżenia i możemy się dowiedzieć, gdzie aktualnie jesteśmy wpisując <code>nesting</code>.</p>
+
+<pre class="terminal">pry(&quot;What is Music&quot;):3&gt; nesting
+Nesting status:
+--
+0. main (Pry top level)
+1. #&lt;Class:0x1022f60e0&gt;
+2. #&lt;Article:0x102300c98&gt;
+3. &quot;What is Music&quot;</pre>
+
+<p>Polecenie zwróci listę obiektów, wewnątrz których jesteśmy. Możemy wrócić do poprzedniego obiektu wpisując <code>exit</code>, w tym przypadku do pierwszego artykułu. Wpisując <code>exit</code> ponownie, zostaniemy cofnięci z powrotem do klasy <code>Article</code>.</p>
+
+<p>Innym powszechnie używanym poleceniem jest <code>ls</code>, które wyświetla listę zmiennych i metod. Domyślnie wyświetla listę wszystkich zmiennych w bieżącym zasięgu, więc jeśli znajdujemy się obecnie wewnątrz klasy <code>Article</code>, to wykonując polecenie zobaczymy listę jej metod.</p>
+
+<pre class="terminal">pry(#&lt;Class:0x1022f60e0&gt;):1&gt; ls
+[:_, :_pry_, :inp, :out, :@_create_callbacks, :@_defined_class_methods, :@_save_callbacks, :@_update_callbacks, :@_validate_callbacks, :@arel_engine, :@arel_table, :@attribute_methods_generated, :@cached_attributes, :@column_names, :@columns, :@columns_hash, :@finder_needs_type_condition, :@generated_attribute_methods, :@inheritable_attributes, :@inheritance_column, :@parent_name, :@quoted_primary_key, :@quoted_table_name, :@relation]</pre>
+
+<p>Niektóre polecenia Pry wspierają użycie flag. Aby zobaczyć listę flag danego polecenia, należy wykonać polecenie dodając do niego opcję <code>-h</code>. Jeżeli wpiszemy <code>ls -h</code>, zobaczymy wszystkie opcje tego polecenia, jak na przykład <code>-m</code>, która służy do wyświetlenia wszystkich metod w klasie lub <code>-M</code>, która zwraca metody instancji. Możemy również przekazać dowolny obiekt, żeby zobaczyć listę metod tego obiektu, aniżeli metod w bieżącym zasięgu.</p>
+
+<p>Kolejnym użytecznym poleceniem Pry jest <code>show-doc</code>. Załóżmy, że chcemy się dowiedzieć, jak działa metoda <code>in_groups_of</code> klasy <code>Array</code>. Rozwiązaniem jest użycie <code>show-doc Array#in_groups_of</code>.</p>
+
+<pre class="terminal">pry(#&lt;Class:0x1022f60e0&gt;):1&gt; show-doc Array#in_groups_of
+
+From: /Users/eifion/.rvm/gems/ruby-1.9.2-p290/gems/activesupport-3.0.10/lib/active_support/core_ext/array/grouping.rb @ line 19:
+Number of lines: 15
+
+signature: in_groups_of(number, fill_with=?)
+
+Splits or iterates over the array in groups of size number,
+padding any remaining slots with fill_with unless it is false.
+
+  %w(1 2 3 4 5 6 7).in_groups_of(3) {|group| p group}
+  [&quot;1&quot;, &quot;2&quot;, &quot;3&quot;]
+  [&quot;4&quot;, &quot;5&quot;, &quot;6&quot;]
+  [&quot;7&quot;, nil, nil]
+
+  %w(1 2 3).in_groups_of(2, &#x27;&amp;nbsp;&#x27;) {|group| p group}
+  [&quot;1&quot;, &quot;2&quot;]
+  [&quot;3&quot;, &quot;&amp;nbsp;&quot;]
+
+  %w(1 2 3).in_groups_of(2, false) {|group| p group}
+  [&quot;1&quot;, &quot;2&quot;]
+  [&quot;3&quot;]</pre>
+
+<p>Możliwe jest wywołanie <code>show-doc</code> bezpośrednio na obiektach. Znajdujemy się obecnie wewnątrz klasy <code>Article</code>, więc możemy wywołać <code>all</code>, aby zwrócić tablicę artykułów. Wywołanie <code>show-doc all.in_groups_of</code> zwróci taką samą dokumentację, jak powyżej.</p>
+
+<p>Innym przydatnym poleceniem jest <code>show-method</code>, które pozwala na obejrzenie kodu źródłowego dowolnej metody. Może być użyte do wyświetlenia kodu źródłowego metody <code>in_groups_of</code>. (Warto wspomnieć, że Pry wspiera uzupełnianie za pomocą klawisza TAB)</p> 
+
+<pre class="terminal">pry(#&lt;Class:0x104e63de0&gt;):1&gt; show-method all.in_groups_of
+
+From: /Users/eifion/.rvm/gems/ruby-1.9.2-p290/gems/activesupport-3.0.10/lib/active_support/core_ext/array/grouping.rb @ line 19:
+Number of lines: 19
+
+def in_groups_of(number, fill_with = nil)
+  if fill_with == false
+    collection = self
+  else
+    # size % number gives how many extra we have;
+    # subtracting from number gives how many to add;
+    # modulo number ensures we don&#x27;t add group of just fill.
+    padding = (number - size % number) % number
+    collection = dup.concat([fill_with] * padding)
+  end
+
+  if block_given?
+    collection.each_slice(number) { |slice| yield(slice) }
+  else
+    groups = []
+    collection.each_slice(number) { |group| groups &lt;&lt; group }
+    groups
+  end
+end</pre>
+
+<p>Mamy również polecenie <code>edit-method</code>, które po uruchomieniu otworzy właściwy plik z kodem źródłowym w odpowiedniej linii.</p> 
+
+<p>Możliwe jest również wywoływanie poleceń powłoki poprzedzając je kropką. Wykonanie polecenia <code>.ls</code> w Pry wywoła polecenie <code>ls</code> w powłoce i wyświetli listę plików w bieżącym katalogu.</p>
+
+<p>Pry jest przydatny do debugowania. W naszym modelu <code>Article</code> mamy metodę <code>word_count</code>, która powinna zwrocić liczbę wyrazów w artykule. W metodzie jest błąd, ponieważ zawsze zwraca <code>0</code>, bez względu na zawartość artykułu. Możemy przyjrzeć się metodzie poprzez wykonanie <code>cd</code> do pierwszego artykułu, a następnie wywołując <code>edit-method word_count</code>. Metoda wygląda tak:</p>
+
+<pre class="codeFilePath">/app/models/article.rb</pre>
+<pre class="ruby">class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :published_at
+  has_many :comments
+
+  def word_count
+    words = content.scan(/\\w+/)
+    words.size
+  end
+end</pre>
+
+<p>Możemy dodać do kodu punkt przerwania (breakpoint) poprzez wywołanie <code>binding.pry</code>. Jeśli dodamy to bezpośrednio przed <code>words.size</code> i zapiszemy plik, to przy następnym wywołaniu metody <code>word_count</code> aplikacja zatrzyma się w miejscu <code>binding.pry</code> i możemy wtedy wrócić do Pry.</p>
+
+<pre class="terminal">&gt; word_count
+
+From: /Users/eifion/blog/app/models/article.rb @ line 7 in Article#word_count:
+
+     2:   attr_accessible :name, :content, :published_at
+     3:   has_many :comments
+     4: 
+     5:   def word_count
+     6:     words = content.scan(/\\w+/)
+ =&gt;  7:     binding.pry
+     8:     words.size
+     9:   end
+    10: end</pre>
+
+<p>Mamy w tej chwili dostęp do wszystkich zmiennych lokalnych, więc możemy wywołać <code>words</code>, żeby zobaczyć zawartość tablicy <code>words</code>.</p>
+
+<pre class="terminal">pry(#&lt;Article:0x1008c3f38&gt;):3&gt; words
+=&gt; []</pre>
+
+<p>Tablica jest pusta, więc wygląda na to, że jest jakiś problem z wyrażeniem regularnym, które przetwarza zawartość. Jeśli się mu przyjrzymy, to zauważymy, że są tam dwa backslashe zamiast jednego. Aby to naprawić, możemy uruchomić <code>edit-method word_count</code> ponownie, poprawić wyrażenie regularne, usunąć linię <code>binding.pry</code> i zapisać plik.</p> 
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :published_at
+  has_many :comments
+
+  def word_count
+    words = content.scan(/\w+/)
+    words.size
+  end
+end</pre>
+
+<p>Możemy przetestować poprawkę wywołując <code>word_count</code> ponownie i okazuje się, że tym razem działa zgodnie z oczekiwaniami.</p>
+
+<pre class="terminal">pry(#&lt;Article:0x1008c3f38&gt;):3&gt; word_count
+=&gt; 55</pre>
+
+<p>Czasem będziemy chcieli znaleźć błąd w kontrolerze lub w widoku niekoniecznie przy użyciu konsoli. Pry może również pomóc w tej kwestii. Najpierw będziemy musieli dodać Pry w <code>Gemfile</code>.</p> 
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.10&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;pry&#x27;, :group =&gt; :development</pre>
+
+<p>Następnie wywołujemy <code>bundle</code>, aby zainstalować gem i <code>rails s</code>, żeby uruchomić serwer. Możemy dodać <code>binding.pry</code> gdziekolwiek w naszych kontrolerach, żeby dodać punkt przerwania.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">def index
+  @articles = Article.all
+  binding.pry
+end</pre>
+
+<p>Jeżeli przejdziemy do tej strony w przeglądarce, okaże się, że &ldquo;utknie&rdquo; w czasie ładowania, a w terminalu uruchomi się Pry dokładnie w miejscu przerwania. Tak, jak w modelu, możemy się przyjrzeć dowolnym zmiennym lokalnym lub zmiennym instancji. Po zakończeniu czynności możemy wpisać <code>exit-all</code>, aby dokończyć żądanie.</p> 
+
+<pre class="terminal">From: /Users/eifion/blog/app/controllers/articles_controller.rb @ line 4 in ArticlesController#index:
+
+     1: class ArticlesController &lt; ApplicationController
+     2:   def index
+     3:     @articles = Article.all
+ =&gt;  4:     binding.pry
+     5:   end
+     6: 
+     7:   def show
+     8:     @article = Article.find(params[:id])
+     9:   end</pre>
+
+<p>To by było na tyle, jeśli chodzi o odcinek o Pry. Pry jest bardzo użytecznym narzędziem i potrafi o wiele więcej, niż zostało tutaj wymienione. Więcej można zobaczyć na stronie <a href="https://github.com/pry/pry/wiki">wiki</a> projektu i w <a href="http://vimeo.com/26391171">screencaście</a> autorstwa Joshuy Cheek.</p>

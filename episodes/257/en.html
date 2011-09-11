@@ -1,0 +1,359 @@
+<p>High-level testing is a great way to test Rails applications. A popular way to perform this kind of testing is Cucumber which was covered here back in episode 155 [<a href="http://railscasts.com/episodes/155-beginning-with-cucumber">watch</a>, <a href="http://asciicasts.com/episodes/155-beginning-with-cucumber">read</a>]. Not everyone likes Cucumber&rsquo;s English-style syntax for defining the application&rsquo;s behaviour, though, so this episode we&rsquo;ll take a look at an alternative way to do high-level testing.</p>
+
+<p>While we&rsquo;d normally advocate test-driven development, in this episode we&rsquo;ll be adding tests to an existing application so that we don&rsquo;t have to worry about the implementation details and making the application work. The application we&rsquo;ll be adding tests to is a simple, one-page to-do list application. This app shows a list of tasks and has a form that allows new tasks to be added.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/603/original/E257I01.png" width="800" height="321" alt="Our simple task list application."/>
+</div>
+
+<p>To test this application we&rsquo;re going to use request specs, which are available in RSpec 2.0, so the first step we&rsquo;ll need to take is to add the RSpec Rails gem to the development and test groups in the <code>Gemfile</code> and then run <code>bundle</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+
+group :development, :test do
+  gem &#x27;rspec-rails&#x27;
+end</pre>
+
+<p>Once Bundler has run we can run the following command to set up RSpec in our application.</p>
+
+<pre class="terminal">$ rails g rspec:install</pre>
+
+<p>Request specs are RSpec&rsquo;s equivalent to Rails&rsquo; built-in integration testing (these were covered in episode 187 [<a href="http://railscasts.com/episodes/187-testing-exceptions">watch</a>, <a href="http://asciicasts.com/episodes/187-testing-exceptions">read</a>]). To generate a request spec we call the integration test generator.</p>
+
+<pre class="terminal">$ rails g integration_test task</pre>
+
+<p>This will create a <code>tasks_spec.rb</code> file in the <code>spec/requests</code> directory, which looks like this:</p>
+
+<p class="codeFilePath">/spec/requests/tasks_spec.rb</p>
+<pre class="ruby">require &#x27;spec_helper&#x27;
+
+describe &quot;Tasks&quot; do
+  describe &quot;GET /tasks&quot; do
+    it &quot;works! (now write some real specs)&quot; do
+      # Run the generator again with the --webrat flag if you want to use webrat methods/matchers
+      get tasks_path
+      response.status.should be(200)
+    end
+  end
+end</pre>
+
+<p>The contents of this file look like fairly standard RSpec tests with the difference that we can call methods like <code>get</code> to call a page in the application and <code>response</code> to check the response for that request. The spec that&rsquo;s included by default in the file requests the tasks page that we saw earlier and checks that the response status is <code>200</code>, indicating a successful response. This spec should pass without modification, so let&rsquo;s try it. We can run <code>rake spec:requests</code> to run only the request specs.</p>
+
+<pre class="terminal">$ rake spec:requests
+(in /Users/eifion/code/tasklist)
+/Users/eifion/.rvm/rubies/ruby-1.9.2-p0/bin/ruby -S bundle exec rspec ./spec/requests/tasks_spec.rb
+DEPRECATION WARNING: &lt;% %&gt; style block helpers are deprecated. Please use &lt;%= %&gt;. (called from _app_views_tasks_index_html_erb___875755388255758006_2152410020_3563250333774836596 at /Users/eifion/code/tasklist/app/views/tasks/index.html.erb:3)
+<span class="passed">.</span>
+
+Finished in 0.18535 seconds
+<span class="passed">1 example, 0 failures</span>
+</pre>
+
+<p>The spec passes, but we do get a deprecation warning and this is the kind of issue that this kind of testing can find but which would be missed if we were just testing directly in a browser. It looks like we forgot to use an equals sign in a block helper and so we have some useful feedback already from writing request specs.</p>
+
+<p>In the view file for the form we&rsquo;ll see that we&rsquo;ve missed the equals sign from the opening <code>form_for</code> tag which is required in Rails 3.</p>
+
+<p class="codeFilePath">/app/views/tasks/index.html.erb</p>
+<pre class="ruby">&lt;% form_for Task.new do |f| %&gt;</pre>
+
+<p>If we add this in&hellip;</p>
+
+<p class="codeFilePath">/app/views/tasks/index.html.erb</p>
+<pre class="ruby">&lt;%= form_for Task.new do |f| %&gt;</pre>
+<p>&hellip;and then run the specs again we&rsquo;ll get a passing spec and no warnings.</p>
+<pre class="terminal">$ rake spec:requests
+(in /Users/eifion/code/tasklist)
+/Users/eifion/.rvm/rubies/ruby-1.9.2-p0/bin/ruby -S bundle exec rspec ./spec/requests/tasks_spec.rb
+<span class="passed">.</span>
+
+Finished in 0.16725 seconds
+<span class="passed">1 example, 0 failures</span></pre>
+
+<h3>Our First Real Request Spec</h3>
+
+<p>In a request spec we generally want to do more than just test the status of the response. We&rsquo;ll replace the default spec now with one that tests that the tasks are shown on the page.</p>
+
+<p class="codeFilePath">/specs/requests/tasks_spec.rb</p>
+<pre class="ruby">require &#x27;spec_helper&#x27;
+
+describe &quot;Tasks&quot; do
+  describe &quot;GET /tasks&quot; do
+    it &quot;displays tasks&quot; do
+      Task.create!(:name =&gt; &quot;paint fence&quot;)
+      get tasks_path
+      response.body.should include(&quot;paint fence&quot;)
+    end
+  end
+end</pre>
+
+<p>This spec is pretty straightforward. We create a new task then visit the <code>tasks</code> page and check that the text on the page includes that task&rsquo;s name. When we run <code>rake spec:requests</code> the spec passes as the page does include that text.</p>
+
+<p>As requests specs are built on Rails integration tests they support all of the <a href="http://guides.rubyonrails.org/testing.html#helpers-available-for-integration-tests">methods</a> that integration tests have. For example if we want to test the creation of a new task we can make use of the <code>post_via_redirect</code> method to make sure that the redirect is followed when we create a task.</p>
+
+<p>Let&rsquo;s write that spec now. It will call <code>post_via_redirect</code> to POST to the <code>index</code> page and pass in the parameters to create a new task called &ldquo;mow lawn&rdquo;.  It then checks that that text is present in the resulting page.</p>
+
+<p class="codeFilePath">/specs/requests/tasks_spec.rb</p>
+<pre class="ruby">require &#x27;spec_helper&#x27;
+
+describe &quot;Tasks&quot; do
+  
+  # Other task omitted.
+  
+  describe &quot;POST /tasks&quot; do
+    it &quot;creates a task&quot; do
+      post_via_redirect tasks_path, &crarr;
+	   :task =&gt; { :name =&gt; &quot;mow lawn&quot; }
+      response.body.should include(&quot;mow lawn&quot;)
+    end
+  end
+end</pre>
+
+<p>If we run the specs now we&rsquo;ll have two passing specs, so it looks like our code works as expected. If we were doing test-driven development we&rsquo;d start with a failing spec and then write code to make it pass and this is one of the advantages of test-driven development as it ensures that your tests are working. In our application we&rsquo;ve jumped straight to a passing test as the implementation is already in place. When adding tests for existing code it can sometimes be worth deliberately breaking something in the code to ensure that the test then fails and then fixing it again.</p> 
+
+<h3>Testing The UI With Capybara</h3>
+
+<p>One problem with our request spec is that it doesn&rsquo;t test the full user experience. We could completely break the New Task form and this wouldn&rsquo;t be caught in the specs. This is because we&rsquo;re POSTing directly to the create action instead of going through the form like the user would.</p>
+
+<p>We need a way to mimic the user&rsquo;s actions and we can do this by using <a href="https://github.com/jnicklas/capybara">Capybara</a>. This is an alternative to Webrat, which was covered back in episode 156 [<a href="http://railscasts.com/episodes/156-webrat">watch</a>, <a href="http://asciicasts.com/episodes/156-webrat">read</a>]. Capybara gives us a number of methods we can use to mimic a user&rsquo;s behaviour in a web application. Capybara is a gem and is installed in the usual way. We&rsquo;ll also add the <a href="http://rubygems.org/gems/launchy">launchy</a> gem and you&rsquo;ll see why shortly. In the <code>Gemfile</code> we&rsquo;ll add both gems to the development and test groups and then run <code>bundle</code> to install it.</p> 
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+
+group :development, :test do
+  gem &#x27;rspec-rails&#x27;
+  gem &#x27;capybara&#x27;
+  gem &#x27;launchy&#x27;
+end</pre>
+
+<p>Capybara is automatically included in our request specs so in the first of our specs we can use Capybara&rsquo;s <code>visit</code> method instead of calling <code>get</code>. We can also replace <code>response.body.should include</code> with <code>page.should have_content</code>.</p> 
+
+<p>In the second spec we can now use Capybara to simulate filling in and submitting the form instead of POSTing directly to the create action. The <code>fill_in</code> method will find the text box with the associated label &ldquo;Name&rdquo; and set its value and we can use <code>click_button</code> to find the form&rsquo;s button by its text and click it.</p>
+
+
+
+<p class="codeFilePath">/specs/requests/task_spec.rb</p>
+<pre class="ruby">require &#x27;spec_helper&#x27;
+
+describe &quot;Tasks&quot; do
+  describe &quot;GET /tasks&quot; do
+    it &quot;displays tasks&quot; do
+      Task.create!(:name =&gt; &quot;paint fence&quot;)
+      visit tasks_path
+      page.should have_content(&quot;paint fence&quot;)
+    end
+  end
+  
+  describe &quot;POST /tasks&quot; do
+    it &quot;creates a task&quot; do
+      visit tasks_path
+      fill_in &quot;Name&quot;, :with =&gt; &quot;mow lawn&quot;
+      click_button &quot;Add&quot;
+	 page.should have_content(&quot;Successfully added task.&quot;)
+      page.should have_content(&quot;mow lawn&quot;)
+    end
+  end
+end</pre>
+
+<p>The specs still pass when we run them and now test the form too so if we make any breaking changes to the form this will be picked up.</p>
+
+<h3>Debugging Pages</h3>
+
+<p>If a spec does fail how can be go about debugging that problem? This is where launchy comes in. As we&rsquo;re using Capybara we can call the <code>save_and_open_page</code> method at any point and this will open the page in a browser so that we can take a look at it. We&rsquo;ll add it immediately after <code>click_button &quot;Add&quot;</code> and when we run the specs again we&rsquo;ll see the tasks page just before we check its contents.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/604/original/E257I02.png" width="801" height="321" alt="The page as it is part way through the spec."/>
+</div>
+
+<p>We can see the state of the page at this point with the flash notice visible and the task that was added through Capybara.</p>
+
+<h3>Testing JavaScript</h3>
+
+<p>Our application is now pretty well tested and these tests have been simple to add with request specs and Capybara. But what if we have JavaScript in our application and want to test that? This can be done quite easily and we&rsquo;ll show you how now.</p>
+
+<p>In our <code>index</code> template we&rsquo;ll add some JavaScript so that we can test it. We&rsquo;ll keep it inline for simplicity&rsquo;s sake and use <code>link_to_function</code> to add a link to the page that calls a JavaScript function when clicked that will change the link&rsquo;s text to &quot;js works&quot;. The script that runs requires jQuery so we&rsquo;ve added a reference to it in the application&rsquo;s layout file. (By the way, jQuery will be the default JavaScript library in Rails 3.1 instead of Prototype).</p>
+
+<p class="codeFilePath">/app/views/tasks/index.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Task List&lt;/h1&gt;
+
+&lt;%= link_to_function &quot;test js&quot;, &#x27;$(this).html(&quot;js works&quot;)&#x27; %&gt;
+
+&lt;%= form_for Task.new do |f| %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;
+    &lt;%= f.text_field :name %&gt;
+    &lt;%= f.submit &quot;Add&quot; %&gt;
+  &lt;/p&gt;
+&lt;% end %&gt;
+
+&lt;ul&gt;
+  &lt;% @tasks.each do |task| %&gt;
+    &lt;li&gt;&lt;%= task.name %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;</pre>
+
+<p>So now we have a link on the page that says &quot;test js&quot; and when we click it the text changes.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/605/original/E257I03.png" width="801" height="321" alt="The changed text after clicking the JavaScript link."/>
+</div>
+
+<p>Let&rsquo;s test this new functionality through Capybara. First we&rsquo;ll write a new spec:</p>
+
+<p class="codeFilePath">/spec/requests/tasks_spec.rb</p>
+<pre class="ruby">it &quot;supports js&quot; do
+  visit_tasks_path
+  click_link &quot;test js&quot;
+  page.should have_content(&quot;js works&quot;)
+end</pre>
+
+<p>When we run the request specs now we get one failure.</p>
+
+<pre class="terminal">$ rake spec:requests
+(in /Users/eifion/code/tasklist)
+/Users/eifion/.rvm/rubies/ruby-1.9.2-p0/bin/ruby -S bundle exec rspec ./spec/requests/tasks_spec.rb
+.<span class="failed">F</span>.
+
+Failures:
+
+  1) Tasks GET /tasks supports js
+     <span class="failed">Failure/Error: page.should have_content(&quot;js works&quot;)</span>
+       <span class="failed">expected #has_content?(&quot;js works&quot;) to return true, got false</span>
+     # ./spec/requests/tasks_spec.rb:14:in `block (3 levels) in &lt;top (required)&gt;&#x27;
+
+Finished in 0.83232 seconds
+<span class="failed">3 examples, 1 failure</span>
+rake aborted!
+ruby -S bundle exec rspec ./spec/requests/tasks_spec.rb failed
+
+(See full trace by running task with --trace)</pre>
+
+<p>The spec fails because the page doesn&rsquo;t have the text that is set by JavaScript. Capybara doesn&rsquo;t support JavaScript by default. We have to tell it to use JavaScript through Selenium.</p>
+
+<p>The functionality we&rsquo;re going to show now isn&rsquo;t supported in the current release version of Capybara. Bundler makes it easy, however, to get the latest version from GitHub.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+
+group :development, :test do
+  gem &#x27;rspec-rails&#x27;
+  gem &#x27;capybara&#x27;, :git =&gt; &#x27;git://github.com/jnicklas/capybara.git&#x27;
+  gem &#x27;launchy&#x27;
+end</pre>
+
+<p>When we run <code>bundle</code> again the latest version of the Capybara gem will be downloaded and installed.</p>
+
+<p>Another step that&rsquo;s required to get JavaScript testing working is to modify the <code>spec_helper</code> file and add the line <code>require &#x27;rspec/rails&#x27;</code>.</p> 
+
+<p class="codeFilePath">/spec/spec_helper.rb</p>
+<pre class="ruby"># This file is copied to spec/ when you run &#x27;rails generate rspec:install&#x27;
+ENV[&quot;RAILS_ENV&quot;] ||= &#x27;test&#x27;
+require File.expand_path(&quot;../../config/environment&quot;, __FILE__)
+require &#x27;rspec/rails&#x27;
+require &#x27;capybara/rspec&#x27;
+
+# rest of file...</pre>
+
+<p>This step might not be required in the release version but for now it is. It&rsquo;s easy now to tell Capybara to use a JavaScript driver for any of our specs. All we have to do is add the <code>:js =&gt; true</code> option to the spec.</p>
+
+<p class="codeFilePath">/spec/requests/tasks_spec.rb</p>
+<pre class="ruby">it &quot;supports js&quot;, :js =&gt; true do
+  visit tasks_path
+  click_link &quot;test js&quot;
+  page.should have_content(&quot;js works&quot;)
+end</pre>
+
+<p>When we run the specs now Firefox will open to run the specs that require JavaScript. All of the specs pass now pass again.</p>
+
+<p>This is a great feature to have but there is a problem to do with database records here that we&rsquo;ll probably run into. We can demonstrate this by adding the <code>:js =&gt; true</code> option to the first two specs, including the one that creates a new <code>Task</code>.</p>
+
+<p class="codeFilePath">/spec/requests/tasks_spec.rb</p>
+<pre class="ruby">describe &quot;Tasks&quot; do
+  describe &quot;GET /tasks&quot;, :js =&gt; true do
+    it &quot;displays tasks&quot; do
+      Task.create!(:name =&gt; &quot;paint fence&quot;)
+      visit tasks_path
+      page.should have_content(&quot;paint fence&quot;)
+    end
+    
+    it &quot;supports js&quot; do
+      visit tasks_path
+      click_link &quot;test js&quot;
+      page.should have_content(&quot;js works&quot;)
+    end    
+  end
+end</pre>
+
+<p>When we run the specs now it&rsquo;ll use Selenium for the first two requests.</p> 
+
+<pre class="terminal">$ rake spec:requests
+(in /Users/eifion/code/tasklist)
+/Users/eifion/.rvm/rubies/ruby-1.9.2-p0/bin/ruby -S bundle exec rspec ./spec/requests/tasks_spec.rb
+<span class="failed">F</span>..
+
+Failures:
+
+  1) Tasks GET /tasks displays tasks
+     <span class="failed">Failure/Error: page.should have_content(&quot;paint fence&quot;)</span>
+       <span class="failed">expected there to be content &quot;paint fence&quot; in &quot;Task List\ntest js\n\nName&quot;</span>
+     # ./spec/requests/tasks_spec.rb:8:in `block (3 levels) in &lt;top (required)&gt;&#x27;
+
+Finished in 7.69 seconds
+<span class="failed">3 examples, 1 failure</span></pre>
+
+<p>This time the first spec fails as the content &ldquo;paint fence&rdquo; is missing from the page. The database record that is created isn&rsquo;t available to the Selenium tests and this is because our specs are using database transactions which aren&rsquo;t compatible with Selenium. To fix this we can set the <code>config.use_transactional_fixtures</code> setting in the <code>spec_helper</code> <code>file</code> to false.</p>
+
+<p class="codeFilePath">/spec/spec_helper.rb</p>
+<pre class="ruby"># If you&#x27;re not using ActiveRecord, or you&#x27;d prefer not to run each of your
+# examples within a transaction, remove the following line or assign false
+# instead of true.
+config.use_transactional_fixtures = false</pre>
+
+<p>This will get the tests passing again but it will mean that the database records are carried over between specs which we don&rsquo;t want. To solve this problem we can use a gem called <a href="https://github.com/bmabey/database_cleaner">database_cleaner</a> to clean the database between specs. The <a href="https://github.com/bmabey/database_cleaner#readme">documentation</a> explains the options we have.</p>
+
+<p>To use it we&rsquo;ll add a reference in the <code>Gemfile</code> and run bundle again to install it.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+
+group :development, :test do
+  gem &#x27;rspec-rails&#x27;
+  gem &#x27;capybara&#x27;, :git =&gt; &#x27;git://github.com/jnicklas/capybara.git&#x27;
+  gem &#x27;launchy&#x27;
+  gem &#x27;database_cleaner&#x27;
+end</pre>
+
+<p>Next we&rsquo;ll modify the <code>spec_helper</code> file again and add the code to clean the database between specs.</p>
+
+<pre class="ruby">/spec/spec_helper.rb</pre>
+<pre class="ruby">config.before(:suite) do
+  DatabaseCleaner.strategy = :truncation
+end
+
+config.before(:each) do
+  DatabaseCleaner.start
+end
+
+config.after(:each) do
+  DatabaseCleaner.clean
+end</pre>
+
+<p>When we run the specs now, with the first two running through Selenium again, they all pass as we&rsquo;re no longer using database transactions. This might have seemed like a lot of work, but once it&rsquo;s all set up it&rsquo;s easy to test JavaScript for any spec by just adding the <code>:js =&gt; true</code> option.</p>
+
+<p>A feature that will be in the next Capybara release that we haven&rsquo;t covered is a new DSL for defining specs. We&rsquo;ll be able to use <code>feature</code>, <code>background</code> and <code>scenario</code> methods to define our specs in a similar way to how the <a href="https://github.com/cavalle/steak">Steak</a> gem works. If you like working with that kind of DSL it&rsquo;ll be built into Capybara which eliminates the need to use Steak.</p>

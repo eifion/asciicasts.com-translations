@@ -1,0 +1,175 @@
+<p>下の図は、長い一覧リストを表示するRails 3アプリケーションのスクリーンショットです。この一覧を、1ページのリストとしてではなく複数ページに分けて表示してみましょう。</p>
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/581/original/E254I01.png" width="815" height="432" alt="商品の長いリスト"/>
+</div>
+
+<p>Railsでのページ分割処理(pagination)でまず選択されるgemといえば<a href="https://github.com/mislav/will_paginate/wiki">will_paginate</a>です。しかし現行バージョンはRails 3をサポートしていません。Rails 3対応のプレリリース版がありますが、ここ数ヶ月更新されていません。will_paginateの開発が停止しているとしたら、他に使えるgemはないでしょうか？</p>
+
+<p>代替案の一つが<a href="https://github.com/amatsuda/kaminari">Kaminari</a>です。こちらのほうが、ページ分割処理をよりきれいに実装していていくつか改善された機能を備えているので、試してみることにしましょう。Kaminariは通常の方法でインストールします。アプリケーションの<code>Gemfile</code>に参照情報を追記し、bundleコマンドを実行し、システムにインストールされたことを確認します。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem "kaminari"</pre>
+
+<h3>Kaminariを使う</h3>
+
+<p>Kaminariでは、すべてのActiveRecordモデルに対してpageというスコープを適用できます。<code>ProductsController</code>の<code>index</code>アクション内で表示したいページに連結して、商品リストをページ分割して表示できるようになります。検索文字列にページ引数を連結します。</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def index
+  @products = Product.order("name").page(params[:page])
+end</pre>
+
+<p>商品リストを表示している<code>index</code>テンプレートで、Kaminariが提供する<code>paginate</code>ヘルパーメソッドを呼び出し、ページ分割処理をしたいリストを渡します。</p>
+
+<p class="codeFilePath">/app/views/products/index.html.erb</p>
+<pre class="ruby">&lt;% title "Products" %&gt;
+&lt;%= paginate @products %&gt;
+&lt;div id="products"&gt;
+  &lt;%= render @products %&gt;
+&lt;/div&gt;
+&lt;p&gt;&lt;%= link_to "New Product", new_product_path %&gt;&lt;/p&gt;</pre>
+
+<p>ここでページをリロードすると、ページの上部に各ページへのリンクが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/582/original/E254I02.png" width="815" height="432" alt="ページ分割されたリスト"/>
+</div>
+
+<p>Kaminariは初期設定では1ページあたり25件を表示しますが、<code>per</code>というスコープを呼び出すことで簡単に表示件数を変更できます。この機能を使って、1ページに表示する件数を5件に変えてみましょう。</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def index
+  @products = Product.order("name").page(params[:page]).per(5)
+end</pre>
+
+<p>これで、1ページに5件が表示されるようになりました。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/583/original/E254I03.png" width="808" height="530" alt="1ページに5件が表示される"/>
+</div>
+
+<p>この記法は、Rails 3の新しいActiveRecordの検索式によくなじみます。<code>order</code>の呼び出しは、モデルに対してスコープを連結しているだけなので、検索式内のどこに記述しても同じように動作します。<code>page</code>と<code>per</code>の呼び出しを、モデルの他の名前付きスコープ内に移動しても、期待通りの動きをします。ただし一つだけ例外があって、<code>per</code>は必ず<code>page</code>の後ろで呼び出されなくてはいけません。これは、<code>page</code>が<code>per</code>スコープを持つからです。もし<code>per</code>を<code>page</code>の前に呼び出したら、まだ存在しないため、未定義メソッドのエラーが発生します。</p>
+
+<h3>外観を変更する</h3>
+
+<p>ページリンクの外観を変更する方法がいくつかあります。ページ数のリンクと一緒に表示される「prev」と「next」という表示と矢印を変更するために、ローカライゼーションファイルに行を追加します。この方法で簡単にこれらの項目を修正できます。複数言語サポートが必要な場合は特に便利です。追加したい項目を<code>views/pagination</code>の下に置き、<code>previous</code>と<code>next</code>の各キーを設定することで、「前」と「次」にあたる文字列を変更できます。ページ数を省略して表示するときの文字列を変更する場合は、<code>truncate</code>キーを設定します。ページが表示されるときにHTMLタグがエスケープされないので、ここでエスケープしておくことに注意してください。</p>
+
+<p class="codeFilePath">/config/locales/en.yml</p>
+<pre class="ruby">en:
+  hello: "Hello world"
+  views:
+    pagination:
+      previous: "&amp;lt; Previous"
+      next: "Next &amp;gt;"
+      truncate: "&amp;hellip;”</pre>
+      
+<p>ページをリロードすると変更された文字列を確認できます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/584/original/E254I04.png" width="815" height="309" alt="リストページの文字列が変更された"/>
+</div>
+
+<p>ナビゲーションの他の部分で利用されるクラスにCSSを追加することでさらに変更を加えることができます。ナビゲーション部分がHTML 5の<code>nav</code>要素を使用していることに注目してください。</p>
+
+<pre class="erb">&lt;nav class='pagination'&gt;
+  &lt;span class="prev"&gt;
+    &lt;a href="/products" class="prev" rel="prev"&gt;&amp;lt; Previous&lt;/a&gt;
+  &lt;/span&gt;
+  &lt;span class="page first"&gt;
+    &lt;a href="/products"&gt;1&lt;/a&gt;
+  &lt;/span&gt;
+  &lt;span class="page current"&gt;2&lt;/span&gt;
+  ...</pre>
+
+<p>CSSを用いればナビゲーションの外観を大きく変えることができますが、変更できない部分もあります。例えば、1ページ目の「Previous」のリンクは初期設定では非表示になっていますが、これをクリックできないリンクとして薄い色で表示するということはできません。</p>
+
+<p>KaminariはRailsのエンジンというしくみで実装されていて、複数のビューファイルを持っており、それらを編集することでアプリケーションをカスタマイズできます。これを簡単に行うために、Kaminari で提供されるジェネレータを利用できます。このジェネレータに、テーマ名を引数として渡します。defaultを指定すると標準のテーマが適用されます。</p>
+
+<pre class="terminal">$ rails g kaminari:views default
+      create  app/views/kaminari/_current_page.html.erb
+      create  app/views/kaminari/_first_page_link.html.erb
+      create  app/views/kaminari/_last_page_link.html.erb
+      create  app/views/kaminari/_next_link.html.erb
+      create  app/views/kaminari/_next_span.html.erb
+      create  app/views/kaminari/_page_link.html.erb
+      create  app/views/kaminari/_paginator.html.erb
+      create  app/views/kaminari/_prev_link.html.erb
+      create  app/views/kaminari/_prev_span.html.erb
+      create  app/views/kaminari/_truncated_span.html.erb</pre>
+
+<p>GitHubの<a href="https://github.com/amatsuda/kaminari_themes">Kaminari Themes project</a>で他のテーマも見ることができます。この記事の執筆時点ではまだ少ししかありませんが、ユーザが自分のテーマを作れる材料は揃っているので、近いうちに間違いなく数は増えていくでしょう。</p>
+
+<p>ジェネレータが<code>app/views</code>の下に新たに<code>kaminari</code>ディレクトリを生成し、いくつかのファイルを配置します。これらのファイルを修正することでページ分割の動作をカスタマイズできます。ベースとなるファイルは<code>_paginator.html.erb</code>で、一見複雑に見えますが簡単に理解して修正できるようになるでしょう。</p>
+
+<pre class="codeFilePath">/app/views/kaminari/_paginator.html.erb</pre>
+<pre class="ruby">&lt;%# The container tag
+  - available local variables
+    current_page:  the page number of currently displayed page
+    num_pages:     total number of pages
+    per_page:      number of items to fetch per page
+    remote:        data-remote
+    paginator:     the paginator that renders the pagination tags inside
+-%&gt;
+&lt;%= paginator.render do -%&gt;
+  &lt;nav class='pagination'&gt;
+    &lt;%= current_page &gt; 1 ?prev_link_tag : prev_span_tag %&gt;
+    &lt;% each_page do |page| -%&gt;
+      &lt;% if page.current?-%&gt;
+        &lt;%= current_page_tag %&gt;
+      &lt;% elsif page.left_outer?|| page.right_outer?|| page.inside_window?-%&gt;
+        &lt;% if page.first?-%&gt;
+          &lt;%= first_page_link_tag %&gt;
+        &lt;% elsif page.last?-%&gt;
+          &lt;%= last_page_link_tag %&gt;
+        &lt;% else -%&gt;
+          &lt;%= page_link_tag %&gt;
+        &lt;% end -%&gt;
+      &lt;% elsif !page.was_truncated?-%&gt;
+        &lt;%= truncated_span_tag %&gt;
+      &lt;% end -%&gt;
+    &lt;% end -%&gt;
+    &lt;%=num_pages &gt; current_page ?next_link_tag : next_span_tag %&gt;
+  &lt;/nav&gt;
+&lt;% end -%&gt;</pre>
+
+<p><code>nav</code>要素と、そのすぐ下の「previous」リンクを表示するためのコードを見てみましょう。このコードは、表示中のページが第1ページかどうかによって、<code>prev_link_tag</code>か<code>prev_span_tag</code>のいずれかを呼び出します。それぞれのメソッドが、別のファイルを呼び出します。第1ページの動作を変えたいので、<code>_prev_span.html.erb</code>を見てみます。</p>
+
+<p class="codeFilePath">/app/view/kaminari/_prev_span.html.erb</p>
+<pre class="ruby">&lt;%# "Previous" without link
+  - available local variables
+    current_page:  the page number of currently displayed page
+    num_pages:     total number of pages
+    per_page:      number of items to fetch per page
+    remote:        data-remote
+-%&gt;
+&lt;span class="prev"&gt;&lt;/span&gt;</pre>
+
+<p><code>span</code>要素内に少しコードを追加します。<code>_prev_link.html.erb</code>の中を見ると、リンクを生成しているのがわかります。このリンクのための文字列を生成している部分のコードをコピーして、<code>span</code>要素内にペーストします。</p>
+
+<p class="codeFilePath">/app/view/kaminari/_prev_span.html.erb</p>
+<pre class="ruby">&lt;%# "Previous" without link
+  - available local variables
+    current_page:  the page number of currently displayed page
+    num_pages:     total number of pages
+    per_page:      number of items to fetch per page
+    remote:        data-remote
+-%&gt;
+&lt;span class="prev disabled"&gt;
+  &lt;%= raw(t 'views.pagination.previous') %&gt;
+&lt;/span&gt;</pre>
+
+<p>文字列を表示するコードが<code>t</code>メソッドを使用して、前に修正したローカライゼーションファイルの翻訳された文字列を取得し、エスケープされないよう<code>raw</code>に渡されます。さらにその部分に<code>disabled</code>クラスを追加し、以下のCSSを記述して、薄い色で表示されるようにしています。</p>
+
+<p class="codeFilePath">/public/stylesheets/application.css</p>
+<pre class="css">.disabled { color: #999; }</pre>
+
+<p>商品リストの第1ページを読み込むと、薄い色で表示された文字列を見ることができます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/585/original/E254I05.png" width="801" height="376" alt="「previous」リンクの表示が変わった"/>
+</div>
+
+<p>当然、最終ページの「next」リンクも同じように処理したいのですが、ここでは省略します。</p>
+
+<p>Kaminari gemの紹介は以上です。Rails 3のアプリケーションでページ分割処理が必要な場合は、試してみてください。今回は紹介できませんでしたが、paginateヘルパーメソッドに渡すことができるオプションは多岐に渡ります。例えば、ページリンクのURLに引数を追加したり、リンクをAJAXで動作させて、ページのリストの表示方法を変えることなども可能です。</p>

@@ -1,0 +1,182 @@
+<p>Rails 3.1 has finally been released. There&rsquo;s a great overview of its new features in the <a href="http://guides.rubyonrails.org/3_1_release_notes.html">Release Notes on the RailsGuides site</a> some of which have been covered on the <a href="http://railscasts.com/?tag_id=31">Railscasts site</a> and also <a href="http://asciicasts.com/tags/rails-31">here</a>. In this episode we&rsquo;ll focus on upgrading a Rails 3.0 application to 3.1 and we&rsquo;ll use the Railscasts site as our example.</p>
+
+<h3>Preparing The Site</h3>
+
+<p>Before we upgrade the site to Rails 3.1 we&rsquo;ll need to take a few preparatory steps. If the site isn&rsquo;t currently running the latest version of Rails 3.0, currently 3.0.10, we&rsquo;ll need to update it. We can do this by setting the version in the Gemfile and then running <code>bundle</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem &quot;rails&quot;, &quot;3.0.10&quot;</pre>
+
+<p>Next we&rsquo;ll run the application&rsquo;s test suite to make sure that all of the tests still pass and that there are no deprecation errors. If there are then we&rsquo;ll need to fix these before we continue. Everything passes in the Railscasts code so we can proceed with the upgrade.</p>
+
+<h3>Upgrading</h3>
+
+<p>We&rsquo;re ready to start to upgrade the site now. We&rsquo;ll do this inside a new Git branch that we&rsquo;ll call <code>rails31</code>.</p>
+
+<pre class="terminal">$ git checkout -b rails31</pre>
+
+<p>Upgrading to Rails 3.1 is pretty simple. We just need to go to our application&rsquo;s <code>Gemfile</code> again and change the version number to whatever the latest release of 3.1 is, currently <code>3.1.0</code>. </p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem &quot;rails&quot;, &quot;3.1.0&quot;</pre>
+
+<p>Now we can run <code>bundle update</code> to install the new version. The only other change we need to make is to the <code>development.rb</code> configuration file where we need to remove or comment out the following line.</p> 
+
+<p class="codeFilePath">/config/development.rb</p>
+<pre class="ruby"># config.action_view.debug_rjs = true</pre>
+
+<p>If we run our tests again now we&rsquo;ll see that they all still pass. We can even start up the Rails server and see it running in the browser.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/728/original/E282I01.png" width="802" height="567" alt="The site works under rails 3.1."/>
+</div>
+
+<h3>Modifying Our Application To Use The Asset Pipeline</h3>
+
+<p>The asset pipeline is one of Rails 3.1&rsquo;s main new features but as our application still has its images, stylesheets and JavaScript files under the <code>/public</code> directory we&rsquo;re not taking advantage of it at all. The asset pipeline is completely optional and doesn&rsquo;t come into effect unless we enable it so if we&rsquo;re not sure about using it this needn&rsquo;t stop us from upgrading to Rails 3.1. Given how easy it is to upgrade this means that there&rsquo;s very little reason not to.</p>
+
+<p>If we do want to use the asset pipeline we have to enable it. To do this we have to add the following lines to the <code>Gemfile</code>. (These come from the <code>Gemfile</code> that is generated when we create a new Rails 3.1 application.)</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby"># Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem &#x27;sass-rails&#x27;, &quot; ~&gt; 3.1.0&quot;
+  gem &#x27;coffee-rails&#x27;, &quot; ~&gt; 3.1.0&quot;
+  gem &#x27;uglifier&#x27;
+end
+
+gem &#x27;jquery-rails&#x27;</pre>
+
+<p>This code creates an <code>assets</code> group and puts some asset-related gems in it. It also includes the <code>jquery-rails</code> gem so that we can use jQuery. (If you prefer to use Prototype there&rsquo;s a <a href="https://github.com/rails/prototype-rails"><code>prototype-rails</code> gem</a> you can use instead.) We&rsquo;ll also need to modify <code>/config/application.rb</code>, replacing this code:</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby"># If you have a Gemfile, require the gems listed there, including any gems
+# you&#x27;ve limited to :test, :development, or :production.
+Bundler.require(:default, Rails.env) if defined?(Bundler)</pre>
+
+<p>with this:</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby">if defined?(Bundler)
+  # If you precompile assets before deploying to production, 
+    use this line
+  Bundler.require *Rails.groups(:assets =&gt; %w(development test))
+  # If you want your assets lazily compiled in production, 
+    use this line
+  # Bundler.require(:default, :assets, Rails.env)
+end</pre>
+
+<p>This code adds the <code>assets</code> group to the groups that are required by <code>Bundler</code>. We&rsquo;ll need to enable the asset pipeline in this file, too, which we can do by adding these lines of code inside the <code>Application</code> class:</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby"># Enable the asset pipeline
+config.assets.enabled = true
+
+# Version of your assets, change this if you want to expire all your assets
+config.assets.version = &#x27;1.0&#x27;</pre>
+
+<p>This code enables the asset pipeline and also gives it a version number. This number can be changed when we want to expire the assets.</p> 
+
+<p>We also need to change the configuration settings in each environment&rsquo;s configuration file. We&rsquo;ll start with <code>development.rb</code>. We need to make a couple of changes here so that the assets aren&rsquo;t compressed and to enable asset debugging.</p>
+
+<p class="codeFilePath">/config/environments/development.rb</p>
+<pre class="ruby">  # Do not compress assets
+  config.assets.compress = false
+  
+  # Expands the lines which load the assets
+  config.assets.debug = true</pre>
+  
+<p>Next we&rsquo;ll modify <code>production.rb</code>.</p>  
+
+<p class="codeFilePath">/config/environments/production.rb</p>
+<pre class="ruby"># Compress JavaScript and CSS
+config.assets.compress = true
+   
+# Don&#x27;t fallback to assets pipeline
+config.assets.compile = false
+   
+# Generate digests for assets URLs
+config.assets.digest = true</pre>
+
+<p>In production mode we want to compress the assets, but we set <code>compile</code> to <code>false</code> so that it doesn&rsquo;t fallback on to the asset pipeline if we&rsquo;re going to precompile them. We also set <code>digest</code> to <code>true</code> so that the assets&rsquo; URLs are <a href="http://guides.rubyonrails.org/asset_pipeline.html#what-is-fingerprinting-and-why-should-i-care">fingerprinted</a>. We can, of course, configure these options differently to suit how our applications work in production mode.</p>
+
+<p>Lastly we&rsquo;ll modify the test environment. Here we add options so that static assets are served and cached and we also enable asset debugging.</p>
+
+<p class="codeFilePath">/config/environments/test.rb</p>
+<pre class="ruby"># Configure static asset server for tests with Cache-Control for performance
+config.serve_static_assets = true
+config.static_cache_control = &quot;public, max-age=3600&quot;
+
+# Allow pass debug_assets=true as a query parameter to load pages with unpackaged assets
+config.assets.allow_debugging = true</pre> 
+
+<p>If we&rsquo;re using Git for our application&rsquo;s source control we should also modify the <code>.gitignore</code> file and add the <code>.sass-cache</code> directory to the list of ignored items. We don&rsquo;t want the SASS cache in Git.</p>
+
+<p class="codeFilePath">/.gitignore</p>
+<pre class="ruby">.sass-cache/</pre>
+
+<h3>Moving The Assets</h3>
+
+<p>Now that our asset pipeline is configured it&rsquo;s time to create the <code>app/assets</code> directory. We can then move the <code>images</code>, <code>javascripts</code> and <code>stylesheets</code> directories from <code>/public</code> to <code>/app/assets</code>.</p>
+
+<pre class="terminal">$ mkdir app/assets
+$ mv public/images/ app/assets/
+$ mv public/javascripts/ app/assets/
+$ mv public/stylesheets/ app/assets/</pre>
+
+<p>Some of the files we&rsquo;ve moved aren&rsquo;t needed anymore, such as the jQuery-related files in the <code>javascripts</code> directory. These are included in the jQuery gem and so we can remove <code>jquery.js</code>, <code>jquery.min.js</code>, and <code>rails.js</code>. Now is also a good time to decide if we want to move some files such as jQuery plugins into <code>/lib/assets</code> or <code>/vendor/assets</code>, like we did in episode 279 [<a href="http://railscasts.com/episodes/279-understanding-the-asset-pipeline">watch</a>, <a href="http://asciicasts.com/episodes/279-understanding-the-asset-pipeline">read</a>].</p>
+
+<p>Next we&rsquo;ll need to create the manifest files. This application already has <code>application.js</code> and <code>application.css</code> files in the relevant directories so we don&rsquo;t need to create them. We&rsquo;ll start with the CSS file. To turn it in into a manifest file we need to add some comments at the top that will tell <a href="https://github.com/sstephenson/sprockets">Sprockets</a> which files to include. (The Sprockets syntax was also covered back in episode 279). We&rsquo;ll tell Sprockets to include the rest of the file itself and also all of the other files inside the stylesheets directory and its subdirectories.</p>
+
+<p class="codeFilePath">/app/assets/stylesheets/application.css</p>
+<pre class="css">/*
+*= require_self
+*= require_tree .
+*/
+
+/* rest of file omitted */</pre>
+
+<p>We can do the same to the <code>application.js</code> file, but we&rsquo;ll need to do something a little different here as we want to include jQuery.</p> 
+
+<p class="codeFilePath">/app/assets/javascripts/application.js</p>
+<pre class="javascript">//= require jquery
+//= require jquery_ujs
+//= require_self
+//= require_tree .
+
+/* rest of file omitted */</pre>
+
+<p>Again we add <code>require_self</code> here as the file itself contains code and also <code>require_tree</code> so that and other files under the same directory are included.</p>
+
+<p>We&rsquo;ll also need to go into the application&rsquo;s layout file and change the lines that include the stylesheets and JavaScript files so that they each only reference the relevant application file, as the other files are included via the manifest.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= stylesheet_link_tag &quot;application&quot; %&gt;
+&lt;%= javascript_include_tag &quot;application&quot;, &quot;http://cdn.sublimevideo.net/js/3s7oes9q.js&quot; %&gt;</pre>
+
+<p>The JavaScript files that the application needs include an external file which isn&rsquo;t going to be included via the asset pipeline. This being the case we&rsquo;ll still need to include it in the list of files above.</p>
+
+<p>Now&rsquo;s the time to try our application in the browser to make sure that our changes have all worked. Before we do we&rsquo;ll run <code>bundle</code> again to install all of the gems that we added.  After they&rsquo;ve installed we can start up the server.</p>
+
+<pre class="terminal">$ rails s</pre>
+
+<p>Everything mostly works but there are some broken images, for example the logo at the top of the screen.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/729/original/E282I02.png" width="804" height="381" alt="The site still works, but there are broken images."/>
+</div>
+
+<p>The problem with this is that the image&rsquo;s URL has been hard-coded in the layout file.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;img src=&quot;/images/railscasts_logo.png&quot; width=&quot;423&quot; height=&quot;56&quot; alt=&quot;RailsCasts = Ruby on Rails Screencasts&quot;/&gt;</pre>
+  
+<p>This won&rsquo;t work as our application&rsquo;s images are no longer in the <code>/public/images</code> directory. The simplest solution might appear to be to change the image&rsquo;s URL from <code>/images/railscasts_logo.png</code> to <code>/assets/railscasts_logo.png</code> and while this will appear to work in development mode we&rsquo;ll run into issues in production. If we have the <code>assets.digest</code> option enabled this will add a hash at the end of the name and so a static reference to that file will no longer work. We should instead always use the helper methods. This will link the image correctly in both development and production mode.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= image_tag(&quot;railscasts_logo.png&quot;, :size =&gt; &quot;423x56&quot;, :alt =&gt; &quot;RailsCasts - Ruby on Rails Screencasts&quot;) %&gt;</pre>
+
+<p>We&rsquo;ll need to globally search through our application and change any statically-referenced assets so that they use the helper methods like the image above. If we reload the page now the image appears which means that our asset pipeline is now working correctly.</p>
+
+<p>We&rsquo;ve pretty much finished upgrading our application to Rails 3.1. There are some other new features you can take advantage of and it&rsquo;s worth taking a look at the other episodes on Rails 3.1 to see if they would be useful in your applications.</p>

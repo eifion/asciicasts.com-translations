@@ -1,0 +1,272 @@
+<p>今回のエピソードでは、<a href="https://github.com/voxdolo/decent_exposure">decent_exposure</a>というgemを紹介します。このgemはシンプルですが優れたコンセプトを持っています。これを使うことによって、インスタンス変数を使わずに、ビューからアクセスできるメソッドのインターフェイスをコントローラ内に作成できます。このgemは、exposeというメソッドを使ってこのインターフェイスを定義します。</p> 
+
+<p>decent_exposureを見る前に、手作業でこのコンセプトを実装してみましょう。対象とするのは簡単なブログアプリケーションで、複数の<code>Articles</code>(記事)とそれに対する複数の<code>Comments</code>(コメント)からなります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/620/original/E259I01.png" width="815" height="550" alt="簡単なブログアプリケーション"/>
+</div>
+
+<p><code>ArticlesController</code>には、標準的なコントーラのコードが含まれています。たとえば<code>index</code>アクションでは、<code>@articles</code>というインスタンス変数を生成します。</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">class ArticlesController &lt; ApplicationController
+  def index
+    @articles = Article.order(:name)
+  end
+
+  #Other actions omitted.
+end</pre>
+
+<p><code>index</code>ビューのコードでは、<code>@articles</code>を用いて各記事を繰り返し読み込んで表示しています。</p>
+
+<p>最初にRailsを使い始めた頃、コントローラのインスタンス変数へのアクセスがビューと共有されていることに違和感を覚えなかったでしょうか? 通常それらはクラス内のプライベート変数となっているべきではないかと。そこで今回は、ビューに対してメソッドを公開することでデータを共有する、もう一つのアプローチを見ていきます。これを実現するために、単独のモデルかモデルのリストを返すプライベートメソッドを、コントローラ内に作成します。</p>
+
+<p>まず<code>index</code>アクションから、複数のarticleを取得するコード行を削除して、それを<code>articles</code>というメソッドに貼付けます。<code>@articles</code>をキャッシュとして利用し、記事のリストが一度だけしか取得されないようにします。そのために<code>||=</code>演算子を使用し、コントーラやビューの他の場所ではこのインスタンス変数を参照しないようにします。<code>articles</code>をヘルパーメソッドにして、ビューで使えるようにします。</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">class ArticlesController &lt; ApplicationController
+  def index
+  end
+
+  private
+  def articles
+    @articles ||= Article.order(:name)
+  end
+  helper_method :articles
+end</pre>
+
+<p>ビューでは、インスタンス変数の呼び出しを新しく作った<code>articles</code>メソッドに置き換えます。</p>
+
+<p class="codeFilePath">/app/views/articles/index.html.erb</p>
+<pre class="ruby">&lt;% title "Articles" %&gt;
+
+&lt;div id="articles"&gt;
+&lt;% for article in articles %&gt;
+  &lt;h2&gt;
+    &lt;%= link_to article.name, article %&gt;
+    &lt;span class="comments"&gt;(&lt;%= pluralize(article.comments.size, 'comment') %&gt;)&lt;/span&gt;
+  &lt;/h2&gt;
+  &lt;div class="created_at"&gt;on &lt;%= article.created_at.strftime('%b %d, %Y') %&gt;&lt;/div&gt;
+  &lt;div class="content"&gt;&lt;%= simple_format(article.content) %&gt;&lt;/div&gt;
+&lt;% end %&gt;
+&lt;/div&gt;
+
+&lt;p&gt;&lt;%= link_to "New Article", new_article_path %&gt;&lt;/p&gt;</pre>
+
+<p>コントーラ内の他のアクションで個別の記事を検索したり新規作成しますが、<code>article</code>メソッドを作ることでこれと似たことができます。これは、<code>articles</code>メソッドよりも少し複雑になります。というのも、渡されるパラメータによって違う動作をしなければいけないからです。メソッドはこのような形になります。</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">def article
+  @article ||= params[:id] ?Article.find(params[:id]) : Article.new(params[:id])
+end
+helper_method :article</pre>
+
+<p>もし<code>id</code>パラメータが存在すれば、メソッドはその<code>id</code>の<code>Article</code>を探します。なければ、<code>article</code>パラメータの内容に基づいて新しい記事を作成します。<code>@article</code>インスタンス変数をこの新しく作ったメソッドに置き換えることによって、記事を検索したり新規作成する行をアクション内からなくすことができます。</p> 
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">class ArticlesController &lt; ApplicationController
+  def index
+  end
+
+  def show
+  end
+
+  def new
+  end
+  
+  def create
+    if article.save
+      redirect_to articles_path, :notice =&gt; "Successfully created article."
+    else
+      render :new
+    end
+  end
+
+  def edit
+  end
+  
+  def update
+    if article.update_attributes(params[:articles])
+      redirect_to articles_path, :notice =&gt; "Successfully updated article."
+    else
+      render :edit
+    end
+  end
+  
+  def destroy
+    @article.destroy
+    redirect_to articles_url, :notice =&gt; "Successfully destroyed article."
+  end
+
+private
+  def articles
+    @articles ||= Article.order(:name)
+  end
+  helper_method :articles
+  
+  def article
+    @article ||= params[:id] ?Article.find(params[:id]) : Article.new(params[:id])
+  end
+  helper_method :article
+end</pre>
+
+<p>アクションのいくつかはコードがなくなりました。これは唯一行っていたインスタンス変数の定義が、<code>action</code>メソッドで処理されるようになったからです。この後、<code>ArticleController</code>の各ビュー内でインスタンス変数を使用していた部分を、対応するメソッドに置き換える必要があります。例えば<code>show</code>ビューは修正後は次のようになります。</p>
+
+<p class="codeFilePath">/app/views/articles/show.html.erb</p>
+<pre class="ruby">&lt;% title article.name %&gt;
+
+&lt;%= simple_format article.content %&gt;
+
+&lt;p&gt;
+  &lt;%= link_to pluralize(article.comments.size, 'Comment'), [article, :comments]%&gt; |
+  &lt;%= link_to "Back to Articles", articles_path %&gt; |
+  &lt;%= link_to "Edit", edit_article_path(article) %&gt; |
+  &lt;%= link_to "Destroy", article, :method =&gt; :delete, :confirm =&gt; "Are you sure?" %&gt;
+&lt;/p&gt;</pre>
+
+<p>他のビューについては省略しますが、同じような修正が必要です。</p>
+
+<p>このアプローチのもう一つの利点は、読み込みが必要最小限になることです。例えば、<code>show</code>アクションにアクションキャッシュを追加する場合、ビューのレンダリング時に表示される記事のみがデータベースから取り出され、コントローラ層では要求されません。これによって、コントローラが本当に必要とするまではアクションが要求されなくなるので、アクションキャッシュが効率的におこなわれます。</p>
+
+<h3>decent_exposure gemを追加する</h3>
+
+<p>便利な機能を手に入れることができましたが、ビューからアクセスできるメソッドをより簡単に定義できればさらに便利でしょう。ここでdecent_exposureの登場です。このgemの<code>expose</code>メソッドを使って、前半で作った<code>articles</code>と<code>article</code>メソッドと似た方法でビューに対してモデルにアクセスする手段を提供できるようになります。<code>expose</code>メソッドは、デフォルト設定で以下のように動作します。<code>id</code>パラメータでモデルを探し、もしそれが見つからなければ、見つけられた適当なパラメータを用いて新しいモデルを作成します。つまり、single modelsの検索や作成にはデフォルト値を使うことができます。別の動作が必要であれば、メソッドにブロックを渡してその中に定義します。キャッシュの処理は、decent_exposureが自動でおこなってくれます。</p>
+
+<p>ではこれをアプリケーションに組み込んでみましょう。まず<code>Gemfile</code>にgemを追加し、<code>bundle</code>コマンドを実行します。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.5'
+gem 'sqlite3'
+gem 'nifty-generators'
+gem 'decent_exposure'</pre>
+
+<p>これで<code>ArticlesController</code>内に書いた<code>article</code>と<code>articles</code>の各メソッドを、2つの<code>expose</code>の呼び出しに置き換えることができます。</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">class ArticlesController &lt; ApplicationController
+
+  expose(:article)
+  expose(:articles) { Article.order(:name) }
+  
+  def index
+  end
+  
+  # Other actions omitted
+end</pre>
+
+<p>exposeのデフォルト設定は個々の<code>Article</code>の処理にはそのまま利用できますが、Article(記事)のリストがほしい場合は動作をカスタマイズする必要があるので、<code>articles</code>メソッドからその部分をコピーしてexposeのブロックに貼り付けます。</p>
+
+<p>アプリケーションを再度読み込むと、以前と同じように動作します。インスタンス変数の代わりにdecent_exposureが提供するメソッドを利用しているので、コントローラはきれいに整理されました。</p>
+
+<h3>ネストされたリソースを取り扱う</h3>
+
+<p>decent_exposureはネストされたリソース(例えば今回のアプリケーションの場合の、記事の下にぶら下がったコメント)をどう取り扱うのでしょうか? </p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Blog::Application.routes.draw do
+  root :to =&gt; "articles#index"
+
+  resources :articles do
+    resources :comments
+  end
+end</pre>
+
+<p><code>CommentsController</code>は次のような形になります。</p>
+
+<p class="codeFilePath">/app/controllers/comments_controller.rb</p>
+<pre class="ruby">class CommentsController &lt; ApplicationController
+  def index
+    @article = article.find(params[:article_id])
+    @comments = @article.comments
+    @comment = Comment.new
+  end
+  
+  def new
+    @article = Article.find(params[:article_id])
+    @comment = @article.comments.build
+  end
+  
+  def create
+    @article = Article.find(params[:article_id])
+    @comment = @article.comments.build(params[:comment])
+    if @comment.save
+      redirect_to @comment.article, :notice =&gt; "Successfully created comment!"
+    else
+      render :new
+    end
+  end
+end</pre>
+
+<p>まだここではインスタンス変数が使われています。各アクションの最初で記事を取得し、その記事を介してコメントを取得するか作成します。decent_exposureはネストされたリソースをサポートしているので、それをここで利用します。</p>
+
+<p>前半と同じように、インスタンス変数を<code>expose</code>の呼び出しに置き換えます。個々の<code>Article</code>と<code>Comment</code>の取得にはデフォルトの動作をそのまま使えますが、コメントのリストを取得するには動作のカスタマイズが必要です。コントローラでインスタンス変数を設定しているコード行を削除し、残ったコードのうちのインスタンス変数の部分を対応するメソッドの呼び出しに置き換えます。これらの修正をおこなうとコントローラはきれいに整理されました。</p>
+
+<p class="codeFilePath">/app/controllers/comments_controller.rb</p>
+<pre class="ruby">class CommentsController &lt; ApplicationController
+  expose(:article)
+  expose(:comments) { article.comments }
+  expose(:comment)
+  
+  def index
+  end
+  
+  def new
+  end
+  
+  def create
+    if comment.save
+      redirect_to comment.article, :notice =&gt; "Successfully created comment!"
+    else
+      render :new
+    end
+  end
+end</pre>
+
+<p><code>ArticlesController</code>を修正したときと同じように、このコントローラに関連するビューを書き直して、インスタンス変数の代わりに、decent_exposureに生成されたメソッドを呼び出すように修正します。次に示すフォーム部品ファイルを参照してください。</p>
+
+<p class="codeFilePath">/app/views/comments/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for [article, comment] do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= f.hidden_field :article_id %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :content, "Comment" %&gt;&lt;br /&gt;
+    &lt;%= f.text_area :content, :rows =&gt; 12, :cols =&gt; 35 %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>アプリケーションを操作してみると、動作は以前と同じですが、コントローラのコードは大きく改善されました。</p>
+
+<p>decent_exposureを利用する場合に、ひとつ気をつけなくてはいけないことがあります。<code>expose</code>をデフォルト設定で個々のモデルを取得するのに用いる場合、渡される名前(<code>:article</code>)の複数形を探し、存在する場合はそれを取得してそのスコープでレコードを組み立てようとします。例えば<code>ArticlesController</code>内にexposeの呼び出しが次のように2つあるとします。</p> 
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">expose(:article)
+expose(:articles) { Article.order(:name).where(:visible =&gt; true) }</pre>
+
+<p>単数形のarticleメソッドの呼び出しは、複数形の<code>articles</code>スコープに基づいて個別の記事を取得しようとするので、上のコードでは、個別の記事を探すときにそれが<code>visible</code>な場合のみ記事が返されます。この振る舞いを止めたければ、複数形の方を、より内容を具体的に示す名称に変更する必要があります。今回は<code>visible_articles</code>に名称を変更します。</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">expose(:article)
+expose(:visible_articles) { Article.order(:name).where(:visible =&gt; true) }</pre>
+
+<p>これで、2番目の<code>expose</code>の呼び出しは、前の単数形のアクションの元となるデフォルトのスコープとは見なされません。このような修正を行った場合は、当然ビューからそのメソッドを呼び出している箇所も修正する必要があります。</p>
+
+<h3>デフォルトの振る舞いを変更する</h3>
+
+<p><code>expose</code>メソッドのデフォルトの振る舞いを変更する必要がある場合は、<code>default_exposure</code>を呼び出してブロックを渡します。そのブロックで定義する振る舞いが、デフォルトの振る舞いよりも優先されます。<code>expose</code>に渡される名前は<code>default_exposure</code>のブロックに渡されます。</p>
+
+<pre class="ruby">class MyController &lt; ApplicationController
+  default_exposure do |name|
+    ObjectCache.load(name.to_s)
+  end
+end</pre>
+
+<p>通常はデフォルト設定をこのように変更する必要はありませんが、必要なときにはそうすることもできることを覚えておいてください。</p>
+
+<p>今回のエピソードはこれで終わりです。decent_exposureはコントローラを整理する優れた方法であり、自分の処理フローに合致すると思ったらぜひ利用を検討してみてください。</p>

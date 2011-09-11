@@ -1,0 +1,202 @@
+<p>3ヶ月ほど前にGithubが<a href="https://github.com/tanoku/redcarpet">Redcarpet</a>というRuby gemを<a href="https://github.com/blog/832-rolling-out-the-redcarpet">導入しました</a>。このgemは<a href="http://en.wikipedia.org/wiki/Markdown">Markdown</a>コードを解釈するのに使われ、Githubではドキュメントをマークアップする簡単な方法として<a href="http://fossil.instinctive.eu/libupskirt/index">Upskirt</a>ライブラリと共に内部的に採用されています。操作方法も簡単なこのRedcarpetを使って、今回のエピソードではRailsアプリケーションに追加する方法およびカスタマイズの方法、またコードブロックをシンタックスハイライトする方法を紹介します。</p> 
+
+<p>下の簡単なブログアプリケーションを使って作業を行っていきます。下の記事に入力した内容はHTMLとして直接出力されるので、2つのパラグラフに分けて入力したにもかかわらず一つのブロックとして表示されています。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/691/original/E272I01.png" width="801" height="358" alt="ブログアプリケーション"/>
+</div>
+
+<p>現在、内容はいかなる方法でも解釈されていません。このアプリケーションをMarkdownを介するように修正していきます。これによって記事を作成したり編集する人が、柔軟にフォーマットを制御できるようになります。</p> 
+
+<h3>Redcarpetをインストールする</h3>
+
+<p>まず最初に、もうお分かりだと思いますが、Redcarpet gemをインストールします。これには通常どおりGemfileにgemへの参照情報を追記して、bundleコマンドを実行してインストールします。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.9'
+gem 'sqlite3'
+gem 'nifty-generators'
+
+gem 'redcarpet'</pre>
+
+<p>次に<code>ArticleController</code>の<code>show</code>ページで、記事の内容を表示するコード行にRedcarpetを追加します。そのために<code>Redcarpet</code>オブジェクトを新規に作成し、マークアップしたい内容を渡して、返された文字列に対して <code>to_html</code>を呼び出します。</p>
+
+<p class="codeFilePath">/app/views/articles/show.html.erb</p>
+<pre class="ruby">&lt;% title @article.name %&gt;
+
+&lt;%= Redcarpet.new(@article.content).to_html %&gt;
+
+&lt;p&gt;
+  &lt;%= link_to "Edit", edit_article_path(@article) %&gt; |
+  &lt;%= link_to "Destroy", @article, :confirm =&gt; 'Are you sure?', :method =&gt; :delete %&gt; |
+  &lt;%= link_to "View All", articles_path %&gt;
+&lt;/p&gt;</pre>
+
+<p>しかしページを再度読み込んでみても、求める結果にはなっていません。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/692/original/E272I02.png" width="800" height="324" alt="記事の内容のタグはエスケープされている"/>
+</div>
+
+<p>Rails 3がHTMLを自動的にエスケープしたので、Redcarpetが追加したタグがそのままページに表示されています。これを直す簡単な方法は、出力を<code>raw</code>で囲む方法です。</p>
+
+<p class="codeFilePath">/app/views/articles/show.html.erb</p>
+<pre class="ruby">&lt;% title @article.name %&gt;
+
+&lt;%= raw Redcarpet.new(@article.content).to_html %&gt;
+
+&lt;p&gt;
+  &lt;%= link_to "Edit", edit_article_path(@article) %&gt; |
+  &lt;%= link_to "Destroy", @article, :confirm =&gt; 'Are you sure?', :method =&gt; :delete %&gt; |
+  &lt;%= link_to "View All", articles_path %&gt;
+&lt;/p&gt;</pre>
+
+<p>ページを再度読み込むと、今度は期待通りに表示されました。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/693/original/E272I03.png" width="800" height="350" alt="今度は期待通りに2つのパラグラフになった"/>
+</div>
+
+<p>Markdownコードを表示させたいときに毎回この操作を行うのも手間なので、<code>markdown</code>というヘルパーへソッドを作成してこの作業を簡略化します。</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def markdown(text)
+    Redcarpet.new(text).to_html.html_safe
+  end
+end</pre>
+
+<p>ヘルパーメソッドから内容を返すときに、<code>raw</code>の代わりに<code>html_safe</code>を呼び出します。これで記事のページで新しく作成したヘルパーメソッドを使えるようになりました。</p>
+
+<p class="codeFilePath">/app/views/articles/show.html.erb</p>
+<pre class="ruby">&lt;% title @article.name %&gt;
+
+&lt;%= markdown @article.content %&gt;
+
+&lt;p&gt;
+  &lt;%= link_to "Edit", edit_article_path(@article) %&gt; |
+  &lt;%= link_to "Destroy", @article, :confirm =&gt; 'Are you sure?', :method =&gt; :delete %&gt; |
+  &lt;%= link_to "View All", articles_path %&gt;
+&lt;/p&gt;</pre>
+
+<h3>Redcarpetをカスタマイズする</h3>
+
+<p>次にRedcarpetのカスタマイズ方法を見ていきます。デフォルト設定では、単一の改行(line break)を処理しません。新しいパラグラフの始まりを定義するには空白行が必要です。例えば下のような単一の改行を含んだ文を入力したとします。</p>
+
+<pre class="html">give me a 
+break</pre>
+
+<p>これは、出力では1行の文として表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/694/original/E272I04.png" width="802" height="478" alt="改行は表示されない"/>
+</div>
+
+<p>このような文を入力した時には、HTMLの該当する場所に改行タグが挿入されたほうがいいでしょう。<a href="http://rdoc.info/github/tanoku/redcarpet/master/Redcarpet">Redcarpetのドキュメント</a>を見ると、オプションのリストがありその中の<a href="http://rdoc.info/github/tanoku/redcarpet/master/Redcarpet#hard_wrap-instance_method">hard_wrap</a>がまさにこの目的で使えそうです。</p> 
+
+<p>以下のように、Redcarpetのコンストラクタ(constructor)にオプションをシンボルとして追加します。</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def markdown(text)
+    Redcarpet.new(text, :hard_wrap).to_html.html_safe
+  end
+end</pre>
+
+<p>記事のページを再度読み込むと「Give me a break」の行は希望どおり2行で表示されます。 </p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/695/original/E272I05.png" width="802" height="428" alt="改行が表示された"/>
+</div>
+
+<p>他にも役に立つオプションを追加することができます。<code><a href="http://rdoc.info/github/tanoku/redcarpet/master/Redcarpet#filter_html-instance_method">filter_html</a></code>オプションを指定すると、すべてのHTMLタグを出力しないようにします。<code><a href="http://rdoc.info/github/tanoku/redcarpet/master/Redcarpet#autolink-instance_method">autolink</a></code>を追加すると、コード中で検知されたURLをリンクに変更します。記事中にコードサンプルを含む予定なので、<code><a href="http://rdoc.info/github/tanoku/redcarpet/master/Redcarpet#no_intraemphasis-instance_method">no_intraemphasis</a></code>オプションも使用します。これによって、単語と単語の間のアンダースコアを強調の開始や終了と解釈しないようにすることで、Rubyのメソッドや変数名に用いられるアンダースコアによって文字が強調されないようにします。最後に、ブログの記事中のコードサンプルを読みやすく表示するためにさらに2つのオプションを指定します。<code><a href="http://rdoc.info/github/tanoku/redcarpet/master/Redcarpet#fenced_code-instance_method">fenced_code</a></code>(すぐ後で実際の使用例を示します)と<code><a href="http://rdoc.info/github/tanoku/redcarpet/master/Redcarpet#gh_blockcode-instance_method">gh_blockcode</a></code>です。</p>
+
+<p>オプション指定が多くなりすぎたので、ヘルパー内で配列として抽出します。</p>
+
+<p class="codeFilePath">/app/helpers/applciation_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def markdown(text)
+    options = [:hard_wrap, :filter_html, :autolink, ↵
+      :no_intraemphasis, :fenced_code, :gh_blockcode]
+    Redcarpet.new(text, *options).to_html.html_safe
+  end
+end</pre>
+
+<p>これらのオプションが設定されたところで、Githubでと同じように記事中にコードブロックを追加できるようになりました。ブロックは最初と最後を3つのバッククォートを含む行で囲み、かつ開始行では言語を指定します。記事を編集してRubyコードのブロックを追加してみます。</p>
+
+<pre class="html">Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. 
+
+``` ruby
+puts "Hello, world!"
+```</pre>
+
+<p>これが次のように表示されます。コードサンプルは、<code>lang</code>要素で言語を定義した<code>pre</code>タグで囲まれています。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/696/original/E272I06.png" width="802" height="428" alt="コードブロックが表示された"/>
+</div>
+
+<p>従来の方式のFenced Codeで、バッククォート(`)の代わりにチルダ(~)を使ってコードブロックを定義することもできます。</p>
+
+<pre class="html">Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. 
+
+~~~ruby
+puts "Hello, world!"
+~~~</pre>
+
+<p>これはバッククォートを使用したときとまったく同じように表示されます。</p>
+
+<h3>シンタックスハイライト</h3>
+
+<p>記事にコードブロックを追加できるようになりましたが、次にシンタックスハイライトを行うにはどうすればいいでしょうか。GithubはこれをPythonのライブラリの<a href="http://pygments.org/">Pygments</a>と<a href="https://github.com/github/albino">Albino gem</a>の組み合わせで処理していて、今回のアプリケーションでも同じように設定してみます。</p>
+
+<p><code>Gemfile</code>にAlbinoを追加し、合わせてNokogiriも加えてRedcarpetが生成するHTMLを解釈して分解できるようにします。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.9'
+gem 'sqlite3'
+gem 'nifty-generators'
+
+gem 'redcarpet'
+gem 'albino'
+gem 'nokogiri'</pre>
+
+<p>いつものようにbundleを実行して、すべてがインストールされたことを確認します。</p> 
+
+<p>Pygmentsもインストールする必要があります。マシンにはPythonがインストールされているので、以下のコマンドを実行してインストールを行います。</p>
+
+<pre class="terminal">$ sudo easy_install pygments</pre>
+
+<p><code>ApplicationHelper</code>で、RedcarpetコードをHTMLに変換する辺りに<code>syntax_highlighter</code>というラッパーメソッドを追加します。このメソッドはNokogiriを用いてドキュメント内の<code>lang</code>属性のついた<code>pre</code>要素(Redcarpet がコードブロックとして定義している部分)を探します。そしてこれらの要素の内容を、シンタックスハイライトされたコードに置き換えます。</p>
+
+<p class="codeFilePath">/app/helpers/application_helper.rb</p>
+<pre class="ruby">module ApplicationHelper
+  def markdown(text)
+    options = [:hard_wrap, :filter_html, :autolink, ↵
+      :no_intraemphasis, :fenced_code, :gh_blockcode]
+    syntax_highlighter(Redcarpet.new(text, ↵
+      *options).to_html).html_safe
+  end
+  
+  def syntax_highlighter(html)
+    doc = Nokogiri::HTML(html)
+    doc.search("//pre[@lang]").each do |pre|
+      pre.replace Albino.colorize(pre.text.rstrip, pre[:lang])
+    end
+    doc.to_s
+  end
+end</pre>
+
+<p>このコードは<a href="https://github.com/injekt/rack-pygmentize">rack-pygmentize gem</a>を元にしているので、仕組みを知るために一度見てみることをお勧めします。この方法によって、もしCoderayのような違うシンタックスハイライト用ライブラリを使いたい場合にも簡単に交換できるようになります。</p> 
+
+<p>シンタックスハイライトを目立たせるためにスタイルシートを追加しました(<a href="https://github.com/ryanb/railscasts-episodes/blob/master/episode-272/blog-after/public/stylesheets/pygments.css">Githubで参照</a>できます)。ページを再度読み込むとコードサンプルがハイライトされています。</p>
+
+ <div class="imageWrapper">
+  <img src="/system/photos/697/original/E272I07.png" width="800" height="322" alt="コードがシンタックスハイライトされた"/>
+</div>
+
+<p>Redcarpetの紹介は以上です。さらに詳しい情報は<a href="https://github.com/tanoku/redcarpet">プロジェクトのGithubページ</a>を参照してください。</p>

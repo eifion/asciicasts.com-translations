@@ -1,0 +1,272 @@
+<p>In this episode we&rsquo;re going to look at a gem called <a href="https://github.com/voxdolo/decent_exposure">decent_exposure</a>. This is a simple gem with a nice concept. We can use it to create an interface of methods in the controller that the view can access instead of using instance variables. The gem uses a method called expose to define this interface.</p> 
+
+<p>Before we look at decent_exposure we&rsquo;ll try applying this concept manually. The application we&rsquo;ll be working with is a simple blogging application with many <code>Articles</code>, each of which can have many <code>Comments</code>.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/620/original/E259I01.png" width="815" height="550" alt="Our simple blogging application."/>
+</div>
+
+<p>The <code>ArticlesController</code> contains pretty standard controller code. For example in the <code>index</code> action it creates an instance variable called <code>@articles</code>.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">class ArticlesController &lt; ApplicationController
+  def index
+    @articles = Article.order(:name)
+  end
+
+  #Other actions omitted.
+end</pre>
+
+<p>In the <code>index</code> view code we then use <code>@articles</code> to loop through each article and render it.</p>
+
+<p>When you first start using Rails it may seem strange that access to a controller&rsquo;s instance variables is shared with the views as these are usually kept private within a class. We&rsquo;ll take a look now at an alternative approach that shares data by exposing methods to the views. To accomplish this we&rsquo;ll create private methods in the controllers that return either single models or lists of models.</p>
+
+<p>First we&rsquo;ll remove the line of code that fetches the articles from the <code>index</code> action and put it into a method called <code>articles</code>. We want <code>@articles</code> to be used as a cache so that the articles are only fetched once. We can use the <code>||=</code> operator to achieve this and we won&rsquo;t now reference this instance variable anywhere else in the controllers or views. We&rsquo;ll make <code>articles</code> a helper method so that we can use it in the views.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">class ArticlesController &lt; ApplicationController
+  def index
+  end
+
+  private
+  def articles
+    @articles ||= Article.order(:name)
+  end
+  helper_method :articles
+end</pre>
+
+<p>In the view we can now replace the call to the instance variable with a call to our new <code>articles</code> method.</p>
+
+<p class="codeFilePath">/app/views/articles/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Articles&quot; %&gt;
+
+&lt;div id=&quot;articles&quot;&gt;
+&lt;% for article in articles %&gt;
+  &lt;h2&gt;
+    &lt;%= link_to article.name, article %&gt;
+    &lt;span class=&quot;comments&quot;&gt;(&lt;%= pluralize(article.comments.size, &#x27;comment&#x27;) %&gt;)&lt;/span&gt;
+  &lt;/h2&gt;
+  &lt;div class=&quot;created_at&quot;&gt;on &lt;%= article.created_at.strftime(&#x27;%b %d, %Y&#x27;) %&gt;&lt;/div&gt;
+  &lt;div class=&quot;content&quot;&gt;&lt;%= simple_format(article.content) %&gt;&lt;/div&gt;
+&lt;% end %&gt;
+&lt;/div&gt;
+
+&lt;p&gt;&lt;%= link_to &quot;New Article&quot;, new_article_path %&gt;&lt;/p&gt;</pre>
+
+<p>The other actions in the controller either find or create a single article and we can do something similar for those by creating an <code>article</code> method. This will be a little more complex than <code>articles</code> as it needs to do different things depending on the parameters that are passed in. Here&rsquo;s what the method looks like:</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">def article
+  @article ||= params[:id] ? Article.find(params[:id]) : Article.new(params[:article])
+end
+helper_method :article</pre>
+
+<p>If an <code>id</code> parameter exists then the method will find the <code>Article</code> with that <code>id</code>. If not then it will create a new one based on any <code>article</code> parameters. We now have a method that we can use to replace the <code>@article</code> instance variable and so we can remove the line in each action that finds or creates an action.</p> 
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">class ArticlesController &lt; ApplicationController
+  def index
+  end
+
+  def show
+  end
+
+  def new
+  end
+  
+  def create
+    if article.save
+      redirect_to articles_path, :notice =&gt; &quot;Successfully created article.&quot;
+    else
+      render :new
+    end
+  end
+
+  def edit
+  end
+  
+  def update
+    if article.update_attributes(params[:articles])
+      redirect_to articles_path, :notice =&gt; &quot;Successfully updated article.&quot;
+    else
+      render :edit
+    end
+  end
+  
+  def destroy
+    article.destroy
+    redirect_to articles_url, :notice =&gt; &quot;Successfully destroyed article.&quot;
+  end
+
+private
+  def articles
+    @articles ||= Article.order(:name)
+  end
+  helper_method :articles
+  
+  def article
+    @article ||= params[:id] ? Article.find(params[:id]) : Article.new(params[:article])
+  end
+  helper_method :article
+end</pre>
+
+<p>Some of our actions now have no code in them at all as they didn&rsquo;t have any behaviour other than to define an instance variable and this is now handled by the <code>action</code> method. We still need to go into each of the <code>ArticleController</code>&rsquo;s views and replace each use of an instance variable with a call to the appropriate method. For example, the <code>show</code> view will look like this after it has been modified:</p>
+
+<p class="codeFilePath">/app/views/articles/show.html.erb</p>
+<pre class="ruby">&lt;% title article.name %&gt;
+
+&lt;%= simple_format article.content %&gt;
+
+&lt;p&gt;
+  &lt;%= link_to pluralize(article.comments.size, &#x27;Comment&#x27;), [article, :comments]%&gt; |
+  &lt;%= link_to &quot;Back to Articles&quot;, articles_path %&gt; |
+  &lt;%= link_to &quot;Edit&quot;, edit_article_path(article) %&gt; |
+  &lt;%= link_to &quot;Destroy&quot;, article, :method =&gt; :delete, :confirm =&gt; &quot;Are you sure?&quot; %&gt;
+&lt;/p&gt;</pre>
+
+<p>We won&rsquo;t show the other views but we&rsquo;ll need to change them in a similar way.</p>
+
+<p>Another advantage of this approach is that it gives us lazy loading. If we were add action caching to, say, the <code>show</code> action, then the article that is being shown will only be fetched from the database if we&rsquo;re going to render the view; the article isn&rsquo;t required in the controller layer. Action caching works well here as the action isn&rsquo;t fetched unless the controller truly needs it.</p>
+
+<h3>Adding The decent_exposure Gem</h3>
+
+<p>We have a good solution now but it would be even better if there was a more convenient way to define the methods that we expose to the view and this is where decent_exposure comes in. We can use its <code>expose</code> method which will define methods that expose models to the view in a similar way to the <code>articles</code> and <code>article</code> methods we wrote above. The <code>expose</code> method has some useful defaults: it will search for a model by its <code>id</code> parameter and if that isn&rsquo;t available it will build a new model using any appropriate parameters it can find. This means that we can use the default values for finding or creating single models. If we require any other behaviour we can pass a block to the method and define it there. Caching will be handled automatically for us by decent_exposure.</p>
+
+<p>Let&rsquo;s try using it in our application. First we&rsquo;ll need to add the gem to the <code>Gemfile</code> and run the <code>bundle</code> command.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.5&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;decent_exposure&#x27;</pre>
+
+<p>We can now replace the <code>article</code> and <code>articles</code> methods we wrote in the <code>ArticlesController</code> with two calls to <code>expose</code>.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">class ArticlesController &lt; ApplicationController
+
+  expose(:article)
+  expose(:articles) { Article.order(:name) }
+  
+  def index
+  end
+  
+  # Other actions omitted
+end</pre>
+
+<p>The defaults that expose uses are correct for a single <code>Article</code> but if we want a list of articles we need to supply the custom behaviour to get those so we&rsquo;ve copied it from the <code>articles</code> method and placed it in expose&rsquo;s block.</p>
+
+<p>If we reload our application now it&rsquo;ll work just as it did before, but the controllers are much neater as they&rsquo;re using the methods supplied by decent_exposure instead of instance variables.</p>
+
+<h3>Handling Nested Resources</h3>
+
+<p>How does decent_exposure handle nested resources such as the comments in our application that are nested under articles?</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Blog::Application.routes.draw do
+  root :to =&gt; &quot;articles#index&quot;
+
+  resources :articles do
+    resources :comments
+  end
+end</pre>
+
+<p>Here&rsquo;s how the <code>CommentsController</code> looks:</p>
+
+<p class="codeFilePath">/app/controllers/comments_controller.rb</p>
+<pre class="ruby">class CommentsController &lt; ApplicationController
+  def index
+    @article = article.find(params[:article_id])
+    @comments = @article.comments
+    @comment = Comment.new
+  end
+  
+  def new
+    @article = Article.find(params[:article_id])
+    @comment = @article.comments.build
+  end
+  
+  def create
+    @article = Article.find(params[:article_id])
+    @comment = @article.comments.build(params[:comment])
+    if @comment.save
+      redirect_to @comment.article, :notice =&gt; &quot;Successfully created comment!&quot;
+    else
+      render :new
+    end
+  end
+end</pre>
+
+<p>We&rsquo;re still using instance variables here. At the top of each action we fetch an article and then fetch or build a comment through that article. We can use decent_exposure here as it fully supports nested resources.</p>
+
+<p>As before we&rsquo;ll replace each instance variable with a call to <code>expose</code>. We can use the default behaviour for fetching a single <code>Article</code> and <code>Comment</code> but to fetch the list of comments we&rsquo;ll need some custom behaviour. We can then delete the lines of code in the controller that assign instance variables and in the code that remains replace those instance variables with calls to the appropriate methods. Once we&rsquo;ve made these changes the controller looks a lot cleaner:</p>
+
+<p class="codeFilePath">/app/controllers/comments_controller.rb</p>
+<pre class="ruby">class CommentsController &lt; ApplicationController
+  expose(:article)
+  expose(:comments) { article.comments }
+  expose(:comment)
+  
+  def index
+  end
+  
+  def new
+  end
+  
+  def create
+    if comment.save
+      redirect_to comment.article, :notice =&gt; &quot;Successfully created comment!&quot;
+    else
+      render :new
+    end
+  end
+end</pre>
+
+<p>As we did when we changed the <code>ArticlesController</code> we&rsquo;ll need to update the views related to this controller so that they call the methods generated by decent_exposure instead of the instance variables, such as in the form partial below.</p>
+
+<p class="codeFilePath">/app/views/comments/_form.html.erb</p>
+<pre class="ruby">&lt;%= form_for [article, comment] do |f| %&gt;
+  &lt;%= f.error_messages %&gt;
+  &lt;%= f.hidden_field :article_id %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :name %&gt;
+    &lt;%= f.text_field :name %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :content, &quot;Comment&quot; %&gt;&lt;br /&gt;
+    &lt;%= f.text_area :content, :rows =&gt; 12, :cols =&gt; 35 %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>When we try the application now it still works as well as it did earlier but the code in the controllers is much improved.</p>
+
+<p>There&rsquo;s one potential gotcha with decent_exposure that we need to be aware of. When we use <code>expose</code> with its default behaviour to fetch as single model it will look for a pluralized version of the name that is passed in (e.g. <code>:article</code>) and attempt to fetch and build records through that scope if it&rsquo;s available. For example, let&rsquo;s say that we have the following two calls to expose in the <code>ArticlesController</code>.</p> 
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">expose(:article)
+expose(:articles) { Article.order(:name).where(:visible =&gt; true) }</pre>
+
+<p>Any call to the singular article method will try to fetch an article based on a plural <code>articles</code> scope so, given the code, above when we look for a single article it will only be returned if that article is <code>visible</code>. If we don&rsquo;t want this behaviour then we&rsquo;ll need to change the name of the pluralized version so that it has a more descriptive name. In this case we&rsquo;ll rename it to <code>visible_articles</code>.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">expose(:article)
+expose(:visible_articles) { Article.order(:name).where(:visible =&gt; true) }</pre>
+
+<p>Now the second <code>expose</code> call is no longer considered the base default scope that member actions are built on. Once we&rsquo;ve made a change like this we will of course need to change any calls to that method in the views.</p>
+
+<h3>Changing The Default Behaviour</h3>
+
+<p>If we ever need to change the <code>expose</code> method&rsquo;s default behaviour we can do so by making a call to <code>default_exposure</code> and passing it a block. The behaviour we define in that block will override the default behaviour. The name passed to <code>expose</code> will be passed to the block in <code>default_exposure</code>.</p>
+
+<pre class="ruby">class MyController &lt; ApplicationController
+  default_exposure do |name|
+    ObjectCache.load(name.to_s)
+  end
+end</pre>
+
+<p>We generally won&rsquo;t need to override the default but the option is there if we ever need to.</p>
+
+<p>That&rsquo;s it for this episode. It&rsquo;s a neat solution for cleaning up controllers and well worth considering if you think it&rsquo;ll fit in with your workflow.</p>

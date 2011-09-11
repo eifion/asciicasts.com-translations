@@ -1,0 +1,269 @@
+<p>Confirmation dialogue boxes are common in web applications. Almost every Rails application shows one when we click a &ldquo;delete&rdquo; link, asking if we&rsquo;re sure we want to delete an item. Most of the time these alerts are unnecessary, we clicked the link because we want the item to be deleted, but there are, of course, times when we click a link by mistake. Wouldn&rsquo;t it be better, though, if there was no confirmation but instead a link offering the ability to undo the change we just made? This would provide a much smoother user experience.</p>
+
+<p>In this episode we&rsquo;ll be implementing this behaviour by making use of a gem called <a href="https://github.com/airblade/paper_trail">PaperTrail</a> which is a generic versioning library for ActiveRecord. There are specific undo frameworks for Rails, for example <a href="https://github.com/laserlemon/vestal_versions">Vestal Versions</a> which was covered back in episode 177 [<a href="http://railscasts.com/episodes/177-model-versioning">watch</a>, <a href="http://railscasts.com/episodes/177-model-versioning">read</a>]. We&rsquo;ll use PaperTrail here as it works better when adding undo support.</p>
+
+<h3>Installing PaperTrail</h3>
+
+<p>To install PaperTrail we need to add a reference to it to our application&rsquo;s <code>Gemfile</code> and then run the <code>bundle</code> command to install it.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby"># Edit this Gemfile to bundle your application&#x27;s dependencies.
+source &#x27;http://gemcutter.org&#x27;
+
+gem &quot;rails&quot;, &quot;3.0.5&quot;
+gem &quot;sqlite3-ruby&quot;, :require =&gt; &quot;sqlite3&quot;
+gem &quot;paper_trail&quot;</pre>
+
+<p>When the gem has installed we&rsquo;ll can run the PaperTrail install generator.</p>
+
+<pre class="terminal">$ rails g paper_trail:install</pre>
+
+<p>This generator creates a migration file that will create a <code>versions</code> table once we&rsquo;ve run <code>rake db:migrate</code>.</p>
+
+<h3>Using PaperTrail</h3>
+
+<p>To add versioning to a model, such as this application&rsquo;s <code>Product</code> model we add a call to <code>has_paper_trail</code> in the model file.</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">class Product &lt; ActiveRecord::Base
+  attr_accessible :name, :price, :released_at
+  has_paper_trail
+end</pre>
+
+<p>The <code>Product</code> model will now be versioned so that any changes made can be undone.</p>
+
+<h3>Adding Undo Functionality</h3>
+
+<p>Getting PaperTrail installed is simple enough but how do we go about adding undo functionality to our application? To start with we&rsquo;ll need a controller action for the undo link to point to. We could add a new action to the <code>ProductsController</code>, but to keep the code cleaner we&rsquo;ll create a new controller called <code>versions</code>. This approach means that we can more easily add versioning to other models later.</p>
+
+<pre class="terminal">$ rails g controller versions</pre>
+
+<p>We only need one action in this controller, to revert a version.</p>
+
+<p class="codeFilePath">/app/controllers/versions_controller.rb</p>
+<pre class="ruby">class VersionsController &lt; ApplicationController
+  def revert
+    @version = Version.find(params[:id])
+    @version.reify.save!
+    redirect_to :back, :notice =&gt; &quot;Undid #{@version.event}&quot;
+  end
+end</pre>
+
+<p>In this action we fetch the <code>Version</code> that matches the <code>id</code> parameter that is passed in from the URL. We then want to get the model object that is specific to that version and we do that by calling <code>reify</code> on the version. In this case this will return the <code>Product</code> instance that the version refers to. We can then call <code>save!</code> on this to revert that product back to that version. Once we&rsquo;ve saved that version we&rsquo;ll redirect back to the previous page and set a flash message to say what&rsquo;s just happened. We can get the event that has just completed by calling <code>@version.event</code>. This will return either &ldquo;create&rdquo;, &ldquo;update&rdquo; or &ldquo;destroy&rdquo; depending on the action that has just been reverted and we&rsquo;ll put that in the message.</p> 
+
+<p>We&rsquo;ll need to be able to access this new action so we&rsquo;ll add a new route to the <code>routes</code> file.</p> 
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Store::Application.routes.draw do |map|
+  post &quot;versions/:id/revert&quot; =&gt; &quot;versions#revert&quot;, :as =&gt; &crarr;     
+       &quot;revert_version&quot;
+  resources :products
+  root :to =&gt; &quot;products#index&quot;
+end</pre>
+
+<p>Note that we&rsquo;ve used the <code>post</code> method here. We&rsquo;re doing something potentially destructive in the revert action as it alters the database so we won&rsquo;t use <code>match</code> as this will accept GET requests. As the name implies post only responds to POST requests.</p>
+
+<h3>Undoing Updates</h3>
+
+<p>Now that we have an action that will handle undo behaviour it&rsquo;s time to add a link to the flash notices inside the <code>ProductsController</code>. We&rsquo;ll start with the <code>update</code> action so that when someone updates a product they can click a link and undo the changes they&rsquo;ve made.</p>
+
+<p>We&rsquo;ll need to create the undo link, but how should we do that in the controller? We could put some HTML into a string but it would be much nicer if we could use <code>link_to</code> in the controller. We can&rsquo;t use view methods like <code>link_to</code> directly in controllers, but we can access them through the <code>view_context</code> so we can call <code>view_context.link_to</code> to create a link. This link will point to the <code>revert</code> action and pass in the <code>id</code> of last stored version of that product to it. We can call <code>@product.versions</code> to get all of the versions of a product and call <code>last</code> on that to get the most recent stored version. Knowing this we can now create the undo link. Note that it has <code>:method =&gt; :post</code> set on it as the <code>revert</code> action will only respond to POST requests. Having constructed the link we can add it to the flash message.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def update
+  @product = Product.find(params[:id])
+  if @product.update_attributes(params[:product])
+    undo_link = view_context.link_to(&quot;undo&quot;, &crarr;
+      revert_version_path(@product.versions.last), &crarr; 
+      :method =&gt; :post)
+    redirect_to products_url, :notice =&gt; &crarr;
+      &quot;Successfully updated product.&quot;
+  else
+    render :action =&gt; &#x27;edit&#x27;
+  end
+end</pre>
+
+<p>We have enough code in place now to try this out. If we edit one of the products in the list, for example changing &ldquo;1 Pint of Milk&rdquo; to &ldquo;2 Pints of Milk&rdquo;, we&rsquo;ll get the following result.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/586/original/E255I01.png" width="815" height="415" alt="The undo link is shown, but isn't escaped."/>
+</div>
+
+<p>The product has changed but the link hasn&rsquo;t quite worked. The link is there, but its HTML has been escaped. To fix this we&rsquo;ll need to go to the place in the application that renders the flash messages and modify it so that it doesn&rsquo;t escape their contents. In this application this takes place in the layout file. All we need to do here is wrap the message in the <code>raw</code> method so that its content isn&rsquo;t escaped.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;div id=&quot;container&quot;&gt;
+  &lt;h1&gt;&lt;%=h yield(:title) %&gt;&lt;/h1&gt;
+  &lt;%- flash.each do |name, msg| -%&gt;
+    &lt;%= content_tag :div, raw(msg), :id =&gt; &quot;flash_#{name}&quot; %&gt;
+  &lt;%- end -%&gt;      
+  &lt;%= yield %&gt;
+&lt;/div&gt;</pre>
+
+<p>We have to be careful when doing this. If any input from the user is displayed in the flash message it won&rsquo;t be escaped and we&rsquo;ll have to remember to escape it before displaying it.</p>
+
+<p>If we edit the product again, changing it to &ldquo;4 Pints of Milk&rdquo; this time the undo link is now shown correctly.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/587/original/E255I02.png" width="815" height="415" alt="The link is now shown correctly."/>
+</div>
+
+<p>When we click the undo link the product is reverted back to its previous version.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/588/original/E255I03.png" width="815" height="415" alt="The update has been undone."/>
+</div>
+
+<h3>Undoing After Deleting an Item</h3>
+
+<p>Next we&rsquo;ll add an undo link to the <code>destroy</code> action so that we can reinstate an item after deleting it. We&rsquo;ll be building up the link in the same way we did in the <code>update</code> action so the first thing we&rsquo;ll do is move the code that creates the link into a separate method that we can then call from both <code>update</code> and <code>destroy</code>. We&rsquo;ll make it a private method so that it isn&rsquo;t considered an action and call it <code>undo_link</code>.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">class ProductsController &lt; ApplicationController
+
+  #other actions omitted.
+  
+  def update
+    @product = Product.find(params[:id])
+    if @product.update_attributes(params[:product])
+      redirect_to products_url, &crarr;
+        :notice =&gt; &quot;Successfully updated product. #{undo_link}&quot;
+    else
+      render :action =&gt; &#x27;edit&#x27;
+    end
+  end
+  
+  def destroy
+    @product = Product.find(params[:id])
+    @product.destroy
+    redirect_to products_url, &crarr;
+      :notice =&gt; &quot;Successfully destroyed product. #{undo_link}&quot;
+  end
+  
+  private
+  def undo_link
+    view_context.link_to(&quot;undo&quot;, &crarr; 
+            revert_version_path(@product.versions.scoped.last), &crarr;
+     :method =&gt; :post)
+  end
+end</pre>
+
+<p>There is one small gotcha here. When we&rsquo;re deleting a record <code>product.versions</code> still refers to a list of versions that doesn&rsquo;t include the most recent version (the version that was deleted by the <code>destroy</code> model). It seems that the versions are being cached in an array. In this case we should be able to call <code>@product.versions(true)</code> to flush the cache as we can with normal associations but this doesn&rsquo;t work like we&rsquo;d expect when deleting records. To get around this we can call <code>scoped</code> on the versions array before calling <code>last</code> and this will mean that we&rsquo;re always referring to the most recent version.</p>
+
+<p>Let&rsquo;s test this out. If we click the &ldquo;Destroy&rdquo; link for &ldquo;2 Pints of Milk&rdquo; and confirm the deletion then that item is removed.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/589/original/E255I04.png" width="815" height="415" alt="The product is successfully destroyed."/>
+</div>
+
+<p>When we click the &ldquo;undo&rdquo; link the deleted item is reinstated.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/590/original/E255I05.png" width="815" height="415" alt="The deleted item has now been reinstated."/>
+</div>
+
+<h3>Undoing a Create</h3>
+
+<p>There&rsquo;s one action left to implement: <code>create</code>. Let&rsquo;s try adding the undo link to the flash message in the <code>create</code> action as we did with <code>update</code> and <code>destroy</code> and see how we get on.</p>
+
+<p class="codeFilePath">/app/controllers/products_controller.rb</p>
+<pre class="ruby">def create
+  @product = Product.new(params[:product])
+  if @product.save
+    redirect_to products_url, :notice =&gt; &quot;Successfully created &crarr;
+      product. #{undo_link}&quot;
+  else
+    render :action =&gt; &#x27;new&#x27;
+  end
+end</pre>
+
+<p>When we add a new product now and try to undo it, however, we get an error message.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/591/original/E255I06.png" width="815" height="415" alt="An error is thrown when we try to undo a new product."/>
+</div>
+
+<p>The code here is trying to save a record but we&rsquo;re trying to undo the creation of a product here so what we really want to do is destroy the created item rather than trying to save it. We need to modify the code in the <code>VersionsController</code> and change its behaviour.</p>
+
+<p>The problem is that when we call <code>reify</code> on a newly-created item it returns <code>nil</code> as there is no previous version. We need to modify the code in the <code>revert</code> action so that it checks to see if that previous version exists and, if so, saves it. Otherwise it will delete the item.</p>
+
+<p class="codeFilePath">/app/controllers/versions_controller.rb</p>
+<pre class="ruby">class VersionsController &lt; ApplicationController
+  def revert
+    @version = Version.find(params[:id])
+    if @version.reify
+      @version.reify.save!
+    else
+      @version.item.destroy
+    end
+    redirect_to :back, :notice =&gt; &quot;Undid #{@version.event}&quot;
+  end
+end</pre>
+
+<p>If no previous version exists then we call <code>@version.item</code> which will return the newly created <code>Product</code> from the products table. We can then call <code>destroy</code> on that to delete it.</p>
+
+<p>Let&rsquo;s give it a try. We&rsquo;ll create a new product called &ldquo;Chips&rdquo;.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/592/original/E255I07.png" width="815" height="415" alt="Creating a new product."/>
+</div>
+
+<p>When we click the &ldquo;undo&rdquo; link the newly-created item is removed.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/593/original/E255I08.png" width="815" height="415" alt="The new item is successfully removed."/>
+</div>
+
+<h3>Redoing The Undo</h3>
+
+<p>Now that we can undo after creating, updating or destroying a product it would be useful to add the ability to redo the action we&rsquo;ve just undone. To add redo behaviour we have to go into our <code>VersionsController</code> and add a link to the flash message that shows when we undo an action.</p> 
+
+<p class="codeFilePath">/app/controllers/versions_controller.rb</p>
+<pre class="ruby">class VersionsController &lt; ApplicationController
+  def revert
+    @version = Version.find(params[:id])
+    if @version.reify
+      @version.reify.save!
+    else
+      @version.item.destroy
+    end
+    link_name = params[:redo] == &quot;true&quot; ? &quot;undo&quot; : &quot;redo&quot;
+    link = view_context.link_to(link_name, &crarr;
+      revert_version_path(@version.next, &crarr;
+      :redo =&gt; !params[:redo]), :method =&gt; :post)
+    redirect_to :back, :notice =&gt; &crarr;
+     &rdquo;Undid #{@version.event}. #{link}&quot;
+  end
+end</pre>
+
+<p>Most of the logic here is to do with changing the text in the link depending on what the previous action was. Then we generate the link which uses <code>revert_version_path</code> and which points to the next version of the item in the version chain. The reason it chooses the next version is because when we save or destroy an item it will create a new version record and that is the one we want to go to get the redo behaviour.</p>
+
+<p>We can try this out now. We&rsquo;ll edit &ldquo;Flat Screen TV&rdquo; and change its name to &ldquo;Flat Screen Television&rdquo;. As expected this gives us an undo link.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/594/original/E255I09.png" width="816" height="286" alt="Modifying a product to test the redo functionality."/>
+</div>
+
+<p>When we click the undo link the product reverts back as before but now we now have a redo link too.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/595/original/E255I10.png" width="816" height="286" alt="The change is undone."/>
+</div>
+
+<p>Clicking the redo link redoes the change and the title changes back to the modified version.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/596/original/E255I11.png" width="816" height="286" alt="The change has now been redone."/>
+</div>
+
+<p>We can toggle between &ldquo;undo&rdquo; and &ldquo;redo&rdquo; as often as we like and the item will swap between its last two versions. Now that we have full undo and redo capabilities we can finally remove the confirmation dialog from the destroy links.</p> 
+
+<h3>Managing Old Versions</h3>
+
+<p>As we use this application now the data in the versions table will build up with a lot of information. Storing all of the version data in one database table makes it easy to remove old versions with a command like this:</p>
+
+<pre class="ruby">Version.delete_all[&quot;created_at &lt; ?&quot;, 1.week.ago]</pre>
+
+<p>We can place the above command in a rake task and call it in a regular basis using the Whenever gem. Take a look at episode 164 [<a href="http://railscasts.com/episodes/164-cron-in-ruby">watch</a>, <a href="http://asciicasts.com/episodes/164-cron-in-ruby">read</a>] for more information about how to do that.</p> 
+
+<p>Another great feature of PaperTrail is that it makes it easy to store additional information in the versions table. All we need to do is add a new column to the versions table. We can then use the <code>:meta</code> option of the <code>has_paper_trail</code> method or use the <code>info_for_paper_trail</code> method in the controller and supply the additional options there. If we want to add some additional information in the versions table, such as the name of the model that&rsquo;s modified so that it can be shown in the flash message we can add that information here and display it in the <code>revert</code> action.</p>

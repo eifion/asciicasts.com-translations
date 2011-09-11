@@ -1,0 +1,224 @@
+<p>国際化(internationalization)については、一番最近ではエピソード138[<a href="http://railscasts.com/episodes/138-i18n">動画を見る</a>, <a href="http://asciicasts.com/episodes/138-i18n">読む</a>]で取り上げました。デフォルト設定ではRailsは国際化の情報をYAMLファイルに保存しますが、今回のエピソードでは別のバックエンドの使い方を紹介します。</p>
+
+<p>下の図は簡単なRailsサイトのページです。このページのヘッダーテキストを国際化してみましょう。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/597/original/E256I01.png" width="800" height="318" alt="アプリケーションのトップページ"/>
+</div>
+
+<p>translateメソッド（短縮形は<code>t</code>）を使えばRailsアプリケーションのテキストの一部を簡単に国際化できます。ただしその場合、アプリケーションがサポートする言語ごとにYAMLファイルを編集して、キーとその言語のテキストを追加する必要があります。大規模なアプリケーションの場合、この方法はすぐに退屈な作業になってしまいます。そもそも国際化テキストを書くのは本来は開発者の仕事ではありません。アプリケーションの管理者が国際化テキストの追加や編集ができるウェブ画面を提供できれば、ずっと便利になるでしょう。</p>
+
+<p>ありがたいことにinternationalization gemは複数のバックエンドをサポートしています。つまりYAMLだけに縛られることなく、気に入ったデータベースバックエンドを選んで使うことができます。デフォルト設定ではRailsは<a href="https://github.com/svenfuchs/i18n/blob/master/lib/i18n/backend/simple.rb">Simple backend</a>を使用して、YAMLファイルで翻訳文を管理します。今回のエピソードで使用するのは<a href="https://github.com/svenfuchs/i18n/blob/master/lib/i18n/backend/key_value.rb">Key-Value backend</a>というバックエンドで、翻訳文を関するためにどのようなkey-valueストアでも使用することができます。ActiveRecordに保存する機能を抽出した<a href="https://github.com/svenfuchs/i18n-active_record">別のgem</a>もあります。これも動くことは動くのですが、アプリケーションの各ページ上の翻訳文に頻繁にアクセスされるため、ActiveRecordというのはベストな方法とは言えないでしょう。翻訳文は、SQLデータベースではなくできればメモリ上に保持したいところです。この問題を解決するためにキャッシュ機能を利用できるかも知れませんが、翻訳文が修正された場合にはキャッシュを使用させないなどの制御に気を配らなくてはいけないのが煩雑です。これらの理由からkey-valueストアを選択することとし、今回のエピソードで紹介していきます。</p>
+
+<h3>バックエンドを変更する</h3>
+
+<p>まずヘッダの静的テキストを修正し、代わりに翻訳を使用するようにします。<code>welcome</code>というキーに対応づけます。</p>
+
+<p class="codeFilePath">/app/views/home/index.html.erb</p>
+<pre class="ruby">&lt;h1&gt;&lt;%= t('welcome') %&gt;&lt;/h1&gt;</pre>
+
+<p>そして、英語用のYAMLファイルに翻訳テキストを追加します。</p>
+
+<p class="codeFilePath">/config/locales/en.yml</p>
+<pre class="ruby">en:
+  welcome: "Welcome"</pre>
+  
+<p>ここでページを再度読み込むと、YAMLファイルのテキストが表示されているのがわかります。</p>
+
+<p>デフォルトのバックエンドを使った翻訳テキストがあるので、バックエンドを変えてみることにしましょう。<code>key_value.rb</code>ファイルの最初のコメント部分に、使い方の説明と別のバックエンドを設定する方法が記述されています。</p>
+
+<pre class="ruby">#   I18n.backend = I18n::Backend::KeyValue.new(Rufus::Tokyo::Cabinet.new('*'))</pre>
+      
+<p><code>I18n::Backend::KeyValue</code>を新規に作成し、使用したいkey-valueストアを指定します。それが翻訳テキスト管理のバックエンドとして使用されます。このバックエンドのデータベースは、3つのメソッドに応答できる必要があります。キーの値を取得する、値を設定する、すべてのキーのリストを得る、の3つです。この情報はコメント欄に記述されています。Rubyのほとんどのkey-valueストアはこれらのメソッドをサポートしているので、そのまま使うことができます。</p>
+
+<pre class="ruby"># * store#[](key)         - Used to get a value
+# * store#[]=(key, value) - Used to set a value
+# * store#keys            - Used to get all keys</pre>
+
+<p>これでアプリケーションの国際化用のバックエンドを入れ替える準備が整ったので、作業を始めることにしましょう。まず<code>/config/initializers</code>ディレクトリ内に<code>i18n_backend.rb</code>というファイルを新規作成します。</p> 
+
+<p class="codeFilePath">/config/initalizers/i18n_backend.rb</p>
+<pre class="ruby">I18n.backend = I18n::Backend::KeyValue.new({})</pre>
+
+<p>コメント欄の例ではバックエンドとしてTokyo Cabinetを使用していますが、今回のアプリケーションをとりあえず動かすために空のハッシュを使用します。当然、実際のアプリケーションではこのようなことはしませんが、これは先ほどの3つのメソッドをサポートする一番単純なもので、デモ目的には十分です。ここでアプリケーションを再起動してトップページに行くと、タイトルが正しく表示されていません。</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/598/original/E256I02.png" width="800" height="314" alt="新しいバックエンドで、翻訳が表示されない"/>
+</div>
+
+<p>ソースコードを見ると、「翻訳がみつからない」とあります。</p>
+
+<pre class="erb">
+&lt;h1&gt;&lt;span class="translation_missing"&gt;en, welcome&lt;/span&gt;&lt;/h1&gt;
+</pre>
+
+<p>アプリケーションが新しいバックエンドを使用しているので、翻訳がないと表示されています。YAMLファイルには残っているのですが、新しいバックエンドにはまだ翻訳がないからです。そこでウェブ画面を新たに作成して、ユーザが新しいバックエンドに翻訳文を追加できるようにします。これを、新しい<code>TranslationsController</code>の<code>index</code>アクションで処理します。</p>
+
+<pre class="terminal">$ rails g controller translations index</pre>
+
+<p>この新しいコントローラをresourceとして動作させたいので、routesファイルに自動生成されたルート(<code>get "translations/index"</code>)を、<code>resources</code>の呼び出しに書き換えます。</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Intn::Application.routes.draw do
+  resources :translations
+  root :to =&gt; "home#index"
+end</pre>
+
+<p><code>index</code>アクションで、翻訳が存在する場合はそれを表示するために、新しいバックエンドからハッシュ形式の翻訳テキストを取得します。そのために<code>I18n.backend.store</code>を呼び出します。</p>
+
+<p class="codeFilePath">/app/controllers/translations_controller.rb</p>
+<pre class="ruby">class TranslationsController &lt; ApplicationController
+  def index
+    @translations = I18n.backend.store
+  end
+end</pre>
+
+<p>ビュー内で翻訳を順番に取得して表示していきます。</p>
+
+<p class="codeFilePAth">/app/views/translations/index.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Translations&lt;/h1&gt;
+
+&lt;ul&gt;
+  &lt;% @translations.each do |key, value| %&gt;
+    &lt;li&gt;&lt;%= key %&gt;: &lt;%= value %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;</pre>
+
+<p>このコードがハッシュ内のすべての翻訳をループして、すべてのキーと値をリスト表示します。新しい翻訳を追加する手段が必要なので、リストの下にフォームを作ります。</p>
+
+<p class="codeFilePath">/app/views/translations/index.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Translations&lt;/h1&gt;
+
+&lt;ul&gt;
+  &lt;% @translations.each do |key, value| %&gt;
+    &lt;li&gt;&lt;%= key %&gt;: &lt;%= value %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;
+
+&lt;h2&gt;Add Translation&lt;/h2&gt;
+&lt;%= form_tag translations_path do %&gt;
+ &lt;p&gt;
+   &lt;%= label_tag :locale %&gt;&lt;br /&gt;
+   &lt;%= text_field_tag :locale %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= label_tag :key %&gt;&lt;br /&gt;
+    &lt;%= text_field_tag :key %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= label_tag :value %&gt;&lt;br /&gt;
+    &lt;%= text_field_tag :value %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;&lt;%= submit_tag "Submit" %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>このフォームは、<code>TranslationController</code>の<code>create</code>アクションにPOSTします。フォームには次の3つのフィールドがあります。言語のロケール(例えば、英語の場合は<code>en</code>)、キー(ビューファイル内の翻訳対象を特定します)、そして翻訳されたテキストです。</p>
+
+<p><code>create</code>アクションで、<code>I18n.backend.store_translations</code>を呼び出して、フォームに入力された値に基づいて新しい翻訳文を追加します。その時に3つの引数を指定します。1つ目はロケールで、フォームから取得します。2つ目はハッシュ形式のデータで、内容は自由です。フォーム上のフィールドから、キーと値を渡します。最後の引数<code>escape</code>は、キーにおいてピリオドをエスケープするかどうかを決定します。ピリオドは、キーの区切りとして使うので、ここでは<code>false</code>に設定します。</p>
+
+<p class="codeFilePath">/app/controllers/translations_controller.rb</p>
+<pre class="ruby">def create
+  I18n.backend.store_translations(params[:locale], ?
+    {params[:key] =&gt; params[:value]}, :escape =&gt; false)
+  redirect_to translations_url, :notice =&gt; "Added translations"
+end</pre>
+
+<p>新しく作ったフォームの動作を確認するために、トップページの翻訳がない部分を追加してみましょう。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/599/original/E256I03.png" width="800" height="460" alt="管理画面から新規の翻訳文を追加する"/>
+</div>
+
+<p>トップページに戻ってみると、翻訳されたヘッダ文が新しく設定したバックエンドから取得され表示されています。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/600/original/E256I04.png" width="801" height="315" alt="新しいバックエンドからの翻訳文"/>
+</div>
+
+<h3>バックエンドにRedisを使用する</h3>
+
+<p>新しいバックエンドはうまく動くようになりましたが、値をRubyのハッシュに保存しているため、Webサーバを再起動したらすべて無くなってしまいます。翻訳文の保存のためには、より永続的な保存場所が必要です。そこでこのアプリケーションのために、永続的なkey-valueストアである<a href="http://redis.io">Redis</a>を使用することにします。</p> 
+
+<p>もしMacを使用しているのであれば、Redisをインストールする一番簡単な方法は<a href="https://github.com/mxcl/homebrew">HomeBrew</a>です。インストールは、次のコマンドを実行します。</p>
+<pre class="terminal">$ brew install redis</pre>
+
+<p>インストールができたら、指示に従ってRedisサーバを起動します。通常は、簡単に<code>redis-server</code>を実行するだけです。</p>
+
+<p>このアプリケーションでRedisを使用するためにRedis gemをインストールします。そのために<code>Gemfile</code>にgemへの参照情報を追加し、<code>bundle</code>コマンドを実行します。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.5'
+gem 'sqlite3'
+gem 'nifty-generators'
+gem 'redis'</pre>
+
+<p>これで、バックエンドの設定でハッシュを指定している部分を、Redisデータベースに置き換えられます。</p>
+
+<p class="codeFilePath">/config/initializers/i18n_backend.rb</p>
+<pre class="ruby">I18n.backend = I18n::Backend::KeyValue.new(Redis.new)</pre>
+
+<p>最低限必要なのはこれだけですが、加えてデータベースを特定する<code>:db</code>オプションを使用して、development (開発)、test (テスト)、production (本番)のそれぞれのモードで違うデータベースを指定することもできます。</p>
+
+<p>バックエンドをkey-valueストアに変更したのに合わせて、翻訳画面のコードも変更します。現状ではハッシュ内をループしているものを、Redisデータベース内をループさせるよう、コードの以下の部分を変更します。</p>
+
+<p class="codeFilePath">/app/views/translations/index.html.erb</p>
+<pre class="ruby">&lt;ul&gt;
+  &lt;% @translations.each do |key, value| %&gt;
+    &lt;li&gt;&lt;%= key %&gt;: &lt;%= value %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;</pre>
+
+<p>これを次のように変更します。</p>
+
+<p class="codeFilePath">/app/views/translations/index.html.erb</p>
+<pre class="ruby">&lt;ul&gt;
+  &lt;% @translations.keys.each do |key| %&gt;
+    &lt;li&gt;&lt;%= key %&gt;: &lt;%= @translations[key] %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;</pre>
+
+<p>これで<code>@translations</code>はRedisデータベースのインスタンスを参照するようになりました。しかし<code>each</code>には対応しないので、<code>keys</code>内で繰り返し処理をおこなうように変更します。この部分では、キーとそれに対応する値を表示します。</p> 
+
+<p>これで翻訳文のための永続的な保存場所ができたので、アプリケーションのサーバを再起動してもフォームから追加した翻訳が失われることはありません。</p>
+
+<h3>代替用バックエンドを追加する</h3>
+
+<p>これで標準以外のバックエンドを設定することができましたが、もし引き続き翻訳の一部にYAMLファイルを使用したい場合はどうすればいいでしょうか? そこでここからは、Key-valueストアから値を取得できない部分について代替のYAMLファイルを使用する方法を説明します。</p> 
+
+<p>まず前に作成した初期設定ファイルでバックエンドを定義した部分を修正します。<code>KeyValue</code>バックエンドを直接使用するのではなく、代わりに<code>Chain</code>バックエンドを使用します。<code>Chain</code>バックエンドから複数のバックエンドが順番に呼び出され、与えられた翻訳キーに対応する値が見つかればそれが返されます。</p>
+
+<p class="codeFilePath">/config/initializers/i18n_backend.rb</p>
+<pre class="ruby">I18n.backend = I18n::Backend::Chain.new(I18n::Backend::KeyValue.new(Redis.new), I18n.backend)</pre>
+
+<p>最初にRedisバックエンドを、次にデフォルトバックエンドを指定しています。アプリケーションはRedisデータベースで翻訳文を探し、対応するキーを見つけられなかった場合、YAMLファイルを参照します。</p>
+
+<p>この方法でバックエンドを設定すると、key-valueストアに直接アクセスするのが困難になります。この問題を回避するために、データベースを定数で指定して外に出します。</p>
+
+<p class="codeFilePath">/config/initializers/i18n_backend.rb</p>
+<pre class="ruby">TRANSLATION_STORE = Redis.new
+I18n.backend = I18n::Backend::Chain.new(I18n::Backend::KeyValue.new(TRANSLATION_STORE), I18n.backend)</pre>
+
+<p>これによって、アプリケーション内でkey-valueストアにアクセスする必要がある場合、例えば<code>TranslationsController</code>内で、この定数を使うことができます。<code>I18n.backend.store</code>を呼び出すことはできません。</p>
+
+<p class="codeFilePath">/app/controllers/translations_controller.rb</p>
+<pre class="ruby">def index
+  @translations = TRANSLATION_STORE
+end</pre>
+
+<p>Redisデータベースから保存された翻訳文を削除してトップページにアクセスしてみると、YAMLファイルからの翻訳文が表示されているのがわかります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/601/original/E256I05.png" width="800" height="452" alt="代替バックエンドからの翻訳文が表示される"/>
+</div>
+
+<p>翻訳文を元に戻すとそちらが優先され、Redisデータベースからの値が表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/602/original/E256I06.png" width="800" height="452" alt="Redisデータベースからの翻訳文が再度表示される"/>
+</div>
+
+<p>今回のエピソードはこれで終わりです。これで、ウェブ画面から翻訳文を編集できるシステムができたので、YAMLファイルを直接編集しなくてもよくなりました。実稼働中のアプリケーションでこのようなことを行う場合、使い勝手をよくするにはいろいろと作り込める部分はありますが、基本的な部分は今回紹介したとおりです。</p> 
+
+<p>このトピックに関しての情報が欲しければ、Jose Valimの近刊“<a href="http://pragprog.com/titles/jvrails/crafting-rails-applications">Crafting Rails Applications</a>”をお勧めします。現在ベータ版が入手可能で、今回のエピソードを執筆するのに非常に参考になりました。</p>

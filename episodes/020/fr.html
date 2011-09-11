@@ -1,0 +1,77 @@
+<h3>Restreindre les acc&egrave;s</h3>
+
+<p>Dans l&#x27;&eacute;pisode pr&eacute;c&eacute;dent nous avons cr&eacute;&eacute; des liens pour cr&eacute;er, modifier et supprimer des &eacute;pisodes d&#x27;ASCIIcasts. Les liens fonctionnent mais un peu trop puisque tout le monde peut cliquer dessus.</p>
+<img src="/system/photos/17/original/E019I03.png" width="663" height="558"/>
+<p class="title">La liste des &eacute;pisodes avec les liens d&#x27;administration visibles &agrave; tous les utilisateurs.</p>
+
+<p>Ce dont on a besoin est de restreindre les liens uniquement &agrave; ceux qui ont la permission de modifier les &eacute;pisodes. Nous allons modifier notre vue partielle pr&eacute;c&eacute;dente pour qu&#x27;elle ne rende que les liens <code>edit</code> et <code>destroy</code> si une m&eacute;thode appel&eacute;e <code>admin?</code> retourne true. (Nous ferons lq m&ecirc;me chose pour le lien <code>new</code> mais nous ne montreront pas le code ici).</p>
+
+<pre class="ruby">
+&lt;li&gt;
+  &lt;p class=&quot;episodeId&quot;&gt;&lt;%= episode.episode_id %&gt;&lt;/p&gt;
+  &lt;h3&gt;&lt;%= link_to episode.title, episode_path(episode.identifier) %&gt;&lt;/h3&gt;
+  &lt;p class=&quot;summary&quot;&gt;&lt;%= episode.summary %&gt;&lt;/p&gt;
+  &lt;p class=&quot;tagList&quot;&gt;
+    Tags: &lt;% episode.tags.each do |tag| %&gt;&lt;%= link_to tag.title, tag_path(tag.title) %&gt;&lt;% end %&gt;
+  &lt;/p&gt;
+  &lt;% if admin? %&gt;
+  &lt;p class=&quot;adminActions&quot;&gt;
+    &lt;%= link_to &quot;Edit&quot;, edit_episode_path(episode) %&gt;
+    &lt;%= link_to &quot;Destroy&quot;, episode_path(episode), :confirm =&gt; &quot;Are you sure?&quot;, :method =&gt; :delete %&gt;
+  &lt;/p&gt;
+  &lt;% end %&gt;
+&lt;/li&gt;
+</pre>
+<p class="title">La vue partielle <code>episode</code> avec l&#x27;appel &agrave; <code>admin?</code> encapsulant les liens <code>edit</code> et <code>destroy</code>.</p>
+
+<p>Ensuite, nous avons besoin d&#x27;&eacute;crire la m&eacute;thode <code>admin?</code>, mais o&ugrave; devrait-elle aller ? Puisque nous allons appeler cette m&eacute;thode depuis une vue, la place la plus &eacute;vidente est dans un fichier de helper de l&#x27;application mais nous voudrions aussi qu&#x27;elle soit disponible dans les contr&ocirc;leurs, donc on vq plut&ocirc;t l&#x27;ajouter dans le contr&ocirc;leur de l&#x27;application.</p>
+<pre class="ruby">
+class ApplicationController &lt; ActionController::Base
+  helper_method :admin?  
+  protected
+  def admin?
+    false
+  end  
+end
+</pre>
+<p class="title">La m&eacute;thode <code>admin?</code> ajout&eacute;e &agrave; <code>ApplicationController</code>.</p>
+
+<p>Pour l&#x27;instant, notre m&eacute;thode <code>admin?</code> va juste retourner <code>false</code>, (on l&#x27;impl&eacute;mentera compl&egrave;tement dans le prochain &eacute;pisode). Comme nous voulons l&#x27;utiliser dans nos vues, nous devons utiliser la m&eacute;thode <code>helper_method</code> qui la rend accessible depuis le code des vues.</p>
+
+<h3>On y est presque</h3>
+<p>Maintenant que nous avons &eacute;cris notre m&eacute;thode <code>admin?</code>, nos liens sont cach&eacute;s au utilisateurs non-administrateurs. Pourtant, il y a toujours un l&eacute;ger probl&egrave;me : N&#x27;importe qui peut toujours visiter la page d&#x27;administration directement et ajouter ou modifier des &eacute;pisodes par ce moyen. On peut corriger &ccedil;a en utilisant <code>before_filter</code>.</p>
+<pre class="ruby">
+class EpisodesController &lt; ApplicationController
+  before_filter :authorize, :except =&gt; [:index, :show ]
+  
+  def index
+    @episodes = Episode.find(:all)
+  end
+  # show, new, create, edit, update and destroy methods hidden.
+end
+</pre>
+<p class="title">The episodes controller (with the method bodies removed).</p>
+
+<p>L&#x27;appel &agrave; <code>before_filter</code> va ex&eacute;cuter une m&eacute;thode appel&eacute;e <code>authorize</code> avant l&#x27;appel de n&#x27;importe quelle m&eacute;thode de notre contr&ocirc;leur sauf pour les m&eacute;thodes <code>index</code> et <code>show</code>. Maintenant, nous allons avoir besoin d&#x27;&eacute;crire la m&eacute;thode <code>authorize</code>. Nous allons la mettre dans le contr&ocirc;leur Application pour qu&#x27;elle soit accessible depuis n&#x27;importe quel contr&ocirc;leur.</p>
+<pre class="ruby">
+class ApplicationController &lt; ActionController::Base
+  helper_method :admin?  
+  protected
+  def admin?
+    false
+  end  
+
+  def authorize
+    unless admin?
+      flash[:error] = &ldquo;Unauthorized access&rdquo;
+      redirect_to home_path
+      false
+    end
+  end
+end
+</pre>
+<p class="title"><code>ApplicationController</code> avec la m&eacute;thode <code>authorize</code>ajout&eacute;e.</p>
+<p>La m&eacute;thode v&eacute;rifie que l&#x27;utilisateur est un administrateur. Si ce n&#x27;est pas le cas, nous affichons un message temporaire et le redirigeons vers la page d&#x27;accueil. Enfin, elle retourne <code>false</code> ainsi aucune action n&#x27;est ex&eacute;cut&eacute;e. Maintenant, si nous essayons la nouvelle page de l&#x27;&eacute;pisode, nous sommes redirig&eacute;s vers la page d&#x27;accueil. Alternativement, si nous ne voulons pas que les utilisateurs non autoris&eacute;s connaissent l&#x27;existence de la page, nous pouvons lancer une erreur 404 &agrave; la place (Page Not Found).
+
+<h3>#TODO:</h3>
+<p>Notre syst&egrave;me d&#x27;administration est presque bon mais nous avons toujours besoin d&#x27;impl&eacute;menter la m&eacute;thode <code>admin?</code>. Nous allons vous montrer comment dans le prochain &eacute;pisode.</p>

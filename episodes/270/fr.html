@@ -1,0 +1,249 @@
+<p>Rails&nbsp;3.1 fournit de nouvelles fonctionnalit&eacute;s relatives &agrave; l&#x27;authentification et, dans cet &eacute;pisode, nous allons vous montrer comment fonctionnent certaines d&#x27;entre elles. Pour ce faire, nous nous baserons sur une simple application dont une page est accessible par n&#x27;importe quelle personne connaissant l&#x27;URL.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/678/original/E270I01.png" width="813" height="533" alt="La page que nous souhaitons s&eacute;curiser."/>
+</div>
+
+<h3>Authentification HTTP Basic</h3>
+
+<p>Nous voulons ajouter une gestion d&#x27;acc&egrave;s &agrave; cette page de fa&ccedil;on &agrave; ce qu&#x27;elle ne soit visible que par certains utilisateurs. Pour cela, nous devons ajouter une authentification et la fa&ccedil;on la plus rapide de le faire est pas l&#x27;utilisation de HTTP Basic. Rails&nbsp;3.1 fournit une nouvelle mani&egrave;re de la mettre en place, tout ce que nous avons besoin de faire, c&#x27;est de modifier le contr&ocirc;leur de la page et ajouter un appel &agrave; une m&eacute;thode appel&eacute;e <code>http_basic_authenticate_with</code> qui prend deux param&egrave;tres, <code>:name</code> et <code>:password</code>.</p>
+
+<p class="codeFilePath">/app/controllers/secret_controller.rb</p>
+<pre class="ruby">class SecretController &lt; ApplicationController
+  http_basic_authenticate_with :name =&gt; &quot;frodo&quot;, :password =&gt; &quot;thering&quot;
+  def index
+  end
+end</pre>
+
+<p>Si nous voulons restreindre l&#x27;authentification &agrave; certaines actions, nous pouvons ajouter les options <code>:only</code> (seulement) ou <code>:except</code> (sauf). Bien &eacute;videmment, dans une application r&eacute;elle, nous placerions le nom d&#x27;utilisateur et le mot de passe dans un fichier de configuration plut&ocirc;t que de les laisser en dur dans le code. Pour cette d&eacute;monstration cependant, cela fera l&#x27;affaire.</p>
+
+<p>Lorsque nous visitons la page, nous allons voir l&#x27;invite de connexion et nous ne pourrons voir la page qu&#x27;en saisissant un nom d&#x27;utilisateur et un mot de passe corrects, ceux que nous avons sp&eacute;cifi&eacute;s lors de l&#x27;appel &agrave; <code>http_basic_authenticate_with</code>.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/679/original/E270I02.png" width="816" height="537" alt="La page demande maintenant une authentification."/>
+</div>
+
+<p>HTTP Basic est quelque peu sous utilis&eacute;. Il est tr&egrave;s facile de le mettre en place pour rendre une partie de site priv&eacute;e et, avec Rails&nbsp;3.1, c&#x27;est encore plus simple.</p>
+
+<h3>Utiliser <code>secure_password</code></h3>
+
+<p>Il arrive que nous ayons besoin d&#x27;une authentification un peu plus pouss&eacute;e, pouvant g&eacute;rer plusieurs utilisateurs. Pour simplifier ceci, Rails&nbsp;3.1 fournit <code>secure_password</code>.</p>
+
+<p>Dans l&#x27;&eacute;pisode 250 [<a href="http://railscasts.com/episodes/250-authentication-from-scratch">regarder</a>, <a href="http://fr.asciicasts.com/episodes/250-authentication-from-scratch">lire</a>], nous avons cr&eacute;&eacute; un syst&egrave;me d&#x27;authentification depuis z&eacute;ro et Rails&nbsp;3.1 rend cela bien plus simple. Nous allons maintenant le faire et remplacer l&#x27;authentification HTTP Basic pour notre propre solution.</p>
+
+<p>La premi&egrave;re chose &agrave; faire est de g&eacute;n&eacute;rer un mod&egrave;le <code>User</code> avec les champs d&#x27;adresse e-mail et de mot de passe.</p>
+
+<pre class="terminal">$ rails g model user email:string password_digest:string</pre>
+
+<p>Nous pouvons maintenant cr&eacute;er la table en base en effectuant une migration.</p>
+
+<pre class="terminal">$ rake db:migrate</pre>
+
+<p>L&#x27;important ici est que nous appelons le champ pr&eacute;vu pour stocker le mot de passe <code>password_digest</code>. Nous allons ensuite devoir ajouter un appel &agrave; <code>has_secure_password</code> dans le mod&egrave;le <code>User</code>.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  has_secure_password
+end</pre>
+
+<p>Cela ajoute les m&eacute;thodes permettant d&#x27;enregistrer et d&#x27;authentifier le mot de passe saisi, les validateurs pour le mot de passe et la confirmation de mot de passe ainsi que les fonctionnalit&eacute;s d&#x27;authentification. Le champ <code>password_digest</code>, que nous avons cr&eacute;&eacute; plus t&ocirc;t, est utilis&eacute; en arri&egrave;re-plan pour stocker le mot de passe sous forme de hash.</p>
+
+<p>Par d&eacute;faut, il n&#x27;y a pas d&#x27;appel &agrave; <code>validates_presence_of</code> pour le mot de passe, nous allons donc en ajouter un, effectu&eacute; &agrave; la cr&eacute;ation d&#x27;un utilisateur.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  has_secure_password
+  validates_presence_of :password, :on =&gt; :create
+end</pre>
+
+<p>En temps normal nous devrions &eacute;galement tester l&#x27;adresse e-mail mais nous ne le ferons pas ici.</p>
+
+<p>Pour permettre aux utilisateurs de cr&eacute;er un compte, nous allons cr&eacute;er <code>UsersController</code>.</p>
+
+<pre class="terminal">$ rails g controller users</pre>
+
+<p>Le code du contr&ocirc;leur est relativement standard et ressemble &agrave; ceci&nbsp;:</p>
+
+<p class="codeFilePath">/app/controllers/users_controller.rb</p>
+<pre class="ruby">class UsersController &lt; ApplicationController
+  def new
+    @user = User.new
+  end
+
+  def create
+    @user = User.new(params[:user])
+    if @user.save
+      redirect_to root_url, :notice =&gt; &quot;Signed up!&quot;
+    else
+      render &quot;new&quot;
+    end
+  end
+end</pre>
+
+<p>La vue <code>new</code> contient un formulaire d&#x27;inscription.</p>
+
+<p class="codeFilePath">/app/views/users/new.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Sign Up&lt;/h1&gt;
+
+&lt;%= form_for @user do |f| %&gt;
+  &lt;% if @user.errors.any? %&gt;
+    &lt;div class=&quot;error_messages&quot;&gt;
+      &lt;h2&gt;Form is invalid&lt;/h2&gt;
+      &lt;ul&gt;
+        &lt;% for message in @user.errors.full_messages %&gt;
+          &lt;li&gt;&lt;%= message %&gt;&lt;/li&gt;
+        &lt;% end %&gt;
+      &lt;/ul&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= f.label :email %&gt;
+    &lt;%= f.text_field :email %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= f.label :password %&gt;
+    &lt;%= f.password_field :password %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= f.label :password_confirmation %&gt;
+    &lt;%= f.password_field :password_confirmation %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;actions&quot;&gt;&lt;%= f.submit %&gt;&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p>Si nous essayons de nous inscrire et saisissons un mot de passe qui ne correspond pas &agrave; la confirmation, nous allons voir un message de validation fournit par <code>has_secure_password</code>.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/680/original/E270I03.png" width="800" height="501" alt="has_secure_password nous fournit automatiquement un validateur de confirmation."/>
+</div>
+
+<p>Lorsque nous saisissons un mot de passe correspondant, nous nous inscrivons correctement.</p>
+
+<p>Les utilisateurs peuvent s&#x27;inscrire mais pas encore se connecter. Nous allons donc cr&eacute;er un formulaire de connexion avec des champs e-mail et mot de passe.</p>
+
+<p class="codeFilePath">/app/views/sessions/new.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Log in&lt;/h1&gt;
+
+&lt;%= form_tag sessions_path do %&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= label_tag :email %&gt;
+    &lt;%= text_field_tag :email, params[:email] %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= label_tag :password %&gt;
+    &lt;%= password_field_tag :password %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;actions&quot;&gt;&lt;%= submit_tag &quot;Log in&quot; %&gt;&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p>Notez que le formulaire utilise <code>form_tag</code> plut&ocirc;t que <code>form_for</code> puisque nous n&#x27;&eacute;ditons pas une ressource. Le formulaire envoie les informations &agrave; <code>sessions_path</code> et nous avons donc besoin de cr&eacute;er <code>SessionsController</code>.</p>
+
+<pre class="terminal">$ rails g controller sessions</pre>
+
+<p>Ce contr&ocirc;leur aura les m&eacute;thodes <code>new</code>, <code>create</code> et <code>destroy</code> afin que les utilisateurs puissent se connecter et se d&eacute;connecter.</p>
+
+<p class="codeFilePath">/app/controllers/sessions_controller.rb</p>
+<pre class="ruby">class SessionsController &lt; ApplicationController
+  def new
+  end
+
+  def create
+    if # authenticated?
+      session[:user_id] = user.id
+      redirect_to root_url, :notice =&gt; &quot;Logged in!&quot;
+    else
+      flash.now.alert = &quot;Invalid email or password&quot;
+      render &quot;new&quot;
+    end
+  end
+
+  def destroy
+    session[:user_id] = nil
+    redirect_to root_url, :notice =&gt; &quot;Logged out!&quot;
+  end
+end</pre>
+
+<p>L&#x27;action <code>create</code> n&#x27;est pas tout &agrave; fait compl&egrave;te car nous devons encore &eacute;crire le code d&eacute;terminant si l&#x27;utilisateur se connectant est authentifi&eacute; ou non. C&#x27;est l&agrave; que nous pouvons tirer avantage du fait que Rails&nbsp;3.1 nous fournit <code>secure_password</code>.</p>
+
+<p>La premi&egrave;re chose que nous allons avoir besoin de faire est de r&eacute;cup&eacute;rer l&#x27;utilisateur dont l&#x27;adresse e-mail correspond &agrave; la valeur saisie dans le formulaire. Nous pouvons ensuite appeler <code>authenticate</code>, m&eacute;thode fournie par <code>has_secure_password</code>, sur cet utilisateur en passant en param&egrave;tre le mot de passe saisi dans le formulaire. Cette m&eacute;thode va comparer le mot de passe au digest de celui stock&eacute; en base de donn&eacute;es. Si aucune correspondance n&#x27;est trouv&eacute;e, <code>find_by_email</code> va retourner <code>nil</code> de fa&ccedil;on &agrave; ce que nous puissions tester que l&#x27;utilisateur existe avant de l&#x27;authentifier.</p>
+
+<p class="codeFilePath">/app/controllers/sessions_controller.rb</p>
+<pre class="ruby">def create
+  user = User.find_by_email(params[:email])
+  if user &amp;&amp; user.authenticate(params[:password])
+    session[:user_id] = user.id
+    redirect_to root_url, :notice =&gt; &quot;Logged in!&quot;
+  else
+    flash.now.alert = &quot;Invalid email or password&quot;
+    render &quot;new&quot;
+  end
+end</pre>
+
+<p>C&#x27;est tout ce dont nous avons besoin pour authentifier gr&acirc;ce &agrave; <code>secure_password</code>. Nous pouvons tester cela en essayant de nous connecter. Si nous saisissons un mot de passe incorrect, nous ne pourrons pas nous authentifier.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/681/original/E270I04.png" width="800" height="390" alt="Une erreur est remont&eacute;e si le nom d&#x27;utilisateur ou le mot de passe sont incorrects."/>
+</div>
+
+<p>Si nous nous connectons avec les bons identifiants, nous serons authentifi&eacute;s et redirig&eacute;s vers la page d&#x27;accueil.</p>
+
+<p>&Agrave; n&#x27;importe quel endroit de notre application, nous devons r&eacute;cup&eacute;rer l&#x27;utilisateur actuellement authentifi&eacute;. Pour ce faire, nous allons ajouter une m&eacute;thode <code>current_user</code> dans <code>ApplicationController</code> et en faire un helper. Nous pourrons ainsi y faire appel dans nos vues. Cette m&eacute;thode va r&eacute;cup&eacute;rer l&#x27;utilisateur depuis la session.</p>
+
+<pre class="codeFilePath">/app/controllers/application_controller.rb</pre>
+<pre class="ruby">class ApplicationController &lt; ActionController::Base
+  protect_from_forgery
+
+  private
+
+  def current_user
+    @current_user ||= User.find(session[:user_id]) if session[:user_id]
+  end
+
+  helper_method :current_user
+end</pre>
+
+<p>Ce qui est fort sympathique, c&#x27;est que cette m&eacute;thode d&#x27;authentification est aussi simple que le mod&egrave;le <code>User</code>, deux lignes de code.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  has_secure_password
+  validates_presence_of :password, :on =&gt; :create
+end</pre>
+
+<p>En comparaison, la solution que nous avions cr&eacute;&eacute;e dans l&#x27;&eacute;pisode 250 avait un <a href="https://github.com/ryanb/railscasts-episodes/blob/master/episode-250/auth/app/models/user.rb">mod&egrave;le <code>User</code> bien plus complexe</a>. Cela dit, il serait sage d&#x27;ajouter une ligne <code>attr_accessible</code> au mod&egrave;le de fa&ccedil;on &agrave; ce que seuls l&#x27;e-mail, le mot de passe et la confirmation de mot de passe puissent &ecirc;tre renseign&eacute;s dans le formulaire d&#x27;inscription.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  attr_accessible :email, :password, :password_confirmation
+  has_secure_password
+  validates_presence_of :password, :on =&gt; :create
+end</pre>
+
+<h3>Ajouter HTTPS</h3>
+
+<p>Si nous g&eacute;rons l&#x27;authentification dans nos applications, nous ne voulons par voir les identifiants envoy&eacute;s sur le r&eacute;seau de fa&ccedil;on lisible. C&#x27;est donc une bonne id&eacute;e d&#x27;utiliser SSL et de passer par HTTPS. Avant Rails&nbsp;3.1, cela devait &ecirc;tre fait manuellement ou via un plugin. Il existe maintenant un fa&ccedil;on bien plus simple de le faire.</p>
+
+<p>Pour restreindre un contr&ocirc;leur afin qu&#x27;il soit uniquement accessible en HTTPS, nous devons simplement ajouter un appel &agrave; la m&eacute;thode de classe <code>force_ssl</code>. Si nous voulons restreindre uniquement certaines actions, nous pouvons utiliser les options <code>:only</code> ou <code>:except</code> comme nous le ferions avec <code>before_filter</code>.</p>
+
+<p class="codeFilePath">/app/controllers/application_controller.rb</p>
+<pre class="ruby">class ApplicationController &lt; ActionController::Base
+  protect_from_forgery
+  force_ssl
+  private
+
+  def current_user
+    @current_user ||= User.find(session[:user_id]) if session[:user_id]
+  end
+
+  helper_method :current_user
+end</pre>
+
+<p>La m&eacute;thode <code>force_ssl</code> force uniquement HTTPS dans les modes test et production. Si nous relan&ccedil;ons le serveur de notre application en mode production et rechargeons la page d&#x27;inscription, elle va tenter de nous rediriger vers la version SSL.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/682/original/E270I05.png" width="795" height="280" alt="La page requi&egrave;re maintenant SSL."/>
+</div>
+
+<p>Cela &eacute;choue car notre serveur ne support par HTTPS mais, si c&#x27;&eacute;tait le cas, nous verrions la version s&eacute;curis&eacute;e de cette page.</p>
+
+<p>C&#x27;est tout pour cet &eacute;pisode sur l&#x27;authentification dans Rails&nbsp;3.1. Tous les ajouts autour de l&#x27;authentification rendent bien plus facile d&#x27;en ajouter &agrave; nos applications Rails.</p>

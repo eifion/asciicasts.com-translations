@@ -1,0 +1,248 @@
+<p>Rails 3.1には認証関連の新機能が含まれています。今回のエピソードではそのいくつかについて使い方を紹介します。実際に動作するところを見るために、URLを知っている人なら誰でもアクセスできるページを持つ簡単なアプリケーションを準備しました。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/678/original/E270I01.png" width="813" height="533" alt="このページに機密管理を設定していく"/>
+</div>
+
+<h3>HTTPベーシック認証</h3>
+
+<p>このページに参照権限を設定して、特定のユーザしかアクセスできないように制限をかけようと思います。そのためには認証機能を追加しなくてはいけませんが、一番早いのはHTTPベーシック認証を追加する方法です。Rails 3.1ではこのための新しい方法を提供しています。必要な作業は、ページのコントローラを修正して、<code>http_basic_authenticate_with</code>という新しいメソッドを呼び出すだけです。その時にオプションとして<code>:name</code>と<code>:password</code>を指定します。</p>
+
+<p class="codeFilePath">/app/controllers/secret_controller.rb</p>
+<pre class="ruby">class SecretController &lt; ApplicationController
+  http_basic_authenticate_with :name =&gt; "frodo", :password =&gt; "thering"
+  def index
+  end
+end</pre>
+
+<p>認証を一部のアクションのみに制限したい場合には、オプションで<code>:only</code>か<code>:except</code>を指定します。言うまでもないですが、実際のアプリケーションではユーザ名とパスワードは素のビューのコード内に持たずに設定ファイル内に移すべきですが、このデモアプリではそのままで進めます。</p>
+
+<p>ページにアクセスしてみるとログインダイアログが表示され、<code>http_basic_authenticate_with</code>で設定した正しいユーザ名とパスワードを入力しなければページを見ることができなくなりました。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/679/original/E270I02.png" width="816" height="537" alt="ページが認証を求める"/>
+</div>
+
+<p>HTTPベーシックはもっと活用されるべきだと思います。サイトの一部へのアクセスに制限をかけたい場合には素早く簡単に設定できるのですが、Rails 3.1ではさらに簡単になっています。</p>
+
+<h3><code>secure_password</code>を使う</h3>
+
+<p>しかし時にはより包括的な、複数ユーザに対応した権限付与のしくみが必要です。 その作業を簡単にするためにRails 3.1に<code>secure_password</code>という機能が加わりました。</p>
+
+<p>エピソード250 [<a href="http://railscasts.com/episodes/250-authentication-from-scratch">動画を見る</a>, <a href="http://asciicasts.com/episodes/250-authentication-from-scratch">読む</a>]では認証システムをゼロから作りましたが、Rails 3.1ではこの作業がかなり簡単にできるようになりました。今からこの作業を行い、HTTPベーシック認証を置き換えます。</p>
+
+<p>まず最初に、Eメールアドレスとパスワードのフィールドを持つ<code>User</code>モデルを作成します。</p>
+
+<pre class="terminal">$ rails g model user email:string password_digest:string</pre>
+
+<p>次にデータベースのマイグレーションを行い、テーブルを作成します。</p>
+
+<pre class="terminal">$ rake db:migrate</pre>
+
+<p>ここで重要なのは、パスワードを格納するフィールドの名称を<code>password_digest</code>にすることです。次に<code>User</code>モデルで<code>has_secure_password</code>の呼び出しを追加します。</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  has_secure_password
+end</pre>
+
+<p>これによって、入力されたパスワードを設定・認証するメソッドと、パスワードと確認パスワードを検証するバリデータと、認証機能が追加されます。前に作成した<code>password_digest</code>フィールドは、裏でパスワードのハッシュ値を保存するのに使われます。</p> 
+
+<p>デフォルトではパスワード用の<code>validates_presence_of</code>検証がないため、新規ユーザが作成されたときに起動される検証機能を追加する必要があります。</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  has_secure_password
+  validates_presence_of :password, :on =&gt; :create
+end</pre>
+
+<p>通常はEメールアドレスも検証するところですが、ここでは省略します。</p>
+
+<p>ユーザによるアカウント作成を許可するために<code>UsersController</code>を作成します。</p>
+
+<pre class="terminal">$ rails g controller users</pre>
+
+<p>コントローラのコードは次のとおり標準的なものです。</p>
+
+<p class="codeFilePath">/app/controllers/users_controller.rb</p>
+<pre class="ruby">class UsersController &lt; ApplicationController
+  def new
+    @user = User.new
+  end
+
+  def create
+    @user = User.new(params[:user])
+    if @user.save
+      redirect_to root_url, :notice =&gt; "Signed up!"
+    else
+      render "new"
+    end
+  end
+end</pre>
+
+<p>newビューには、登録用フォームが含まれています。</p>
+
+<p class="codeFilePath">/app/views/users/new.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Sign Up&lt;/h1&gt;
+
+&lt;%= form_for @user do |f| %&gt;
+  &lt;% if @user.errors.any?%&gt;
+    &lt;div class="error_messages"&gt;
+      &lt;h2&gt;Form is invalid&lt;/h2&gt;
+      &lt;ul&gt;
+        &lt;% for message in @user.errors.full_messages %&gt;
+          &lt;li&gt;&lt;%= message %&gt;&lt;/li&gt;
+        &lt;% end %&gt;
+      &lt;/ul&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+  &lt;div class="field"&gt;
+    &lt;%= f.label :email %&gt;
+    &lt;%= f.text_field :email %&gt;
+  &lt;/div&gt;
+  &lt;div class="field"&gt;
+    &lt;%= f.label :password %&gt;
+    &lt;%= f.password_field :password %&gt;
+  &lt;/div&gt;
+  &lt;div class="field"&gt;
+    &lt;%= f.label :password_confirmation %&gt;
+    &lt;%= f.password_field :password_confirmation %&gt;
+  &lt;/div&gt;
+  &lt;div class="actions"&gt;&lt;%= f.submit %&gt;&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p>登録時に確認用パスワードが一致しないと、<code>has_secure_password</code>からの検証メッセージが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/680/original/E270I03.png" width="800" height="501" alt="has_secure_passwordが自動的に確認用バリデータを表示する"/>
+</div>
+
+<p>確認用パスワードが一致すると登録が成功します。</p>
+
+<p>登録は成功しますがログインはまだなので、次にEメールとパスワードフィールドを持ったログインフォームを作成します。</p>
+
+<p class="codeFilePath">/app/views/sessions/new.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Log in&lt;/h1&gt;
+
+&lt;%= form_tag sessions_path do %&gt;
+  &lt;div class="field"&gt;
+    &lt;%= label_tag :email %&gt;
+    &lt;%= text_field_tag :email, params[:email] %&gt;
+  &lt;/div&gt;
+  &lt;div class="field"&gt;
+    &lt;%= label_tag :password %&gt;
+    &lt;%= password_field_tag :password %&gt;
+  &lt;/div&gt;
+  &lt;div class="actions"&gt;&lt;%= submit_tag "Log in" %&gt;&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p>このフォームは、リソースであるテーブルデータを編集するためではないので、<code>form_for</code>ではなく<code>form_tag</code>を使用しています。フォームは<code>sessions_path</code>に送信されるので、新たに<code>SessionsController</code>を作成します。</p>
+
+<pre class="terminal">$ rails g controller sessions</pre>
+
+<p>このコントローラは、<code>new</code>, <code>create</code>, <code>destroy</code>アクションを持ち、ユーザのログイン、ログアウトを制御します。</p>
+
+<p class="codeFilePath">/app/controllers/sessions_controller.rb</p>
+<pre class="ruby">class SessionsController &lt; ApplicationController
+  def new
+  end
+
+  def create
+    if # authenticated?      session[:user_id] = user.id
+      redirect_to root_url, :notice =&gt; "Logged in!"
+    else
+      flash.now.alert = "Invalid email or password"
+      render "new"
+    end
+  end
+
+  def destroy
+    session[:user_id] = nil
+    redirect_to root_url, :notice =&gt; "Logged out!"
+  end
+end</pre>
+
+<p><code>create</code>アクションはまだ完成しておらず、ログインしたユーザが認証されているかどうかを判断するコードを、追加で記述する必要があります。ここで、Rails 3.1で追加された<code>secure_password</code>を利用することができます。</p>  
+
+<p>まず最初に、フォームに入力された値とEメールアドレスが一致するユーザを取得します。そのユーザに対して、<code>has_secure_password</code>で提供される<code>authenticate</code>メソッドを呼び出して、フォームで入力されたパスワードを渡します。このメソッドが、入力されたパスワードとデータベース内のパスワードダイジェストを比較します。一致するユーザが見つからなければ<code>find_by_email</code>が<code>nil</code>を返すので、認証の前にユーザが存在するかどうかをチェックします。</p>
+
+<p class="codeFilePath">/app/controllers/sessions_controller.rb</p>
+<pre class="ruby">def create
+  user = User.find_by_email(params[:email])
+  if user &amp;&amp; user.authenticate(params[:password])
+    session[:user_id] = user.id
+    redirect_to root_url, :notice =&gt; "Logged in!"
+  else
+    flash.now.alert = "Invalid email or password"
+    render "new"
+  end
+end</pre>
+
+<p><code>secure_password</code>で認証する場合に必要なのはこれだけです。これをテストするためにログインしてみます。間違ったパスワードを入力すると、認証が失敗します。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/681/original/E270I04.png" width="800" height="390" alt="ユーザ名かパスワードが違うとエラーが発生する"/>
+</div>
+
+<p>正しい認証情報でログインすると、認証が成功しトップページにリダイレクトされます。</p>
+
+<p>アプリケーションの他の場所では、現在ログイン中のユーザを取得しなくてはいけないので、<code>ApplicationController</code>に<code>current_user</code>メソッドを追加し、ビューからアクセスできるようにヘルパーメソッドにします。このメソッドは、セッションから現在のユーザを取得します。</p>
+
+<pre class="codeFilePath">/app/controllers/application_controller.rb</pre>
+<pre class="ruby">class ApplicationController &lt; ActionController::Base
+  protect_from_forgery
+  
+  private
+  
+  def current_user
+    @current_user ||= User.find(session[:user_id]) if session[:user_id]
+  end
+  
+  helper_method :current_user
+end</pre>
+
+<p>この認証用メソッドの優れた点は、<code>User</code>モデルがコード2行のみと非常にシンプルであることです。</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  has_secure_password
+  validates_presence_of :password, :on =&gt; :create
+end</pre>
+
+<p>これと比べると、エピソード250で紹介した方法では<a href="https://github.com/ryanb/railscasts-episodes/blob/master/episode-250/auth/app/models/user.rb">よりずっと複雑な<code>User</code>モデル</a>を使用していました。そうは言うものの、もう一行だけ、<code>attr_accessible</code>行をモデルに追加して、ユーザ登録フォームからはEメール、パスワード、確認用パスワードのフィールドのみを編集できるようにしておくのがいいでしょう。</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  attr_accessible :email, :password, :password_confirmation
+  has_secure_password
+  validates_presence_of :password, :on =&gt; :create
+end</pre>
+
+<h3>HTTPSを追加する</h3>
+
+<p>アプリケーションで認証を処理する場合、秘密情報を平文で送信したくないので、SSLを用いてHTTPSに切り替えるのがいいでしょう。Rails 3.1の前は、これを行うには手作業かプラグインを介す必要がありましたが、今はずっと簡単に実装する方法があります。</p>
+
+<p>コントローラをHTTPSのみでアクセスされるよう制限をかけるには、ただ単に<code>force_ssl</code>クラスメソッドの呼び出しを追加するだけです。さらにコントローラ内のある特定のアクションのみに制限をかけるには、<code>:only</code>あるいは<code>:except</code>オプションを用いて<code>before_filter</code>と同じ要領で設定を行えます。</p> 
+
+<p class="codeFilePath">/app/controllers/application_controller.rb</p>
+<pre class="ruby">class ApplicationController &lt; ActionController::Base
+  protect_from_forgery
+  force_ssl
+  private
+  
+  def current_user
+    @current_user ||= User.find(session[:user_id]) if session[:user_id]
+  end
+  
+  helper_method :current_user
+end</pre>
+
+<p><code>force_ssl</code>メソッドはテスト(test)と本番(production)モードでのみHTTPSを強制します。アプリケーションのサーバを本番(production)モードで再起動して登録ページを再度読み込むと、SSL版にリダイレクトしようとします。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/682/original/E270I05.png" width="795" height="280" alt="ページがSSLを求める"/>
+</div>
+
+<p>サーバがHTTPSをサポートしていないのでこれはエラーになりますが、もしサポートしていればこのページのセキュア版が表示されます。</p>
+
+<p>Rails 3.1の認証機能についての今回のエピソードは以上です。認証に関する新しい追加機能によって、Railsアプリケーションに認証機能を実装するのがずっと簡単になりました。</p>

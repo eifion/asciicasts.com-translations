@@ -1,0 +1,335 @@
+<p>ほとんどすべてのRailsアプリケーションは、なんらかの認証機能を必要とします。パスワード認証機能を提供するライブラリとしてもっともよく使われるのが、<a href="https://github.com/binarylogic/authlogic">Authlogic</a>、<a href="https://github.com/plataformatec/devise">Devise</a>、 <a href="https://github.com/technoweenie/restful-authentication">Restful Authentication</a>、<a href="https://github.com/thoughtbot/clearance">Clearance</a>の４つですが、どれを使うのがいいのでしょうか？AuthlogicとResful Authenticationはここ数ヶ月更新されていないので、残るのはDeviseかClearanceです。どちらもRailsのengineという仕組みによって、いくつかのコントローラとビューをアプリケーションに付加し認証機能を提供するものです。認証のような重要な機能を扱う場合、engineという仕組みは最適とは言えません。というのも、controllerやviewで提供される多くの機能を結局は上書きすることになりやすいからです。このような場合、engineという仕組みの利点は活かされず、アプリケーション全体を複雑なものにしてしまいます。</p> 
+
+<p>もちろんengineを使うのがふさわしい場合もあり、どんなときも使うべきでないというわけではありませんが、ここでは別の方法を検討したほうがいいかもしれません。認証機能の実装のためにはengineよりもgeneratorの方が向いているかも知れません。すべてのコードがアプリケーション内にあり、カスタマイズしやすいからです。例えば、Ryan BatesのNifty Authenticationには、アプリケーションにパスワード認証機能を 追加するためのベースになる簡単なコードを生成するジェネレータが含まれています。しかしこの記事はNifty Authenticationを紹介するのが目的ではありません。ここではパスワード認証をゼロから作る方法を紹介することにしましょう。それによって、実際にengineやgeneratorを使うときにも、その中身がどのような仕組みで動いているかについて理解が深まることでしょう。</p>
+
+<h3>はじめに</h3>
+
+<p>認証のしくみをゼロから作るにあたり、まずは<code>auth</code>という名前でRails 3のアプリケーションを新規作成しましょう。</p>
+
+<pre class="terminal">$ rails new auth</pre>
+
+<p>続いて、新しく作成した<code>auth</code>ディレクトリに <code>cd</code>し、ユーザ登録(sign-up)プロセスを作ります。ユーザを作成するためのコントローラが必要なので、<code>UsersController</code>を作成し、 その中に<code>new</code> アクションを作ります。</p>
+
+<pre class="terminal">$ rails g controller users new</pre>
+
+<p>このコントローラと一緒に、ユーザのメールアドレスとパスワードを保存するための<code>User</code>モデルも作成します。言うまでもないですが、パスワードは決して素のテキストで保存するべきではありません。その代わりにハッシュ値とソルトを保存します。</p> 
+
+<pre class="terminal">$ rails g model user email:string password_hash:string password_salt:string</pre>
+
+<p>モデルを作成したら、データベースをmigrateしてusersテーブルを作成します。</p>
+
+<pre class="terminal">$ rake db:migrate</pre>
+
+<p>次に<code>UsersController</code>内の<code>new</code> アクションと<code>create</code>アクションにコードを記述します。</p>
+
+<p class="codeFilePath">/app/controllers/users_controller.rb</p>
+<pre class="ruby">class UsersController &lt; ApplicationController
+  def new
+    @user = User.new
+  end
+  
+  def create
+    @user = User.new(params[:user])
+    if @user.save
+      redirect_to root_url, :notice =&gt; "Signed up!"
+    else
+      render "new"
+    end
+  end
+end</pre>
+
+<p>これはごく標準的なコントローラのコードです。<code>new</code>アクションで、新しい<code>User</code>を生成します。<code>create</code>アクションでは、入力フォームから渡された引数に基づいて<code>User</code>を生成します。新しく生成された<code>User</code>が有効なら、スタートページにリダイレクトします。（スタートページはまだ作成されていません。）Userが正しく生成されなければ<code>new</code>アクションのテンプレートを再表示します。</p>
+
+<p>ここで、<code>new</code>テンプレートを作りましょう。ここには、<code>email</code>、<code>password</code>、 <code>password_confirmation</code>の各フィールドとエラーメッセージを表示するためのコードが含まれます。</p>
+
+<p class="codeFilePath">/app/views/users/new.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Sign Up&lt;/h1&gt;
+
+&lt;%= form_for @user do |f| %&gt;
+  &lt;% if @user.errors.any?%&gt;
+    &lt;div class="error_messages"&gt;
+      &lt;h2&gt;Form is invalid&lt;/h2&gt;
+      &lt;ul&gt;
+        &lt;% for message in @user.errors.full_messages %&gt;
+          &lt;li&gt;&lt;%= message %&gt;&lt;/li&gt;
+        &lt;% end %&gt;
+      &lt;/ul&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+  &lt;p&gt;
+    &lt;%= f.label :email %&gt;&lt;br /&gt;
+    &lt;%= f.text_field :email %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :password %&gt;&lt;br /&gt;
+    &lt;%= f.password_field :password %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= f.label :password_confirmation %&gt;
+    &lt;%= f.password_field :password_confirmation %&gt;
+  &lt;/p&gt;
+  &lt;p class="button"&gt;&lt;%= f.submit %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>先ほど作成した<code>User</code>モデルには属性として<code>password</code>と <code>password_confirmation</code>を持っていません。その代わりに<code>User</code>モデル内にこれらを処理するアクセサメソッドを作ります。</p> 
+
+<p>次に、routesファイルを少し修正します。controllerジェネレータは、次のようなrouteを生成しました。</p>
+
+<pre class="ruby">get "users/new"</pre>
+
+<p>このrouteを/sign_upに変えて、users#newにアクセスするように指示し、名前を<code>"sign_up"</code>にします。また、root routeをユーザ登録フォームに対応づけます。最後にrecources :usersを追加して、createアクションが機能するようにします。</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Auth::Application.routes.draw do
+  get "sign_up" =&gt; "users#new", :as =&gt; "sign_up"
+  root :to =&gt; "users#new"
+  resources :users
+end</pre>
+
+<p>ここでサーバを起動して、登録フォームのページにアクセスすると、エラーが表示されます。</p>
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/557/original/E250I01.png" width="800" height="514" alt="フォームにアクセスするとエラーが表示される"/>
+</div>
+
+<p>このエラーが表示されたのは、ユーザ情報を入力するフォームには<code>password</code>フィールドがあるにもかかわらずデータベースには対応するフィールドがないため<code>User</code>モデルにも<code>password</code>属性がないからです。そこでモデルでpassword属性を生成し、それと同時に<code>password_confirmation</code>フィールドを処理する属性も作ります。
+パスワード確認には、<code>validates_confirmation_of</code>を使えば2つのフィールドへの入力が一致しているかも同時にチェックしてくれます。ちょうどいいタイミングなので、フォーム内の他の入力確認、メールアドレスとパスワードの存在チェック、メールアドレスの重複チェックも追加しましょう。</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  attr_accessor :password
+  validates_confirmation_of :password
+  validates_presence_of :password, :on =&gt; :create
+  validates_presence_of :email
+  validates_uniqueness_of :email
+end</pre>
+
+<p>Userモデルを作成したときに、暗号化したパスワードを保存するために<code>password_hash</code>と<code>password_salt</code>を作りました。フォームが登録されるときに<code>password</code>フィールドの値を暗号化し、結果のハッシュ値とソルトをこれらのフィールドに保存します。パスワードの暗号化には、<a href="http://bcrypt.sourceforge.net/">bcrypt</a>が便利です。ここでは<a href="http://bcrypt-ruby.rubyforge.org/">bcrypt-ruby</a> gemを使うことにします。まずGemfileにgemへの参照情報を記述して、bundleコマンドを実行し、gemがインストールされたことを確認します。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.3'
+
+gem 'sqlite3-ruby', :require =&gt; 'sqlite3'
+gem 'bcrypt-ruby', :require =&gt; 'bcrypt'</pre>
+
+<p>次に<code>User</code>モデルを編集し、パスワードが保存される前に暗号化するように修正します。これを実現するために、<code>before_save</code>コールバックを使用し、この後作成する<code>encrypt_password</code>メソッドを呼び出します。このメソッドはパスワードが存在するかをチェックし、もし存在すれば、<code>BCrypt::Engine</code>の２つのメソッド<code>generate_salt</code>と<code>hash_secret</code>を使って、ソルトとハッシュ値を生成します。</p>
+ 
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  attr_accessor :password
+  before_save :encrypt_password
+  
+  validates_confirmation_of :password
+  validates_presence_of :password, :on =&gt; :create
+  validates_presence_of :email
+  validates_uniqueness_of :email
+  
+  def encrypt_password
+    if password.present?      self.password_salt = BCrypt::Engine.generate_salt
+      self.password_hash = BCrypt::Engine.hash_secret(password, password_salt)
+    end
+  end
+end</pre>
+
+<p>これで、ユーザ情報が登録されると、<code>password_hash</code>と<code>password_salt</code>がデータベースに保存されるようになりました。ユーザ登録フォームにアクセスして情報を正しく入力すると、homeページにリダイレクトされます。そこでデータベース内の<code>users</code>テーブルを見てみると、新しいユーザの情報が、暗号化されたパスワードのハッシュ値とソルトと共に登録されているのがわかります。</p>
+
+<pre class="terminal">$ rails dbconsole
+SQLite version 3.6.12
+Enter ".help" for instructions
+Enter SQL statements terminated with a ";"
+sqlite&gt; .mode column
+sqlite&gt; .header on
+sqlite&gt; SELECT * FROM users;
+id          email                  password_hash                                                 password_salt                  created_at                  updated_at                
+----------  ---------------------  ------------------------------------------------------------  -----------------------------  --------------------------  --------------------------
+1           eifion@asciicasts.com  $2a$10$Jh./oyCeThSChUCY8Of6F.fiHP8m4gMkZNjUR3vsDgvupUPgumNs.  $2a$10$Jh./oyCeThSChUCY8Of6F.  2011-01-26 21:51:56.399518  2011-01-26 21:51:56.399518</pre>
+
+<h3>ログイン</h3>
+
+<p>これで半分まで来ました。ユーザ登録(sign up)ができるようになりましたが、まだログイン(sign in)ができません。それではこれから、ログインフォームを処理する<code>sessions</code>コントローラを新しく作成しましょう。</p> 
+
+<pre class="terminal">$ rails g controller sessions new</pre>
+
+<p><code>new</code>ビューのファイル内に、ログイン用のフォームを作成します。</p>
+
+<p class="codeFilePath">/app/views/sessions/new.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Log in&lt;/h1&gt;
+
+&lt;%= form_tag sessions_path do %&gt;
+  &lt;p&gt;
+    &lt;%= label_tag :email %&gt;&lt;br /&gt;
+    &lt;%= text_field_tag :email, params[:email] %&gt;
+  &lt;/p&gt;
+  &lt;p&gt;
+    &lt;%= label_tag :password %&gt;&lt;br /&gt;
+    &lt;%= password_field_tag :password %&gt;
+  &lt;/p&gt;
+  &lt;p class="button"&gt;&lt;%= submit_tag %&gt;&lt;/p&gt;
+&lt;% end %&gt;</pre>
+
+<p>ここでは<code>form_for</code>ではなく<code>form_tag</code>を使います。<code>form_for</code>を使った場合、フォーム名に対応するモデルがあるということを示すことになるからです。今回、<code>Session</code>モデルはないので、form_forは使えません。フォームからのデータは<code>sessions_path</code>にPOSTされ、<code>SessionController</code>の<code>create</code>アクションを呼び出します。フォームには、email addressとpasswordという２つのフィールドがあります。</p> 
+
+<p>ここで、ルーティングにも変更を加えます。ジェネレータが生成した<code>"sessions/new"</code>を、<code>"log_in"</code>ルートに置き換えます。また、ユーザ登録フォームが正しく動くよう、<code>resources :sessions</code>も追加しておきます。</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Auth::Application.routes.draw do
+  get "log_in" =&gt; "sessions#new", :as =&gt; "log_in"
+
+  get "sign_up" =&gt; "users#new", :as =&gt; "sign_up"
+  root :to =&gt; "users#new"
+  resources :users
+  resources :sessions
+end</pre>
+
+<p><code>SessionsController</code>内に<code>create</code>アクションを作成し、ユーザがログインしたときの処理を記述します。そこでは、<code>User</code>モデルのnew class methodをコールすることでユーザ認証をおこないます。ユーザが正しく認証されたら、このメソッドが<code>User</code>のレコードを返します。その場合、ユーザIDをセッション変数に格納して、スタートページにリダイレクトし、ユーザにはflashメッセージを表示して正しくログインしたことを知らせます。認証が成功しなかった場合は、別のflashメッセージを表示してフォームを再表示します。ポイントは、他のページへリダイレクトするのではなく、<code>flash.now</code>を使ってページを表示しています。</p>
+
+<p class="codeFilePath">/app/controllers/sessions_controller.rb</p>
+<pre class="ruby">class SessionsController &lt; ApplicationController
+  def new
+  end
+  
+  def create
+    user = User.authenticate(params[:email], params[:password])
+    if user
+      session[:user_id] = user.id
+      redirect_to root_url, :notice =&gt; "Logged in!"
+    else
+      flash.now.alert = "Invalid email or password"
+      render "new"
+    end
+  end
+end</pre>
+
+<p>ここで、User.authenticateメソッドを作ります。このメソッドは入力されたメールアドレスをもとにユーザを検索します。ユーザが検索されたら、ユーザ登録のときと同様にフォームから入力されたパスワードをそのユーザの<code>password_salt</code>を用いて暗号化します。パスワードから生成されたハッシュ値が、保存されたハッシュ値と一致すればパスワードが正しいということでユーザが返されるか、そうでなければ<code>nil</code>が返されます。Rubyでは、<code>else</code>ステートメントがなくても<code>nil</code>が返されるので、実際のところ<code>else</code>ステートメントは不要ですが、ここでは分かりやすさのためあえて付け加えてあります。</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">def self.authenticate(email, password)
+    user = find_by_email(email)
+    if user &amp;&amp; user.password_hash == BCrypt::Engine.hash_secret ↵
+      (password, user.password_salt)
+      user
+    else
+      nil
+    end
+  end
+end</pre>
+
+<p>これをテストする前に、アプリケーションのレイアウトファイルを修正し、flashメッセージが表示されるようにします。</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Auth&lt;/title&gt;
+  &lt;%= stylesheet_link_tag :all %&gt;
+  &lt;%= javascript_include_tag :defaults %&gt;
+  &lt;%= csrf_meta_tag %&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;% flash.each do |name, msg| %&gt;
+    &lt;%= content_tag :div, msg, :id =&gt; "flash#{name}" %&gt;
+  &lt;% end %&gt;
+
+&lt;%= yield %&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+
+<p>正しくないユーザやパスワードでログインしようとすると、ログインフォームが再表示され、さらにそれに加えて、ログインが正しく行われなかったことを知らせるflashメッセージが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/558/original/E250I02.png" width="801" height="343" alt="ログイン情報が正しくないとエラーメッセージが表示される"/>
+</div>
+
+<p>正しいログイン情報を入力すると、homeページにリダイレクトされ、正しくログインできたことを知らせるflashメッセージが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/559/original/E250I03.png" width="800" height="434" alt="ログイン情報が正しければ、homeページにリダイレクトされる"/>
+</div>
+
+<h3>ログアウト</h3>
+
+<p>ここまでのところはうまく行きました。次にログアウト処理が必要です。まず、新しいrouteである<code>"log_out"</code>を追加しましょう。</p>
+
+
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Auth::Application.routes.draw do
+  get "log_in" =&gt; "sessions#new", :as =&gt; "log_in"
+  get "log_out" =&gt; "sessions#destroy", :as =&gt; "log_out"
+
+  get "sign_up" =&gt; "users#new", :as =&gt; "sign_up"
+  root :to =&gt; "users#new"
+  resources :users
+  resources :sessions
+end</pre>
+
+<p>このrouteは、<code>SessionsController</code>の<code>destroy</code>アクションに対応付けられています。このアクションは、<code>user_id</code>セッション変数を削除することでユーザをログアウトし、スタートページにリダイレクトします。</p>
+
+<p class="codeFilePath">/app/controllers/sessions_controller.rb</p>
+<pre class="ruby">def destroy
+  session[:user_id] = nil
+  redirect_to root_url, :notice =&gt; "Logged out!"
+end</pre>
+
+<p>正しく動作するかどうか、<code>/log_out</code>にアクセスして確認します。スタートページにリダイレクトされて、"Logged out(ログアウトしました)!"とflashメッセージが表示されます。</p>
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/560/original/E250I04.png" width="800" height="434" alt="ログアウトするとスタートページにリダイレクトされる"/>
+</div>
+
+<h3>リンクを追加する</h3>
+
+<p>ユーザがログインやログアウトのためにブラウザのアドレスバーにURLをタイプするよりも、ページへのリンクを準備する方がずっと便利でしょう。レイアウトファイル内のflashメッセージを表示するコードの直前に以下のコードを置きます。</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;div id="user_nav"&gt;
+  &lt;% if current_user %&gt;
+    Logged in as &lt;%= current_user.email %&gt;
+    &lt;%= link_to "Log out", log_out_path %&gt;
+  &lt;% else %&gt;
+    &lt;%= link_to "Sign up", sign_up_path %&gt; or 
+    &lt;%= link_to "Log in", log_in_path %&gt;
+  &lt;% end %&gt;
+&lt;/div&gt;</pre>
+
+<p><code>current_user</code>メソッドがまだないので、ここで作ることにします。<code>ApplicationController</code>内に記述します。</p> 
+
+<p class="codeFilePath">/app/controllers/application_controller.rb</p>
+<pre class="ruby">class ApplicationController &lt; ActionController::Base
+  protect_from_forgery
+  helper_method :current_user
+  
+  private
+  def current_user
+    @current_user ||= User.find(session[:user_id]) if ↵
+      session[:user_id]
+  end
+end</pre>
+
+<p><code>current_user</code>メソッドは、セッション変数から現在のユーザのidを得て、それをインスタンス変数にキャッシュします。それをヘルパーメソッドとして作成し、アプリケーションのビューのコードの中でも利用できるようにします。</p>
+
+<p>ページをリロードすると、sign up(ユーザ登録)とlog in(ログイン)のリンクが表示されています。ログインすると、ログイン情報と、ログアウト用のリンクが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/561/original/E250I05.png" width="803" height="437" alt="これでログインとログアウト用のリンクができた"/>
+</div>
+
+<p>これで認証システムが一通りできあがりました。今回のエピソードでは多くのコードを扱いましたが、そのほとんどがコントローラ内とビュー内に記述するものでした。認証のロジックはすべて<code>User</code>モデル内の<code>self.authenticate</code>メソッドと<code>encrypt_password</code>メソッドで発生します。このコードはとてもシンプルです。</p> 
+
+<p>あなたも、engineを使わずに認証システムをゼロから作るのであれば、パスワード認証はそれほど複雑ではなく、コントローラやビューを、あなたのアプリケーションに合うように好きなようにカスタマイズすることが可能です。ここで説明したものは、最低限のしくみです。実システムでは、Userモデル内にパスワードの長さやメールアドレスのフォーマットのチェック機能を追加するのもいいでしょう。</p>
+
+<p>Userモデルに追加するべき大事なものは、一括設定できる属性を制限するコードです。これは、Userモデル内にattr_accessorを追加することで実現します。</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  attr_accessible :email, :password, :password_confirmation
+  
+  #rest of code omitted
+end</pre>
+
+<p>これによって、Userモデル内のpassword_hashなどのフィールドを入力フォーム以外から更新できないようにします。</p> 
+
+<p>今回のエピソードはこれで終わりです。gemとして入手できる認証のしくみはそのまま利用できて便利ですが、通常のパスワード認証がどのようなしくみで動作しているのかを理解することはとても大切です。もしパスワード認証に加えて、サードパーティによる外部認証が必要な場合は、Simple OmniAuthについて説明しているエピソード241[<a href="http://railscasts.com/episodes/241-simple-omniauth">動画を見る</a>、<a href="http://asciicasts.com/episodes/241-simple-omniauth">原文を読む</a>]を参照してください。</p>

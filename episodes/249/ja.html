@@ -1,0 +1,112 @@
+<p>下のスクリーンショットは、ソート可能で複数ページにわたる商品リストを表示する小さなRailsアプリケーションです。このアプリケーションの反応速度を見るために、リクエスト結果の読み込みにかかった時間をデータベースに記録して、アプリケーションのパフォーマンスを計測してみましょう。</p>
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/555/original/E249I01.png" width="800" height="498" alt="productアプリケーション"/>
+</div>
+
+<p>計測データを収集する方法はいくつかあります。一つは、アプリケーションのログファイルを解析して、そこから情報を抽出する方法です。ページの平均読み込み時間などの統計情報を計算したければ、情報がデータベースに保存されていれば作業がとても簡単になります。もちろん、<a href="http://newrelic.com/">NewRelic’s RPM</a> などのサードパーティ製品を使うこともできますが、今回はごく簡単な方法で各リクエストにかかった時間をただ記録するだけです。</p>
+
+<h3>notification(通知)</h3>
+
+<p>このしくみを、Rails 3で導入された<code><a href="http://api.rubyonrails.org/classes/ActiveSupport/Notifications.html">ActiveSupport::Notifications</a></code>という機能を使って実装してみます。notificationを使って計測ツールを作成します。この計測ツールはブロックを持っていて、ブロックの実行が終了すると、notificationイベントを発信します。それによって、このイベントを受信登録(subscribe)しているnotificationが起動されます。Rails 3のアプリケーションでは、ひとつのリクエストがこのようなnotificationを複数発信していることがよく見られ、そのうちのいくつでも受信登録できます。計測ツールを自作する前に、組み込みの計測ツール(instrument)を受信登録してどのように動くのかを見てみましょう。</p>
+
+<p>まず最初に、<code>/config/initalizers</code>ディレクトリ内に<code>notifications.rb</code>というファイルを新規に作成します。このファイルの中にnotificationを受信するためのコードを記述します。それには、<code>ActiveSupport::Notifications.subscribe</code>を呼び出します。このメソッドに引数を渡せば、受信するnotificationを絞り込むことができます。リクエストごとに発信しているすべてのnotificationを見たいので、ここでは引数は渡しません。メソッドはブロックを受け取ることもできます。ブロックは５つの引数、notificationの名前、開始時間、終了時間、<code>id</code>、notificationについての情報をハッシュで持つ<code>payload</code>をとります。これらの情報を取得し、デバッガに送信します。</p>
+
+<p class="codeFilePath">/config/initializers/notifications.rb</p>
+<pre class="ruby">ActiveSupport::Notifications.subscribe do |name, start, finish, id, payload|
+  Rails.logger.debug(["notification:", name, start, finish, id, payload].join(" "))
+end</pre>
+<p>ここでRailsサーバを起動して、スタートページをリロードすると、先ほどのリクエストの間に作成されたnotificationを見ることができます。まずひとつは以下のとおりです。</p>
+<pre class="terminal">notification: start_processing.action_controller 2011-01-19 21:51:40 +0000 2011-01-19 21:51:40 +0000 bac10ab8b439502ce5ba {:controller=&gt;"ProductsController", :action=&gt;"index", :params=&gt;{"controller"=&gt;"products", "action"=&gt;"index"}, :formats=&gt;[:html], :method=&gt;"GET", :path=&gt;"/products"}</pre>
+
+<p>このnotification内に、渡された引数を見ることができます。<code>name</code>、<code>start</code>と<code>finish</code>の時刻、<code>id</code>、そして最後に<code>payload</code>ハッシュです。このリクエストの間に発信されたnotificationは次のとおりです。</p>
+
+<pre class="terminal">start_processing.action_controller
+notification: sql.active_record
+notification: sql.active_record
+notification: sql.active_record
+notification: !render_template.action_view
+notification: !render_template.action_view
+notification: render_template.action_view
+notification: process_action.action_controller</pre>
+
+<p>一連のnotificationの中にはActiveRecordの検索からのものも含まれており、つまりこれらを受信登録すれば各データベース検索にかかった時間を見ることができるということです。以下の行に注目してください。これはリクエストが完了したタイミングで発信されており、これを利用してリストの処理にどのくらいの時間がかかったかを知ることができます。</p>
+
+<pre class="terminal">notification: process_action.action_controller 2011-01-19 21:51:40 +0000 2011-01-19 21:51:41 +0000 bac10ab8b439502ce5ba {:controller=&gt;"ProductsController", :action=&gt;"index", :params=&gt;{"controller"=&gt;"products", "action"=&gt;"index"}, :formats=&gt;[:html], :method=&gt;"GET", :path=&gt;"/products", :status=&gt;200, :view_runtime=&gt;208.36210250854492, :db_runtime=&gt;80.30999999999999}</pre>
+
+<p>このnotificationには、その他にも次のような有用な情報が含まれています。すなわち、<code>params</code>(引数)、<code>path</code>(パス)、<code>status</code>(状態)、<code>view_runtime</code>(ビューの処理時間)、<code>db_runtime</code>(データベースの処理時間)です。これの一部については後ほど利用することにします。</p>
+
+<p>この情報をデータベースで記録して、どのページの表示が遅いのかを特定します。もし実稼働しているアプリケーションであれば、メモリ上で処理した方がより効率のいいいいかも知れませんが、このアプリケーションでは通常のモデルにデータを保存することにします。</p>
+
+<p>このアプリケーションには、Ryan Batesの<a href="https://github.com/ryanb/nifty-generators">Nifty Generators</a>がインストールされているので、nifty:scaffoldジェネレータでモデルとそれに関連するコントローラとビューを作成します。モデルには、pathを保存するpathフィールドとリクエストにかかった時間を保存する３つのフィールドを作ります。</p>
+
+<pre class="terminal">$ rails g nifty:scaffold page_request path:string page_duration:float view_duration:float db_duration:float index</pre>
+
+<p>コマンドを実行したらデータベースをmigrateして新しいテーブルを作成します。</p>
+
+<pre class="terminal">$ rake db:migrate</pre>
+
+<p>これで、各リクエストについての情報を保存するモデルができました。notificationの名前 <code>process_action.action_controller</code> を記録し、このnotificationだけを受信登録することにします。情報を抽出することになるpayload内のフィールド名も覚えておきます。</p>
+
+<p><code>notifications.rb</code>ファイル内に、<code>ActiveSupport::Notifications.support</code>への呼び出しに引数を渡すように記述し、受信するnotificationを絞り込みました。一つのやり方として正規表現を渡す方法があります。名前に<code>action_controller</code>という文字列を含むnotificationすべてを受信するには次のように記述します。</p>
+
+<p class="codeFilePath">/config/initializers/notifications.rb</p>
+<pre class="ruby">ActiveSupport::Notifications.subscribe /action_controller/ do |name, start, finish, id, payload|
+  Rails.logger.debug(["notification:", name, start, finish, id, payload].join(" "))
+end</pre>
+
+<p>別の方法として、文字列を渡して名前が一致するnotificationを指定する方法があり、今回はその方法を使います。また、ただnotificationのログをとるだけではなく、新たに<code>PageRequest</code>オブジェクトを生成し、それをデータベースに保存します。</p> 
+
+<p class="codeFilePath">/config/initializers/notifications.rb</p>
+<pre class="ruby">ActiveSupport::Notifications.subscribe "process_action.action_controller" do |name, start, finish, id, payload|
+  PageRequest.create!do |page_request|
+    page_request.path = payload[:path]
+    page_request.page_duration = (finish - start) * 1000
+    page_request.view_duration = payload[:view_runtime]
+    page_request.db_duration = payload[:db_runtime]
+  end
+end</pre>
+
+<p>Railsサーバを再起動し、いくつかのページにアクセスしたあと、<code>/page_requests</code>ページを表示させると、データベースに保存されたページリクエストとそれにかかった時間のリストが表示されます。この情報を使って、どのページが最も遅いかを調べたり、時系列でのパフォーマンスのグラフを作成したりなどできます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/556/original/E249I02.png" width="808" height="355" alt="ページリクエストと実行時間のリスト"/>
+</div>
+
+<h3>notificationを作成する</h3>
+
+<p>Railsが内部的に発信するnotificationイベントは、基本的にはここで紹介しているようなパフォーマンス計測の目的で利用します。notificationはどのような目的にも利用できるので、例としてこのstoreアプリケーション内で計測ツール(instrument)を作成してみましょう。</p>
+
+<p>このアプリケーションでは利用者が商品を検索できますが、入力された検索語を記録することにします。<code>Product</code>モデルの<code>search</code>クラスメソッド内で検索がおこなわれるので、検索語を記録するしくみをそこに作りましょう。このしくみをモデル内に作って負荷をかけたくないので、代わりにこのクラス内で検索に関する情報を含んだnotificationを発信し、アプリケーションの他の部分でこれを受信するようにします。</p>
+
+<p>notificationを作成するために、<code>ActiveSupport::Notifications.instrument</code>を呼び出して、新しい計測ツール(instrument)を作成します。これは２つの引数を持ちます。一つ目はnotificationの名前、２つ目はpayloadに渡したいものです。２つ目の引数は、通常ハッシュの形式をしており、今作ろうとしているこのnotificationでは検索語になります。</p>
+
+<p class="codeFilePath">/app/models/product.rb</p>
+<pre class="ruby">class Product &lt; ActiveRecord::Base
+  def self.search(search)
+    if search
+      ActiveSupport::Notifications.instrument("products.search", :search =&gt; search)
+      where('name LIKE ?', "%#{search}%")
+    else
+      scoped
+    end
+  end
+end</pre>
+
+<p><code>instrument</code>にブロックを渡す場合、notificationに渡される開始時間と終了時間は、ブロック内のコードが実行を開始した時間と終了した時間となります。ここではscopeを使用しているのでデータベース検索は<code>search</code>メソッド内で行われないため、この情報はあまり意味がないでしょう。つまり開始時間と終了時間は同じになるということです。</p>
+
+<p>notificationの設定ファイルで、先ほど作成したnotificationを受信できるので、それを自由に扱うことができます。例えば、検索語をログファイルに記録することにします。</p>
+
+<p class="codeFilePath">/config/initializers/notifications.rb</p>
+<pre class="ruby">ActiveSupport::Notifications.subscribe "products.search"  do |name, start, finish, id, payload|
+  Rails.logger.debug "SEARCH: #{payload[:search]}"
+end</pre>
+
+<p>組み込みのnotificationに対しておこなったのと同じように、自作したnotificationに受信登録します。payloadから検索語を読んで、それをログメッセージに渡すことができます。ここでサーバを再起動して、「milk」という文字列を探すと、検索語がログに記録されているのがわかるでしょう。</p>
+<pre class="terminal">SEARCH: milk</pre>
+
+<p>もちろん、前に計測情報を記録したときと同じように、データベースのテーブルを作成してこの情報を保存することもできました。</p>
+
+<p>このような方法で、Rails 3ではnotificationを使って、ロジックをクラスの外に出して、どこか他の場所で処理することができます。別々の場所にnotificationを処理する受信設定を好きなだけ追加することができます。しかし、アプリケーション内でのnotificationの利用は、使い過ぎになる可能性があるので気をつけましょう。例えば、アプリケーションに<code>User</code>モデルがあると仮定して、新規ユーザが登録されたら電子メールを発信したいとします。このような場合にもnotificationを使うことができるのですが、上手な使い方とは言えません。notificationがもっとも適するのは、ログの記録のような、アプリケーションのコアとなる振る舞いに影響を与えないような部分に対してでしょう。notificationを利用する場合、アプリケーションのコアとなるロジックをいろいろな場所に散らばらせてしまう可能性があるので注意が必要です。どのようなオブジェクトでもnotificationを受信できるので、ロジックをアプリケーションのどこのコードにでも書くことができてしまうからです。これはコードを読みにくく、デバッグしにくくするので、notificationをアプリケーションのコアとなるロジック以外のところだけで使用するべきです。</p>
+
+<p>今回のエピソードはこれで終わりです。忘れずに、notificationに関するより詳しい情報をAPIドキュメントで確認してください。</p>

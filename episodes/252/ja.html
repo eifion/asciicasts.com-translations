@@ -1,0 +1,104 @@
+<p>メトリクスは、コードを評価して改善すべき箇所を見つける方法を提供します。<a href="http://metric-fu.rubyforge.org/">metric_fu</a>は、エピソード166[<a href="http://railscasts.com/episodes/166-metric-fu">動画を見る</a>, <a href="http://asciicasts.com/episodes/166-metric-fu">読む</a>]で紹介した、Ruby向けの優れたメトリクス計測ツールです。ただ問題は、依存関係が複雑なためセットアップが少し難しく、Rails 3で使用する場合は特にそうです。代わりに利用されたのが<a href="http://getcaliper.com/">the Caliper project</a>でした。Githubリポジトリに接続してメトリクス計測を行うことができましたが、残念ながら今は公開されていません。</p>
+
+<p>そこで、やはりローカル環境で計測を実行することにして、それを簡単におこなえる<a href="http://iain.nl/2010/11/easier-metricfu-with-metrical/">Metrical</a>というgemを紹介します。Metricalはバックグラウンドでmetric_fuを利用しながら、簡単に操作できるラッパーコマンドを提供します。</p>
+
+<p>Railscastsのサイトのソースコードに対して計測を行うことでMetricalを実際に試してみましょう。まずMetrical gemをインストールします。</p>
+
+<pre class="terminal">$ gem install metrical</pre>
+
+<p>このgemをインストールすると、依存しているいくつかのgemも同時にインストールされます。それらがすべてインストールされると、アプリケーションのディレクトリから<code>metrical</code>コマンドを実行できるようになります。このコマンドで、metric_fuを介してアプリケーションのコードに対していくつかの計測が実行されます。出力結果にいくつかのエラーが含まれているかも知れませんが、コマンドが終了したのであればそれらを無視しても特に問題はないでしょう。正常に終了したかどうかは、結果をブラウザで見てみればわかります。</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/566/original/E252I01.png" width="808" height="465" alt="Metricalの実行結果"/>
+</div>
+
+<p>最初のページにはmetric_fuが実行した計測ツール群がリストアップされています。任意の行をクリックすると、生成された計測結果が表示されます。例えば、Reek を見てみるとアプリケーションの改善すべき部分についての有用なフィードバックを得ることができます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/567/original/E252I02.png" width="808" height="465" alt="Reekの結果"/>
+</div>
+
+<p>次にもうひとつ、Rcovというツールを見てみましょう。Metricalで実行されるツールの内、Rcovはアプリケーションのtestとspecを実行する必要があるため、失敗する確率がもっとも高いでしょう。Railscastsのコードに対して実行した場合、カバー率は0.0%になります。ここで一番大きな問題は、RcovがまだサポートしていないRuby 1.9のコードが使われていることです。代わりとなるものを調べる前にツール群からRcovをはずしておきます。Metricalから操作する場合のmetric_fuの動作を設定ためには、アプリケーションのルートディレクトリに<code>.metrics</code>ファイルを追加します。</p>
+
+<p class="codeFilePath">/.metrics</p>
+<pre class="ruby">MetricFu::Configuration.run do |config|
+	config.metrics -= [:rcov]
+end</pre>
+
+<p>再度<code>metrical</code>を実行してみると、エラー数が減って、Rcovが結果に表示されていません。しかしコードカバー率は有用な計測値です。Rcovの代わりに何を使えばいいでしょう？いくつかの代替ツールがあります。例えば、<a href="http://www.metabates.com/2010/08/13/coverme-code-coverage-for-ruby-1-9/">CoverMe</a>と<a href="https://github.com/colszowka/simplecov">SimpleCov</a>です。どちらも有用な結果を生成してくれますが、今回は設定が簡単なSimpleCovを選択します。まずアプリケーションの<code>Gemfile</code>にgemの情報を追加します。</p> 
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">group :test do
+  gem 'simplecov', '&gt;=0.3.8', :require =&gt; false
+end</pre>
+
+<p>次にテストやスペックのヘルパーファイルに次の2行を追加します。</p> 
+
+<p class="codeFilePath">/spec/spec_helper.rb</p>
+<pre class="ruby">require 'simplecov'
+SimpleCov.start 'rails'</pre>
+
+<p>いつもと同じく、アプリケーションにgemを追加する場合は<code>bundle</code>を実行してgemがインストールされたことを確認します。インストール後、<code>rake spec</code>コマンドでアプリケーションのスペックを実行し、<code>coverage/index.html</code>を開いて結果を確認します。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/568/original/E252I03.png" width="808" height="465" alt="SimpleCovからの出力"/>
+</div>
+
+<p>これによって、テストやスペックでのコードのカバー率が低いファイルを簡単に見つけることができます。カバー率がもっとも低いファイルから順に表示されています。例として<code>comments_controller</code>をクリックすると、具体的にどのコードがカバーされていてどれがされていないかを見ることができます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/569/original/E252I04.png" width="807" height="607" alt="SimpleCovのコードカバー率"/>
+</div>
+
+<p>これを使ってどのコードがカバーされていないかを特定でき、テストかコードのいずれかを修正してカバー率を改善します。</p> 
+
+<p>コードのカバー率についてはこれで解決です。続いてmetric_fuが提供する新しい2つの計測ツール、The Best Practices ReportとHotspotsを見てみましょう。</p> 
+
+<p>Hotspotsはアプリケーション内のファイル、クラス、メソッドの概要を一覧で表示し、もっとも悪いものから順に並べて示します。もっとも悪いものを決めるのにはいくつかの要因が考慮されますが、基本的にはReekとFlogを見ます。Hotspotsはまず最初にチェックする場所として適しているでしょう。そこからアプリケーションの考慮すべき箇所を順にチェックしていくことができます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/570/original/E252I05.png" width="807" height="607" alt="Hotspotの結果"/>
+</div>
+
+<p>The Rails Best Practicesはアプリケーション内でベストプラクティスに合致しない箇所を教えてくれます。</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/571/original/E252I06.png" width="807" height="607" alt="The Rails Best Practicesの結果"/>
+</div>
+
+<p>このレポートの出力はブラウザで見ると少し見にくいので、metric_fuからではなく直接実行してみましょう。すでにMetricalをインストールしてあるのでgemが存在するはずですが、もしなければ以下を実行します。</p>
+
+<pre class="terminal">$ gem install rails_best_practices</pre>
+
+<p>このコマンドを実行すると、出力結果の中に<a href="http://rails-bestpractices.com">Rails Best Practicesのサイト</a>を参照するよう指示が表示されるので、サイトを見てみることにしましょう。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/572/original/E252I07.png" width="806" height="465" alt="Rails Best Practicesのサイト"/>
+</div>
+
+<p>Rails Best Practicesには多数のベストプラクティスが掲載されています。読んで参考にしたり、アプリケーションに適用して改善することができます。「適用済み(Implemented)」タブで表示される項目はgemによって使用されているもので、<code>rails_best_practices</code>コマンドを実行するとチェックされます。</p>
+
+<p>このコマンドを実行すると、複数の提案が赤字で表示されます。</p>
+
+<pre class="terminal">$ rails_best_practices 
+Analyzing:     100% |oooooooooooooooooooooooooooooooooooooooooo| Time: 00:00:00
+<span style="color:#C00;">./app/controllers/comments_controller.rb:53 - move model logic into model (errors use_count &gt; 4)
+./app/views/comments/index.rss.builder:10 - law of demeter
+./app/views/comments/index.rss.builder:10 - law of demeter
+./db/schema.rb:15 - always add db index (comments =&gt; [user_id])
+./db/schema.rb:71 - always add db index (spam_reports =&gt; [comment_id])
+./app/controllers/comments_controller.rb:28,32,41 - use before_filter for edit,update,destroy
+...</span></pre> 
+
+<p>赤字のテキストはあまり目によくないかもしれません。代わりに出力形式としてHTMLを指定でき、さらにオプションを追加することでファイル名にリンクをつけTextMateで対応するファイルが開くよう指定します。</p>
+<pre class="terminal">$ rails_best_practices -f html --with-textmate</pre>
+
+<p>これによって<code>rails_best_practices.html</code>というHTMLファイルが生成され、ブラウザで開けるようになります。</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/573/original/E252I08.png" width="806" height="465" alt="ブラウザで表示されたRuby Best Practicesの出力"/>
+</div>
+
+<p>このアプリケーションでは26のエラーが検出されました。ファイル名をクリックすると、そのファイルがTextMateで開きます。エラーメッセージをクリックすると、Rails Best Practicesサイトの対応するページが表示され、問題の説明とコードを改善する方法を読むことができます。あとはリストのアイテムをひとつずつ潰してコードを改善するだけです。</p>
+
+<p>他の計測結果にも言えることですが、推奨された内容を鵜呑みにしないようにしましょう。ある手法が一般的にベストプラクティスであると見なされていても、それが自分のアプリケーションにとってもベストであるとは限りません。生成されたリストは、改善できる可能性がある箇所を見つけるための一般的なガイドラインであると受け止める方がいいでしょう。リストの項目をゼロに減らすのを目的にするべきではありません。これは他のすべての計測項目にも言えることです。表示された改善提案が自分のアプリケーションにとって本当にベストかを常に考えてから適用し、アプリケーションのコードが本当に改善されたことを確認するようにすべきです。メトリクスは、コードをどう改善するかのヒントとして利用するのがいいでしょう。</p>

@@ -1,0 +1,214 @@
+<p><a href="http://pry.github.com/">Pry</a>はIRBの代替となるツールで、 IRBと同じようにRubyコードを実行するためのプロンプトを提供します。IRBと比較して、多くの付加機能を持っています。今回のエピソードでは、PryのしくみとRailsアプリケーションに統合する方法を紹介します。</p> 
+
+<p>Pryはgemで提供されるのでインストールは簡単です。<code>pry-doc</code> gemも一緒にインストールしますが、これについては後ほど説明します。</p>
+
+<pre class="terminal">$ gem install pry pry-doc</pre>
+
+<p>RVM gemsetを利用しているので、すべてのgemsetから使用できる形でPryをインストールします。そのためには次の2つのコマンドを実行します。</p>
+
+<pre class="terminal">$ rvm gemset use global
+$ gem install pry pry-doc</pre>
+
+<p>Pryがインストールできたら<code>pry</code>コマンドで起動し、<code>irb</code>コマンドでおこなうのと同じようにRubyコードを実行します。</p>
+
+<pre class="terminal">$ pry
+pry(main)&gt; 1 + 2
+=&gt; 3</pre>
+
+<p>Pryは単なる電卓以上の機能を提供しますが、機能の説明の前に、Railsアプリケーションから利用できるように設定する方法を見ていきます。使用するアプリケーションは、今までも何回か使用したおなじみのブログアプリケーションです。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/727/original/E280I01.png" width="815" height="452" alt="ブログアプリケーション"/>
+</div>
+
+<p>アプリケーションのディレクトリから<code>rails c</code>を実行するとIRBが起動します。代わりにPryを使うためには、Railsのenvironmentファイルを指定して<code>pry</code>コマンドを実行します。これによって、標準のRailsコンソールと同じように、アプリケーションのモデルにアクセスできるようになります。</p>
+
+<pre class="terminal">$ pry -r ./config/environment
+pry(main)&gt; Article.count
+=&gt; 3</pre>
+
+<p>これでPryの準備ができたので、その機能について見ていきます。<code>help</code>とタイプすると、Pryがサポートしているすべてのコマンドの一覧が表示されます。もっともよく使うコマンドは、<code>cd</code>と<code>ls</code>の2つなのでこれらのコマンドを見てみましょう。<code>cd</code>コマンドは現在のスコープを変更します。<code>cd Article</code>とタイプすると<code>Article</code>クラス内に移動し、<code>self</code>を実行することでいつでも現在のスコープを確認できます。</p>
+
+<pre class="terminal">pry(main)&gt; cd Article
+pry(#&lt;Class:0x1022f60e0&gt;):1&gt; self
+=&gt; Article(id: integer, name: string, content: text, created_at: datetime, updated_at: datetime, published_at: datetime)</pre>
+
+<p>Articleクラス内にいるので、どのメソッドでも呼び出すことができます。firstとタイプすると最初の記事が返されますが、これは<code>Article.first</code>を指定するのと同じ意味になります。</p>
+
+<pre class="terminal">pry(#&lt;Class:0x1022f60e0&gt;):1&gt; first
+=&gt; #&lt;Article id: 1, name: "What is Music", content: "Music is an art form in which the medium is sound o...", created_at: "2011-08-24 20:35:29", updated_at: "2011-08-24 20:37:22", published_at: "2011-05-13 23:00:00"&gt;</pre>
+
+<p>またあらゆるオブジェクトに<code>cd</code>することができるので、<code>Article</code>スコープ内で<code>cd first</code>を実行するとその記事にスコープが移ります。そこでまたメソッドやプロパティを呼び出すことができるので、<code>name</code>とタイプします。</p>
+
+<pre class="terminal">pry(#&lt;Class:0x1022f60e0&gt;):1&gt; cd first
+pry(#&lt;Article:0x102300c98&gt;):2&gt; name
+=&gt; "What is Music"</pre>
+
+<p>記事の<code>name</code>に<code>cd</code>してその文字列に対してメソッドを呼び出すことも可能です。</p> 
+
+<pre class="terminal">pry(#&lt;Article:0x102300c98&gt;):2&gt; cd name
+pry("What is Music"):3&gt; upcase
+=&gt; "WHAT IS MUSIC"</pre>
+
+<p>Pryは移動の履歴を覚えていて、nestingを呼び出して参照することができます。</p>
+
+<pre class="terminal">pry("What is Music"):3&gt; nesting
+Nesting status:
+--
+0. main (Pry top level)
+1. #&lt;Class:0x1022f60e0&gt;
+2. #&lt;Article:0x102300c98&gt;
+3. "What is Music"</pre>
+
+<p>このコマンドは、それまでに訪れたオブジェクトのリストを返します。<code>exit</code>とタイプすると、直前にいたオブジェクトの中に戻されるので、今回の場合は最初の記事に戻ります。再度exitとタイプすると、<code>Article</code>クラスに戻ります。</p>
+
+<p>もっともよく使用されるもうひとつのコマンドは<code>ls</code>で、これは変数とメソッドをリスト表示します。デフォルトでは現在のスコープのすべての変数をリスト表示します。今<code>Article</code>クラスの中にいたとすると、これを実行するとメソッドの一覧が表示されます。</p>
+
+<pre class="terminal">pry(#&lt;Class:0x1022f60e0&gt;):1&gt; ls
+[:_, :_pry_, :inp, :out, :@_create_callbacks, :@_defined_class_methods, :@_save_callbacks, :@_update_callbacks, :@_validate_callbacks, :@arel_engine, :@arel_table, :@attribute_methods_generated, :@cached_attributes, :@column_names, :@columns, :@columns_hash, :@finder_needs_type_condition, :@generated_attribute_methods, :@inheritable_attributes, :@inheritance_column, :@parent_name, :@quoted_primary_key, :@quoted_table_name, :@relation]</pre>
+
+<p>Pryコマンドにはフラグをサポートするものがあり、その場合は<code>-h</code>オプションをつけてコマンドを実行するとコマンドのフラグの一覧が表示されます。<code>ls -h</code>を実行すると、サポートされているすべてのオプションが表示されます。その中の<code>-m</code>を指定するとクラスが持つメソッドのリストが表示され、<code>-M</code>を指定するとインスタンスメソッドのリストが表示されます。現在のスコープの代わりにオブジェクトやクラスを渡すと、それが持つメソッドのリストが返されます。</p>
+
+<p>もうひとつの便利なPryコマンドは<code>show-doc</code>です。例えば<code>Array</code>クラスの<code>in_groups_of</code>メソッドの動作を知りたいとします。その場合は<code>show-doc Array#in_groups_of</code>を実行して調べることができます。</p>
+
+<pre class="terminal">pry(#&lt;Class:0x1022f60e0&gt;):1&gt; show-doc Array#in_groups_of
+
+From: /Users/eifion/.rvm/gems/ruby-1.9.2-p290/gems/activesupport-3.0.10/lib/active_support/core_ext/array/grouping.rb @ line 19:
+Number of lines: 15
+
+signature: in_groups_of(number, fill_with=?)
+
+Splits or iterates over the array in groups of size number,
+padding any remaining slots with fill_with unless it is false.
+
+  %w(1 2 3 4 5 6 7).in_groups_of(3) {|group| p group}
+  ["1", "2", "3"]
+  ["4", "5", "6"]
+  ["7", nil, nil]
+
+  %w(1 2 3).in_groups_of(2, '&amp;nbsp;') {|group| p group}
+  ["1", "2"]
+  ["3", "&amp;nbsp;"]
+
+  %w(1 2 3).in_groups_of(2, false) {|group| p group}
+  ["1", "2"]
+  ["3"]</pre>
+  
+  <p>オブジェクトに対して直接<code>show-doc</code>を呼び出すこともできます。現在のスコープは<code>Article</code>クラスなので、<code>all</code>を指定すると記事の配列が返されます。<code>show-doc all.in_groups_of</code>を実行しても、上と同じドキュメンテーションが返されます。</p>
+
+<p>もうひとつの便利なコマンドは<code>show-method</code>です。このコマンドはあらゆるメソッドのソースコードを表示します。これを使って<code>in_groups_of</code>のソースを見てみます。(ここで念のため触れておきますが、Pryにはコマンドの入力時に自動補完の機能がありタブキーを押すことで呼び出すことができます。)</p>  
+
+<pre class="terminal">pry(#&lt;Class:0x104e63de0&gt;):1&gt; show-method all.in_groups_of
+
+From: /Users/eifion/.rvm/gems/ruby-1.9.2-p290/gems/activesupport-3.0.10/lib/active_support/core_ext/array/grouping.rb @ line 19:
+Number of lines: 19
+
+def in_groups_of(number, fill_with = nil)
+  if fill_with == false
+    collection = self
+  else
+    # size % number gives how many extra we have;
+    # subtracting from number gives how many to add;
+    # modulo number ensures we don't add group of just fill.
+    padding = (number - size % number) % number
+    collection = dup.concat([fill_with] * padding)
+  end
+
+  if block_given?
+    collection.each_slice(number) { |slice| yield(slice) }
+  else
+    groups = []
+    collection.each_slice(number) { |group| groups &lt;&lt; group }
+    groups
+  end
+end</pre>
+
+<p>また、これと似た<code>edit-method</code>というコマンドがあります。メソッドに対してこのコマンドを実行すると、関連するソースコードのファイルをテキストエディタで開き、対応する行を表示します。</p> 
+
+<p>コマンドの前にピリオドをつけることで、シェルコマンドを実行することもできます。Pryの中で<code>.ls</code>を実行すると、シェルコマンドの<code>ls</code>が実行され、カレントディレクトリのすべてのファイルがリスト表示されます。</p> 
+
+<p>Pryはデバッグ時にも役に立ちます。<code>Article</code>モデルには<code>word_count</code>というメソッドがあり、記事の<code>content</code>に含まれる単語の数を返します。しかしこのメソッドにはバグがあるため、記事のcontentが何であっても常に<code>0</code>を返します。メソッドを調べるために最初の<code>Article</code>に<code>cd</code>して、<code>edit-method word_count</code>を実行します。メソッドの内容は以下のとおりです。</p>
+
+<pre class="codeFilePath">/app/models/article.rb</pre>
+<pre class="ruby">class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :published_at
+  has_many :comments
+
+  def word_count
+    words = content.scan(/\\w+/)
+    words.size
+  end
+end</pre>
+
+<p><code>binding.pry</code>を呼び出すことで、コードの任意の場所にブレイクポイントを追加できます。上のコードの<code>words.size</code>の行の直前にブレイクポイントを追加してファイルを保存して<code>word_count</code>メソッドを再度呼び出すと、<code>binding.pry</code>の場所で停止してPryプロンプトに戻ります。</p>
+
+<pre class="terminal">&gt; word_count
+
+From: /Users/eifion/blog/app/models/article.rb @ line 7 in Article#word_count:
+
+     2:   attr_accessible :name, :content, :published_at
+     3:   has_many :comments
+     4: 
+     5:   def word_count
+     6:     words = content.scan(/\\w+/)
+ =&gt;  7:     binding.pry
+     8:     words.size
+     9:   end
+    10: end</pre>
+    
+<p>メソッドのすべてのローカル変数にアクセスできるので、<code>words</code>を呼び出すと<code>words</code>という配列の内容を見ることができます。</p>
+
+<pre class="terminal">pry(#&lt;Article:0x1008c3f38&gt;):3&gt; words
+=&gt; []</pre>
+
+<p>配列は空になっているので、内容をスキャンする正規表現に何か問題があると思われます。調べてみると、バックスラッシュが1つであるべきところが2つになっています。これを修正するために再度<code>edit-method word_count</code>を実行し、正規表現を修正し、<code>binding.pry</code>の行を削除してファイルを保存します。</p> 
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :published_at
+  has_many :comments
+
+  def word_count
+    words = content.scan(/\w+/)
+    words.size
+  end
+end</pre>
+
+<p>修正部分をテストするために再度<code>word_count</code>を呼び出すと、今度は期待通りに動作します。</p>
+
+<pre class="terminal">pry(#&lt;Article:0x1008c3f38&gt;):3&gt; word_count
+=&gt; 55</pre>
+
+<p>アプリケーションのコントローラ層やビュー層の何かをデバッグするときはコンソール経由でなく作業したい場合もあります。この場合もPryが役に立ちます。まず<code>Gemfile</code>にPryへの参照を追加します。</p> 
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.0.10'
+gem 'sqlite3'
+gem 'nifty-generators'
+gem 'pry', :group =&gt; :development</pre>
+
+<p><code>bundle</code>を実行してgemをインストールし、<code>rails s</code>でサーバを起動します。これで、コントローラのどこにでも<code>binding.pry</code>の呼び出しを追加することで、ブレイクポイントを設定できます。</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">def index
+  @articles = Article.all
+  binding.pry
+end</pre>
+
+<p>プラウザでそのページを開くと、読み込みが途中で中断し、一方ターミナルではそのブレイクポイントで停止した状態のPryプロンプトが表示されます。モデルでの場合と同じように、ローカル変数やインスタンス変数を検査(inspect)できます。作業が終わったら、<code>exit-all</code>とタイプしてリクエストを完了させることができます。</p> 
+
+<pre class="terminal">From: /Users/eifion/blog/app/controllers/articles_controller.rb @ line 4 in ArticlesController#index:
+
+     1: class ArticlesController &lt; ApplicationController
+     2:   def index
+     3:     @articles = Article.all
+ =&gt;  4:     binding.pry
+     5:   end
+     6: 
+     7:   def show
+     8:     @article = Article.find(params[:id])
+     9:   end</pre>
+     
+<p>Pryに関する今回のエピソードは以上です。とても便利なgemで、ここで紹介しきれなかった多くの機能を持っています。<a href="https://github.com/pry/pry/wiki">wiki</a>にはそれらの機能の説明や、Joshua Cheekによる非常に参考になる<a href="http://vimeo.com/26391171">スクリーンキャスト</a>のリンクもあります。</p>

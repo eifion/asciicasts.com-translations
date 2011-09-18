@@ -1,0 +1,182 @@
+<p>Rails 3.1がついにリリースされました。新機能についての優れた概要説明が<a href="http://guides.rubyonrails.org/3_1_release_notes.html">RailsGuidesサイトのリリースノート</a>にあります。また新機能のいくつかについては、<a href="http://railscasts.com/?tag_id=31">Railscastsサイト</a>と<a href="http://asciicasts.com/tags/rails-31">このサイト</a>でも紹介されています。今回のエピソードでは、Rails 3.0アプリケーションを3.1にアップグレードする方法に焦点をあて、Railscastsサイトを例として説明していきます。</p>
+
+<h3>サイトを準備する</h3>
+
+<p>サイトをRails 3.1にアップグレードする前に、いくつかの準備作業が必要です。現在のサイトがRails 3.0の最新バージョン(現時点では3.0.10)で動いていなければ、更新を行います。これには、Gemfileでバージョンを設定して<code>bundle</code>を実行します。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem "rails", "3.0.10"</pre>
+
+<p>次にアプリケーションのテストスイートを実行して、テストがすべて成功することと非推奨エラー(deprecation error)が出ていないことを確認します。もしエラーがある場合は、それらを修正してからこの後の作業に進みます。Railscastsのコードはテストがすべて成功したので、引き続きアップグレード作業に移ります。</p>
+
+<h3>アップグレード</h3>
+
+<p>サイトのアップグレード作業を開始する準備ができました。これを、<code>rails31</code>という名前の新しいGitブランチを作成してその中で行うことにします。</p>
+
+<pre class="terminal">$ git checkout -b rails31</pre>
+
+<p>Rails 3.1へのアップグレードは至ってシンプルです。ただ単にアプリケーションの<code>Gemfile</code>を開いて、バージョン番号を3.1の最新リリース(現時点では<code>3.1.0</code>)に変更します。 </p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem "rails", "3.1.0"</pre>
+
+<p><code>bundle update</code>を実行して新バージョンをインストールします。唯一もう一ヶ所修正が必要なのが設定ファイルの<code>development.rb</code>で、次の行を削除するかコメントアウトします。</p> 
+
+<p class="codeFilePath">/config/development.rb</p>
+<pre class="ruby"># config.action_view.debug_rjs = true</pre>
+
+<p>テストを再度実行すると、すべて成功します。Railsサーバを正常に起動することもでき、ブラウザから参照できます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/728/original/E282I01.png" width="802" height="567" alt="サイトがrails 3.1で稼働した"/>
+</div>
+
+<h3>Asset Pipelineを使用するためのアプリケーションの修正</h3>
+
+<p>Asset PipelineはRails 3.1の主な新機能のひとつですが、今回のアプリケーションでは画像ファイル、スタイルシート、JavaScriptファイルがまだ<code>/public</code>ディレクトリの下にあるので、その機能をまだまったく活かせていません。Asset Pipelineは完全にオプションの機能であるため、有効化させない限りはその機能は現れません。そのため、それを使うのかどうかまだわからない時点であっても、Rails 3.1へのアップグレードを思いとどまる必要はありません。アップグレードがいかに簡単かということを考えたら、それを今行わない理由はありません。</p>
+
+<p>もしAsset Pipelineの機能を使いたければ、有効化する必要があります。そのためには次の行を<code>Gemfile</code>に追加します。(これらの行は、新規にRails 3.1アプリケーションを作成したときに生成される<code>Gemfile</code>に入っています。)</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby"># Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails', " ~&gt; 3.1.0"
+  gem 'coffee-rails', " ~&gt; 3.1.0"
+  gem 'uglifier'
+end
+
+gem 'jquery-rails'</pre>
+
+<p>このコードが<code>assets</code>グループを作成し、そこにいくつかのアセット関連のgemを入れます。また、<code>jquery-rails</code> gemをインクルードしてjQueryが使えるようにします。(もしPrototypeを使いたい場合は、代わりに<a href="https://github.com/rails/prototype-rails"><code>prototype-rails</code> gem</a>を使用します。)さらに<code>/config/application.rb</code>のコードの以下の部分：</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby"># If you have a Gemfile, require the gems listed there, including any gems
+# you've limited to :test, :development, or :production.
+Bundler.require(:default, Rails.env) if defined?(Bundler)</pre>
+
+<p>を以下のように書き換えます。</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby">if defined?(Bundler)
+  # If you precompile assets before deploying to production, 
+    use this line
+  Bundler.require *Rails.groups(:assets =&gt; %w(development test))
+  # If you want your assets lazily compiled in production, 
+    use this line
+  # Bundler.require(:default, :assets, Rails.env)
+end</pre>
+
+<p>このコードは、<code>Bundler</code>で要求されるグループに<code>assets</code>グループを追加します。続いてAsset Pipelineを有効化するためにこのファイルの<code>Application</code>クラスの中に次のコードを追加します。</p>
+
+<p class="codeFilePath">/config/application.rb</p>
+<pre class="ruby"># Enable the asset pipeline
+config.assets.enabled = true
+
+# Version of your assets, change this if you want to expire all your assets
+config.assets.version = '1.0'</pre>
+
+<p>このコードがAsset Pipelineを有効化し、バージョン番号を設定します。アセットに有効期限を設定したい場合はこの値を変更します。</p> 
+
+<p>合わせてenvironmentの各設定ファイルの設定を変更します。まず最初は<code>development.rb</code>です。いくつかの箇所を変更して、アセットを圧縮せず、asset debuggingを有効化するよう設定します。</p>
+
+<p class="codeFilePath">/config/environments/development.rb</p>
+<pre class="ruby">  # Do not compress assets
+  config.assets.compress = false
+  
+  # Expands the lines which load the assets
+  config.assets.debug = true</pre>
+  
+<p>次に<code>production.rb</code>を変更します。</p>  
+
+<p class="codeFilePath">/config/environments/production.rb</p>
+<pre class="ruby"># Compress JavaScript and CSS
+config.assets.compress = true
+   
+# Don't fallback to assets pipeline
+config.assets.compile = false
+   
+# Generate digests for assets URLs
+config.assets.digest = true</pre>
+
+<p>本番モード(production mode)ではアセットを圧縮したいのですが、<code>compile</code>を<code>false</code>に設定して、プリコンパイル時にはAsset Pipelineが機能しないようにします。また<code>digest</code>を<code>true</code>に設定して、アセットのURLが<a href="http://guides.rubyonrails.org/asset_pipeline.html#what-is-fingerprinting-and-why-should-i-care">fingerprint</a>されるようにしました。もちろん、作成するアプリケーションが本番モードでどう振舞ってほしいかに合わせて、これらのオプションを違うように設定することも可能です。</p>
+
+<p>最後にテスト環境を修正します。ここではオプションを追加して、静的なアセットが返されキャッシュされるようにして、かつasset debuggingを有効化します。</p>
+
+<p class="codeFilePath">/config/environments/test.rb</p>
+<pre class="ruby"># Configure static asset server for tests with Cache-Control for performance
+config.serve_static_assets = true
+config.static_cache_control = "public, max-age=3600"
+
+# Allow pass debug_assets=true as a query parameter to load pages with unpackaged assets
+config.assets.allow_debugging = true</pre> 
+
+<p>アプリケーションのソースコード管理にGitを使っている場合、<code>.gitignore</code>ファイルも修正して、無視する項目のリストに<code>.sass-cache</code>ディレクトリを追加します。これはGitではSASSのキャッシュは不要だからです。</p>
+
+<p class="codeFilePath">/.gitignore</p>
+<pre class="ruby">.sass-cache/</pre>
+
+<h3>アセットを移動する</h3>
+
+<p>Asset Pipelineが設定できたので、<code>app/assets</code>ディレクトリを作成します。そして<code>images</code>、<code>javascripts</code>、<code>stylesheets</code>の各ディレクトリを<code>/public</code> から<code>/app/assets</code>に移動します。</p>
+
+<pre class="terminal">$ mkdir app/assets
+$ mv public/images/ app/assets/
+$ mv public/javascripts/ app/assets/
+$ mv public/stylesheets/ app/assets/</pre>
+
+<p>移動したファイルのうちのいくつか、例えば<code>javascripts</code>ディレクトリのjQuery関連のファイルはもはや必要ありません。これらはjQuery gemに含まれているので、<code>jquery.js</code>、<code>jquery.min.js</code>、<code>rails.js</code>は削除します。ここで、エピソード279[<a href="http://railscasts.com/episodes/279-understanding-the-asset-pipeline">動画を見る</a>, <a href="http://asciicasts.com/episodes/279-understanding-the-asset-pipeline">読む</a>]で行ったのと同じように、jQueryプラグインなどのファイルを<code>/lib/assets</code>か<code>/vendor/assets</code>に移すかどうかを決めておくのがいいでしょう。</p>
+
+<p>次にmanifestファイルを作成します。このアプリケーションにはすでに<code>application.js</code>ファイルと<code>application.css</code>ファイルがそれぞれ対応するディレクトリに存在するので、新たに作成する必要はありません。ではCSSファイルから始めることにします。これをmanifestファイルにするために、最初の部分にコメントを追加して<a href="https://github.com/sstephenson/sprockets">Sprockets</a>に対してどのファイルをインクルードするかを指示します。(Sprocketsの記法についてもエピソード279で紹介しました。)Sprocketsに対して、そのファイルの残りの部分と、stylesheetsディレクトリとそのサブディレクトリ以下のその他のすべてのファイルをインクルードするように指示します。</p>
+
+<p class="codeFilePath">/app/assets/stylesheets/application.css</p>
+<pre class="css">/*
+*= require_self
+*= require_tree .
+*/
+
+/* rest of file omitted */</pre>
+
+<p><code>application.js</code>ファイルについても同じように指示できますが、ここではjQueryをインクルードしたいので、少し違う方法で行います。</p> 
+
+<p class="codeFilePath">/app/assets/javascripts/application.js</p>
+<pre class="javascript">//= require jquery
+//= require jquery_ujs
+//= require_self
+//= require_tree .
+
+/* rest of file omitted */</pre>
+
+<p>ここでも、ファイル自体にコードが含まれるので<code>require_self</code>を追加し、同じディレクトリの他のファイルがインクルードされるよう<code>require_tree</code>を追加します。</p>
+
+<p>またアプリケーションのレイアウトファイルを開いてstylesheetファイルとJavaScriptファイルをインクルードしている行を修正して、関連するapplicationファイルだけを参照するようにします。というのも、その他のファイルはmanifestを介してインクルードされるからです。</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= stylesheet_link_tag "application" %&gt;
+&lt;%= javascript_include_tag "application", "http://cdn.sublimevideo.net/js/3s7oes9q.js" %&gt;</pre>
+
+<p>アプリケーションが必要とするJavaScriptファイルには、Asset Pipelineを介して読み込まれない外部ファイルも含まれます。この場合もやはり上のファイルのリストに含む必要があります。</p>
+
+<p>ではここでブラウザからアプリケーションを見てみて、変更点がうまく動いているか確認します。その前に<code>bundle</code>を再度実行して、追加したgemをインストールします。インストールが完了したらサーバを起動します。</p>
+
+<pre class="terminal">$ rails s</pre>
+
+<p>ほとんどはうまくいきますが、一部の画像、例えば画面上部のロゴが正しく表示されません。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/729/original/E282I02.png" width="804" height="381" alt="サイトは正常に動作するが、一部の画像が表示されない"/>
+</div>
+
+<p>この問題の原因は、画像のURLがレイアウトファイルに直書きされていることにあります。</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;img src="/images/railscasts_logo.png" width="423" height="56" alt="RailsCasts = Ruby on Rails Screencasts"/&gt;</pre>
+  
+<p>アプリケーションの画像はもう<code>/public/images</code>ディレクトリにはないので、これはうまくいきません。一番簡単に解決する方法は、画像のURLを<code>/images/railscasts_logo.png</code>から<code>/assets/railscasts_logo.png</code>に変更することのように思えますが、 開発モードではうまく行っているように見えても、本番モードでは問題が発生します。<code>assets.digest</code>オプションを有効化すると、名前の後ろにハッシュ値が追加され、それによってファイルへの静的な参照は機能しなくなります。代わりに常にヘルパーメソッドを使用するようにします。これで、開発モードと本番モードの両方で画像に正しくリンクが貼られます。</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;%= image_tag("railscasts_logo.png", :size =&gt; "423x56", :alt =&gt; "RailsCasts - Ruby on Rails Screencasts") %&gt;</pre>
+
+<p>アプリケーション全体で検索して、静的に参照されているアセットすべてについて、上の画像のようにヘルパーメソッドを使用するよう修正します。ページを再度読み込むと画像が表示されるので、Asset Pipelineが正しく機能していることがわかります。</p>
+
+<p>これでアプリケーションをRails 3.1にアップグレードする作業は終わりです。他にも便利な新機能がいくつかあるので、自分のアプリケーションの役に立つかどうかを確認するためにRails 3.1に関する他のエピソードも見てみることをお勧めします。</p>

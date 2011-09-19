@@ -1,0 +1,271 @@
+<p><a href="http : //outoftime.github.com/sunspot">Sunspot</a> est une solution permettant d&#x27;ajouter une recherche full-text aux applications Ruby. Elle utilise <a href="http://lucene.apache.org/solr/">Solr</a> en arri&egrave;re-plan et a de nombreuses fonctionnalit&eacute;s sympathiques. Dans cet &eacute;pisode, nous allons l&#x27;utiliser pour ajouter une recherche full-text &agrave; une application Rails. Nous utiliserons une application de blog qui nous a d&eacute;j&agrave; servi dans de pr&eacute;c&eacute;dents &eacute;pisodes.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/718/original/E278I01.png" width="800" height="432" alt="Notre application blogging."/>
+</div>
+
+<p>Cette application contient une page qui affiche un certain nombre d&#x27;articles et nous voulons faire en sorte de pouvoir chercher parmi ceux-ci. En utilisant SQL, cela devient rapidement difficile et ce n&#x27;est pas, en g&eacute;n&eacute;ral, la meilleure approche. Une solution d&eacute;di&eacute;e &agrave; la recherche full-text, comme Sunspot, s&#x27;av&egrave;re plus pertinente pour impl&eacute;menter cette fonctionnalit&eacute;.</p>
+
+<h3>Installer Sunspot</h3>
+
+<p>Sunspot est distribu&eacute;e sous forme de gem et s&#x27;installe de la mani&egrave;re habituelle, <code>Gemfile</code> et <code>bundle</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.0.9&#x27;
+gem &#x27;sqlite3&#x27;
+gem &#x27;nifty-generators&#x27;
+gem &#x27;sunspot_rails&#x27;</pre>
+
+<p>Une fois la gem et ses d&eacute;pendances install&eacute;es, nous devons g&eacute;n&eacute;rer le fichier de configuration de Sunspot en lan&ccedil;ant</p>
+
+<pre class="terminal">$ rails g sunspot_rails:install</pre>
+
+<p>Cette commande cr&eacute;e un fichier YML dans <code>/config/sunspot.yml</code>. Nous n&#x27;avons besoin de faire aucun changement aux r&eacute;glages par d&eacute;faut.</p>
+
+<p>Sunspot encapsule Solr dans la gem, nul besoin, donc, de l&#x27;installer s&eacute;par&eacute;ment. Cela signifie que tout fonctionne tout de suite, ce qui est bien pratique en d&eacute;veloppement. Pour d&eacute;marrer, nous lan&ccedil;ons</p>
+
+<pre class="terminal">$ rake sunspot:solr:start</pre>
+
+<p>Si vous &ecirc;tes sous OS&nbsp;X&nbsp;Lion et que vous n&#x27;avez pas install&eacute; le runtime Java, il vous sera demand&eacute; de le faire lorsque vous lancerez la commande. Vous verrez peut-&ecirc;tre un warning de d&eacute;pr&eacute;ciation mais il peut &ecirc;tre ignor&eacute;. La commande va &eacute;galement cr&eacute;er quelques fichiers de configuration suppl&eacute;mentaire pour un r&eacute;glage plus avanc&eacute;. Nous ne les verrons pas mais ils sont d&eacute;taill&eacute;s dans la <a href="http://outoftime.github.com/sunspot/docs/index.html">documentation</a>.</p>
+
+<h3>Utiliser Sunspot</h3>
+
+<p>Maintenant que nous avons install&eacute; Sunspot, nous pouvons l&#x27;utiliser dans notre mod&egrave;le <code>Article</code>. Pour ajouter la recherche full-text, nous utilisons la m&eacute;thode <code>searchable</code>.</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :published_at
+  has_many :comments
+  
+  searchable do
+    text :name, :content
+  end
+end</pre>
+
+<p>Cette m&eacute;thode prend un bloc et, dedans, nous d&eacute;finissons les attributs sur lesquels nous voulons effectuer la recherche de mani&egrave;re &agrave; ce que Sunspot sache quoi indexer. Nous pouvons utiliser la m&eacute;thode <code>text</code> pour d&eacute;finir les attributs sur lesquels une recherche full-text sera effectu&eacute;e. Pour nos articles, nous le ferons pour les champs name et content.</p>
+
+<p>Sunspot indexe automatiquement toute nouvel article mais pas les existants. Nous pouvons dire &agrave; Sunspot de re-indexer les entr&eacute;es existantes en lan&ccedil;ant</p>
+
+<pre class="terminal">$ rake sunspot:reindex</pre>
+
+<p>Tous les articles sont maintenant dans la base de donn&eacute;es de Solr et nous pouvons chercher parmi ceux-ci. Nous allons donc ajouter un champ de recherche en haut de la page d&#x27;index.</p>
+
+<p class="codeFilePath">/app/views/articles/index.html.erb</p>
+<pre class="ruby">&lt;% title &quot;Articles&quot; %&gt;
+
+&lt;%= form_tag articles_path, :method =&gt; :get do %&gt;
+  &lt;p&gt;
+    &lt;%= text_field_tag :search, params[:search] %&gt;
+    &lt;%= submit_tag &quot;Search&quot;, :name =&gt; nil %&gt;
+&lt;% end %&gt;
+&lt;!-- rest of view omitted --&gt;</pre>
+
+<p>Ce formulaire envoie les information de recherche en GET &agrave; l&#x27;action <code>index</code>. Tous les param&egrave;tres de recherche seront donc ajout&eacute;s &agrave; la query string. Nous allons ensuite modifier le contr&ocirc;leur de fa&ccedil;on &agrave; ce qu&#x27;il r&eacute;cup&egrave;re les articles en utilisant ce param&egrave;tre <code>search</code>. Pour lancer une recherche avec Sunspot, nous appelons la m&eacute;thode <code>search</code> sur le mod&egrave;le et lui passons un bloc. Dans ce bloc, nous pouvons faire appel &agrave; diff&eacute;rentes m&eacute;thodes pour g&eacute;rer les recherches complexes. Nous allons utiliser la m&eacute;thode <code>fulltext</code> et lui passer les param&egrave;tres de recherche du formulaire. Enfin, nous allons assigner le r&eacute;sultat &agrave; <code>@search</code>. Nous pouvons appeler <code>results</code> dessus pour obtenir la liste des articles correspondants.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">def index
+  @search = Article.search do
+    fulltext params[:search]
+  end
+  @articles = @search.results
+end</pre>
+
+<p>Nous pouvons tester cela en rechargeant la page des articles et en cherchant un mot cl&eacute;. Nous voyons alors une liste des articles r&eacute;pondant &agrave; cette recherche.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/719/original/E278I02.png" width="800" height="565" alt="La liste des articles filtr&eacute;e."/>
+</div>
+
+<p>La recherche retourne une liste des articles contenant le terme de recherche, que cela soit dans le champ <code>name</code> ou <code>content</code>.</p>
+
+<p>Nous pouvons faire bien plus dans le bloc <code>searchable</code> du mod&egrave;le <code>Article</code>. Par exemple, nous pouvons utiliser <code>boost</code> pour modifier le poids des champs. Nous pouvons donc rendre le champ <code>name</code> plus important que le champ <code>content</code>.</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :published_at
+  has_many :comments
+  
+  searchable do
+    text :name, :boost =&gt; 5
+    text :content
+  end
+end</pre>
+
+<p>C&#x27;est important lorsque nous voulons trier les r&eacute;sultats par pertinence. Dans notre cas, les articles dont le nom contient le terme recherch&eacute; appara&icirc;tront avant ceux le comprenant seulement dans leur contenu.</p>
+
+<p>Les attributs list&eacute;s dans le bloc <code>searchable</code> ne doivent pas n&eacute;cessairement &ecirc;tre des champs en base de donn&eacute;es, nous pouvons utiliser n&#x27;importe quelle m&eacute;thode d&eacute;finie dans le mod&egrave;le. Nous allons cr&eacute;er une m&eacute;thode <code>publish_month</code> qui va retourner le nom du mois et l&#x27;ann&eacute;e de publication de l&#x27;article et effectuer ensuite une recherche sur cette m&eacute;thode comme s&#x27;il s&#x27;agissait d&#x27;un champ en base.</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :published_at
+  has_many :comments
+  
+  searchable do
+    text :name, :boost =&gt; 5
+    text :content, :publish_month
+  end
+  
+  def publish_month
+    published_at.strftime(&quot;%B %Y&quot;)
+  end
+  
+end</pre>
+
+<p>Nous devons indexer de nouveau les entr&eacute;es en lan&ccedil;ant <code>rake sunspot:reindex</code> avant de pouvoir effectuer notre recherche sur le nom de mois.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/720/original/E278I03.png" width="800" height="420" alt="Les articles filtr&eacute;s sur leur mois de publication."/>
+</div>
+
+<p>Au lieu de cr&eacute;er une m&eacute;thode, nous pouvons cr&eacute;er un bloc et effectuer la recherche sur ce que retourne ce dernier. Un article a des commentaires, nous pouvons donc ajouter la possibilit&eacute; d&#x27;effectuer une recherche sur le contenu des commentaires en utilisant un bloc.</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :published_at
+  has_many :comments
+  
+  searchable do
+    text :name, :boost =&gt; 5
+    text :content, :publish_month
+    text :comments do
+      comments.map(&amp;:content)
+    end
+  end
+  
+  def publish_month
+    published_at.strftime(&quot;%B %Y&quot;)
+  end
+  
+end</pre>
+
+<p>Dans le bloc, le contexte est celui d&#x27;un <code>Article</code>. Nous pouvons donc obtenir les commentaires et faire un mapping sur leur contenu. Bien que cela retourne un tableau, Sunspot saura s&#x27;en charger et indexer tous les commentaires afin de pouvoir effectuer une recherche sur ces derniers.</p>
+
+<h3>Effectuer une recherche sur les attributs</h3>
+
+<p>Que devons-nous faire si nous souhaitons des capacit&eacute;s de recherche plus puissantes qu&#x27;une simple recherche full-text ? Une recherche sur un attribut particulier, par exemple. Nous devons simplement passer le type d&#x27;attribut que nous voulons filtrer, que ce soit string, integer, float ou encore timestamp. Pour ajouter l&#x27;attribut <code>published_at</code> aux champs recherch&eacute;s, nous pouvons utiliser la m&eacute;thode <code>time</code>.</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :published_at
+  has_many :comments
+  
+  searchable do
+    text :name, :boost =&gt; 5
+    text :content, :publish_month
+    text :comments do
+      comments.map(&amp;:content)
+    end
+    time :published_at
+  end
+  
+  def publish_month
+    published_at.strftime(&quot;%B %Y&quot;)
+  end
+  
+end</pre>
+
+<p>Nous pouvons en faire usage dans <code>ArticlesController</code> pour restreindre les articles cherch&eacute;s &agrave; une date de publication ant&eacute;rieure &agrave; la date courante. Pour cela, nous utilisons la m&eacute;thode <code>with</code>.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">def index
+  @search = Article.search do
+    fulltext params[:search]
+    with(:published_at).less_than(Time.zone.now)
+  end
+  @articles = @search.results
+end</pre>
+
+<p>Cela fait, une recherche ne retournera pas les articles qui n&#x27;ont pas encore &eacute;t&eacute; publi&eacute;s. Vous pouvez trouver une tr&egrave;s bonne documentation sur le sujet sur la <a href="https://github.com/outoftime/sunspot/wiki/Scoping-by-attribute-fields">page de wiki de Sunspot</a>.</p>
+
+<h3>Recherche &agrave; facettes</h3>
+
+<p>Une recherche &agrave; facettes nous permet de filtrer les r&eacute;sultats de recherche en se basant sur certains attributs comme le mois de publication d&#x27;article. Disons que nous voulons ajouter une liste de liens montrant les dates auxquelles des articles ont &eacute;t&eacute; publi&eacute;s. Lorsque nous cliquons sur l&#x27;un de ces liens, la liste des articles est alors filtr&eacute;e pour afficher uniquement ceux publi&eacute;s pour le mois choisi.</p>
+
+<p>Pour ce faire, nous allons d&#x27;abord ajouter un attribut <code>string</code> au bloc <code>searchable</code> pour notre m&eacute;thode <code>publish_month</code>.</p>
+
+<p class="codeFilePath">/app/models/article.rb</p>
+<pre class="ruby">class Article &lt; ActiveRecord::Base
+  attr_accessible :name, :content, :published_at
+  has_many :comments
+  
+  searchable do
+    text :name, :boost =&gt; 5
+    text :content, :publish_month
+    text :comments do
+      comments.map(&amp;:content)
+    end
+    time :published_at
+    string :publish_month
+  end
+  
+  def publish_month
+    published_at.strftime(&quot;%B %Y&quot;)
+  end
+  
+end</pre>
+
+<p>Nous pouvons en faire une recherche &agrave; facettes en appelant <code>facet</code> dans le bloc <code>search</code> du contr&ocirc;leur <code>ArticlesController</code>.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">def index
+  @search = Article.search do
+    fulltext params[:search]
+    with(:published_at).less_than(Time.zone.now)
+    facet(:publish_month)
+  end
+  @articles = @search.results
+end</pre>
+
+<p>Nous pouvons maintenant lister ces facettes sur la page <code>index</code> en ajoutant le code suivant entre le champ de recherche et la liste des articles.</p>
+
+<p class="codeFilePath">/app/views/articles/index.html.erb</p>
+<pre class="ruby">&lt;div id=&quot;facets&quot;&gt;
+  &lt;h3&gt;Published&lt;/h3&gt;
+  &lt;ul&gt;
+    &lt;% for row in @search.facet(:publish_month).rows %&gt;
+      &lt;li&gt;
+        &lt;% if params[:month].blank? %&gt;
+          &lt;%= link_to row.value, :month =&gt; row.value %&gt; (&lt;%= row.count %&gt;)
+        &lt;% else %&gt;
+          &lt;strong&gt;&lt;%= row.value %&gt;&lt;/strong&gt; (&lt;%= link_to &quot;remove&quot;, :month =&gt; nil %&gt;)
+        &lt;% end %&gt;
+      &lt;/li&gt;
+    &lt;% end %&gt;
+  &lt;/ul&gt;
+&lt;/div&gt;</pre>
+
+<p>Dans ce code, nous bouclons sur chacune des facettes <code>publish_month</code> et les affichons. Si nous appelons <code>.facet</code> sur notre objet <code>@search</code> et passons l&#x27;attribut que nous voulons lister, dans notre cas <code>:publish_month</code>, nous pouvons ensuite appeler <code>.rows</code> dessus pour obtenir chaque option de facette pour cet attribut.</p>
+
+<p>Lorsque nous appelons <code>row.value</code>, la valeur de l&#x27;attribut est retourn&eacute;e (ex: &ldquo;January 2011&rdquo;). Nous pouvons &eacute;galement faire appel &agrave; <code>row.count</code> pour obtenir le nombre d&#x27;articles correspondant &agrave; cette valeur. S&#x27;il y a un param&egrave;tre <code>month</code> dans la query string, nous allons afficher sa valeur suivie d&#x27;un lien &ldquo;remove&rdquo; qui permet de supprimer le param&egrave;tre. Cela nous permet de s&eacute;lectionner une facette donn&eacute;e et de la passer sous forme d&#x27;un param&egrave;tre <code>month</code>.</p>
+
+<p>Lorsque nous rechargeons la page, et que nous avons reindex&eacute; les entr&eacute;es, nous allons voir la liste des facettes dans un panneau, chacune montrant un mois et le nombre d&#x27;articles publi&eacute;s durant ce mois. Si nous s&eacute;lectionnons un mois, nous allons le recevoir en param&egrave;tre dans la query string mais les articles ne seront pas filtr&eacute;s. Pour corriger cela, nous devons ajouter un autre param&egrave;tre <code>with</code> au bloc <code>search</code> dans le contr&ocirc;leur afin qu&#x27;il filtre les articles d&#x27;apr&egrave;s le param&egrave;tre <code>month</code> s&#x27;il est pr&eacute;sent.</p>
+
+<p class="codeFilePath">/app/controllers/articles_controller.rb</p>
+<pre class="ruby">def index
+  @search = Article.search do
+    fulltext params[:search]
+    with(:published_at).less_than(Time.zone.now)
+    facet(:publish_month)
+    with(:publish_month, params[:month]) &crarr; 
+      if params[:month].present?
+  end
+  @articles = @search.results
+end</pre>
+
+<p>Maintenant, lorsque nous s&eacute;lectionnons un mois, nous verrons la liste correctement filtr&eacute;e.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/721/original/E278I04.png" width="800" height="439" alt="Les articles filtr&eacute;s par mois en utilisant une facette."/>
+</div>
+
+<p>Lorsque nous cliquons sur le lien &ldquo;remove&rdquo;, nous revenons &agrave; la liste compl&egrave;te. Cela fonctionne avec les r&eacute;sultats de recherches. Si nous cherchons un terme, la liste affichera les mois contenant des articles correspondants.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/722/original/E278I05.png" width="800" height="581" alt="Les mois correspondant aux articles filtrés sont affichés dans la sidebar."/>
+</div>
+
+<p>Les facettes sont une fonctionnalit&eacute; fort sympathique en parall&egrave;le de la recherche.</p>
+
+<p>C&#x27;est tout pour cet &eacute;pisode. Sunspot est un tr&egrave;s bon moyen d&#x27;ajouter une recherche full-text aux applications Rails et fournit de nombreuses fonctionnalit&eacute;s suppl&eacute;mentaires non abord&eacute;es ici. Pensez &agrave; jeter un oeil sur le <a href="https://github.com/outoftime/sunspot/wiki/">wiki</a> pour plus d&#x27;informations.</p>

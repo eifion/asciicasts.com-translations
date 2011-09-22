@@ -1,0 +1,71 @@
+<div class="rtl">
+<p>לאחרונה, ריאן בייטס שאל בטוויטר מה הדרך הטובה ביותר לנהל את תהליכי הרקע עליהם מתבססת אפליקציית ריילס בסביבת הפיתוח. מספר אנשים הציעו את <a href="https://github.com/ddollar/foreman">פורמן (Foreman)</a>, וזה מה שנכסה בפרק זה.
+<p>לדוגמא, כדי להשתמש באפליקציית <a href="https://github.com/ryanb/govsgo">GoVsGo</a> של ריאן בסביבת פיתוח, יש לפתוח מספר תהליכי רקע מבעוד מועד. תהליכים אלה כוללים לדוגמא את Beanstalkd, <code>script/worker</code> וכמו כן גם תהליך שרת של אפליקציית Faye. יש לאתחל כל אחד מהתהליכים הללו בכל פעם בה רוצים להשתמש ב-GoVsGo בסביבת הפיתוח. כאן נכנס פורמן לתמונה, ומאפשר לנו לנהל בצורה פשוטה את כל תהליכי הרקע הללו.</p>
+
+<h3>התקנה ושימוש ב-פורמן</h3>
+<p>פורמן מסופק לנו כג'ם ומותקן בדרך הרגילה והמקובלת.</p>
+
+<pre class="terminal">$ gem install foreman</pre>
+<p>פורמן קורא מתוך קובץ הנקרא <code>Procfile</code> את רשימת התהליכים שעליו לנהל. הקובץ אמור להיות בתיקיית השורש של אפליקציית הריילס שלנו, כך שעלינו ליצור אותו. בקובץ זה נרשום את כל התהליכים שנרצה שפורמן ינהל. כל תהליך יזוהה באמצעות שם, לאחריו נקודותיים ואחריהן התהליך שאנו רוצים שיורץ, כך שנמלא את הקובץ באופן הבא:</p>
+
+<p class="codeFilePath">/Procfile</p>
+<pre class="ruby">beanstalk:  beanstalkd
+worker:     ./script/worker
+faye:       rackup faye.ru -s thin -E production</pre>
+
+<p>לאחר שיצרנו את קובץ ה-<code>Procfile</code>, אנו יכולים לבדוק את תקינותו על ידי הרצת הפקודה<code>foreman check</code>.</p>
+
+<pre class="terminal">$ foreman check
+valid procfile detected (beanstalk, worker, faye)</pre>
+
+<p>אם השתמשתם בטאב, במקום ברווח, על מנת להפריד את השמות מהפקודות בקובץ ההגדרה, תתקבל הודעה המזהירה מפני הפסקת התמיכה בפורמט זה. יש לקחת זאת בחשבון כאשר עורכים את קובץ ה-<code>Procfile</code>. אם לאחר הרצת הפקודה אנו מקבלים חיווי כי הקובץ תקין, נוכל לנסות להריץ את פורמן על ידי הפקודה <code>foreman start</code>.</p>
+
+<pre class="terminal">$ foreman start
+20:06:35 beanstalk.1  | started with pid 23140
+20:06:35 worker.1     | started with pid 23141
+20:06:35 faye.1       | started with pid 23143
+20:06:36 faye.1       | &gt;&gt; Thin web server (v1.2.11 codename Bat-Shit Crazy)
+20:06:36 faye.1       | &gt;&gt; Maximum connections set to 1024
+20:06:36 faye.1       | &gt;&gt; Listening on 0.0.0.0:9292, CTRL+C to stop
+20:06:38 worker.1     | [2011-08-29 20:06:38 +0100] Working 1 jobs: [ Game.move ]</pre>
+
+<p>כאשר נריץ את הפקודה, כל אחד מהתהליכים שהגדרנו בקובץ <code>Procfile</code> יורץ ויירשם יחד עם הפלט שלו בחלון המסוף. אם נלחץ <code>קונטרול+C</code> בחלון המסוף, כל אחד מהתהליכים יופסק.</p>
+
+<p>לפורמן יש <a href="http://ddollar.github.com/foreman/">מדריך</a> שימושי, המתעד את הפרמטרים שניתן להעביר לו וכן כמה מתכונותיו הנוספות, אותן נסקור כעת. לדוגמא, אם נרצה להריץ רק תהליך אחד מתוך התהליכים שהוגדרו בקובץ <core>Procfile</code>, כל שעלינו לעשות הוא לקרוא לפורמן יחד עם השם שהגדרו, לדוגמא:</p>.
+
+<pre class="terminal">$ foreman start faye
+20:35:41 faye.1       | started with pid 23322
+20:35:41 faye.1       | &gt;&gt; Thin web server (v1.2.11 codename Bat-Shit Crazy)
+20:35:41 faye.1       | &gt;&gt; Maximum connections set to 1024
+20:35:41 faye.1       | &gt;&gt; Listening on 0.0.0.0:9292, CTRL+C to stop</pre>
+
+<p>אם נרצה להריץ מספר עותקים שונים של תהליכי רקע, נוכל לעשות זאת באמצעות העברת הפרמטר <code>-c</code>. לדוגמא, נוכל לאתחל 4 מופעים של worker על ידי הרצת הפקודה <code>foreman start -c worker=4</code>.</p>
+
+<pre class="terminal">$ foreman start -c worker=4
+20:39:41 beanstalk.1  | started with pid 23366
+20:39:41 worker.1     | started with pid 23368
+20:39:41 worker.2     | started with pid 23370
+20:39:41 worker.3     | started with pid 23372
+20:39:41 worker.4     | started with pid 23374
+20:39:41 faye.1       | started with pid 23376
+20:39:42 faye.1       | &gt;&gt; Thin web server (v1.2.11 codename Bat-Shit Crazy)
+20:39:42 faye.1       | &gt;&gt; Maximum connections set to 1024
+20:39:42 faye.1       | &gt;&gt; Listening on 0.0.0.0:9292, CTRL+C to stop
+20:39:46 worker.3     | [2011-08-29 20:39:46 +0100] Working 1 jobs: [ Game.move ]
+20:39:46 worker.1     | [2011-08-29 20:39:46 +0100] Working 1 jobs: [ Game.move ]
+20:39:46 worker.2     | [2011-08-29 20:39:46 +0100] Working 1 jobs: [ Game.move ]
+20:39:47 worker.4     | [2011-08-29 20:39:47 +0100] Working 1 jobs: [ Game.move ]</pre>
+
+<p>הפקודה תגרום לפתיחת כל התהליכים פעם יחידה, פרט ל-worker אשר ייפתח ב-4 מופעים שונים.</p>
+
+<h3>ייצוא תהליכים</h3>
+<p>לפורמן יכולת לייצא את התהליכים בפורמט שניתן להשתמש בו בשרת בסביבת הייצור. נכון להיום הפורמטים הנתמכים הם <code>inittab</code> ו-<code>upstart</code>. אם נריץ את הפקודה  <code>foreman export upstart .</code> פורמן ייצור מספר קבצי הגדרות בפורמט upstart בתוך התיקייה הנוכחית. אם נבחן אחד מהן, נראה שהוא מריץ פקודה להתחלת תהליך של  <code>beanstalkd</code> וטיפול בלוגים.</p>
+
+<p class="codeFilePath">/govsgo-beanstalk-1.conf</p>
+<pre class="terminal">start on starting govsgo-beanstalk
+stop on stopping govsgo-beanstalk
+respawn
+
+exec su - govsgo -c &#x27;cd /Users/eifion/govsgo; export PORT=5000; beanstalkd &gt;&gt; /var/log/govsgo/beanstalk-1.log 2&gt;&amp;1&#x27;</pre>
+<p>עד כאן פרק זה על פורמן. הפרק היה קצת מהרגיל, היות ופורמן הוא פתרון פשוט לבעיה נקודתית, והוא עושה את עבודתו נאמנה. אם עליכם לפתוח מספר תהליכים שונים על מנת שאפליקציית הריילס שלכם תפעל בסביבת הפיתוח, כדאי לכם לשקול להשתמש בפורמן</p>
+</div>

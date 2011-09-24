@@ -1,0 +1,245 @@
+<div class="rtl">
+<p>בפרק זה נבחן מחדש את נושא יצירת אובייקטי בדיקות (test objects) תוך שימוש במפעלים (factories), ולא בקבועים (fixtures). השימוש בקבועים הוסבר <a href="http://railscasts.com/episodes/60-testing-without-fixtures">בפרק 60</a>. כיום, ניתן לעשות שימוש במפעלים (factories) דרך מספר כלים שונים הזמינים לנו. בפרק זה נדגים מספר דרכים שונות באמצעותן מפעלים יכולים לשפר את הבדיקות באפליקציית ריילס. 
+</p>
+
+<p>ראשית נבחן מפרט (spec) של מודל User. המפרט כולל שתי בדיקות הקשורות להזדהות (authentication). המבדק הראשון מוודא כי כאשר מעבירים למתודה  <code>authenticate</code> שם וסיסמה נכונים מוחזר אובייקט <code>User</code>. המבדק השני מוודא כי כאשר מועבר שם משתמש נכון אך סיסמה שגויה, המתודה מחזירה <code>nil</code>.</p>
+<pre class="ruby">
+require File.dirname(__FILE__) + &#x27;/../spec_helper&#x27;
+
+describe User do
+  fixtures :all
+  it &quot;should authenticate with matching username and password&quot; do
+    User.authenticate(&#x27;bob&#x27;, &#x27;secret&#x27;).should == users(:bob)
+  end
+
+  it &quot;should not authenticate with incorrect password&quot; do
+    User.authenticate(&#x27;bob&#x27;, &#x27;incorrect&#x27;).should be_nil
+  end
+end
+</pre>
+<p>שימו לב כי כרגע בבדיקות אלה נעשה שימוש בקבועים. לקבועים מספר חולשות ההופכות אותם לפחות מאידיאליים, העיקרית שבהן היא שהם מפרידים את המידע שאנו בודקים מההתנהגות שאנו בודקים: בבדיקה הראשונה למעלה, אנו בודקים את ההתנהגות של מודל <code>User</code>, אך איננו יוצרים <code>User</code> בפועל, אלא מסתמכים על מידע שקיים בקובץ הקבועים (fixtures). הסתמכות זו הופכת בדיקות לשבריריות יותר ומסובכות לקריאה. לעיתים קרובות צריך להסתכל בקובץ הקבועים הנפרד על מנת להבין בדיקה כהלכה, וגם אז – העניינים לא תמיד ברורים.</p>
+<pre class="ruby">
+bob:
+  username: bob
+  email: bob@example.com
+  password_hash: 3488f5f7efecab14b91eb96169e5e1ee518a569f
+  password_salt: bef65e058905c379436d80d1a32e7374b139e7b0
+  admin: false
+
+admin:
+  username: admin
+  email: admin@example.com
+  password_hash: 3488f5f7efecab14b91eb96169e5e1ee518a569f
+  password_salt: bef65e058905c379436d80d1a32e7374b139e7b0
+  admin: true
+</pre>  
+<p>לדוגמה, היות והסיסמה במודל <code>User</code> מוצפנת, בעוד שבבדיקה עצמה אנו רוצים לבדוק את הסיסמה 'secret', מהסתכלות בקובץ הקבועים לעיל לא ניתן לדעת אם זו הסיסמה הנכונה בכלל.</p>
+
+<h3>נפטרים מהקבועים</h3>
+
+<p>לפני שאנו מבצעים שינויים כלשהם בבדיקות, עלינו להריץ אותן ולוודא שהן עוברות כולן בהצלחה.</p>
+<pre class="terminal">
+$ rake spec
+(in /Users/eifion/rails/apps_for_asciicasts/ep158)
+<span class="passed">.....</span>
+
+Finished in 0.217478 seconds
+
+<span class="passed">5 examples, 0 failures</span>
+</pre>
+<p>הבדיקות עוברות בהצלחה, כך שניתן להתחיל לבצע שינויים. לפני שנתחיל להשתמש במפעלים, ננסה ליצור אובייקטים בצורה ישירה, ונראה כיצד נתקדם. השינוי הראשון שנבצע הוא להיפטר מהתלות בקבועים, וליצור משתמש במסד הנתונים עבור כל בדיקה במפרט.</p>
+<pre class="ruby">
+require File.dirname(__FILE__) + &#x27;/../spec_helper&#x27;
+
+describe User do
+  it &quot;should authenticate with matching username and password&quot; do
+    user = User.create!(:username =&gt; &quot;bob&quot;, :password =&gt; &quot;secret&quot;)
+    User.authenticate(&#x27;bob&#x27;, &#x27;secret&#x27;).should == user
+  end
+
+  it &quot;should not authenticate with incorrect password&quot; do
+    user = User.create!(:username =&gt; &quot;bob&quot;, :password =&gt; &quot;secret&quot;)
+    User.authenticate(&#x27;bob&#x27;, &#x27;incorrect&#x27;).should be_nil
+  end
+end
+</pre>
+<p>כעת נריץ את הבדיקות שנית, ו...&hellip;</p>
+<pre class="terminal">
+$ rake spec
+(in /Users/eifion/rails/apps_for_asciicasts/ep158)
+<span class="passed">...</span><span class="failed">FF</span>
+
+1)
+<span class="failed">ActiveRecord::RecordInvalid in &#x27;User should authenticate with matching username and password&#x27;</span>
+
+2)
+<span class="failed">ActiveRecord::RecordInvalid in &#x27;User should not authenticate with incorrect password&#x27;
+Validation failed: Username has already been taken, Email is invalid</span>
+Finished in 0.167193 seconds
+
+<span class="failed">5 examples, 2 failures</span>
+</pre>
+<p>&hellip;הפעם קיבלנו שתי שגיאות. מהשגיאה השנייה נראה כי למודל <code>User</code> יש שדה <code>email</code> הכולל תשריר (validation) מסוים אודותיו. נוכל לחזור כעת למפרט ולהוסיף לכל בדיקה ערך כלשהו עבור שדה זה, ואמנם – עבור שתי בדיקות זה לא ייקח זמן רב. אבל אם היו לנו עשרות בדיקות שעושות שימוש במודל <code>User</code> אז היה מדובר בעבודה רבה. אם בשלב כלשהו בעתיד נרצה להוסיף שדה נוסף למודל, אשר כולל תשריר גם הוא, נצטרך לשנות כל אחת ואחת מהבדיקות שיוצרת מופע של המודל. במקרים מסוימים נצטרך להוסיף לבדיקות נתונים עבור שדות שאינם רלוונטיים עבור אותה בדיקה. לדוגמה – עבור שתי הבדיקות שלנו לעיל, השדה <code>email</code> אינו רלוונטי ולא אכפת לנו כלל מה הערך השמור בו (ועדיין, עלינו לספק אחד). </p>
+
+<h3>שימוש במפעלים</h3>
+<p>ניתן לפתור את הבעיה באמצעות שימוש במפעלים. ניתן להשתמש במפעל על מנת ליצור מופע שריר של אובייקט עבור הבדיקות שלנו, ולשנות בכל פעם רק את השדות הרלוונטיים לאותה בדיקה. </p>
+
+<p>ש מספר ג'מים זמינים, ובפרק זה נעשה שימוש ב <a href="http://www.thoughtbot.com/projects/factory_girl/">Factory Girl</a>. על מנת להתקין את Factory Girl, יש להוסיף את השורה הבאה לקובץ <code>/config/environments/test.rb</code>.</p>
+<pre class="ruby">
+config.gem &quot;thoughtbot-factory_girl&quot;, :lib =&gt; &quot;factory_girl&quot;, :source =&gt; &quot;http://gems.github.com&quot;
+</pre>
+<p>לאחר שהוספנו את השורה, עלינו להריץ את rake על מנת לוודא שהג'ם הותקן.</p>
+<pre class="terminal">
+$ sudo rake gems:install RAILS_ENV=test
+(in /Users/eifion/rails/apps_for_asciicasts/ep158)
+gem install thoughtbot-factory_girl --source http://gems.github.com
+Successfully installed thoughtbot-factory_girl-1.2.1
+1 gem installed
+Installing ri documentation for thoughtbot-factory_girl-1.2.1...
+Installing RDoc documentation for thoughtbot-factory_girl-1.2.1...
+</pre>
+<p>כעת ש-Factory Girl הותקן, עלינו ליצור את המפעל הראשון שלנו. זה תמיד רעיון טוב לשמור את כל המפעלים במקום יחיד, והיות ואנו משתמשים ב-RSpec, ניצור את הקובץ <code>factories.rb</code> תחת התיקייה <code>spec</code>.</p>
+
+<p>כעת, עלינו לגרום לסביבת RSpec להכיר את המפעלים שלנו, וניתן לעשות זאת על ידי הוספת שורה אשר תקשר את <code>factories.rb</code> אל הסביבה. את השורה נוסיף בראש הקובץ <code>/spec/spec_helper.rb</code>. </p>
+<pre class="ruby">
+require File.dirname(__FILE__) + &quot;/factories&quot;
+</pre>
+<p>אם היינו עושים שימוש בסביבת בדיקות אחרת, כגון Test::Unit או Shoulda, היינו ממקמים את הקובץ <code>factories.rb</code> ומוסיפים את השורה לעיל ב-<code>/test/test_helper.rb</code>.</p>
+
+<p>משהשלמנו זאת, ניתן ליצור את המפעל הראשון שלנו, זה אשר יטפל במודל <code>User</code>.</p>
+<pre class="ruby">
+Factory.define :user do |f|
+  f.username &quot;foo&quot;
+  f.password &quot;foobar&quot;
+  f.password_confirmation { |u| u.password }
+  f.email &quot;foo@example.com&quot;
+end
+</pre>
+<p>אנו מגדירים אובייקט מפעל באמצעות הקריאה <code>Factory.define</code> ומעבירים כפרמטרים את שם המודל, במקרה זה <code>:user</code>, ובלוק אשר קולט את אובייקט המפעל. בתוך הבלוק אנו יכולים להגדיר ערכי ברירת מחדל לשדות והמאפיינים השונים של המודל עבורו אנו מגדירים את המפעל. בקוד לעיל, הוגדרו ארבעה שדות, כאשר לשדות <code>username</code>, <code>password</code> ו-<code>email</code> הוגדרו ערכי מחרוזת, אבל לשדה <code>password_confirmation</code> נעשתה הגדרה שונה. הסיבה לכך היא שאם נקבע את ערך השדה הזה ל <code>&ldquo;foobar&rdquo;</code> יהיה עלינו לשנות את שני שדות הסיסמה בכל פעם שנרצה ליצור בבדיקות שלנו אובייקט עם סיסמה שונה מברירת המחדל. במקום זאת, אנו מעבירים בלוק אשר בודק את מצבו הנוכחי של האובייקט ומציב בשדה אישור הסיסמה את אותו הערך בדיוק השמור בשדה הסיסמה. כך נבטיח שהסיסמה ואישור הסיסמה יהיו תמיד תואמים.</p>
+
+<p>כעת שיצרנו מפעל עבור מודל <code>User</code>,  אנו יכולים לעדכן את הבדיקות שלנו כדי שיעשו בו שימוש. במקום ליצור אובייקטים ישירות עם הקריאה <code>User.create!</code> ניצור אותם דרך המפעל שלנו.</p>
+<pre class="ruby">
+require File.dirname(__FILE__) + &#x27;/../spec_helper&#x27;
+
+describe User do
+  it &quot;should authenticate with matching username and password&quot; do
+    user =  Factory.create(:user, :username =&gt; &quot;frank&quot;, :password =&gt; &quot;secret&quot;)
+    User.authenticate(&quot;frank&quot;, &quot;secret&quot;).should == user
+  end
+
+  it &quot;should not authenticate with incorrect password&quot; do
+    user = Factory.create(:user, :username =&gt; &quot;frank&quot;, :password =&gt; &quot;secret&quot;)
+    User.authenticate(&quot;frank&quot;, &quot;incorrect&quot;).should be_nil
+  end
+end
+</pre> 
+<p>בקוד לעיל נעשה כעת שימוש ב-<code>Factory.create</code>  על מנת ליצור את המשתמשים שלנו, כאשר הפרמטרים שמועברים הם: סוג האובייקט שאנו רוצים ליצור, ורשימת השדות שאנו רוצים לדרוס את ערכי ברירת המחדל שלהם. שימו לב שעדכנו את שמות המשתמש ל'בוב' ו-'פרנק' כדי שלא תהיה התנגשות עם האובייקטים שמיוצרים על ידי קובץ הקבועים.</p>
+
+<p>אם נריץ את הבדיקות שלנו כעת שוב, הן כולן עוברות בהצלחה.</p>
+<pre class="terminal">
+$ rake spec
+(in /Users/eifion/rails/apps_for_asciicasts/ep158)
+<span class="passed">.....</span>
+
+Finished in 0.163722 seconds
+
+<span class="passed">5 examples, 0 failures</span>
+</pre>
+<h3>יצירת אובייקטים ברצף</h3>
+
+<p>למודל <code>User</code> שלנו יש מספר תשרירים. אובייקטים המיוצרים על ידי המפעל מתמודדים  עם רובם היטב, פרט לאחד:</p>
+<pre class="ruby">
+  validates_uniqueness_of :username, :email, :allow_blank =&gt; true
+</pre>  
+<p>המודל <code>User</code> שלנו דורש <code>username</code> ייחודי ו-<code>email</code> ייחודי, כך שאנו לא יכולים לכתוב שום בדיקה שמייצרת יותר ממופע אחד, היות והערכים של שדות אלה מקובעים. Factory Girl מספק לנו דרך ליצור מספר אובייקטים ברצף, כך שכל אובייקט מכיל ערכים הייחודיים רק לו. </p>
+<pre class="ruby">
+Factory.define :user do |f|
+  f.sequence(:username) { |n| &quot;foo#{n}&quot; } 
+  f.password &quot;foobar&quot;
+  f.password_confirmation { |u| u.password }
+  f.sequence(:email) { |n| &quot;foo#{n}@example.com&quot; }
+end
+</pre>
+<p>החלפנו בקוד למעלה את הערכים המקובעים של שם המשתמש וכתובת הדואר האלקטרוני, בקריאה למתודה  <code>sequence</code> אליה אנו מעבירים את שם השדה ובלוק. הבלוק מקבל כקלט מספר, שאנו יכולים לעשות בו שימוש כדי לייחד כל ערך שאנו מציבים. עכשיו אנו יכולים ליצור משתמש דרך המפעל שלנו, ויהיה לו  <code>username</code> ו-<code>email</code> ייחודיים.</p>
+
+<h3>יחסים</h3>
+<p>בנוסף למודל <code>User</code>, התוכנה שלנו כוללת גם מודל <code>Article</code>. למודל <code>Article</code> יש יחס <code>belongs_to</code> אל המודל <code>User</code> ויש בו תשריר המבטיח כי לכל מאמר יש <code>user_id</code>.</p>
+<pre class="ruby">
+class Article &lt; ActiveRecord::Base
+  belongs_to :user
+  has_many :comments, :dependent =&gt; :destroy
+  validates_presence_of :name, :user_id
+  acts_as_list
+
+  def editable_by?(some_user)
+    some_user.admin? || some_user == user
+  end
+end
+</pre>
+<p>Factory Girl מאפשר לנו להגדיר יחסים אלה, באמצעות קריאה למתודה <code>association</code> והעברת שם המודל אליו קיים ייחוס בתור פרמטר.</p>
+<pre class="ruby">
+Factory.define :article do |f|
+  f.name &quot;foo&quot;
+  f.association :user
+end
+</pre>
+<p>כאשר יוצרים אובייקט <code>Article</code> ייעשה חיפוש למציאת מפעל המתאים לייחוס <code>:user</code> ובאופן אוטומטי ייעשה בו שימוש על מנת לבנות אובייקט מתאים. אם לייחוס שלנו שם שונה, לדוגמה author, נוכל להגדיר זאת מפורשות כך:</p>
+<pre class="ruby">
+f.association :author, :factory =&gt; :user
+</pre>
+
+<h3>עצות וטיפים לסיום</h3>
+<p>נסיים את הפרק הזה על Factory Girl במבט חוזר לאחת הבדיקות שלנו, ונסתכל על מספר תכונות נוספות הזמינות לנו.</p>
+<pre class="ruby">
+it &quot;should authenticate with matching username and password&quot; do
+  user =  Factory.create(:user, :username =&gt; &quot;frank&quot;, :password =&gt; &quot;secret&quot;)
+  User.authenticate(&quot;frank&quot;, &quot;secret&quot;).should == user
+end
+</pre>
+<p>כאשר אנו קוראים למתודה <code>Factory.create</code> ליצירת אובייקט, המופע נשמר בפועל במסד הנתונים. אם נרצה לעבוד עם מופע בזיכרון, אך ללא שמירה שלו, נוכל לקרוא במקום זאת למתודה <code>Factory.build</code>.</p>
+<pre class="ruby">
+user =  Factory.build(:user, :username =&gt; &quot;frank&quot;, :password =&gt; &quot;secret&quot;)
+</pre>
+<p>ל-<code>Factory</code> class יש גם מתודה הנקראת <code>attributes_for</code> המחזירה טבלת גיבוב (hash) של ערכי האובייקט.</p>
+<pre class="terminal">
+&gt;&gt; Factory.attributes_for :user
+=&gt; {:email=&gt;&quot;foo2@example.com&quot;, :password=&gt;&quot;foobar&quot;, :username=&gt;&quot;foo2&quot;, :password_confirmation=&gt;&quot;foobar&quot;}
+</pre>
+<p>מתודה זו שימושית במיוחד לבדיקות של בקרים (controller tests), אשר דורשים טבלת גיבוב כפרמטר לפעולת הבקרים (controller actions). שימו לב לערכים בשדות שם המשתמש וכתובת הדוא"ל, אשר מבוססים על הרצפים עליהם דיברנו קודם לכן. </p>
+
+<p>לסיום, במקום לקרוא ל <code>Factory.create</code> ישירות, נוכל לכתוב בקיצור <code>Factory</code>  והתוצאה תהיה זהה.</p>
+<pre class="ruby">
+user =  Factory(:user, :username =&gt; &quot;frank&quot;, :password =&gt; &quot;secret&quot;)
+</pre>
+<p>מתוך יכולותיה של Factory Girl כיסינו רק את הבסיס. למידע נוסף כדאי לעיין <a href="http://dev.thoughtbot.com/factory_girl/">בתיעוד</a>.</p>
+
+<p>שווה לקוראים להעיף מבט גם על אלטרנטיבות ל-Factory Girl, בין השאר Machinist3, המאפשר לתאר אובייקטים בתמציתיות רבה.</p>
+<pre class="ruby">
+require &#x27;faker&#x27;'
+
+Sham.name  { Faker::Name.name }
+Sham.email { Faker::Internet.email }
+Sham.title { Faker::Lorem.sentence }
+Sham.body  { Faker::Lorem.paragraph }
+
+User.blueprint do
+  name
+  email
+end
+
+Post.blueprint do
+  title
+  author
+  body
+end
+</pre>
+<p>אלטרנטיבה אחרת ששווה בדיקה היא <a href="http://github.com/flogic/object_daddy/tree/master">Object Daddy</a>,  אשר מציג זווית פעולה אחרת,  על ידי הוספת המתודה <code>generate</code> לכל מודל ActiveRecord. ואז ניתן לקרוא למתודה מכל מקום בבדיקות, על מנת ליצור מופע שריר של המודל. ניתן להגדיר בתוך המודל עצמו את ערכי ברירת המחדל.</p>
+<pre class="ruby">
+class User &lt; ActiveRecord::Base
+  generator_for(:start_time) { Time.now }
+  generator_for :name, &#x27;Joe&#x27;
+  generator_for :age =&gt; 25
+end
+</pre>
+<p>לא משנה מה הפתרון אשר תבחרו, מפעלים הם דרך נפלאה לשפר את הבדיקות באפליקציית הריילס שלכם.</p>
+</div>

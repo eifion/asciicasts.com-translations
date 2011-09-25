@@ -1,0 +1,326 @@
+<p>エピソード250[<a href="http://railscasts.com/episodes/250-authentication-from-scratch">動画を見る</a>, <a href="http://asciicasts.com/episodes/250-authentication-from-scratch">読む</a>]で、Railsアプリケーションにゼロから認証機能を追加しました。既存のサードパーティ製のツールを使いたい場合は、一部の機能を自動化してくれるgemがいくつかありますが、今回のエピソードでは<a href="https://github.com/NoamB/sorcery">Sorcery</a>を紹介します。</p>
+
+<p>Sorceryはシンプルなツールです。わずか20のメソッドを持つだけですが、およそ必要な認証機能のすべてを提供します。そのシンプルさに反してフル機能を持ち、またモジュール方式をとっているため、例えばパスワードの初期化、活動ログなど、必要な部品のみを選択して有効化できます。Sorceryは他の認証用gemと比較するとより低いレベルで動作し、コントローラ層やビュー層のコーディングは開発者にゆだねられています。今回のエピソードではこのSorceryを使って既存のRailsアプリケーションに認証機能を付加していきます。</p>
+
+<h3>はじめに</h3>
+
+<p>対象とするアプリケーションはいたってシンプルです。ウェルカム画面を持っていて、そこには秘密のページへのリンクがあります。現時点では秘密のページは誰でも見ることができますが、ログインしたユーザのみがアクセスできるように制限をかけようと思います。このためにはアプリケーションに認証機能を追加する必要があり、ここでSorceryが登場します。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/730/original/E283I01.png" width="804" height="366" alt="対象のアプリケーション"/>
+</div>
+
+<p>Sorceryはgemとして提供され、通常の方法でインストールを行います。<code>Gemfile</code>に参照情報を追加し、<code>bundle</code>コマンドを実行します。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem 'sorcery'</pre>
+
+<p>Bundlerが終了したら、Sorceryの初期化ファイルを追加するために次のコマンドを実行します。(この詳細は後ほど説明します。)</p>
+
+<pre class="ruby">$ rake sorcery:bootstrap</pre>
+
+<p>次に<code>sorcery_migration</code>を作成します。これを使って、追加したいSorceryモジュールを選択します。ここでは、単純なパスワード認証に必要な<code>core</code>モジュールと、<code>remember_me</code>モジュールをインクルードします。すべてのモジュールのリストを参照するためには、Sorceryの<a href="https://github.com/NoamB/sorcery/blob/master/README.rdoc">README</a>をチェックしてください。</p>
+
+<pre class="terminal">$ rails g sorcery_migration core remember_me
+      create  db/migrate/20110914221626_sorcery_core.rb
+      create  db/migrate/20110914221627_sorcery_remember_me.rb</pre>
+
+<p>コマンドを実行すると、選択したモジュールに応じていくつかのmigrationファイルが生成されます。<code>sorcery_core</code>のmigrationを見ると、新しい<code>users</code>テーブルに追加される属性が確認できます。</p>
+
+<p class="codeFilePath">/db/migrate/20110914221626_sorcery_core.rb</p>
+<pre class="ruby">class SorceryCore &lt; ActiveRecord::Migration
+  def self.up
+    create_table :users do |t|
+      t.string :username,         :null =&gt; false  
+      t.string :email,            :default =&gt; nil 
+      t.string :crypted_password, :default =&gt; nil
+      t.string :salt,             :default =&gt; nil
+      t.timestamps
+    end
+  end
+
+  def self.down
+    drop_table :users
+  end
+end</pre>
+
+<p>デフォルトではmigrationは<code>username</code>フィールドを作成します。<code>username</code>フィールドは<code>email</code>フィールドと同じく必要ないため、該当行をコメントアウトします。</p> 
+
+<p class="codeFilePath">/db/migrate/20110914221626_sorcery_core.rb</p>
+<pre class="ruby">class SorceryCore &lt; ActiveRecord::Migration
+  def self.up
+    create_table :users do |t|
+      # t.string :username,         :null =&gt; false  
+      t.string :email,            :default =&gt; nil 
+      t.string :crypted_password, :default =&gt; nil
+      t.string :salt,             :default =&gt; nil
+      t.timestamps
+    end
+  end
+end</pre>
+
+<p>Sorceryの設定を変更して、 <code>username</code>の代わりに<code>email</code>を使用するよう指定します。このためにSorceryの初期化ファイルを修正します。このファイルの最初で、有効化したいモジュールを特定します。<code>core</code>モジュール以外で使用するのは<code>remember_me</code>モジュールだけですが、ここでそれを追加します。</p>
+
+<pre class="codeFilePath">/config/initializers/sorcery.rb</pre>
+<pre class="ruby"># The first thing you need to configure is which modules you need in your app.
+# The default is nothing which will include only core features (password encryption, login/logout).
+# Available submodules are: :user_activation, :http_basic_auth, :remember_me, 
+# :reset_password, :session_timeout, :brute_force_protection, :activity_logging, :external
+Rails.application.config.sorcery.submodules = [:remember_me]
+
+# Rest of file omitted.</pre>
+
+<p>他にもここで指定できる設定オプションがあり、それらはファイル内でわかりやすく説明されています。ほとんどは変更する必要はありませんが、ひとつだけ<code>username_attribute_name</code>は変更する必要があります。このオプションを有効化して、その値をユーザを特定するのに使うフィールドである<code>:email</code>に変更します。</p>
+
+<p class="codeFilePath">/config/initializers/sorcery.rb</p>
+<pre class="ruby">config.user_config do |user|
+  # -- core --
+  user.username_attribute_name = :email                                          
+	# change default username
+	# attribute, for example, 
+	# to use :email as the login.                                                                                                                                                                          
+
+	# Other options omitted.
+end
+# This line must come after the 'user config' block.
+config.user_class = "User"                                                          	
+# define which model authenticates                                                                   	
+# with sorcery.
+end</pre>
+
+<p>ファイルの最後には、Sorceryが認証に利用するモデルの名前を指定するための設定項目があり、デフォルトでは<code>User</code>になっています。このアプリケーションにはまだ<code>User</code>モデルがないため、ここで作成することにします。すでに<code>User</code>のフィールドを定義するmigrationファイルがあるので、Railsに対してモデル作成時にそれを生成しないように指定します。</p>
+
+<pre class="terminal">$ rails g model user --skip-migration</pre>
+
+<p><code>User</code>モデルでSorceryを有効化するために、コードを一行追加します。</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  authenticates_with_sorcery!end</pre>
+
+<p>これにより、<code>User</code>モデルで認証を扱えるようにいくつかのメソッドが追加されます。しかし、検証(validation)や属性を保護する機能は追加されません。それらを追加するかどうかは開発者にゆだねられます。</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  authenticates_with_sorcery!  
+  attr_accessible :email, :password, :password_confirmation
+  
+  validates_confirmation_of :password
+  validates_presence_of :password, :on =&gt; :create
+  validates_presence_of :email
+  validates_uniqueness_of :email
+end</pre>
+
+<p>ここでmigrationを実行し、usersテーブルを作成します。</p>
+
+<pre class="terminal">$ rake db:migrate</pre>
+
+<h3>コントローラとビューを追加する</h3>
+
+<p><code>User</code>モデルの準備ができたので、対応するコントローラを設定します。まず登録手続きを処理する<code>UsersController</code>を作成します。 </p>
+
+<pre class="terminal">$ rails g controller users new</pre>
+
+<p>ログイン処理をおこなうSessionsControllerも作成します。</p>
+  
+<pre class="terminal">$ rails g controller sessions new</pre>
+
+<p>これは、エピソード250で認証機能をゼロからに作ったときの作業に似ているので、ここは簡単に触れるだけにします。<code>UsersController</code>は標準的なもので、<code>new</code>アクションで<code>User</code>を新規作成し、 <code>create</code>アクションでは渡されたパラメータから<code>User</code>を新規作成します。</p>
+
+<p class="codeFilePath">/app/controllers/users_controller.rb</p>
+<pre class="ruby">class UsersController &lt; ApplicationController
+  def new
+    @user = User.new
+  end
+  
+  def create
+    @user = User.new(params[:user])
+    if @user.save
+      redirect_to root_url, :notice =&gt; "Signed up!"
+    else
+      render :new
+    end
+  end
+end</pre>
+
+<p><code>new</code>テンプレートも標準的なもので、新規ユーザを作成するフォームに<code>email</code>、<code>password</code>、<code>password_confirmation</code>の各フィールドと、検証エラーを表示するためのコードが含まれています。</p>
+
+<p class="codeFilePath">/app/views/users/new.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Sign Up&lt;/h1&gt;
+
+&lt;%= form_for @user do |f| %&gt;
+  &lt;% if @user.errors.any?%&gt;
+    &lt;div class="error_messages"&gt;
+      &lt;h2&gt;Form is invalid&lt;/h2&gt;
+      &lt;ul&gt;
+        &lt;% for message in @user.errors.full_messages %&gt;
+          &lt;li&gt;&lt;%= message %&gt;&lt;/li&gt;
+        &lt;% end %&gt;
+      &lt;/ul&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+  &lt;div class="field"&gt;
+    &lt;%= f.label :email %&gt;
+    &lt;%= f.text_field :email %&gt;
+  &lt;/div&gt;
+  &lt;div class="field"&gt;
+    &lt;%= f.label :password %&gt;
+    &lt;%= f.password_field :password %&gt;
+  &lt;/div&gt;
+  &lt;div class="field"&gt;
+    &lt;%= f.label :password_confirmation %&gt;
+    &lt;%= f.password_field :password_confirmation %&gt;
+  &lt;/div&gt;
+  &lt;div class="actions"&gt;&lt;%= f.submit %&gt;&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p><code>SessionsController</code>の中身は、より興味深いものになっています。<code>new</code>アクションがありますがコードを追加する必要がないので、次にテンプレートを見てみます。ここでは、簡単なログインフォームで、<code>email</code>と<code>password</code>のためのテキストフィールドと<code>remember_me</code>フィールドのための<code>checkbox</code>を持ったものを作ります。</p>
+
+<p class="codeFilePath">/app/views/sessions/new.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Log in&lt;/h1&gt;
+
+&lt;%= form_tag sessions_path do %&gt;
+  &lt;div class="field"&gt;
+    &lt;%= label_tag :email %&gt;
+    &lt;%= text_field_tag :email, params[:email] %&gt;
+  &lt;/div&gt;
+  &lt;div class="field"&gt;
+    &lt;%= label_tag :password %&gt;
+    &lt;%= password_field_tag :password %&gt;
+  &lt;/div&gt;
+  &lt;div class="field"&gt;
+    &lt;%= check_box_tag :remember_me, 1, params[:remember_me] %&gt;
+    &lt;%= label_tag :remember_me %&gt;
+  &lt;/div&gt;
+  &lt;div class="actions"&gt;&lt;%= submit_tag "Log in" %&gt;&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p>ログインフォームを処理するための<code>create</code>アクションを作成します。Sorceryでは<code>login</code>というメソッドが提供され、 3つのパラメータをとります。ユーザ名かメールアドレス、入力されたパスワード、<code>remember_me</code>チェックボックスの値です。このメソッドが認証を行い、一致するものが見つかった場合にその<code>User</code>を返します。これを確認して、ユーザが見つかったらトップページにリダイレクトします。見つからなかったら、フラッシュメッセージと共にログインフォームを再度表示します。</p>
+
+<p class="codeFilePath">/app/views/controllers/sessions_controller.rb</p>
+<pre class="ruby">class SessionsController &lt; ApplicationController
+  def new
+  end
+  
+  def create
+    user = login(params[:email], params[:password], ↵
+      params[:remember_me])
+    if user
+      redirect_back_or_to root_url, :notice =&gt; "Logged in!"
+    else
+      flash.now.alert = "Email or password was invalid."
+    end
+  end
+end</pre>
+
+<p>ユーザが見つかった場合にトップページにリダイレクトさせるときに、<code>redirect_to</code>を使う代わりに、Sorcery が提供する<code>redirect_back_or_to</code>というメソッドを使います。このメソッドは<code>redirect_to</code>と同じように振るまいますが、SorceryがURLを保存している場合は、コードで指定したURLではなく保存されたURLにリダイレクトします。これで便利なのは、あるページにアクセスしたユーザをまずログインさせたいという場合に、Sorceryがそのユーザをログインページに誘導し、ログインが成功したら最初に訪れようとしていたページに戻してくれる点です。</p>
+
+<p>ユーザがログアウトする手段も提供しなくてはいけないので、コントローラに<code>destroy</code>アクションも追加します。Sorceryには<code>logout</code>というメソッドがあり、これを呼び出すことでユーザをログアウトさせることができます。ユーザがログアウトした後は、トップページにリダイレクトします。</p>
+
+<p class="codeFilePath">/app/views/controllers/sessions_controller.rb</p>
+<pre class="ruby">def destroy
+  logout
+  redirect_to root_url, :notice =&gt; "Logged out!"
+end</pre>
+
+<p>次にroutesファイルを開いて、すべてをつなげるために、デフォルトの自動生成されたアクションを次のルートで置き換えます。</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Auth::Application.routes.draw do
+  get "logout" =&gt; "sessions#destroy", :as =&gt; "logout"
+  get "login" =&gt; "sessions#new", :as =&gt; "login"
+  get "signup" =&gt; "users#new", :as =&gt; "signup"
+  resources :users
+  resources :sessions
+  get "secret" =&gt; "home#secret", :as =&gt; "secret"
+  root :to =&gt; "home#index"
+end</pre>
+
+<p>認証に関連する機能を処理するいくつかの名前付きルート(named routes)やリソース(resources)があります。</p> 
+
+<p>新しく作成したこれらのページにユーザがアクセスできるように、新規にリンクが必要です。それらをレイアウトページに追加して、アプリケーションのすべてのページから見えるようにします。<code>current_user</code>メソッドを使って、ユーザがログインがしているかどうかを確認できます。もしログインしていたら、メールアドレスをログアウトのリンクと一緒に表示します。もし現在のユーザがいない場合は、登録かログインをさせるためのページへのリンクを表示します。</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Auth Example&lt;/title&gt;
+  &lt;%= stylesheet_link_tag    "application" %&gt;
+  &lt;%= javascript_include_tag "application" %&gt;
+  &lt;%= csrf_meta_tags %&gt;
+&lt;/head&gt;
+&lt;body class="&lt;%= params[:controller] %&gt;"&gt;
+  &lt;div id="container"&gt;
+    &lt;div class="user_nav"&gt;
+      &lt;% if current_user %&gt;
+        Logged in as &lt;%= current_user.email %&gt;.
+        &lt;%= link_to "Log out", logout_path %&gt;
+      &lt;% else %&gt;
+        &lt;%= link_to "Sign up", signup_path %&gt; or
+        &lt;%= link_to "Log in", login_path  %&gt;.
+      &lt;% end %&gt;
+    &lt;/div&gt;
+    &lt;% flash.each do |name, msg| %&gt;
+      &lt;%= content_tag :div, msg, :id =&gt; "flash_#{name}" %&gt;
+    &lt;% end %&gt;
+    &lt;%= yield %&gt;
+  &lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+
+<p>サイトをテストする準備ができました。トップページにアクセスすると、登録とログインのリンクが表示されています。</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/731/original/E283I02.png" width="798" height="380" alt="すべてのページに登録とログインのリンクが表示される"/>
+</div>
+
+<p>登録をクリックすると登録フォームが表示され、そのサイトに対してユーザ登録を行うことができます。その後、ログインをクリックして、登録した情報でログインすることができます。</p> 
+ 
+<div class="imageWrapper">
+  <img src="/system/photos/732/original/E283I03.png" width="803" height="397" alt="ログイン画面"/>
+</div>
+
+<h3>権限を与える</h3>
+
+<p>サイトにログインしたので、秘密のページにアクセスすることができます。ログアウトしてから秘密のページにアクセスしてみると、まだページを見ることができます。そこで権限を付与する機能を追加して、ログインユーザだけがページにアクセスできるよう制限をかけます。</p> 
+
+<p>秘密の(secret)ページは、<code>HomeController</code>内のアクションです。Sorceryが提供する<code>require_login</code>という<code>before_filter</code>を使えば、アクションへのアクセスを制限することが可能です。これを使ってsecretアクションへのアクセスを制限します。</p>
+
+<p class="codeFilePath">/app/controllers/home_controller.rb</p>
+<pre class="ruby">class HomeController &lt; ApplicationController
+  before_filter :require_login, :only =&gt; :secret
+
+  def index
+  end
+
+  def secret
+  end
+end</pre>
+
+<p>このフィルターが起動されると、Sorceryは<code>not_authenticated</code>メソッドを呼び出します。<code>ApplicationController</code>でこのメソッドをオーバーライドするのがいいでしょう。そうすることによって、権限が付与されなかったときの動作を制御することができます。ログインページにリダイレクトして警告メッセージを表示します。</p> 
+
+<p class="codeFilePath">/app/controllers/application_controller.rb</p>
+<pre class="rubby">class ApplicationController &lt; ActionController::Base
+  protect_from_forgery
+  
+  private
+  def not_authenticated
+    redirect_to login_url, :alert =&gt; "First log in to view ↵
+    this page."
+  end
+  
+end</pre>
+
+<p>ログアウトした状態で再度秘密のページにアクセスしてみると、ログインページにリダイレクトされてそこには警告メッセージが表示されています。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/733/original/E283I04.png" width="803" height="436" alt="ログインせずに秘密のページを見ようとするとリダイレクトされる"/>
+</div>
+
+<p>ログインすると秘密のページにリダイレクトされます。これはログインページにリダイレクトされたときに見ようとしていたページをSorceryが憶えているからです。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/734/original/E283I05.png" width="803" height="436" alt="ログインするとページを見ることができる"/>
+</div>
+
+<p>Sorceryに関する今回のエピソードは以上です。今回紹介した以外にも多くの機能があるので、<a href="https://github.com/NoamB/sorcery">ドキュメンテーション</a>を参照してください。少し低いレベルで動作する認証ソリューションを探している場合は、Sorceryを検討してみる価値があるでしょう。</p>

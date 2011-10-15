@@ -1,0 +1,383 @@
+<p>今回のエピソードでは<a href="https://github.com/jcasimir/draper">Draper</a>を紹介します。Draperはpresenterパターンに似た形でRailsアプリケーションのビューにdecoratorを追加できるようにするgemです。テンプレートやヘルパーメソッドに多くの複雑なビューロジックを持っているような場合に、Draperを利用してよりオブジェクト指向のアプローチをとることでコードをすっきりと整理できます。今回のエピソードでそのしくみを紹介します。</p>
+
+<p>対象のアプリケーションを下に示します。ユーザプロファイルのページにそのユーザに関する各種の情報が表示されています。その内容は、アバター画像、フルネーム、ユーザ名、Markdownで記述された簡単な略歴、WebサイトとTwitterフィードへのリンクです。ユーザがWebサイトの情報を入力した場合は、アバター画像とフルネームはそのサイトへのリンクになります。</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/747/original/E286I01.png" width="800" height="595" alt="すべての詳細情報を入力したユーザのプロファイルページ"/>
+</div>
+
+<p>ページは単純な構造のように見えますが、MrMysteryさんのようにあまり情報を入力していないユーザについても正しく処理しなくてはいけません。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/748/original/E286I02.png" width="800" height="470" alt="ほとんど詳細情報を入力していないユーザのプロファイルページ"/>
+</div>
+
+<p>このユーザはユーザ名を入力しただけなので、フルネームの代わりにユーザ名、デフォルトのアバター画像、その他のフィールドには代替テキストを表示しています。このように情報量に応じてユーザを正しく扱うために多くのif条件を持つことで、このページのテンプレートはより複雑になっています。このロジックの一部をどこか他に移すことができれば、このテンプレートをずっとすっきりした形に変えることができるでしょう。</p>
+
+<p class="codeFilePath">/app/views/users/show.html.erb</p>
+<pre class="ruby">&lt;div id="profile"&gt;
+  &lt;%= link_to_if @user.url.present?, ↵ 
+  image_tag("avatars/#{avatar_name(@user)}", class: "avatar"), ↵
+  @user.url %&gt;
+  &lt;h1&gt;&lt;%= link_to_if @user.url.present?, ↵
+    (@user.full_name.present? ? @user.full_name : ↵
+    @user.username), @user.url %&gt;&lt;/h1&gt;
+  &lt;dl&gt;
+    &lt;dt&gt;Username:&lt;/dt&gt;
+    &lt;dd&gt;&lt;%= @user.username %&gt;&lt;/dd&gt;
+    &lt;dt&gt;Member Since:&lt;/dt&gt;
+    &lt;dd&gt;&lt;%= @user.member_since %&gt;&lt;/dd&gt;
+    &lt;dt&gt;Website:&lt;/dt&gt;
+    &lt;dd&gt;
+    &lt;% if @user.url.present? %&gt;
+      &lt;%= link_to @user.url, @user.url %&gt;
+    &lt;% else %&gt;
+      &lt;span class="none"&gt;None given&lt;/span&gt;
+    &lt;% end %&gt;
+    &lt;/dd&gt;
+    &lt;dt&gt;Twitter:&lt;/dt&gt;
+    &lt;dd&gt;
+    &lt;% if @user.twitter_name.present? %&gt;
+      &lt;%= link_to @user.twitter_name, ↵
+  "http://twitter.com/#{@user.twitter_name}" %&gt;
+    &lt;% else %&gt;
+      &lt;span class="none"&gt;None given&lt;/span&gt;
+    &lt;% end %&gt;
+    &lt;/dd&gt;
+    &lt;dt&gt;Bio:&lt;/dt&gt;
+    &lt;dd&gt;
+    &lt;% if @user.bio.present? %&gt;
+      &lt;%=raw Redcarpet.new(@user.bio, :hard_wrap, :filter_html, ↵
+        :autolink).to_html %&gt;
+    &lt;% else %&gt;
+      &lt;span class="none"&gt;None given&lt;/span&gt;
+    &lt;% end %&gt;
+    &lt;/dd&gt;
+  &lt;/dl&gt;
+&lt;/div&gt;</pre>
+
+<p>このロジックはビュー関連のため、モデル側に抽出する訳にはいきません。解決策としては、ヘルパーメソッドを使うことが考えられます。このテンプレートではすでに、アバターを表示するために<code>image_tag</code>というヘルパーを使っています。その中身を見てみましょう。</p>
+
+<p class="codeFilePath">/app/helpers/users_helper.rb</p>
+<pre class="ruby">module UsersHelper
+  def avatar_name(user)
+    if user.avatar_image_name.present?
+      user.avatar_image_name
+    else
+      "default.png"
+    end
+  end
+end</pre>
+
+<p>このヘルパーメソッドは現在のユーザがアバターを持っているかどうかを判断して、持っていない場合にデフォルト画像のファイル名を返します。ビューからさらにロジックをヘルパーメソッドとして抽出することもできますが、この方法の問題はそれらがグローバルな名前空間の単なるメソッドでありまったくオブジェクト指向ではないという点です。</p>
+
+<h3>Draperのインストール</h3>
+
+<p>このケースはpresenter(Draperの用語ではdecorator)を使う例として適しているので、このアプリケーションにDraperを追加してみましょう。Draper gemは通常の方法でインストールします。<code>Gemfile</code>に参照情報を追加して<code>bundle</code>コマンドを実行します。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+
+gem 'rails', '3.1.0'
+gem 'sqlite3'
+
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails', "  ~&gt; 3.1.0"
+  gem 'coffee-rails', "~&gt; 3.1.0"
+  gem 'uglifier'
+end
+
+gem 'jquery-rails'
+gem 'redcarpet'
+
+gem 'draper'</pre>
+
+<p>Draperがインストールされたら、<code>User</code>モデルに対してdecoratorを作成するために<code>draper:decorator</code>ジェネレータを実行します。</p>
+
+<pre class="ruby">$ rails g draper:decorator user
+      create  app/decorators
+      create  app/decorators/application_decorator.rb
+      create  app/decorators/user_decorator.rb</pre>
+      
+<p>これが初めてのdecoratorなので、<code>application_decorator</code>も同時に作成されます。作成されるdecoratorはすべてApplicationDecoratorを継承するので、すべてのdecoratorで共通の機能はすべてそこで定義します。</p> 
+
+<p><code>UserDecorator</code>クラスは見た通り単純で、ほとんどがそのしくみを説明するコメントになっています。それではこれを使って、テンプレートの整理を始めましょう。</p>
+
+<h3>プロファイルページを整理する</h3>
+
+<p>プロファイルページでDraperを使うためにはまず<code>UsersController</code>内の<code>show</code>アクションを修正する必要があります。このアクションは、現状では通常の方法で<code>User</code>を取得します。</p>
+
+<p class="codeFilePath">/app/controllers/users_controller.rb</p>
+<pre class="ruby">class UsersController &lt; ApplicationController
+  def index
+    @users = User.all
+  end
+
+  def show
+    @user = User.find(params[:id])
+  end
+end</pre>
+
+<p>このユーザをdecoratorでラップ(wrap)するために、<code>User.find</code>を<code>UserDecorator.find</code>で置き換えます。</p>
+
+<p class="codeFilePath">/app/controllers/users_controller.rb</p>
+<pre class="ruby">def show
+  @user = UserDecorator.find(params[:id])
+end</pre>
+
+<p>これでこのコードは<code>UserDecorator</code>インスタンスを返すようになりました。<code>UserDecorator</code>は<code>User</code>レコードをラップして、デフォルトではすべてのメソッドを<code>User</code>に委譲します(これについては後ほど詳しく説明します)。<code>User</code>ではなく<code>UserDecorator</code>を対象にするように変わったにもかかわらず、アクションは以前と同じように動作します。それではビューの整理を始めますが、まずはユーザのアバターを表示するコードを修正します。</p>
+
+<p class="codeFilePath">/app/views/users/show.html.erb</p>
+<pre class="ruby">&lt;%= link_to_if @user.url.present?, image_tag( ↵ 
+  "avatars/#{avatar_name(@user)}", class: "avatar"), @user.url %&gt;</pre>
+  
+<p>ビューのこの部分を次のように置き換えます。</p>
+
+<p class="codeFilePath">/app/views/users/show.html.erb</p>
+<pre class="ruby">&lt;%= @user.avatar %&gt;</pre>
+
+<p>このコードは<code>UserDecorator</code>のavatarメソッドを探すので、次にそのメソッドを書きます。このメソッドを書くときに注意しなくては行けないことがいくつかあります。decoratorからヘルパーメソッド(例えば<code>link_to_if</code>メソッド)を呼び出す場合は、<code>h</code>メソッド(helperの略)を介する必要があります。モデルを参照したいときは、今回の場合でいえば<code>@user</code>ではなく、<code>model</code>を呼び出します。</p>
+
+<p>ビューから<code>avatar</code>にコピーしたコードでは、<code>avatar_name</code>ヘルパーメソッドを呼び出しています。decoratorから<code>avatar_name</code>を呼び出しているので、<code>avatar_name</code>を<code>UsersHelper</code>クラスからdecoratorに移動します。これで同じクラス内にメソッドがあるので、<code>User</code>を渡す必要はなく、userの呼び出しをモデルに置き換えることができます。</p>
+
+<p class="codeFilePath">/app/decorators/user_decorator.rb</p>
+<pre class="ruby">class UserDecorator &lt; ApplicationDecorator
+  decorates :user
+  
+  def avatar
+    h.link_to_if model.url.present?, h.image_tag("avatars/#{avatar_name}", class: "avatar"), model.url
+  end
+  
+  private
+  def avatar_name
+    if model.avatar_image_name.present?
+      model.avatar_image_name
+    else
+      "default.png"
+    end
+  end
+end</pre>
+
+<p>次にユーザ名を表示するコードを整理します。ビューのこのコードを置き換えます。</p>
+
+<p class="codeFilePath">/app/views/users/show.html.erb</p>
+<pre class="ruby">&lt;h1&gt;&lt;%= link_to_if @user.url.present?, (@user.full_name.present? ? @user.full_name : @user.username), @user.url %&gt;&lt;/h1&gt;</pre>
+ 
+<p>これを次のように書き換えます。</p>
+
+<p class="codeFilePath">/app/views/users/show.html.erb</p>
+<pre class="ruby">&lt;h1&gt;&lt;%= @user.linked_name %&gt;&lt;/h1&gt;</pre>
+
+<p><code>UserDecorator</code>に<code>linked_name</code>メソッドを書かなくてはいけません。テンプレートから取り出したコードと前に書いた<code>avatar</code>メソッドには似ている点があります。どちらもリンクを表示させますが、その内容はユーザのURLが存在する場合はそれに依存して変わります。今はひとつのクラスの中にあるので、この重複は簡単にリファクタリングできます。</p>
+
+<p>リンク生成処理を扱うために<code>site_link</code>というプライベートメソッドを新たに作成します。このメソッドにはパラメータとしてcontentを渡します。これで、<code>avatar</code>と<code>linked_name</code>の両方のメソッドからこのメソッドを呼び出すことができ、きれいに整理できます。前と同じように、<code>linked_name</code>の中の<code>@user</code>の呼び出しはすべて<code>model</code>に置き換えます。これらの修正がすべて終わると、decorator は以下のようになります。</p>
+
+<p class="codeFilePath">app/decorators/user_decorator.rb</p>
+<pre class="ruby">class UserDecorator &lt; ApplicationDecorator
+  decorates :user
+  
+  def avatar
+    site_link h.image_tag("avatars/#{avatar_name}", ↵
+      class: "avatar")
+  end
+  
+  def linked_name
+    site_link(model.full_name.present? ? model.full_name : ↵
+      model.username)
+  end
+  
+  private
+  def site_link(content)
+    h.link_to_if model.url.present?, content, model.url
+  end
+  
+  def avatar_name
+    if model.avatar_image_name.present?
+      model.avatar_image_name
+    else
+      "default.png"
+    end
+  end
+end</pre>
+
+<p>ここでユーザのプロファイルページを読み込み直すと、前とまったく同じように表示されるでしょう。</p>
+
+<p>テンプレートは十分きれいになったようですが、まだ改善の余地があります。次はビューコードの中のより大きな部分をリファクタリングします。ユーザのWebサイトへのリンクを表示する部分のコードです。</p>
+
+<p class="codeFilePath">/app/views/user/show.html.erb</p>
+<pre class="ruby">&lt;dt&gt;Website:&lt;/dt&gt;
+&lt;dd&gt;
+  &lt;% if @user.url.present? %&gt;
+    &lt;%= link_to @user.url, @user.url %&gt;
+  &lt;% else %&gt;
+    &lt;span class="none"&gt;None given&lt;/span&gt;
+  &lt;% end %&gt;
+&lt;/dd&gt;</pre>
+
+<p>これを下の内容で置き換えます。</p>
+
+<p class="codeFilePath">/app/views/user/show.html.erb</p>
+<pre class="ruby">&lt;dt&gt;Website:&lt;/dt&gt;
+&lt;dd&gt;&lt;%= @user.website %&gt;&lt;/dd&gt;</pre>
+
+<p>前と同じようにメソッドをdecoratorクラスの中に作成します。ビューから削除したコードを見ればわかりますが、ユーザが<code>url</code>を持たない場合はあるHTMLが表示されます。これを単に文字列として返すこともできますが、生のHTMLをRubyプログラムの中に置きたくありません。別の解決法として、コードを部分テンプレート(partial)に移動して表示させるというやり方がありますが、たかだか一つのHTML要素を出力するだけなので、<code>content_tag</code>ヘルパーメソッドを使うほうが合理的でしょう。</p>
+
+<p class="codeFilePath">/app/decorators/user_decorator.rb</p>
+<pre class="ruby">def website
+  if model.url.present?
+    h.link_to model.url, model.url
+  else
+    h.content_tag :span, "None given", class: "none"
+  end  
+end</pre>
+
+<p>Twitterの情報とユーザの略歴をそれぞれ表示するテンプレートの部分についても同じ手法をとることができます。ここでは詳細は述べませんが、修正後のビューのコードはずっときれいになります。</p>
+
+<p class="codeFilePath">/app/views/users/show.html.erb</p>
+<pre class="ruby">&lt;div id="profile"&gt;
+  &lt;%= @user.avatar %&gt;
+  &lt;h1&gt;&lt;%= @user.linked_name %&gt;&lt;/h1&gt;
+  &lt;dl&gt;
+    &lt;dt&gt;Username:&lt;/dt&gt;
+    &lt;dd&gt;&lt;%= @user.username %&gt;&lt;/dd&gt;
+    &lt;dt&gt;Member Since:&lt;/dt&gt;
+    &lt;dd&gt;&lt;%= @user.member_since %&gt;&lt;/dd&gt;
+    &lt;dt&gt;Website:&lt;/dt&gt;
+    &lt;dd&gt;&lt;%= @user.website %&gt;&lt;/dd&gt;
+    &lt;dt&gt;Twitter:&lt;/dt&gt;
+    &lt;dd&gt;&lt;%= @user.twitter %&gt;&lt;/dd&gt;
+    &lt;dt&gt;Bio:&lt;/dt&gt;
+    &lt;dd&gt;&lt;%= @user.bio %&gt;&lt;/dd&gt;
+  &lt;/dl&gt;
+&lt;/div&gt;</pre>
+
+<p>decorator内の新しい<code>twitter</code>と<code>bio</code>の各メソッドは次のようになります。</p>
+
+<p class="codeFilePath">/app/decorators/user_decorator.rb</p>
+<pre class="ruby">def website
+  if model.url.present?
+    h.link_to model.url, model.url
+  else
+    h.content_tag :span, "None given", class: "none"
+  end  
+end
+
+def twitter
+  if model.twitter_name.present?
+    h.link_to model.twitter_name, ↵  
+      "http://twitter.com/#{model.twitter_name}"
+  else
+    h.content_tag :span, "None given", class: "none"
+  end
+end
+  
+def bio
+  if model.bio.present?
+    Redcarpet.new(model.bio, :hard_wrap, :filter_html, ↵
+ 		:autolink).to_html.html_safe
+  else
+    h.content_tag :span, "None given", class: "none"
+  end
+end</pre>
+
+<p>2つの新しいメソッドはとても似ていて、前に書いた<code>website</code>にも似ています。3つのメソッドの多くの部分、特に<code>else</code>節が重複しています。そこでこの部分を独立したメソッドとして抽出するのがいいでしょう。</p>
+
+<p>そのためにはブロックが役に立つでしょう。<code>else</code>節を独立したメソッドとして抽出し、<code>handle_none</code>という名前にします。存在を確認したい値とブロックをこのメソッドに渡します。値が存在したらブロック内のコードが実行され、なければspanタグを表示します。この<code>handle_none</code>を使って、<code>website</code>、<code>twitter</code>、<code>bio</code>の各メソッドを整理します。</p>
+
+<p class="codeFilePath">/app/decorators/user_decorator.rb</p>
+<pre class="ruby">def website
+  handle_none model.url do
+    h.link_to model.url, model.url
+  end  
+end
+  
+def twitter
+  handle_none model.twitter_name do
+    h.link_to model.twitter_name, ↵ 
+      "http://twitter.com/#{model.twitter_name}"
+  end
+end
+  
+def bio
+  handle_none model.bio do
+    Redcarpet.new(model.bio, :hard_wrap, :filter_html, ↵
+      :autolink).to_html.html_safe
+  end
+end
+  
+private
+def handle_none(value)
+  if value.present?
+    yield
+  else
+    h.content_tag :span, "None given", class: "none"
+  end
+end</pre>
+
+<p>もう一つ修正できる点として、Markdownの表示処理を<code>ApplicationDecorator</code>に抽出して、今後作るかもしれない他のdecoratorから呼び出せるようにします。新たに<code>markdown</code>メソッドを作成し、そこで渡されたテキストを表示処理します。</p>
+
+<p class="codeFilePath">/app/decorators/application_decorator.rb</p>
+<pre class="ruby">class ApplicationDecorator &lt; Draper::Base
+  def markdown(text)
+    Redcarpet.new(text, :hard_wrap, :filter_html, ↵ 
+      :autolink).to_html.html_safe
+  end
+end</pre>
+
+<p>これで<code>UserDecorator</code>内で<code>bio</code>メソッドから<code>markdown</code>を呼び出すように修正できます。</p>
+
+<p class="codeFilePath">/app/decorators/user_decorator.rb</p>
+<pre class="ruby">def bio
+  handle_none model.bio do
+    markdown(model.bio)
+  end
+end</pre>
+
+<h3>モデルを修正する</h3>
+
+<p>decoratorが正しく機能するように設定できたので、ここでモデル層を一度見渡してみて、もしビュー関連のコードがあったらそれを対応するdecoratorに移動させます。例えば、<code>User</code>モデルにはユーザが作成された時間をフォーマットする<code>member_since</code>メソッドがあります。このコードは、フォーマットされた文字列を返すだけなのでビュー関連だと見なされます。これをdecoratorに移動します。</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  def member_since
+    created_at.strftime("%B %e, %Y")
+  end
+end</pre>
+
+<p>作業としてはメソッドをdecoratorに移動して、<code>created_at</code>の前に<code>model</code>を付けるだけです。</p>
+
+<p class="codeFilePath">/app/decorators/user_decorator.rb</p>
+<pre class="ruby">def member_since
+  model.created_at.strftime("%B %e, %Y")
+end</pre>
+
+<h3><code>allows</code>メソッドを用いてモデルへのアクセスを制限する</h3>
+
+<p><code>UserDecorator</code>を修正している間に、Draperのもう一つの機能である<code>allows</code>を紹介します。デフォルトでは<code>UserDecorator</code>はすべてのメソッドを<code>User</code>オブジェクトに委譲しますが、<code>User</code>モデルに委譲されるメソッドを選択して指定することも可能です。それには<code>allows</code>を使って委譲したいメソッドの名前を渡します。</p>
+
+<p class="codeFilePath">/app/decorators/user_decorator.rb</p>
+<pre class="ruby">class UserDecorator &lt; ApplicationDecorator
+  decorates :user
+  allows :username
+
+  # Other methods omitted
+end</pre>
+
+<p>ここでは<code>username</code>のみの委譲を許可し、これによって<code>username</code>メソッドだけがUserに委譲されます。これが、decoratorになくてビューから呼び出される唯一のメソッドなので、委譲しなくてはいけないメソッドはこれだけです。これによって、decoratorのインタフェースをより細かく制御できるようになります。</p> 
+
+<p>decoratorに必要なものを抽出するリファクタリング作業がすべて終了したので、ユーザのプロファイルページを再度読み込んですべてが変わらず表示されることを確認します。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/749/original/E286I03.png" width="800" height="583" alt="修正作業後、ユーザプロファイルページがすべて変わりなく表示される"/>
+</div>
+
+<p>正しく表示されています。念のため他のユーザを見てもすべて同じように表示されていますが、ビューコードは以前よりずっときれいに整理されました。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/750/original/E286I04.png" width="800" height="469" alt="MrMysteryさんのプロファイルページも変わりなく表示される"/>
+</div>
+
+<p>decoratorを使用することで、1050バイト、34行だったshowテンプレートは382バイト、16行になったので、サイズを2/3削減したことになります。見た目もずっときれいになり、ページのレイアウトを変更したい場合の編集作業もずっと簡単にできるようになりました。</p>

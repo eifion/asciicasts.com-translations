@@ -1,0 +1,384 @@
+<p>If you ever need to process credit card payments through your Rails applications you should take a look at <a href="https://stripe.com">Stripe</a>. Stripe is a payment gateway that is easy to set up and which is very developer friendly. It only charges fees on a per-transaction basis and these are very reasonable. There are no monthly fees or other hidden costs. (By the way we&rsquo;re not being paid to say this).</p>
+
+<p>Stripe is currently only available in the United States so you&rsquo;ll need an account at a U.S. bank if you want to use it in your applications. International support is being worked on, however, and should be available soon. This doesn&rsquo;t mean that you can&rsquo;t bill international customers, the only restriction is that the seller must be in the U.S.</p> 
+
+<h3>Adding Stripe to a Rails Application</h3>
+
+<p>In this episode we&rsquo;ll use Stripe to add recurring payments to a Rails application. The application we&rsquo;ll use is a site that sells Llama Kisses. Why? Well Ryan Bates grew up on a llama ranch and missed out on the opportunity to sell llama kisses then so he&rsquo;s making up for lost time now.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/760/original/E288I01.png" width="821" height="518" alt="The Llama Kisses site."/>
+</div>
+
+<p>Most of the application is already written. There are four different plans and users can sign up for any one of them to create a subscription. There&rsquo;s only an email field on the sign-up page right now and when we fill that field in and submit the form a new subscription will be created. So that we can take payments through Stripe we&rsquo;ll add some more fields for credit card details.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/761/original/E288I02.png" width="821" height="332" alt="The signup form."/>
+</div>
+
+<p>Getting started with Stripe is easy. It we visit <a href="https://stripe.com/">stripe.com</a> and click the &ldquo;Get Started with Stripe&rdquo; button we&rsquo;ll be taken to a page where we can process test transactions. We can also do this from the command line with curl. If we copy the example code from the <a href="https://manage.stripe.com">&ldquo;Getting Started&rdquo; page</a> and run it in a terminal window we should see some JSON returned.</p>
+
+<pre class="terminal">$ curl https://api.stripe.com/v1/charges \
+&gt;   -u zVyGPfdmfhSGpHAxhFiJT7kFnHeSi9ZN: \
+&gt;   -d amount=100 \
+&gt;   -d currency=usd \
+&gt;   -d &#x27;card[number]=4242424242424242&#x27; \
+&gt;   -d &#x27;card[exp_month]=5&#x27; \
+&gt;   -d &#x27;card[exp_year]=2012&#x27; \
+&gt;   -d &#x27;description=test charge IFnFXZgdZk&#x27;
+
+{
+  &quot;amount&quot;: 100,
+  &quot;created&quot;: 1318355241,
+  &quot;currency&quot;: &quot;usd&quot;,
+  &quot;description&quot;: &quot;test charge IFnFXZgdZk&quot;,
+  &quot;fee&quot;: 0,
+  &quot;id&quot;: &quot;ch_oVfzHImv8sN5TV&quot;,
+  &quot;livemode&quot;: false,
+  &quot;object&quot;: &quot;charge&quot;,
+  &quot;paid&quot;: true,
+  &quot;refunded&quot;: false,
+  &quot;card&quot;: {
+    &quot;country&quot;: &quot;US&quot;,
+    &quot;exp_month&quot;: 5,
+    &quot;exp_year&quot;: 2012,
+    &quot;last4&quot;: &quot;4242&quot;,
+    &quot;object&quot;: &quot;card&quot;,
+    &quot;type&quot;: &quot;Visa&quot;
+  }
+}</pre>
+
+<p>Whether we run a test transaction through the site or through the terminal window the recent payments are shown in the dashboard at the bottom of Stripe&rsquo;s management page.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/762/original/E288I03.png" width="822" height="586" alt="Stripe&rsquo;s dashboard showing our test payments."/>
+</div>
+
+<p>Creating an account is easy; all we need to is enter an email address and a password on the management page. Once we&rsquo;ve done that we can visit <a href="https://manage.stripe.com/account">the page for our account</a> where we&rsquo;ll see, amongst other things, the API keys we&rsquo;ll need to communicate with Stripe&rsquo;s REST API. Stripe also provide a Ruby gem that makes using this API in Rails applications much easier. We&rsquo;ll install this gem in our application now. As with most Ruby gems we do this by adding a reference to it the <code>Gemfile</code> and then running <code>bundle</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+gem &#x27;rails&#x27;, &#x27;3.1.1&#x27;
+gem &#x27;sqlite3&#x27;
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem &#x27;sass-rails&#x27;,   &#x27;~&gt; 3.1.4&#x27;
+  gem &#x27;coffee-rails&#x27;, &#x27;~&gt; 3.1.1&#x27;
+  gem &#x27;uglifier&#x27;, &#x27;&gt;= 1.0.3&#x27;
+end
+gem &#x27;jquery-rails&#x27;
+gem &#x27;stripe&#x27;</pre>
+
+<p>Stripe needs two API keys so that it knows which account it&rsquo;s working with. We&rsquo;ll store these in a new <code>stripe.rb</code> initializer file in the application&rsquo;s <code>/config/initializers</code> directory. The keys we need to store here are the secret test key that&rsquo;s shown in our account page and the public API key here. We&rsquo;ll store the public key in a constant as it isn&rsquo;t used by the Ruby gem, only in views and JavaScript. This key should hold the value from the publishable test key on our Stripe account page.</p>
+
+<p class="codeFilePath">/config/initializers/stripe.rb</p>
+<pre class="ruby">Stripe.api_key = &quot;5J7dr36JmNpLrXXFwAXChdRzZZwLyCHV&quot;
+STRIPE_PUBLIC_KEY = &quot;pk_B1SaM15nXXruDU3g2D6uns2kJeu9m&quot;</pre>
+
+<p>As this file contains sensitive information it&rsquo;s a good idea to add it to the application&rsquo;s <code>.gitignore</code> file so that it isn&rsquo;t included in the repository. Also, as we&rsquo;ll use different keys on the production site we don&rsquo;t want this file being accidentally copied over to the production codebase.</p> 
+
+<h3>Adding Stripe&rsquo;s JavaScript and The API Key</h3>
+
+<p>When a user submits their credit card information in a form the credit card information goes directly to Stripe&rsquo;s server and not to our application at all. This makes it a lot easier to get <a href="http://en.wikipedia.org/wiki/Payment_Card_Industry_Data_Security_Standard">PCI compliance</a>. If we look at the example form on <a href="https://stripe.com/api">Stripe&rsquo;s API page</a> we&rsquo;ll see that none of its fields have a <code>name</code> attribute. This means that when the form is submitted these fields aren&rsquo;t passed to our application&rsquo;s server. Instead they&rsquo;ll read by some JavaScript code that is triggered when a user submits the form.</p>
+
+<p>To use Stripe in our application we need to include a JavaScript file from Stripe&rsquo;s server. Then we set our publishable key and add some JavaScript that will fire when the form containing the credit card fields is submitted. This JavaScript will generate a token based on the credit card information from the form.</p>
+
+<p>We&rsquo;ll add Stripe&rsquo;s JavaScript file in our application&rsquo;s layout file. It needs to be placed before the application&rsquo;s own JavaScript file. We could add some code that checks if the current page is the checkout page and only adds the script when this is the case, but we won’t do that here. We also need to make our public key available to JavaScript and we&rsquo;ll do this the same way that Rails adds its CSRF key, in a <code>meta</code> tag in the head of the page.</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Llama Kisses&lt;/title&gt;
+  &lt;%= stylesheet_link_tag    &quot;application&quot; %&gt;
+  &lt;%= javascript_include_tag &quot;https://js.stripe.com/v1/&quot;, &quot;application&quot; %&gt;
+  &lt;%= csrf_meta_tags %&gt;
+  &lt;%= tag :meta, :name =&gt; &quot;stripe-key&quot;, &crarr; 
+    :content =&gt; STRIPE_PUBLIC_KEY %&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;!-- Body omitted --&gt;
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+
+<h3>Adding Credit Card Fields To The Subscription Form</h3>
+
+<p>Next we&rsquo;ll add the credit card fields to the subscription form. The form currently contains a hidden field that holds the <code>id</code> of the selected plan and a text field for an email address. We&rsquo;ll add more fields for a credit card number, security code and expiration date.</p>
+
+<p class="codeFilePath">/app/views/subscriptions/new.html.erb</p>
+<pre class="ruby">&lt;%= form_for @subscription do |f| %&gt;
+  &lt;% if @subscription.errors.any? %&gt;
+    &lt;div class=&quot;error_messages&quot;&gt;
+      &lt;h2&gt;&lt;%= pluralize(@subscription.errors.count, &quot;error&quot;) %&gt; prohibited this subscription from being saved:&lt;/h2&gt;
+      &lt;ul&gt;
+      &lt;% @subscription.errors.full_messages.each do |msg| %&gt;
+        &lt;li&gt;&lt;%= msg %&gt;&lt;/li&gt;
+      &lt;% end %&gt;
+      &lt;/ul&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+  &lt;%= f.hidden_field :plan_id %&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= f.label :email %&gt;
+    &lt;%= f.text_field :email %&gt;
+  &lt;/div&gt;  
+  &lt;div class=&quot;field&quot;&gt;
+      &lt;%= label_tag :card_number, &quot;Credit Card Number &quot; %&gt;
+      &lt;%= text_field_tag :card_number, nil, name: nil %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+      &lt;%= label_tag :card_code, &quot;Security Code on Card (CVV)&quot; %&gt;
+      &lt;%= text_field_tag :card_code, nil, name: nil %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= label_tag :card_month, &quot;Card Expiration&quot; %&gt;
+    &lt;%= select_month nil, {add_month_numbers_true: true}, {name: nil, id: &quot;card_month&quot;}%&gt;
+    &lt;%= select_year nil, {start_year: Date.today.year, end_year: Date.today.year+15}, {name: nil, id: &quot;card_year&quot;}%&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;actions&quot;&gt;&lt;%= f.submit &quot;Subscribe&quot; %&gt;&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p>We&rsquo;ve added two text fields to the form, one for a credit card number, and one for the security code and also two dropdowns for the expiry date. There are a few things worth noting about the fields we&rsquo;ve added. For the credit card name and security code we&rsquo;ve used <code>label_tag</code> and <code>text_field_tag</code> instead of going through the form builder as these new fields aren&rsquo;t attributes on our <code>Subscription</code> model. We don&rsquo;t want them to be submitted back to the server at all so we&rsquo;ve also specified a <code>nil</code> name for each field. Similarly for the expiry date fields we&rsquo;re using <code>select_month</code> and <code>select_year</code> for the expiry date and specifying the <code>id</code> manually so that we don&rsquo;t have to deal with the one that Rails generates.</p>
+
+<p>When we reload the page the new fields are shown in the form.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/763/original/E288I04.png" width="822" height="505" alt="The subscription form with its new credit card fields."/>
+</div>
+
+<p>Next we want to write the JavaScript that fires when the form is submitted. This script will submit the credit card information to Stripe and submit the token that it receives back from Stripe through the form. As our application is written in Rails 3.1 we&rsquo;ll write this code in CoffeeScript in the <code>subscriptions.js.coffee</code> file.</p>
+
+<p class="codeFilePath">/app/assets/javascripts/subscriptions.js.coffee</p>
+<pre class="javascript">jQuery -&gt;
+  Stripe.setPublishableKey($(&#x27;meta[name=&quot;stripe-key&quot;]&#x27;).attr(&#x27;content&#x27;))
+  subscription.setupForm()
+
+subscription =
+  setupForm: -&gt;
+    $(&#x27;#new_subscription&#x27;).submit -&gt;
+      $(&#x27;input[type=submit]&#x27;).attr(&#x27;disabled&#x27;, true)
+      subscription.processCard()
+  
+  processCard: -&gt;
+    card =
+      number: $(&#x27;#card_number&#x27;).val()
+      cvc: $(&#x27;#card_code&#x27;).val()
+      expMonth: $(&#x27;#card_month&#x27;).val()
+      expYear: $(&#x27;#card_year&#x27;).val()
+    Stripe.createToken(card, subscription.handleStripeResponse)
+  
+  handleStripeResponse: (status, response) -&gt;
+    if status == 200
+      alert(response.id)
+    else
+	 alert(response.error.message)</pre> 
+	 
+<p>This code should only run after the page&rsquo;s DOM has loaded and so it&rsquo;s all wrapped in the <code>jQuery</code> function. The first thing it does is set up Stripe by specifying the publishable key. The key&rsquo;s value is read from the <code>meta</code> tag we added in the application&rsquo;s layout file. We fetch it by looking for a <code>meta</code> tag with a <code>name</code> attribute that has a value of <code>stripe</code> and reading that tag&rsquo;s <code>content</code> attribute. The rest of the logic is handled through a <code>subscription</code> object. This object has a function called <code>setupForm</code> that will do all of the work.</p>
+
+<p>Next we create the <code>subscription</code> object and give it a <code>setupForm</code> function. In this function we get the subscription form by its <code>id</code> and add a callback that fires when the form&rsquo;s <code>submit</code> event fires.  When the form is submitted we disable the submit button to stop the it from being accidentally submitted again by setting the button&rsquo;s disabled attribute to <code>true</code>. Then we call a <code>processCard</code> function and return <code>false</code> so that the form isn&rsquo;t submitted.</p>
+
+<p>The <code>processCard</code> function creates an object representing the credit card&rsquo;s values in the format that Stripe expects and reads the appropriate values for each field from the form&rsquo;s fields using <code>val()</code>. The next line is the important one. We call <code>Stripe.createToken</code> with two arguments. The first is the card object that we&rsquo;ve just created (we can also pass in an optional amount here). The second is a function that will handle the response from Stripe, which happens asynchronously. We&rsquo;ll pass in <code>subscription.handleStripeResponse</code> here.</p>
+
+<p>The <code>handleStripeResponse</code> function takes two arguments: a <code>status</code> and a <code>response</code>. If the status has a value of <code>200</code> then the transaction succeeded and we&rsquo;ll have a response token stored in <code>response.id</code>. For now we&rsquo;ll just <code>alert</code> the response value so that we can see what it is. If the status isn&rsquo;t <code>200</code> then an error has occurred so we&rsquo;ll <code>alert</code> the error message.</p>
+
+<p>We can give our new form a try out now. If we reload the new subscription form and submit valid card details we get a response token back.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/764/original/E288I05.png" width="827" height="506" alt="The response token shown for a valid request."/>
+</div>
+
+<p>If we enter an invalid card number we&rsquo;ll get an error message returned instead.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/765/original/E288I06.png" width="822" height="505" alt="An error message is returned if we enter invalid details."/>
+</div>
+
+<h3>Handling The Response</h3>
+
+<p>Now that we know that the calls to Stripe are being processed correctly we&rsquo;ll improve the code that handles the error messages. Instead of showing an alert we&rsquo;ll show the error message on the page in a div with and id of stripe_error and re-enable the submit button so that the user can enter their details again.</p>
+
+<p class="codeFilePath">/app/assets/javascripts/subscriptions.js.coffee</p>
+<pre class="javascript">handleStripeResponse: (status, response) -&gt;
+  if status == 200
+    alert(response.id)
+  else
+    $(&#x27;#stripe_error&#x27;).text(response.error.message)
+    $(&#x27;input[type=submit]&#x27;).attr(&#x27;disabled&#x27;, false)</pre>
+    
+<p>Having done this we&rsquo;ll need to add the <code>div</code> to the view.</p>
+
+<p class="codeFilePath">/app/views/subscriptions/new.html.erb</p>
+<pre class="ruby">&lt;%= form_for @subscription do |f| %&gt;
+  &lt;!-- Form fields omitted --&gt;
+  &lt;div id=&quot;stripe_error&quot;&gt;
+    &lt;noscript&gt;JavaScript is not enabled and is required for this form. First enable it in your web browser settings.&lt;/noscript&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;actions&quot;&gt;&lt;%= f.submit &quot;Subscribe&quot; %&gt;&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p>We&rsquo;ve placed a <code>noscript</code> element in the <code>div</code> so that an error is shown if anyone tries to use the form in a browser that doesn&rsquo;t have JavaScript enabled. When we reload the page and submit the form with an invalid credit card number again we&rsquo;ll see the error message in the <code>stripe_error</code> div instead of an <code>alert</code>.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/766/original/E288I07.png" width="822" height="534" alt="The error message is now shown on the page."/>
+</div>
+
+<p>Next we&rsquo;ll change the code that handles successful transactions. Instead of displaying the response token in an <code>alert</code> we&rsquo;ll add it to a new hidden field in the form and then submit the form. We&rsquo;ll add a new hidden field in the view and call it <code>stripe_card_token</code>.</p>
+
+<p class="codeFilePath">/app/views/subscriptions/new.html.erb</p>
+<pre class="ruby">&lt;%= f.hidden_field :stripe_card_token %&gt;</pre>
+
+<p>There&rsquo;s no <code>stripe_card_token</code> field in the <code>subscriptions</code> table in the database so we&rsquo;ll need to add this field as a virtual attribute in our <code>Subscription</code> model.</p>
+
+<p class="codeFilePath">/app/models/subscription.rb</p>
+<pre class="ruby">class Subscription &lt; ActiveRecord::Base
+  belongs_to :plan
+  validates_presence_of :plan_id
+  validates_presence_of :email
+  
+  attr_accessible :stripe_card_token
+end</pre>
+
+<p>Back in our CoffeeScript file we&rsquo;ll replace the <code>alert</code> with code that sets the value of our new hidden field to the value of the response token and then submits the form. We submit the form by calling <code>submit</code> directly on the form. Doing this bypasses the <code>onsubmit</code> callback so that the form is POSTed back to the server.</p>
+
+<p class="codeFilePath">/app/assets/javascripts/subscriptions.js.coffee</p>
+<pre class="ruby">handleStripeResponse: (status, response) -&gt;
+  if status == 200
+    $(&#x27;#subscription_stripe_card_token&#x27;).val(response.id)
+    $(&#x27;#new_subscription&#x27;)[0].submit()
+  else
+    $(&#x27;#stripe_error&#x27;).text(response.error.message)
+    $(&#x27;input[type=submit]&#x27;).attr(&#x27;disabled&#x27;, false)</pre>
+    
+<p>The form is submitted to the <code>SubscriptionsController</code>&rsquo;s <code>create</code> action and the token will be passed in to a new <code>Subscription</code>. We could handle the payment through a <code>before_create</code> callback here but instead we&rsquo;ll create a new method in the <code>Subscription</code> model called <code>save_with_payment</code> and do it there. Before we write this method we&rsquo;ll replace the call to <code>save</code> with <code>save_with_payment</code>.</p>
+
+<p class="codeFilePath">/app/controllers/subscription_controller.rb</p>
+<pre class="ruby">def create
+  @subscription = Subscription.new(params[:subscription])
+  if @subscription.save_with_payment
+    redirect_to @subscription, :notice =&gt; &quot;Thank you for &crarr; 
+      subscribing!&quot;
+  else
+    render :new
+  end
+end</pre>
+
+<p>The <code>save_with_payment</code> method will use the <code>stripe</code> gem to handle the payment. We could use the response token to make a payment using the <code>Stripe::Charge.create</code> method but we don&rsquo;t want to do this as the response token can only be used once and we want to make a recurring payment. Instead we&rsquo;ll use the token to create a new <code>Stripe::Customer</code>. We can then assign a plan to that customer with recurring payments. Stripe will then automatically handle recurring payments for us. All of this is covered in Stripe&rsquo;s excellent <a href="https://stripe.com/docs/api?lang=ruby">API documentation</a>.</p>
+
+<p>Before we make any changes to our <code>Subscription</code> model we&rsquo;ll go to our Stripe account and set up some plans so that it knows how to handle our recurring payments. We&rsquo;ll add four plans with names and ids that match the plans in our Rails application.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/767/original/E288I08.png" width="799" height="528" alt="The plans added to our Stripe account."/>
+</div>
+
+<p>Back in our <code>Subscription</code> model we can now write the <code>save_with_payment</code> method.</p>
+
+<p class="codeFilePath">/app/models/subscription.rb</p>
+<pre class="ruby">class Subscription &lt; ActiveRecord::Base
+  belongs_to :plan
+  validates_presence_of :plan_id
+  validates_presence_of :email
+  
+  attr_accessor :stripe_card_token
+  
+  def save_with_payment
+    if valid?
+      customer = Stripe::Customer.create(description:email, &crarr; 
+        plan: plan_id, card: stripe_card_token)
+      self.stripe_customer_token = customer.id
+      save!
+    end
+  end
+end</pre>
+
+<p>This method checks that the model is valid and if it is it will create a new <code>Stripe::Customer</code>, passing it the customer&rsquo;s email address as a description, the <code>plan_id</code> and the <code>stripe_card_token</code>. Stripe will create a new <code>id</code> for the customer which we&rsquo;ll need to save to the database. We&rsquo;ll save it in to a new  <code>stripe_customer_token</code> field. We&rsquo;ll create a migration for this field then run <code>rake db:migrate</code> to add it to the database.</p>
+
+<pre class="terminal">$ rails g migration add_stripe_to_subscriptions stripe_customer_token:string</pre>
+    
+<p>We&rsquo;re ready now to test making a payment. If we go to the new subscription page, enter valid credit card details and click &ldquo;Subscribe&rdquo; the token and customer will be created in the background and the form will be submitted. If we visit the payments page for our Stripe account we&rsquo;ll see the new payment listed for the price of the plan. This is a recurring payment and will be taken every month.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/768/original/E288I09.png" width="818" height="557" alt="The recurring payment shown in the dashboard."/>
+</div>
+
+<h3>Handling Errors</h3>
+
+<p>The call to <code>Stripe::Customer.create</code> might raise an exception if some of the information passed isn&rsquo;t valid. This can happen, for example, if a user submits the form without JavaScript enabled in their browser so that the <code>stripe_card_token</code> wasn&rsquo;t generated. It&rsquo;s a good idea to use rescue to handle these cases. Stripe will raise an <code>InvalidRequestError</code> in these cases and we can catch these, log them, add a validation error to the page and then show the form again.</p>
+
+<p class="codeFilePath">/app/models/subscription.rb</p>
+<pre class="ruby">def save_with_payment
+  if valid?
+    customer = Stripe::Customer.create(description:email, &crarr;
+      plan: plan_id, card: stripe_card_token)
+    self.stripe_customer_token = customer.id
+    save!
+  end
+rescue Stripe::InvalidRequestError =&gt; e
+  logger.error &quot;Stripe error while creating customer: #{e.mesage}&quot;
+  errors.add :base, &quot;There was a problem with your credit card.&quot;
+end</pre>
+
+<p>We also need to handle errors on form fields unrelated to credit card information, such as the email field on our form, better. Currently if we try to submit a subscription with no email address but with valid credit card details we&rsquo;ll receive a proper token from Stripe but instead of being redirected to the page that shows a successful login we&rsquo;ll be shown the form again with an email validation error.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/769/original/E288I10.png" width="799" height="600" alt="The credit card fields still show even after we&rsquo;ve entered valid information."/>
+</div>
+
+<p>In these cases we should hide the credit card fields as we already have a valid token. We can do this by modifying the view so that it hides the fields if a <code>stripe_card_token</code> exists for the subscription and shows a message instead.</p>
+
+<p class="codeFilePath">/app/views/subscriptions/new.html.erb</p>
+<pre class="ruby">&lt;div class=&quot;field&quot;&gt;
+  &lt;%= f.label :email %&gt;
+  &lt;%= f.text_field :email %&gt;
+&lt;/div&gt;  
+&lt;% if @subscription.stripe_card_token %&gt;
+  Credit card has been provided
+&lt;% else %&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= label_tag :card_number, &quot;Credit Card Number &quot; %&gt;
+    &lt;%= text_field_tag :card_number, nil, name: nil %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= label_tag :card_code, &quot;Security Code on Card (CVV)&quot; %&gt;
+    &lt;%= text_field_tag :card_code, nil, name: nil %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= label_tag :card_month, &quot;Card Expiration&quot; %&gt;
+    &lt;%= select_month nil, {add_month_numbers_true: true}, &crarr; 
+      {name: nil, id: &quot;card_month&quot;}%&gt;
+    &lt;%= select_year nil, {start_year: Date.today.year, &crarr;
+      end_year: Date.today.year+15}, &crarr;
+      {name: nil, id: &quot;card_year&quot;} %&gt;
+  &lt;/div&gt;
+&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p>We&rsquo;ll also need to update the <code>setupForm</code> function in our subscriptions CoffeeScript file so that it doesn&rsquo;t try to process the card again when a user submits the form in this case. We can do this by checking to see if the card number field exists on the form. If it doesn&rsquo;t then it&rsquo;s been hidden because the credit card information has already been processed. In this case we won&rsquo;t process it again and we&rsquo;ll return <code>true</code> so that the form is submitted.</p>
+
+<p class="codeFilePath">/app/assets/javascripts/subscriptions.js.coffee</p>
+<pre class="javascript">setupForm: -&gt;
+  $(&#x27;#new_subscription&#x27;).submit -&gt;
+    $(&#x27;input[type=submit]&#x27;).attr(&#x27;disabled&#x27;, true)
+    if $(&#x27;#card_number&#x27;).length
+      subscription.processCard()
+      false
+    else
+      true</pre>
+      
+<p>If we submit the form with valid credit card details but with a missing email address now the credit card fields will be hidden.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/770/original/E288I11.png" width="799" height="466" alt="The credit card fields are now hidden."/>
+</div>
+
+<p>If we fill in the email field and submit the form again our subscription will be successful and the payment will be processed by Stripe.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/771/original/E288I12.png" width="799" height="321" alt="When we enter a valid email address our subscription is successfully submitted."/>
+</div>
+
+<h3>WebHooks</h3>
+
+<p>One feature of Stripe that we haven&rsquo;t covered is WebHooks. These allow us to provide a callback URL that Stripe will call when a given event fires. For example if a recurring payment fails we want to be told about this so that we can suspend that user&rsquo;s account. We can then inform them so that they can update their credit card information. Speaking of which, our application still needs a way for users to update their card information, cancel their subscriptions and so on, but we won&rsquo;t be covering that here.</p>
+
+<p>Stripe has a number of features we haven&rsquo;t covered in this episode, but hopefully we&rsquo;ve given you enough to get started. Stripe is a great way to process credit card payments. Unfortunately it&rsquo;s unavailable outside the U.S. for now, but international support is promised soon.</p>

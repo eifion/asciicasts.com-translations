@@ -1,0 +1,384 @@
+<p>Railsアプリケーションでクレジットカードによる支払い処理が必要な場合は、<a href="https://stripe.com">Stripe</a>をぜひチェックしてみてください。Stripeは設定が簡単でとても開発者にやさしいペイメントゲートウェイ(カード決済サービス)です。使用料はトランザクションごとに発生するだけで、しかもとても良心的な価格設定です。月額の使用料やその他の隠れたコストもありません。(念のため、我々はこの記事でお金をもらっているわけではありません。)</p>
+
+<p>Stripeは今のところ米国内でのみ利用可能で、自分のアプリケーションで利用したいという場合は米国の銀行に口座を持つ必要があります。米国以外への対応も現在進行中で、まもなく提供されると思われます。なおこれは海外の顧客に対して課金できないという意味ではなく、販売者側が米国内にいなければいけないという制限です。</p> 
+
+<h3>RailsアプリケーションにStripeを追加する</h3>
+
+<p>今回のエピソードではStripeを使ってRailsアプリケーションに繰り返しの支払い処理を追加します。使用するアプリケーションはラマのキスを販売するサイトです。なぜラマか? 実はRyan Batesはラマ牧場で子供時代を過ごしたのですが、当時ラマのキスを売って一儲けしたいと思っていたのに機会に恵まれず、今になって過去の夢を取り戻そうとしているのです。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/760/original/E288I01.png" width="821" height="518" alt="ラマキスのサイト"/>
+</div>
+
+<p>アプリケーションの大半はすでに出来上がっています。4つのプランがあり、ユーザはいずれかに申し込んで定期予約登録します。登録ページにはまだEメールアドレスのフィールドしかありませんが、フィールドに入力してフォームを送信すると、新しい定期予約が作成されます。Stripeを介して支払いを受けられるように、クレジットカードの情報を入力するためのフィールドを追加します。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/761/original/E288I02.png" width="821" height="332" alt="登録フォーム"/>
+</div>
+
+<p>Stripeの利用方法は簡単です。<a href="https://stripe.com/">stripe.com</a>のサイトで「Get Started with Stripe」ボタンをクリックすると 、テスト用トランザクションを処理できるページが表示されます。curlを使ってコマンドラインからも同じ操作が可能です。<a href="https://manage.stripe.com">「Getting Started」のページ</a>からサンプルコードをコピーして、ターミナルウィンドウで実行すると、JSONが返されます。</p>
+
+<pre class="terminal">$ curl https://api.stripe.com/v1/charges \
+&gt;   -u zVyGPfdmfhSGpHAxhFiJT7kFnHeSi9ZN: \
+&gt;   -d amount=100 \
+&gt;   -d currency=usd \
+&gt;   -d 'card[number]=4242424242424242' \
+&gt;   -d 'card[exp_month]=5' \
+&gt;   -d 'card[exp_year]=2012' \
+&gt;   -d 'description=test charge IFnFXZgdZk'
+
+{
+  "amount": 100,
+  "created": 1318355241,
+  "currency": "usd",
+  "description": "test charge IFnFXZgdZk",
+  "fee": 0,
+  "id": "ch_oVfzHImv8sN5TV",
+  "livemode": false,
+  "object": "charge",
+  "paid": true,
+  "refunded": false,
+  "card": {
+    "country": "US",
+    "exp_month": 5,
+    "exp_year": 2012,
+    "last4": "4242",
+    "object": "card",
+    "type": "Visa"
+  }
+}</pre>
+
+<p>テスト用トランザクションをWebサイトからかまたはターミナルウィンドウから実行すると、Stripeの管理ページの下の方のダッシュボードに最近の支払いが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/762/original/E288I03.png" width="822" height="586" alt="Stripeのダッシュボードに支払いテストが表示される"/>
+</div>
+
+<p>アカウントの作成は簡単です。管理ページでEメールアドレスとパスワードを入力するだけです。登録ができたら、<a href="https://manage.stripe.com/account">アカウントページ</a>でまず最初にStripeのREST APIと通信するためのAPIキーを確認できます。またStripeはRailsアプリケーションからこのAPIをとても簡単に利用できるようにするRuby gemを提供しています。アプリケーションにこのgemをインストールします。他のRuby gemと同じように、<code>Gemfile</code>に参照情報を追加して<code>bundle</code>コマンドを実行します。</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source 'http://rubygems.org'
+gem 'rails', '3.1.1'
+gem 'sqlite3'
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~&gt; 3.1.4'
+  gem 'coffee-rails', '~&gt; 3.1.1'
+  gem 'uglifier', '&gt;= 1.0.3'
+end
+gem 'jquery-rails'
+gem 'stripe'</pre>
+
+<p>Stripeは、操作対象のアカウントを識別するために2つのAPIキーを使用します。これらの情報を、アプリケーションの<code>/config/initializers</code>ディレクトリに新しく作成した<code>stripe.rb</code>という初期設定ファイルに保存します。ここで保存するキーは、アカウントページに表示されている秘密のテスト用キーと公開APIキーです。公開キーは、Ruby gemでは使われずビューとJavaScriptで使用するだけなので、定数に保存します。このキーにはStripeのアカウントページにある公開のテスト用キーの値を設定します。</p>
+
+<p class="codeFilePath">/config/initializers/stripe.rb</p>
+<pre class="ruby">Stripe.api_key = "5J7dr36JmNpLrXXFwAXChdRzZZwLyCHV"
+STRIPE_PUBLIC_KEY = "pk_B1SaM15nXXruDU3g2D6uns2kJeu9m"</pre>
+
+<p>このファイルには取り扱いに注意が必要な情報が含まれるので、アプリケーションの<code>.gitignore</code>ファイルに追加して、リポジトリに含まれないようにするのがいいでしょう。また、本番環境のサイトでは別のキーを使うので、このファイルが誤って本番環境のコードにコピーされたら困ります。</p> 
+
+<h3>StripeのJavaScriptとAPIキーを追加する</h3>
+
+<p>ユーザがクレジットカード情報をフォームに入力すると、その情報は直接Stripeのサーバに送信され、対象のアプリケーションを介することはありません。これによって、<a href="http://en.wikipedia.org/wiki/Payment_Card_Industry_Data_Security_Standard">PCIコンプライアンス</a>を得るのが非常に簡単になります。<a href="https://stripe.com/api">StripeのAPIページ</a>のサンプルフォームを見てみると<code>name</code>属性を持つフィールドは一つもありません。これはつまり、フォームが送信されてもこれらのフィールドは我々のアプリケーションのサーバには渡されないということです。その代わりに、ユーザがフォームを送信したときに実行されるJavaScriptコードに読み取られます。</p>
+
+<p>アプリケーションでStripeを利用するときには、StripeのサーバにあるJavaScriptファイルをインクルードする必要があります。その上で公開キーを設定し、クレジットカード情報のフィールドを含むフォームが送信されたときに起動されるJavaScriptを追加します。このJavaScriptが、フォームのクレジットカード情報に基づいてトークンを生成します。</p>
+
+<p>アプリケーションのレイアウトファイルにStripeのJavaScriptファイルを追加します。このファイルは、アプリケーション自身のJavaScriptファイルよりも前に置かれている必要があります。現在のページがチェックアウトページかどうかをチェックして、その場合のみJavaScriptを追加するコードを加えた方がいいのでしょうが、ここでは省略します。また公開キーをJavaScriptから利用できるようにする必要がありますが、これはRailsがCSRFキーをページのhead部分の<code>meta</code>タグに追加するのと同じ方法をとります。</p>
+
+<p class="codeFilePath">/app/views/layouts/application.html.erb</p>
+<pre class="ruby">&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Llama Kisses&lt;/title&gt;
+  &lt;%= stylesheet_link_tag    "application" %&gt;
+  &lt;%= javascript_include_tag "https://js.stripe.com/v1/", "application" %&gt;
+  &lt;%= csrf_meta_tags %&gt;
+  &lt;%= tag :meta, :name =&gt; "stripe-key", ↵ 
+    :content =&gt; STRIPE_PUBLIC_KEY %&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;!-- Body omitted --&gt;
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+
+<h3>定期会員登録フォームにクレジットカード情報のフィールドを追加する</h3>
+
+<p>次に定期会員登録フォームにクレジットカード情報のフィールドを追加します。フォームには現在、選択されたプランの<code>id</code>を保持する隠しフィールドとEメールアドレスのためのテキストフィールドがあります。これに、クレジットカード番号、セキュリティコード、期限日のためのフィールドを追加します。</p>
+
+<p class="codeFilePath">/app/views/subscriptions/new.html.erb</p>
+<pre class="ruby">&lt;%= form_for @subscription do |f| %&gt;
+  &lt;% if @subscription.errors.any? %&gt;
+    &lt;div class="error_messages"&gt;
+      &lt;h2&gt;&lt;%= pluralize(@subscription.errors.count, "error") %&gt; prohibited this subscription from being saved:&lt;/h2&gt;
+      &lt;ul&gt;
+      &lt;% @subscription.errors.full_messages.each do |msg| %&gt;
+        &lt;li&gt;&lt;%= msg %&gt;&lt;/li&gt;
+      &lt;% end %&gt;
+      &lt;/ul&gt;
+    &lt;/div&gt;
+  &lt;% end %&gt;
+  &lt;%= f.hidden_field :plan_id %&gt;
+  &lt;div class="field"&gt;
+    &lt;%= f.label :email %&gt;
+    &lt;%= f.text_field :email %&gt;
+  &lt;/div&gt;  
+  &lt;div class="field"&gt;
+      &lt;%= label_tag :card_number, "Credit Card Number " %&gt;
+      &lt;%= text_field_tag :card_number, nil, name: nil %&gt;
+  &lt;/div&gt;
+  &lt;div class="field"&gt;
+      &lt;%= label_tag :card_code, "Security Code on Card (CVV)" %&gt;
+      &lt;%= text_field_tag :card_code, nil, name: nil %&gt;
+  &lt;/div&gt;
+  &lt;div class="field"&gt;
+    &lt;%= label_tag :card_month, "Card Expiration" %&gt;
+    &lt;%= select_month nil, {add_month_numbers_true: true}, {name: nil, id: "card_month"}%&gt;
+    &lt;%= select_year nil, {start_year: Date.today.year, end_year: Date.today.year+15}, {name: nil, id: "card_year"}%&gt;
+  &lt;/div&gt;
+  &lt;div class="actions"&gt;&lt;%= f.submit "Subscribe" %&gt;&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p>フォームに2つのテキストフィールド(クレジットカード番号とセキュリティコード用)と期限日用に2つのドロップダウンを追加しました。追加したフィールドについて、以下に少し補足します。クレジットカードの名前とセキュリティコードは<code>Subscription</code>モデルの属性ではないので、フォームビルダーを通す代わりに<code>label_tag</code>と<code>text_field_tag</code>を使用しました。それらの値はサーバに送らてほしくないので、合わせてそれぞれのフィールドの名前として<code>nil</code>を設定しました。同じように期限日のフィールドには<code>select_month</code>と<code>select_year</code>を使用し、<code>id</code>を手作業で設定して、Railsが生成したものを使わなくてもいいようにします。</p>
+
+<p>ページをリロードすると、新しいフィールドがフォームに表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/763/original/E288I04.png" width="822" height="505" alt="新たにクレジットカード用のフィールドが追加された定期会員登録フォーム"/>
+</div>
+
+<p>次にフォームが送信されたときに実行されるJavaScriptを書きます。このスクリプトはクレジットカード情報をStripeに送信し、フォームを介してStripeから受信したトークンを送信します。このアプリケーションはRails 3.1で作成されているため、<code>subscriptions.js.coffee</code>ファイルのこのコードをCoffeeScriptで記述します。</p>
+
+<p class="codeFilePath">/app/assets/javascripts/subscriptions.js.coffee</p>
+<pre class="javascript">jQuery -&gt;
+  Stripe.setPublishableKey($('meta[name="stripe-key"]').attr('content'))
+  subscription.setupForm()
+
+subscription =
+  setupForm: -&gt;
+    $('#new_subscription').submit -&gt;
+      $('input[type=submit]').attr('disabled', true)
+      subscription.processCard()
+  
+  processCard: -&gt;
+    card =
+      number: $('#card_number').val()
+      cvc: $('#card_code').val()
+      expMonth: $('#card_month').val()
+      expYear: $('#card_year').val()
+    Stripe.createToken(card, subscription.handleStripeResponse)
+  
+  handleStripeResponse: (status, response) -&gt;
+    if status == 200
+      alert(response.id)
+    else
+	 alert(response.error.message)</pre> 
+	 
+<p>このコードはページのDOMが読み込まれた後に実行されなくてはいけないので、全体を<code>jQuery</code> 関数でラップしています。このファイルはまず公開キーを指定してStripeを設定します。キーの値は、アプリケーションのレイアウトファイルに追加した<code>meta</code>タグから読み込まれます。値が<code>stripe</code>である<code>name</code>属性を持った<code>meta</code>タグを探し、その<code>content</code>属性を読み込んでそのキーの値を取得します。残りのロジックは<code>subscription</code>オブジェクトを介して処理されます。このオブジェクトが持つ<code>setupForm</code>という関数がすべての処理を行います。</p>
+
+<p>次に<code>subscription</code>オブジェクトを作成して<code>setupForm</code>関数を与えます。この関数では、<code>id</code>から定期会員登録フォームを取得し、フォームの<code>submit</code>イベントが起動したときに実行されるコールバックを追加します。フォームが送信されるときに誤って送信ボタンが再度押されることがないように、ボタンのdisabled属性を<code>true</code>にして無効化します。その後で<code>processCard</code>関数を呼び出し、<code>false</code>を返してフォームが送信されないようにします。</p>
+
+<p><code>processCard</code>関数が生成するオブジェクトが、クレジットカードの値をStripeが期待する形式で表し、<code>val()</code>を用いてフォームのフィールドから必要な値を読みます。次の行は重要です。<code>Stripe.createToken</code>を2つの引数と共に呼び出します。一つ目は今生成したcardオブジェクトです(オプション値を渡すこともできます)。2つ目はStripeからのレスポンスを非同期で処理する関数です。ここで<code>subscription.handleStripeResponse</code>を渡します。</p>
+
+<p><code>handleStripeResponse</code>関数は2つの引数、<code>status</code>と<code>response</code>、をとります。もしstatusの値が<code>200</code>だったらトランザクションは成功で、<code>response.id</code>にレスポンス・トークンが保存されます。今はレスポンスの値を<code>alert</code>表示して、その値を確認するだけにします。もしstatusが<code>200</code>でなければエラーが発生したということなので、<code>alert</code>でエラーメッセージを表示します。</p>
+
+<p>ではここで新しいフォームを試してみます。新しい登録フォームをリロードして有効なカード情報を送信するとレスポンス・トークンが返信されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/764/original/E288I05.png" width="827" height="506" alt="正しいリクエストに対しレスポンス・トークンが表示される"/>
+</div>
+
+<p>不正なカード番号を入力すると、今度はエラーメッセージが返されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/765/original/E288I06.png" width="822" height="505" alt="不正な情報を入力するとエラーメッセージが返される"/>
+</div>
+
+<h3>レスポンスを処理する</h3>
+
+<p>Stripeへの呼び出しが正しく処理されることがわかったので、次はエラーメッセージを処理するコードを修正します。アラートを表示するのではなく、エラーメッセージをページ上のdivにstripe_errorのidと共に表示して、送信ボタンを再度有効化してユーザが情報を入力できるようにします。</p>
+
+<p class="codeFilePath">/app/assets/javascripts/subscriptions.js.coffee</p>
+<pre class="javascript">handleStripeResponse: (status, response) -&gt;
+  if status == 200
+    alert(response.id)
+  else
+    $('#stripe_error').text(response.error.message)
+    $('input[type=submit]').attr('disabled', false)</pre>
+    
+<p>この修正後、ビューに<code>div</code>を追加します。</p>
+
+<p class="codeFilePath">/app/views/subscriptions/new.html.erb</p>
+<pre class="ruby">&lt;%= form_for @subscription do |f| %&gt;
+  &lt;!-- Form fields omitted --&gt;
+  &lt;div id="stripe_error"&gt;
+    &lt;noscript&gt;JavaScript is not enabled and is required for this form. First enable it in your web browser settings.&lt;/noscript&gt;
+  &lt;/div&gt;
+  &lt;div class="actions"&gt;&lt;%= f.submit "Subscribe" %&gt;&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p><code>div</code>の中に<code>noscript</code>要素を置いて、JavaScriptが有効化されていないブラウザからフォームを利用しようとしたときにエラーが表示されるようにしました。ページをリロードして無効なカード番号を再度フォームから送信すると、<code>alert</code>ではなく<code>stripe_error</code> divの中にエラーメッセージが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/766/original/E288I07.png" width="822" height="534" alt="エラーメッセージがページに表示される"/>
+</div>
+
+<p>次に成功したトランザクションを処理するコードを修正します。レスポンス・トークンを<code>alert</code>で表示するのではなく、フォームに新たに追加した隠しフィールドに入れて、フォームを送信します。ビューに新たに隠しフィールドを追加し、<code>stripe_card_token</code>という名前にします。</p>
+
+<p class="codeFilePath">/app/views/subscriptions/new.html.erb</p>
+<pre class="ruby">&lt;%= f.hidden_field :stripe_card_token %&gt;</pre>
+
+<p>データベースの<code>subscriptions</code>テーブルには<code>stripe_card_token</code>フィールドがないので、このフィールドを仮の属性として<code>Subscription</code>モデルに追加します。</p>
+
+<p class="codeFilePath">/app/models/subscription.rb</p>
+<pre class="ruby">class Subscription &lt; ActiveRecord::Base
+  belongs_to :plan
+  validates_presence_of :plan_id
+  validates_presence_of :email
+  
+  attr_accessible :stripe_card_token
+end</pre>
+
+<p>CoffeeScriptファイルに戻って、<code>alert</code>の部分を修正して、新たに作った隠しフィールドの値をレスポンス・トークンの値に設定しフォームを送信するコードに置き換えます。フォーム上で直接<code>submit</code>を呼び出して、フォームを送信します。これによって、<code>onsubmit</code>コールバックを迂回し、フォームのデータがPOSTでサーバに送信されます。</p>
+
+<p class="codeFilePath">/app/assets/javascripts/subscriptions.js.coffee</p>
+<pre class="ruby">handleStripeResponse: (status, response) -&gt;
+  if status == 200
+    $('#subscription_stripe_card_token').val(response.id)
+    $('#new_subscription')[0].submit()
+  else
+    $('#stripe_error').text(response.error.message)
+    $('input[type=submit]').attr('disabled', false)</pre>
+    
+<p>フォームは<code>SubscriptionsController</code>の<code>create</code>アクションに送られ、トークンが新しい<code>Subscription</code>に渡されます。<code>before_create</code>コールバックを介して支払処理をすることも可能ですが、そうではなく<code>Subscription</code>モデルの中に新規に<code>save_with_payment</code>というメソッドを作成してそこで処理を行います。このメソッドを書く前に、<code>save</code>の呼び出しを<code>save_with_payment</code>に置き換えます。</p>
+
+<p class="codeFilePath">/app/controllers/subscription_controller.rb</p>
+<pre class="ruby">def create
+  @subscription = Subscription.new(params[:subscription])
+  if @subscription.save_with_payment
+    redirect_to @subscription, :notice =&gt; "Thank you for ↵ 
+      subscribing!"
+  else
+    render :new
+  end
+end</pre>
+
+<p><code>save_with_payment</code>メソッドは<code>stripe</code> gemを使って支払い処理を行います。レスポンス・トークンを使って<code>Stripe::Charge.create</code>メソッドで支払いを行うこともできますが、レスポンス・トークンは1回しか使用できずここでは繰り返しの支払いを行いたいのでこの方法はとれません。その代わりにトークンを用いて新規の<code>Stripe::Customer</code>を作成します。そうすることで、そのユーザに対して定期的な支払いの予定を設定できます。これでStripeが繰り返しの支払いを自動処理してくれます。これらのすべてがStripeのすぐれた<a href="https://stripe.com/docs/api?lang=ruby">APIドキュメント</a>に記述されています。</p>
+
+<p><code>Subscription</code>モデルの修正に取りかかる前に、Stripeアカウントにアクセスしていくつかのプランを設定して繰り返しの支払い処理の方法を事前登録しておきます。Railsアプリケーション中のプランに対応する名前とidを付けた4つのプランを追加します。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/767/original/E288I08.png" width="799" height="528" alt="Stripeアカウントに追加されたプラン"/>
+</div>
+
+<p>ここで<code>Subscription</code>モデルに戻って、<code>save_with_payment</code>メソッドを書きます。</p>
+
+<p class="codeFilePath">/app/models/subscription.rb</p>
+<pre class="ruby">class Subscription &lt; ActiveRecord::Base
+  belongs_to :plan
+  validates_presence_of :plan_id
+  validates_presence_of :email
+  
+  attr_accessor :stripe_card_token
+  
+  def save_with_payment
+    if valid?
+      customer = Stripe::Customer.create(description:email, ↵ 
+        plan: plan_id, card: stripe_card_token)
+      self.stripe_customer_token = customer.id
+      save!
+    end
+  end
+end</pre>
+
+<p>このメソッドはモデルが有効かチェックし、そうであれば新規に<code>Stripe::Customer</code>を作成し、description(顧客のEメールアドレス)、<code>plan_id</code>、<code>stripe_card_token</code>を渡します。Stripeが顧客のために新しい<code>id</code>を作成するので、それをデータベースに保存します。新規に<code>stripe_customer_token</code>フィールドに保存することにします。このフィールドのためのマイグレーションを作成し、<code>rake db:migrate</code>を実行してデータベースに追加します。</p>
+
+<pre class="terminal">$ rails g migration add_stripe_to_subscriptions stripe_customer_token:string</pre>
+    
+<p>これで支払処理のテストを行う準備ができました。新しい登録ページを開いて、有効なカード情報を入力して「Subscribe」ボタンをクリックすると、バックグラウンドでトークンとcustomerが作成され、フォームが送信されます。Stripeアカウントの支払いページを見ると、そのプランの値段で新規の支払いが表示されています。これは繰り返しの支払いで毎月定期的に処理されます。</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/768/original/E288I09.png" width="818" height="557" alt="繰り返しの支払いがダッシュボードに表示される"/>
+</div>
+
+<h3>エラー処理</h3>
+
+<p><code>Stripe::Customer.create</code>の呼び出しは、情報の一部が不正な場合に例外を発生させる可能性があります。例えば、ユーザがJavaScriptを有効にせずにフォームを送信したために<code>stripe_card_token</code>が生成されなかった場合に発生します。このような場合への対応として、rescueを使用するのがいいでしょう。Stripeが<code>InvalidRequestError</code>を発生させるので、これを捕らえてログに記録し、ページに検証エラーを追加して再度フォームを表示します。</p>
+
+<p class="codeFilePath">/app/models/subscription.rb</p>
+<pre class="ruby">def save_with_payment
+  if valid?
+    customer = Stripe::Customer.create(description:email, ↵
+      plan: plan_id, card: stripe_card_token)
+    self.stripe_customer_token = customer.id
+    save!
+  end
+rescue Stripe::InvalidRequestError =&gt; e
+  logger.error "Stripe error while creating customer: #{e.mesage}"
+  errors.add :base, "There was a problem with your credit card."
+end</pre>
+
+<p>また、クレジットカード情報に関係のないフォームフィールド(例えば今回のフォームのEメールフィールド)のエラーも、今よりもうまく処理する必要があります。現状では、Eメールアドレスなしで有効なクレジットカード情報で会員登録を実行した場合、Stripeから正規のトークンが届きますが、ログインが成功した旨を知らせるページにリダイレクトされる代わりに、メールアドレスの検証エラーと共に再度フォームが表示されてしまいます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/769/original/E288I10.png" width="799" height="600" alt="有効な情報を入力してもクレジットカード情報用フィールドが再度表示される"/>
+</div>
+
+<p>このような場合には、正規のトークンをすでに得たのでクレジットカード用フィールドは隠すべきです。そのためにはビューを修正して、定期予約の<code>stripe_card_token</code>が存在する場合フィールドを隠して代わりにメッセージを表示します。</p>
+
+<p class="codeFilePath">/app/views/subscriptions/new.html.erb</p>
+<pre class="ruby">&lt;div class="field"&gt;
+  &lt;%= f.label :email %&gt;
+  &lt;%= f.text_field :email %&gt;
+&lt;/div&gt;  
+&lt;% if @subscription.stripe_card_token %&gt;
+  Credit card has been provided
+&lt;% else %&gt;
+  &lt;div class="field"&gt;
+    &lt;%= label_tag :card_number, "Credit Card Number " %&gt;
+    &lt;%= text_field_tag :card_number, nil, name: nil %&gt;
+  &lt;/div&gt;
+  &lt;div class="field"&gt;
+    &lt;%= label_tag :card_code, "Security Code on Card (CVV)" %&gt;
+    &lt;%= text_field_tag :card_code, nil, name: nil %&gt;
+  &lt;/div&gt;
+  &lt;div class="field"&gt;
+    &lt;%= label_tag :card_month, "Card Expiration" %&gt;
+    &lt;%= select_month nil, {add_month_numbers_true: true}, ↵ 
+      {name: nil, id: "card_month"}%&gt;
+    &lt;%= select_year nil, {start_year: Date.today.year, ↵
+      end_year: Date.today.year+15}, ↵
+      {name: nil, id: "card_year"} %&gt;
+  &lt;/div&gt;
+&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p>合わせてsubscriptionsのCoffeeScriptファイルの<code>setupForm</code>関数を修正して、このような場合にユーザがフォームを送信したときに、二重でカード処理が行われないようにします。これは、フォームにカード番号のフィールドが存在するかをチェックすることにより可能です。もし存在しなければ、それはクレジットカード番号がすでに処理されたので表示を隠されているということになります。この場合は再度処理はせず、<code>true</code>を返してフォームが送信されるようにします。</p>
+
+<p class="codeFilePath">/app/assets/javascripts/subscriptions.js.coffee</p>
+<pre class="javascript">setupForm: -&gt;
+  $('#new_subscription').submit -&gt;
+    $('input[type=submit]').attr('disabled', true)
+    if $('#card_number').length
+      subscription.processCard()
+      false
+    else
+      true</pre>
+      
+<p>ここで、有効なクレジットカード情報を入力し、Eメールアドレスは入力せずにフォームを送信すると、クレジットカードフィールドは隠されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/770/original/E288I11.png" width="799" height="466" alt="クレジットカードフィールドが隠されている"/>
+</div>
+
+<p>Eメールフィールドを埋めてフォームを再送信すると定期予約の登録は成功し、Stripeによって支払い処理が行われます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/771/original/E288I12.png" width="799" height="321" alt="有効なEメールアドレスを入力すると定期予約は正しく登録される"/>
+</div>
+
+<h3>WebHook</h3>
+
+<p>今回触れることができなかったStripeの機能のひとつがWebHookです。この機能を使えば、特定のイベントが発生したときにStripeが呼び出すコールバックURLを利用できます。例えば繰り返しの支払いが失敗したときには、通知を受けてそのユーザのアカウントを保留できるようにしたいでしょう。そうすればユーザにカード情報を更新するように連絡することができます。カード情報の更新について言えば、作成するアプリケーションにはカード情報の更新やsubscriptionの解約などの手続きの手段があるべきですが、今回はその部分には触れていません。</p>
+
+<p>Stripeには今回のエピソードでカバーできなかった機能がまた多くありますが、使い始めるために必要な情報は提供できたと思います。Stripeはクレジットカードによる支払い処理のためのすぐれた方法です。残念ながら米国以外ではまだ利用できませんが、米国以外への対応も近々行われる予定です。</p>

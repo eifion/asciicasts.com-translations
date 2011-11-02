@@ -1,0 +1,394 @@
+<p>В этом эпизоде мы рассмотрим <a href="https://github.com/jcasimir/draper">Draper</a>, gem, который позволяет добавлять декораторы к вьюхам Rails-приложения, очень похоже на паттерн presenter. Если у вас много сложной логики отображения в ваших шаблонах и хелперах, то Draper может помочь очистить этот код с использованием более объектно-ориентированного подхода. В этом эпизоде мы покажем, как это работает.</p>
+
+<p>Приложение, с которым будем работать показано ниже. В нем есть страница профиля пользователя, которая показывает различные части информации о данном пользователе включая аватар, полное имя, имя пользователя, короткую биографию с использованием разметки и ссылки на вебсайт и ленту Twitter. Если пользователь задал вебсайт, то аватар и полное имя будут ссылаться на этот сайт.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/747/original/E286I01.png" width="800" height="595" alt="Страница профиля для пользователя, который ввел все свои данные."/>
+</div>
+
+<p>Страница кажется достаточно простой, но мы также должны учитывать пользователей, которые не ввели так много данных как &ldquo;MrMystery&rdquo;.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/748/original/E286I02.png" width="800" height="470" alt="Страница профиля для пользователя, который ввел лишь часть данных."/>
+</div>
+
+<p>Этот пользователь ввел только имя пользователя, поэтому выводим его вместо его полного имени, показываем аватар по умолчанию и некоторую замену для текста в остальных полях. Это делает шаблон для этой страницы более сложным, с необходимостью множества выражений if для обработки пользователей с разным количеством информации. Мы могли бы сделать этот шаблон значительно чище, если бы могли переместить часть этой логики куда-нибудь еще.</p>
+
+``` /app/views/users/show.html.erb
+<div id="profile">
+  <%= link_to_if @user.url.present?, image_tag("avatars/#{avatar_name(@user)}", class: "avatar"), @user.url %>
+  <h1><%= link_to_if @user.url.present?, (@user.full_name.present? ? @user.full_name : @user.username), @user.url %></h1>
+  <dl>
+    <dt>Username:</dt>
+    <dd><%= @user.username %></dd>
+    <dt>Member Since:</dt>
+    <dd><%= @user.member_since %></dd>
+    <dt>Website:</dt>
+    <dd>
+    <% if @user.url.present? %>
+      <%= link_to @user.url, @user.url %>
+    <% else %>
+      <span class="none">None given</span>
+    <% end %>
+    </dd>
+    <dt>Twitter:</dt>
+    <dd>
+    <% if @user.twitter_name.present? %>
+      <%= link_to @user.twitter_name, "http://twitter.com/#{@user.twitter_name}" %>
+    <% else %>
+      <span class="none">None given</span>
+    <% end %>
+    </dd>
+    <dt>Bio:</dt>
+    <dd>
+    <% if @user.bio.present? %>
+      <%=raw Redcarpet.new(@user.bio, :hard_wrap, :filter_html, :autolink).to_html %>
+    <% else %>
+      <span class="none">None given</span>
+    <% end %>
+    </dd>
+  </dl>
+</div>
+```
+
+<p>Так как эта логика относится к вьюхам, мы не можем выделить ее в модель. Одним из решений было бы использования методов хелперов. Мы уже используем один, обозначаемый <code>image_tag</code> в этом шаблоне для отображения аватара. Давайте взглянем на него.</p>
+
+``` /app/helpers/users_helper.rb</p>
+module UsersHelper
+  def avatar_name(user)
+    if user.avatar_image_name.present?
+      user.avatar_image_name
+    else
+      "default.png"
+    end
+  end
+end
+```
+
+<p>Этот метод хелпера определяет, имеет ли данный пользователь аватар и возвращает имя изображения по умолчанию в ином случае. Мы можем извлечь большую часть логики из вьюхи в методы хелпера, но проблема в том, что это простые методы размещаются в глобальном namespace, при этом в них нет ничего объектно-ориентированного.</p>
+
+<h3>Установка Draper</h3>
+
+<p>Этот сценарий - отличная возможность для использования presenter или декоратора. Так как Draper относится к ним, давайте добавим его в наше приложение. Gem Draper устанавливается как обычно, добавлением его в <code>Gemfile</code> с последующим запуском <code>bundle</code>.</p>
+
+``` /Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.1.0'
+gem 'sqlite3'
+
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails', "  ~> 3.1.0"
+  gem 'coffee-rails', "~> 3.1.0"
+  gem 'uglifier'
+end
+
+gem 'jquery-rails'
+gem 'redcarpet'
+
+gem 'draper'
+```
+
+<p>Когда Draper установлен, мы создадим декоратор для нашей модели <code>User</code>, запустив генератор <code>draper:decorator</code>.</p>
+
+``` terminal
+$ rails g draper:decorator user
+      create  app/decorators
+      create  app/decorators/application_decorator.rb
+      create  app/decorators/user_decorator.rb
+```      
+
+<p>Раз это наш первый декоратор, то также будет сгенерирован <code>application_decorator</code>. Любые декораторы, которые мы генерируем, наследуются от ApplicationDecorator, поэтому мы можем разместить там любую функциональность, которую хотим разделить между декораторами.</p>
+
+<p>Класс <code>UserDecorator</code> достаточно простой, состоящий преимущественно из комментариев, которые объясняют, как собственно он работает. Давайте сразу начнем чистить наши шаблоны.</p>
+
+<h3>Приведение в порядок страницы профиля</h3>
+
+<p>Для использования Draper на нашей странице профиля для начала нужно сделать изменения в экшене <code>show</code> контроллера <code>UsersController</code>. Этот экшен сейчас извлекает пользователя как обычно.</p>
+
+``` /app/controllers/users_controller.rb
+class UsersController < ApplicationController
+  def index
+    @users = User.all
+  end
+
+  def show
+    @user = User.find(params[:id])
+  end
+end
+```
+
+<p>Мы должны обернуть этого пользователя в наш декоратор, для чего мы заменяем <code>User.find</code> на <code>UserDecorator.find</code>.</p>
+
+``` /app/controllers/users_controller.rb
+def show
+  @user = UserDecorator.find(params[:id])
+end
+```
+
+<p>Этот код теперь вернет объект <code>UserDecorator</code>, который оборачивает объект <code>User</code> и по умолчанию делегирует все методы ему (об этом – позже). Экшен будет работать точно так же, как и до этого, даже когда мы работаем с <code>UserDecorator</code> вместо <code>User</code>. Теперь мы можем начать чистить наши вьюхи и начнем с кода, который отображает аватар пользователя.</p>
+
+``` /app/views/users/show.html.erb
+<%= link_to_if @user.url.present?, image_tag("avatars/#{avatar_name(@user)}", class: "avatar"), @user.url %>
+```
+
+<p>Мы заменим это во вьюхе следующим кодом:</p>
+
+``` /app/views/users/show.html.erb
+<%= @user.avatar %>
+```
+
+<p>Этот код обращается к методу avatar в <code>UserDecorator</code>, который мы сейчас напишем. Есть несколько вещей, которые стоит учитывать во время написания этого метода. Всякий раз, когда вызывается метод хелпера из декоратора, такой как наш <code>link_to_if</code>, мы должны вызывать его через метод <code>h</code> (что означает &ldquo;helpers&rdquo;). Когда мы хотим сослаться на модель, мы вызываем вместо нее метод <code>model</code>, в данном случае вместо <code>@user</code>.</p>
+
+<p>Код, который мы скопировали из вьюхи в <code>avatar</code>, вызывает метод хелпера <code>avatar_name</code>. Так как мы вызываем <code>avatar_name</code> из нашего декоратора, мы переместим его туда из класса <code>UsersHelper</code>. Теперь, имея метод в том же классе, нам не нужно передавать ему объект <code>User</code>, и мы можем заменить все обращения к пользователю на model.</p>
+
+``` /app/decorators/user_decorator.rb
+class UserDecorator < ApplicationDecorator
+  decorates :user
+
+  def avatar
+    h.link_to_if model.url.present?, h.image_tag("avatars/#{avatar_name}", class: "avatar"), model.url
+  end
+
+  private
+  def avatar_name
+    if model.avatar_image_name.present?
+      model.avatar_image_name
+    else
+      "default.png"
+    end
+  end
+end
+```
+
+<p>Далее мы приведем в порядок код, который отображает имя пользователя. Мы заменим этот код во вьюхе:</p>
+
+``` /app/views/users/show.html.erb
+<h1><%= link_to_if @user.url.present?, (@user.full_name.present? ? @user.full_name : @user.username), @user.url %></h1>
+```
+
+<p>на это:</p>
+
+``` /app/views/users/show.html.erb
+<h1><%= @user.linked_name %></h1>
+```
+
+<p>Нам потребуется написать метод <code>linked_name</code> в <code>UserDecorator</code>. Есть сходства между кодом, который мы взяли из шаблона и методом <code>avatar</code>, который мы написали ранее. Они оба отображают ссылку, содержимое которой зависит от наличия <code>url</code> пользователя. Так как мы используем класс, то достаточно просто устранить это дублирование.</p>
+
+<p>Чтобы обеспечить создание ссылки, мы создадим новый private метод <code>site_link</code>, который принимает содержимое как параметр. Мы можем использовать этот метод потом как в <code>avatar</code>, так и в <code>linked_name</code> методах, чтобы привести их в порядок. Как раньше мы заменили любые обращения к <code>@user</code> в <code>linked_name</code> на <code>model</code>. Сделав всё это, наш декоратор теперь выглядит так:</p>
+
+
+``` app/decorators/user_decorator.rb
+class UserDecorator < ApplicationDecorator
+  decorates :user
+
+  def avatar
+    site_link h.image_tag("avatars/#{avatar_name}", class: "avatar")
+  end
+
+  def linked_name
+    site_link(model.full_name.present? ? model.full_name : model.username)
+  end
+
+  private
+  def site_link(content)
+    h.link_to_if model.url.present?, content, model.url
+  end
+
+  def avatar_name
+    if model.avatar_image_name.present?
+      model.avatar_image_name
+    else
+      "default.png"
+    end
+  end
+end
+```
+
+<p>Если мы перезагрузим страницу профиля пользователя, то она должна выглядеть точно так же, как и до изменений.</p>
+
+<p>Наш шаблон уже выглядит намного чище, но есть еще много чего мы можем сделать. Далее мы рефакторим большой кусок кода вьюхи - код, который выводит ссылку на вебсайт пользователя.</p>
+
+``` /app/views/user/show.html.erb
+<dt>Website:</dt>
+<dd>
+  <% if @user.url.present? %>
+    <%= link_to @user.url, @user.url %>
+  <% else %>
+    <span class="none">None given</span>
+  <% end %>
+</dd>
+```
+
+<p>Мы заменим на это:</p>
+
+``` /app/views/user/show.html.erb
+<dt>Website:</dt>
+<dd><%= @user.website %></dd>
+```
+
+<p>Так же как и до этого, мы создадим метод в классе декоратора. Мы можем видеть из кода, который мы убрали из вьюхи, что если у пользователя нет <code>url</code>, то выводится некоторый HTML. Можно просто возвратить это как строку, но мы не хотим размещать голый HTML в строке Ruby. Другим решением могло бы быть переместить код в partial и вывести его, но так как нам нужно только лишь вывести единственный элемент HTML, больше смысла будет использовать метод хелпера <code>content_tag</code>.</p>
+
+``` /app/decorators/user_decorator.rb
+def website
+  if model.url.present?
+    h.link_to model.url, model.url
+  else
+    h.content_tag :span, "None given", class: "none"
+  end
+end
+```
+
+<p>Можно сделать аналогично для двух частей шаблона, которые выводят информацию Twitter и биографию пользователя. Здесь не будут показаны детали, но в результате изменений код нашей вьюхи выглядит значительно чище.</p>
+
+``` /app/views/users/show.html.erb
+<div id="profile">
+  <%= @user.avatar %>
+  <h1><%= @user.linked_name %></h1>
+  <dl>
+    <dt>Username:</dt>
+    <dd><%= @user.username %></dd>
+    <dt>Member Since:</dt>
+    <dd><%= @user.member_since %></dd>
+    <dt>Website:</dt>
+    <dd><%= @user.website %></dd>
+    <dt>Twitter:</dt>
+    <dd><%= @user.twitter %></dd>
+    <dt>Bio:</dt>
+    <dd><%= @user.bio %></dd>
+  </dl>
+</div>
+```
+
+<p>Новые методы в декораторе – <code>twitter</code> и <code>bio</code> выглядят следующим образом:</p>
+
+``` /app/decorators/user_decorator.rb
+def website
+  if model.url.present?
+    h.link_to model.url, model.url
+  else
+    h.content_tag :span, "None given", class: "none"
+  end
+end
+
+def twitter
+  if model.twitter_name.present?
+    h.link_to model.twitter_name, "http://twitter.com/#{model.twitter_name}"
+  else
+    h.content_tag :span, "None given", class: "none"
+  end
+end
+
+def bio
+  if model.bio.present?
+    Redcarpet.new(model.bio, :hard_wrap, :filter_html, :autolink).to_html.html_safe
+  else
+    h.content_tag :span, "None given", class: "none"
+  end
+end
+```
+
+<p>Два новых метода очень похожи друг на друга и на метод <code>website</code>, написанный ранее. Есть небольшое дублирование между тремя методами, особенно в каждом выражении <code>else</code>, поэтому было бы правильно выделить эту часть в отдельный метод.</p>
+
+<p>Можно для этого использовать блок. Мы выделим код из <code>else</code> в отдельный метод, назовем его <code>handle_none</code>. Передадим значение, наличие которого мы хотим проверить в этот метод, а так же блок. Если значение существует, код в блоке будет выполнен, а иначе будет выведен тег span. Тогда мы можем использовать этот <code>handle_none</code>, чтобы очистить методы <code>website</code>, <code>twitter</code> и <code>bio</code>.</p>
+
+``` /app/decorators/user_decorator.rb
+def website
+  handle_none model.url do
+    h.link_to model.url, model.url
+  end
+end
+
+def twitter
+  handle_none model.twitter_name do
+    h.link_to model.twitter_name, "http://twitter.com/#{model.twitter_name}"
+  end
+end
+
+def bio
+  handle_none model.bio do
+    Redcarpet.new(model.bio, :hard_wrap, :filter_html, :autolink).to_html.html_safe
+  end
+end
+
+private
+def handle_none(value)
+  if value.present?
+    yield
+  else
+    h.content_tag :span, "None given", class: "none"
+  end
+end
+```
+
+<p>Еще одно изменение, которое мы можем сделать - выделить вывод разметки в <code>ApplicationDecorator</code> так, чтобы можно было бы вызывать его из любого другого декоратора, который мы могли бы сделать. Мы можем создать новый метод <code>markdown</code>, который будет выводить любой текст, который мы передадим в него.</p>
+
+``` /app/decorators/application_decorator.rb
+class ApplicationDecorator < Draper::Base
+  def markdown(text)
+    Redcarpet.new(text, :hard_wrap, :filter_html, :autolink).to_html.html_safe
+  end
+end
+```
+
+<p>Теперь в <code>UserDecorator</code> мы можем изменить метод <code>bio</code> так, чтобы он вызывал <code>markdown</code>.</p>
+
+``` /app/decorators/user_decorator.rb
+def bio
+  handle_none model.bio do
+    markdown(model.bio)
+  end
+end
+```
+
+<h3>Изменение модели</h3>
+
+<p>Теперь у нас есть декоратор, поэтому будет правильно просмотреть модель на предмет кода, относящегося ко вьюхам, который мы можем переместить в соответствующий декоратор. Например, в нашей модели <code>User</code> есть метод <code>member_since</code>, который форматирует время<code>created_at</code> пользователя. Этот код может считаться относящимся ко вьюхам, так как все что он делает - возвращает форматированную строку, поэтому мы переместим его в декоратор.</p>
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  def member_since
+    created_at.strftime("%B %e, %Y")
+  end
+end
+```
+
+<p>Все что нам нужно сделать - переместить метод в декоратор и приписать <code>model</code> перед <code>created_at</code>.</p>
+
+``` /app/decorators/user_decorator.rb
+def member_since
+  model.created_at.strftime("%B %e, %Y")
+end
+```
+
+<h3>Ограничение доступа к модели с помощью метода <code>allows</code></h3>
+
+<p>Пока мы изменяем <code>UserDecorator</code>, есть еще одна возможность Draper, которую мы продемонстрируем: метод <code>allows</code>. В его нынешнем виде <code>UserDecorator</code> делегирует все свои методы объекту <code>User</code>, но мы можем выбирать, какие методы передаются модели <code>User</code>, используя метод <code>allows</code> и передавая ему имя методов, которые мы хотим делегировать.</p>
+
+``` /app/decorators/user_decorator.rb
+class UserDecorator < ApplicationDecorator
+  decorates :user
+  allows :username
+
+  # Other methods omitted
+end
+```
+
+<p>Мы разрешим для делегирования только <code>username</code>, и, таким образом, только метод <code>username</code> будет передан в модель User. Это единственный метод, который нам надо делегировать, так как это - единственный метод, вызываемый во вьюхе, который не исходит из декоратора. Это дает нам больше контроля над интерфейсом декоратора.</p>
+
+<p>Теперь мы закончили с рефакторингом с помощью декоратора и попробуем загрузить страницу профиля пользователя снова, чтобы убедиться, что до сих пор всё выглядит так же.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/749/original/E286I03.png" width="800" height="583" alt="Страница профиля пользователя выглядит так же после наших изменений."/>
+</div>
+
+<p>Так и есть. Мы даже можем проверить другого пользователя и он выглядит так же, однако наш код значительно чище.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/750/original/E286I04.png" width="800" height="469" alt="Страница профиля для MrMystery также не изменилась."/>
+</div>
+
+<p>Используя декоратор, наш шаблон show был уменьшен с 1050 байтов в 34 строк до 382 байтов в 16 строк, уменьшение в размере - практически на две трети. Так всё выглядит значительно чище и мы упростили себе задачу редактирования, если бы понадобилось изменять вёрстку страницы.</p>

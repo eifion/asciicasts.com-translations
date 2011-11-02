@@ -1,0 +1,188 @@
+<p>Pjax is a jQuery plugin, written by Chris Wanstrath, that allows you to easily update a section of a page with an AJAX request instead of having to do a full HTTP request. The demo page1 shows how this works. By default, clicking on any of the links on this page will cause the page to fully reload and we can tell that this has happened as the time on the page changes. When we enable pjax by clicking the checkbox clicking the links no longer a full page reload and the time no longer updates, although the main section of the page still changes.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/803/original/E294I01.png" width="800" height="531" alt="The pjax demo site."/>
+</div>
+
+<p>Pjax uses pushState so the user won&rsquo;t notice that AJAX requests are being made in the background. Each time pjax updates the page the URL in the address bar updates, the page&rsquo;s title changes and the previous page is added to the browser&rsquo;s history so that the back button works correctly. Pjax degrades gracefully too: if the user&rsquo;s browser doesn&rsquo;t support pushState or they&rsquo;ve disabled JavaScript it will fall back to making a traditional HTTP request.</p>
+
+<h3>Integrating Pjax into a Rails Application</h3>
+
+<p>There are several ways we can integrate pjax into a Rails application and we&rsquo;ll try two of them in this episode. The application we&rsquo;ll be working with is shown below. It shows a list of products and clicking on a product reveals a sidebar showing some information about that product.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/804/original/E294I02.png" width="799" height="531" alt="Our site showing the information for one of the products."/>
+</div>
+
+<p>Currently when we click of the link the entire page reloads. To show how much of the page has changed the layout file and the page&rsquo;s template both generate random numbers when they&rsquo;re loaded. When both numbers change this shows that the entire page has been reloaded and this is what we currently see. We&rsquo;ll use pjax now to so that only the areas of the page that need to change are updated.</p>
+
+There&rsquo;s a gem called <a href="https://github.com/rails/pjax_rails">pjax_rails</a> by David Heinemeier Hansson that makes it easy to add pjax to a Rails 3.1 application and though it doesn&rsquo;t quite fit the needs of our application we&rsquo;ll try it anyway to show how it works. To install it we just add the pjax_rails gem to our <code>/Gemfile</code> and run <code>bundle</code>.
+
+``` /Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.1.1'
+gem 'sqlite3'
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~> 3.1.4'
+  gem 'coffee-rails', '~> 3.1.1'
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+gem 'pjax_rails'
+```
+<p>Once Bundler has finished we need to modify our <code>application.js</code> manifest file so that it loads pjax&rsquo;s JavaScript.</p>
+
+``` /assets/javascripts/application.js
+// This is a manifest file that'll be compiled into including all the files listed below.
+// Add new JavaScript/Coffee code in separate files in this directory and they'll automatically
+// be included in the compiled file accessible from http://example.com/assets/application.js
+// It's not advisable to add code directly here, but if you do, it'll appear at the bottom of the
+// the compiled file.
+//
+//= require jquery
+//= require jquery_ujs
+//= require pjax
+//= require_tree .
+```
+
+<p>Finally we need to wrap the <code>yield</code> call in the layout file in a div with a <code>data-pjax-container</code> attribute.</p>
+
+```/app/views/layouts/application.html.erb
+<!DOCTYPE html>
+<html>
+  <head>
+    <title><%= content_for?(:title) ? content_for(:title) : "Store" %></title>
+    <%= stylesheet_link_tag    "application" %>
+    <%= javascript_include_tag "application" %>
+    <%= csrf_meta_tag %>
+  </head>
+  <body>
+    <div id="container">
+      <div class="layout_time">Layout random: <strong><%= rand(900)+100 %></strong></div>
+      <% flash.each do |name, msg| %>
+        <%= content_tag :div, msg, :id => "flash_#{name}" %>
+      <% end %>
+      <div data-pjax-container>
+      <%= yield %>
+      </div>
+    </div>
+  </body>
+</html>
+```
+
+<p>When we restart the server and the reload our page now every link on the page will be pjax-enabled. When we click a link now the page doesn&rsquo;t reload fully and we can see this as only the template&rsquo;s random number changes. This is almost what we want but if we look closely we&rsquo;ll see that the page&rsquo;s title doesn&rsquo;t change when we click on one of the links.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/805/original/E294I03.png" width="799" height="411" alt="The title doesn't change when the rest of the page does."/>
+</div>
+
+<p>We can fix this by adding a <code>title</code> tag in the template. This is a little hacky and makes the page&rsquo;s HTML invalid, but it does work.</p>
+
+``` /app/views/index.html.erb
+<% content_for :title, @product ? @product.name : "Products" %>
+<title><%= yield (:title) %></title>
+<!-- Rest of page omitted -->
+```
+
+<p>When we reload the page now the title changes when we click one of the links and we also have a fully-working back button and history. From the user&rsquo;s perspective everything works as it did before but it feels a little faster. This is good but the <code>pjax_rails</code> gem is a little aggressive. Every link on the page is pjax-enabled by default but this isn&rsquo;t really what we want in our application. Likewise the whole template is always updated when we click a link and there&rsquo;s no way of restricting which parts of the page are updated. There is a way of disabling pjax for certain links but having to keep track of these can be awkward. If you have a simple application whose layout file always stays the same, though, then pjax-rails may well suit you, though.</p>
+
+<p>It should be possible to use Rack middleware to make a more flexible solution and this is how Gert Goet&rsquo;s  <a href="https://github.com/eval/rack-pjax">rack-pjax</a> gem works so we&rsquo;ll replace pjax_rails with rack-pjax in our application. First we&rsquo;ll replace the pjax_rails gem with rack-pjax in the <code>Gemfile</code> and run <code>bundle</code> again.</p>
+
+``` /Gemfile
+# gem 'pjax_rails'
+gem 'rack-pjax
+```
+
+<p>Next we need to add the included Rack middleware to the application&rsquo;s config file.</p>
+
+``` /config/application.rb
+module Store
+  class Application < Rails::Application 
+    config.middleware.use Rack::Pjax
+    # Other config commands omitted
+  end
+end
+```
+
+<p>Rack-pjax doesn&rsquo;t come with a jQuery plugin embedded so we&rsquo;ll need to install this separately. We&rsquo;ll create a <code>vendor/assets/javascripts</code> directory in our application and download the <code>jquery.pjax.js</code> file to it using <code>curl</code>.</p>
+
+``` terminal
+$ mkdir -p vendor/assets/javascripts
+$ curl https://raw.github.com/defunkt/jquery-pjax/master/jquery.pjax.js > vendor/assets/javascripts/jquery.pjax.js
+``` 
+
+<p>We&rsquo;ll need to include this file in our application&rsquo;s JavaScript manifest file so we&rsquo;ll replace pjax_rails&rsquo;s JavaScript file with this one.</p>
+
+``` /assets/javascripts/application.js
+//= require jquery
+//= require jquery_ujs
+//= require jquery.pjax
+//= require_tree .
+```
+
+<p>Unlike pjax_rails, rack-pjax doesn&rsquo;t pjax-enable all links by default so we need to specify the ones to enable. These are all in pages in the <code>ProductsController</code> so we&rsquo;ll do this in the products CoffeeScript file.</p>
+
+```/app/assets/javascripts/products.js.coffee
+jQuery ->
+  $('.product a').pjax('[data-pjax-container]')
+```  
+
+<p>In this code we first make sure that the DOM has loaded then fetch the links that we want to enable. In our case this is any link inside a parent element with a <code>product</code> class. We then call <code>pjax</code> on them and specify what we want to updated when the link is clicked.</p>
+
+<p>With rack-pjax we no longer need to override the <code>title</code> element and so we can remove this from the <code>index</code> template. When we reload the page now it works as it did before; the template is updated when we click a link but not the layout and only the template&rsquo;s random number is updated. The title is updated now, too, even though it&rsquo;s not specified in the template because this is detected from the layout.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/806/original/E294I04.png" width="799" height="411" alt="The title is now updated correctly."/>
+</div>
+
+<p>What&rsquo;s really useful is that we can now move our <code>data-pjax-container</code> element anywhere we want. It&rsquo;s no longer has to be placed around the <code>yield</code> call in the layout file. We&rsquo;ll move it into the <code>index</code> template and wrap it around the product details section, i.e. the section that displays the details for a product.</p>
+
+```/app/views/products/index.html.erb
+<% content_for :title, @product ? @product.name : "Products" %>
+
+<div class="template_time">Template random: <strong><%= rand(900)+100 %></strong></div>
+
+<h1>Products</h1>
+
+<% for product in @products %>
+  <div class="product">
+    <h2>
+      <%= link_to product.name, :product_id => product %>
+      <span class="price"><%= number_to_currency(product.price) %></span>
+    </h2>
+  </div>
+<% end %>
+
+<p><%= link_to "New Product", new_product_path %></p>
+
+<div data-pjax-container>
+  <% if @product %>
+  <div id="product_details">
+    <h3><%= @product.name %></h3>
+    <dl>
+      <dt>Price:</dt>
+      <dd><%= number_to_currency(@product.price) %></dd>
+      <dt>Released:</dt>
+      <dd><%= @product.released_at.strftime("%B %e, %Y") %></dd>
+      <dt>Category:</dt>
+      <dd><%= @product.category %></dd>
+    </dl>
+    <p class="actions">
+      <%= link_to "Edit", edit_product_path(@product) %> |
+      <%= link_to "Destroy", @product, method: :delete, confirm: "Are you sure?" %>
+    </p>
+  </div>
+  <% end %>
+</div>
+```
+
+<p>Now when we click a link only the side panel changes and neither of the random numbers changes.</p>
+
+<p>If you&rsquo;re curious about how this gem works then you should take a look at its source code. It&rsquo;s really simple, being just one Ruby file of about fifty lines of code. Bear in mind though that the entire layout and template are still rendered by the server before rack-pjax decides which parts to send back to the client. If rendering the template is a big performance problem then you might be better off looking at an alternative solution, but for most application this should work perfectly.</p>
+
+<p>That&rsquo;s in for our episode on pjax. It&rsquo;s a simple solution and well worth taking a look at if you think it might fit your application&rsquo;s needs.</p>

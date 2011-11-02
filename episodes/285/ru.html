@@ -1,0 +1,254 @@
+<p>Наряду с тем, что Spork это <a href="http://ru.wikipedia.org/wiki/%D0%9B%D0%BE%D0%B6%D0%BA%D0%B0-%D0%B2%D0%B8%D0%BB%D0%BA%D0%B0">столовый прибор</a>, <a href="https://github.com/timcharper/spork">Spork</a> это Ruby gem, который поможет наборам тестов приложения загружаться быстрее. В этом эпизоде мы покажем вам как можно ускорить работу тестов приложения.</p>
+
+<p>Обычно, когда мы запускаем набор тестов для приложения Rails возникает пауза в несколько секунд, пока тесты начнут выполняться. Можно увидеть сколько она длится для тестов нашего приложения с помощью команды <code>time</code>.</p>
+
+<pre class="terminal">$ time rspec .
+.........
+
+Finished in 1.98 seconds
+9 examples, 0 failures
+
+real	0m11.090s
+user	0m9.735s
+sys	0m1.306s</pre>
+
+<p>Хотя RSpec утверждает, что тесты заняли всего пару секунд, но время, которое проходит между запуском <code>rspec</code> и возвратом в командную строку значительно дольше, около 11 секунд. Дополнительное время требуется для загрузки приложения Rails, и, как мы уже успели убедиться, это может занимать больше времени, чем работа тестов.</p>
+
+<h3>Установка Spork</h3>
+
+<p>Spork устанавливается так же, как и любой другой gem, но раз он используется только для тестирования, мы добавим его в группу <code>test</code> в <code>Gemfile</code>. Так как мы устанавливаем его для приложения Rails 3, нам потребуется установить prerelease версию гема, которая на данный момент <code>0.9.0.rc</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem &quot;rspec-rails&quot;, :group =&gt; [:test, :development]
+group :test do
+  gem &quot;factory_girl_rails&quot;
+  gem &quot;capybara&quot;
+  gem &quot;guard-rspec&quot;
+  gem &quot;spork&quot;, &quot;&gt; 0.9.0.rc&quot;
+end</pre>
+
+<p>Как всегда, нам надо запустить <code>bundle</code>, как только мы изменим <code>Gemfile</code>, чтобы все гемы в нем установились.</p>
+
+<p>Затем нам нужно запустить команду Spork <code>bootstrap</code> чтобы подготовить файл helper.</p>
+
+<pre class="terminal">$ spork --bootstrap
+Using RSpec
+Bootstrapping /Users/eifion/auth/spec/spec_helper.rb.
+Done. Edit /Users/eifion/auth/spec/spec_helper.rb now with your favorite text editor and follow the instructions.</pre>
+
+<p>Можно увидеть из вывода выше, Spork обнаружил, что мы используем RSpec и он изменил файл <code>spec_helper</code>. Давайте взглянем, что поменялось.</p>
+
+<p class="codeFilePath">/spec/spec_helper.rb</p>
+<pre class="ruby">require &#x27;spork&#x27;
+
+Spork.prefork do
+  # Loading more in this block will cause your tests to run faster. However,
+  # if you change any configuration or code from libraries loaded here, you&#x27;ll
+  # need to restart spork for it take effect.
+
+end
+
+Spork.each_run do
+  # This code will be run each time you run your specs.
+
+end</pre>
+
+<p>Spork добавил два метода к <code>spec_helper</code>, каждый из которых принимает блок. Первый – <code>prefork</code> запускается, когда запускается сервер Spork. Другой – <code>each_run</code>, запускается каждый раз, когда мы запускаем наш набор тестов. Разумно будет переместить как можно больше кода <code>spec_helper</code> в <code>prefork</code>, чтобы он выполнился только однажды. Мы переместим весь код файла в этот метод и проверим, будут ли теперь работать тесты.</p>
+
+<p class="codeFilePath">/spec/spec_helper.rb</p>
+<pre class="ruby">require &#x27;rubygems&#x27;
+require &#x27;spork&#x27;
+
+Spork.prefork do
+  # This file is copied to spec/ when you run &#x27;rails generate &crarr;
+  rspec:install&#x27;
+  ENV[&quot;RAILS_ENV&quot;] ||= &#x27;test&#x27;
+  require File.expand_path(&quot;../../config/environment&quot;, __FILE__)
+  require &#x27;rspec/rails&#x27;
+  require &#x27;capybara/rspec&#x27;
+
+  # Requires supporting ruby files with custom matchers and &crarr;
+    macros, etc,
+  # in spec/support/ and its subdirectories.
+  Dir[Rails.root.join(&quot;spec/support/**/*.rb&quot;)].each {|f| &crarr;
+    require f}
+
+  RSpec.configure do |config|
+    config.mock_with :rspec
+    config.use_transactional_fixtures = true
+    config.include(MailerMacros)
+    config.before(:each) { reset_email }
+  end
+end
+
+Spork.each_run do
+  # This code will be run each time you run your specs.
+end</pre>
+
+<p>Используем Spork, введя команду <code>spork</code>, чтобы запустить его сервер.</p>
+
+<pre class="terminal">$ spork
+Using RSpec
+Preloading Rails environment
+Loading Spork.prefork block...
+Spork is ready and listening on 8989!</pre>
+
+<p>Как только сервер запустился, он выполнит код в методе <code>prefork</code>, потому как этот код должен быть выполнен только один раз. Теперь мы можем открыть другое окно терминала и запустить наш набор тестов. Нужно запустить тесты через сервер Spork, что мы и сделаем, передав параметр <code>--drb</code>.</p>
+
+<p>Когда мы запустим тесты через Spork, набор тестов отработает быстрее, и, если мы снова запустим их через команду <code>time</code>, то увидим, что теперь это занимает значительно меньше времени для завершения. Этот выигрыш в скорости будет расти с ростом нашего приложения.</p>
+
+<pre class="terminal">$ time rspec . --drb
+.........
+
+Finished in 2.21 seconds
+9 examples, 0 failures
+
+real	0m4.125s
+user	0m0.342s
+sys	0m0.097s</pre>
+
+<p>Spork действительно полезен, потому что запускает приложение в среде test только один раз и позволяет нам запустить его тесты столько раз, сколько нам нужно без нужды перезапускать всё приложение каждый раз.</p>
+
+<h3>Использование Guard со Spork</h3>
+
+<p>Guard это гем, который запускает заново набор тестов приложения каждый раз, когда изменяется его код. Мы рассмотрели его детально в эпизоде 264 [<a href="http://railscasts.com/episodes/264-guard">смотреть</a>, <a href="http://asciicasts.com/episodes/264-guard">читать</a>]. Guard может быть использован со Spork с помощью гема <code><a href="https://github.com/guard/guard-spork">guard-spork</a></code>. Он устанавливается так же, как мы установили Spork, добавлением в группу <code>test</code> в <code>Gemfile</code> и запуском <code>bundle</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">gem &quot;rspec-rails&quot;, :group =&gt; [:test, :development]
+group :test do
+  gem &quot;factory_girl_rails&quot;
+  gem &quot;capybara&quot;
+  gem &quot;guard-rspec&quot;
+  gem &quot;spork&quot;, &quot;&gt; 0.9.0.rc&quot;
+  gem &quot;guard-spork&quot;
+end</pre>
+
+<p>Когда гем установлен, нужно запустить <code>guard init spork</code> чтобы добавить Spork в наш <code>Guardfile</code>. Если затем мы взглянем на <code>Guardfile</code>, то увидим раздел Spork ниже раздела RSpec.</p>
+
+<p class="codeFilePath">/Guardfile</p>
+<pre class="ruby">guard &#x27;spork&#x27;, :cucumber_env =&gt; { &#x27;RAILS_ENV&#x27; =&gt; &#x27;test&#x27; }, :rspec_env =&gt; { &#x27;RAILS_ENV&#x27; =&gt; &#x27;test&#x27; } do
+  watch(&#x27;config/application.rb&#x27;)
+  watch(&#x27;config/environment.rb&#x27;)
+  watch(%r{^config/environments/.+\.rb$})
+  watch(%r{^config/initializers/.+\.rb$})
+  watch(&#x27;spec/spec_helper.rb&#x27;)
+end</pre>
+
+<p>Нам нужно переместить этот раздел выше раздела RSpec, так как он должен быть запущен прежде любых других разделов связанных с тестированием. Нам нужно также изменить <code>guard</code> для RSpec и добавить параметр <code>:cli</code> со значением <code>--drb</code>. Это обеспечивает, чтобы тесты были запущены через Spork, и это применяется к любым другим guards, которые у нас могли бы быть, например Cucumber.</p>
+
+<pre class="terminal">guard &#x27;rspec&#x27;, :version =&gt; 2, :cli =&gt; &#x27;--drb&#x27; do
+  # Содержимое опущено.
+end</pre>
+
+<p>Теперь нам больше не нужно запускать сервер Spork отдельно. Когда мы запускаем Guard, он автоматически запустит Spork в фоновом режиме и запустит набор тестов, когда мы изменим любой Ruby файл нашего приложения.</p>
+
+<pre class="terminal">$ guard
+Please install rb-fsevent gem for Mac OSX FSEvents support
+Using polling (Please help us to support your system better than that.)
+Please install growl_notify or growl gem for Mac OS X notification support and add it to your Gemfile
+Guard is now watching at &#x27;/Users/eifion/auth&#x27;
+Starting Spork for RSpec
+Using RSpec
+Preloading Rails environment
+Loading Spork.prefork block...
+Spork is ready and listening on 8989!
+Spork server for RSpec successfully started
+Guard::RSpec is running, with RSpec 2!
+Running all specs
+Running tests with args [&quot;--color&quot;, &quot;--format&quot;, &quot;progress&quot;, &quot;--format&quot;, &quot;Guard::RSpec::Formatter::NotificationRSpec&quot;, &quot;--out&quot;, &quot;/dev/null&quot;, &quot;--require&quot;, &quot;/Users/eifion/.rvm/gems/ruby-1.9.2-p180@rails31/gems/guard-rspec-0.4.5/lib/guard/rspec/formatters/notification_rspec.rb&quot;, &quot;spec&quot;]...
+.........
+
+Finished in 4.29 seconds
+9 examples, 0 failures
+Done.</pre>
+
+<p>Это значительно проще, чем управлять Spork в отдельности. Когда мы меняем один из файлов из нашего приложения или тестов и сохраняем его, то соответствующие тесты будут заново запущены автоматически через пару секунд.</p>
+
+<h3>Настройка Spork</h3>
+
+<p>Теперь мы взглянем на настройку Spork. Иногда, когда мы изменяем файл приложения, Spork не реагирует на изменение – это значит, что его нужно перезапустить. Это случается, потому что файл загружается в блоке <code>prefork</code>, но не перезагружается в <code>each_run</code>. Это часто случается, если используется Factory Girl. Его фабрики загружаются в <code>prefork</code>, поэтому любые изменения, которые мы производим с ними не подгружаются, когда перезапускается набор тестов. Нам нужно, чтобы любые изменения, которые мы делаем автоматически подгружались, поэтому нам нужно перезагружать фабрики в <code>each_run</code>. В последних версиях Factory Girl есть метод reload, который сделает это, поэтому всё просто.</p>
+
+<p class="codeFilePath">/spec/spec_helper.rb</p>
+<pre class="ruby">Spork.each_run do
+  FactoryGirl.reload
+end</pre>
+
+<p>Любые изменения, которые касаются фабрик теперь будут подобраны на следующем запуске тестов.</p>
+
+<p>Подобные проблемы могут возникнуть с файлами в директории <code>/spec/support</code>. Опять же, они подгружаются в блоке <code>prefork</code>, поэтому любые изменения, которые мы осуществляем, будут загружены, когда будут заново запущены тесты. Мы можем переместить код загрузки файлов в <code>each_run</code>, однако, чем больше кода мы помещаем там, тем дольше будет задержка прежде чем тесты начнут выполняться. Будет лучше, если мы сможем сохранить код в блоке <code>preload</code> и перезагружать Spork автоматически как только один из файлов в <code>/spec/support</code> изменится.</p>
+
+<p>Это то, с чем нам может помочь <code>guard-spork</code>. <code>Guardfile</code> содержит список шаблонов имен файлов в блоке <code>spork</code>, который определяет файлы, за которыми ведется наблюдение. Если любой подходящий файл изменится, Spork будет перезапущен. Мы можем спокойно добавить сюда директорию <code>spec/support</code>.</p>
+
+<p class="codeFilePath">/Guardfile</p>
+<pre class="ruby">guard &#x27;spork&#x27;, :cucumber_env =&gt; { &#x27;RAILS_ENV&#x27; =&gt; &crarr;
+  &#x27;test&#x27; }, :rspec_env =&gt; { &#x27;RAILS_ENV&#x27; =&gt; &#x27;test&#x27; } do
+  watch(&#x27;config/application.rb&#x27;)
+  watch(&#x27;config/environment.rb&#x27;)
+  watch(%r{^config/environments/.+\.rb$})
+  watch(%r{^config/initializers/.+\.rb$})
+  watch(&#x27;spec/spec_helper.rb&#x27;)
+  watch(%r{^spec/support/.+\.rb$})
+end</pre>
+
+<p>Любые изменение в файлах из директории <code>spec/support</code> теперь будут подобраны гемом Guard и перезапустят Spork.</p>
+
+<p>Раз мы рассматриваем <code>Guardfile</code>, то стоит упомянуть о небольшой хитрости в том, что делать с медленно работающим набором тестов. Если для работы тестов потребовалось больше минуты, то мы не хотим, чтобы они запускались так часто. Есть два параметра, которые мы можем передать в <code>rspec guard</code>, которые помогут: <code>all_on_start</code> и <code>all_over_pass</code>. Установим оба значения в <code>false</code>.</p>
+
+<p class="codeFilePath">/Guardfile</p>
+<pre class="ruby">guard &#x27;rspec&#x27;, :version =&gt; 2, :cli =&gt; &#x27;--drb&#x27;, &crarr;
+  :all_on_start =&gt; false, :all_after_pass =&gt; false do
+
+# команды watch опущены.
+end</pre>
+
+<p>С этими установленными параметрами Guard не будет запускать заново весь набор тестов, после того как пройдут тесты, провалившиеся в прошлый раз. Это дает нам больше контроля над тем, когда запускаются все тесты. Мы можем нажать клавишу ввода в терминале Guard (если мы используем последнюю версию Guard), чтобы запустить все тесты.</p>
+
+<p>Другая подсказка, которая не относится к Spork, но может быть полезной, когда имеешь дело с большими наборами тестов - добавление трех строк к блоку конфигурации RSpec (нижние три строки в блоке, представленном ниже).</p>
+
+<p class="codeFilePath">/spec/spec_helper.rb</p>
+<pre class="ruby">RSpec.configure do |config|
+  config.mock_with :rspec
+  config.use_transactional_fixtures = true
+  config.include(MailerMacros)
+  config.before(:each) { reset_email }
+
+  config.treat_symbols_as_metadata_keys_with_true_values = true
+  config.filter_run :focus =&gt; true
+  config.run_all_when_everything_filtered = true
+end</pre>
+
+<p>Теперь, когда бы мы ни добавили метку <code>:focus</code> к какому-то тесту, только этот тест будет запущен вместо них всех. Например, добавим <code>:focus</code> к тестам, которые проверяют модель <code>User</code>.</p>
+
+<p class="codeFilePath">/spec/models/user_spec.rb</p>
+<pre class="ruby">require &#x27;spec_helper&#x27;
+
+describe User do
+  describe &quot;#send_password_reset&quot; do
+    let(:user) { Factory(:user) }
+
+    it &quot;generates a unique password_reset_token each time&quot;, &crarr;
+      :focus do
+      user.send_password_reset
+      last_token = user.password_reset_token
+      user.send_password_reset
+      user.password_reset_token.should_not eq(last_token)
+    end
+
+	# Остальные тесты опущены.
+  end
+end</pre>
+
+<p>Когда мы сохраним вышеприведенный файл, Guard подберет изменения, но из-за метки <code>:focus</code> только единственный тест будет запущен.</p>
+
+<pre class="terminal">Running: spec/models/user_spec.rb
+Running tests with args ...
+Run filtered including {:focus=&gt;true}
+.
+
+Finished in 1.93 seconds
+1 example, 0 failures
+Done.</pre>
+
+<p>Бывают случаи, когда кусок кода вызывается в блоке Spork <code>prefork</code> в то время, как мы не хотим этого, но нет простого способа переместить его в <code>each_run</code>. Spork предоставляет метод <code>trap_method</code> чтобы обслуживать такие сценарии. Этот метод останавливает перехваченный метод от немедленного запуска, а вместо этого запускает его после отделения процесса (fork). Это будет полезно в определенных случаях, таких как использование Mongoid или Devise. Оба из них загружают в блоке prefork, код, который не должен быть запущен. Это описывается более подробно на <a href="https://github.com/timcharper/spork/wiki/Spork.trap_method-Jujutsu">вики-страницах Spork</a>.</p>
+
+<p>На этом закончим этот эпизод про Spork. Это отличный инструмент для ускорения процесса TDD, и, когда он совмещен с подсказками, которые мы рассмотрели выше, он отлично масштабируется даже для больших проектов на Rails.</p>

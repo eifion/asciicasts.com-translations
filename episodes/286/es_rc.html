@@ -1,0 +1,394 @@
+<p>En este episodio presentamos <a href="https://github.com/jcasimir/draper">Draper</a>, una gema para a&ntilde;adir decoradores en las vistas de una aplicaci&oacute;n Rails, al estilo del patr&oacute;n presentador.  Si en nuestras vistas y m&eacute;todos <em>helper</em> tenemos mucha l&oacute;gica compleja Draper nos puede servir para limpiar el c&oacute;digo mediante un enfoque m&aacute;s orientado a objeto.  Veremos c&oacute;mo funciona en este episodio.</p>
+
+<p>La aplicaci&oacute;n con la que vamos a trabajar es la que aparece debajo, tiene una p&aacute;gina para el perfil de usuario que muestra diferente informaci&oacute;n sobre los usuarios incluyendo el avatar, el nombre completo, una biograf&iacute;a breve en Markdown y enlaces a una web y a Twitter.  Si el usuario nos ha dado la direcci&oacute;n de su web el avatar y el nombre enlazar&aacute;n a dicho sitio.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/747/original/E286I01.png" width="800" height="595" alt="La página de perfil de un usuario que ha rellenado todos los detalles."/>
+</div>
+
+<p>Parece una p&aacute;gina sencilla pero hay que gestionar tambi&eacute;n los usuarios que no han dado toda esta informaci&oacute;n, como por ejemplo &ldquo;MrMystery&rdquo;.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/748/original/E286I02.png" width="800" height="470" alt="La página del perfil de un usuario que no ha dado mucha información."/>
+</div>
+
+<p>El usuario tan s&oacute;lo ha introducido el <em>nick</em> por lo que ser&aacute; lo que mostraremos en lugar del nombre completo, as&iacute; como un avatar por defecto y un par de textos fijos para el resto de campos.  Esto hace que se complique la plantilla de esta p&aacute;gina, puesto que hay m&uacute;ltiples condiciones <code>if</code> para gestionar los usuarios seg&uacute;n la informaci&oacute;n que hayan ido introduciendo.  La plantilla quedar&iacute;a mucho mejor si pudi&eacute;semos mover parte de esta l&oacute;gica a otro sitio.</p>
+
+``` /app/views/users/show.html.erb
+<div id="profile">
+  <%= link_to_if @user.url.present?, image_tag("avatars/#{avatar_name(@user)}", class: "avatar"), @user.url %>
+  <h1><%= link_to_if @user.url.present?, (@user.full_name.present? ? @user.full_name : @user.username), @user.url %></h1>
+  <dl>
+    <dt>Username:</dt>
+    <dd><%= @user.username %></dd>
+    <dt>Member Since:</dt>
+    <dd><%= @user.member_since %></dd>
+    <dt>Website:</dt>
+    <dd>
+    <% if @user.url.present? %>
+      <%= link_to @user.url, @user.url %>
+    <% else %>
+      <span class="none">None given</span>
+    <% end %>
+    </dd>
+    <dt>Twitter:</dt>
+    <dd>
+    <% if @user.twitter_name.present? %>
+      <%= link_to @user.twitter_name, "http://twitter.com/#{@user.twitter_name}" %>
+    <% else %>
+      <span class="none">None given</span>
+    <% end %>
+    </dd>
+    <dt>Bio:</dt>
+    <dd>
+    <% if @user.bio.present? %>
+      <%=raw Redcarpet.new(@user.bio, :hard_wrap, :filter_html, :autolink).to_html %>
+    <% else %>
+      <span class="none">None given</span>
+    <% end %>
+    </dd>
+  </dl>
+</div>
+```
+
+<p>Dado que esta l&oacute;gica est&aacute; relacionada con la vista no podemos extraerla al modelo.  Una soluci&oacute;n ser&iacute;a utilizar m&eacute;todos <em>helper</em>.  Ya usamos uno llamado <code>image_tag</code> en la plantilla para mostrar el avatar.  Ve&aacute;moslo.</p>
+
+``` /app/helpers/users_helper.rb
+module UsersHelper
+  def avatar_name(user)
+    if user.avatar_image_name.present?
+      user.avatar_image_name
+    else
+      "default.png"
+    end
+  end
+end
+```
+<p>Este m&eacute;todo <em>helper</em> determina si el usuario actual tiene un avatar y en caso contrario devuelve el nombre de una imagen por defecto.  Podr&iacute;amos extraer m&aacute;s l&oacute;gica de la vista en m&eacute;todos <em>helper</em> pero el problema con este enfoque es que se trata de m&eacute;todos simples en el espacio de nombres global o lo que es lo mismo, la t&eacute;cnica no tiene nada de orientaci&oacute;n a objetos.</p>
+
+<h3>Instalaci&oacute;n de Draper</h3>
+
+<p>Este escenario es un buen sitio para utilizar un presentador (o un decorador, como Draper prefiere denominarlo) as&iacute; que a&ntilde;ad&aacute;moslo a la aplicaci&oacute;n.  La gema Draper se instala de la manera habitual, a&ntilde;adi&eacute;ndola al <code>Gemfile</code> y luego ejecutando <code>bundle</code>.</p>
+
+``` /Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.1.0'
+gem 'sqlite3'
+
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails', "  ~> 3.1.0"
+  gem 'coffee-rails', "~> 3.1.0"
+  gem 'uglifier'
+end
+
+gem 'jquery-rails'
+gem 'redcarpet'
+
+gem 'draper'
+```
+
+<p>Tras la instalaci&oacute;n de Draper crearemos un decorador para nuestro modelo <code>User</code> mediante el generador <code>draper:decorator</code>.</p>
+
+
+``` terminal
+$ rails g draper:decorator user
+      create  app/decorators
+      create  app/decorators/application_decorator.rb
+      create  app/decorators/user_decorator.rb
+```      
+
+<p>Como se trata del primer decorador que a&ntilde;adimos, se crear&aacute; tambi&eacute;n un fichero llamado <code>application_decorator</code>.  Todos los decoradores que creemos heredar&aacute;n de ApplicationDecorator por lo que podremos poner en este fichero la funcionalidad que queramos compartir entre todos nuestros decoradores.</p>
+
+<p>La clase <code>UserDecorator</code> es muy sencilla, y consiste sobre todo en cometarios que explican su funcionamiento.  Empezamos a usarla para despejar nuestras plantillas.</p>
+
+<h3>Arreglando la p&aacute;gina de perfil</h3>
+
+<p>Para usar Draper en nuestra p&aacute;gina de perfil primero tenemos que hacer un cambio en la acci&oacute;n <code>show</code> de <code>UsersController</code>  La acci&oacute;n recupera una instancia de <code>User</code> en la forma habitual.</p>
+
+``` /app/controllers/users_controller.rb
+class UsersController < ApplicationController
+  def index
+    @users = User.all
+  end
+
+  def show
+    @user = User.find(params[:id])
+  end
+end
+```
+
+<p>Tenemos que envolver este usuario con nuestro decorador, lo que haremos cambiando <code>User.find</code> por <code>UserDecorator.find</code>.</p>
+
+```/app/controllers/users_controller.rb
+def show
+  @user = UserDecorator.find(params[:id])
+end
+```
+
+<p>El c&oacute;digo devolver&aacute; una instancia de <code>UserDecorator</code>, que por defecto delegar&aacute; todos los m&eacute;todos a <code>User</code> por lo que la acci&oacute;n funcionar&aacute; igual que antes aunque estemos trabajando con un <code>UserDecorator</code> en lugar de un <code>User</code>.  Con esto ya podemos empezar a limpiar nuestras vistas y empezaremos con el c&oacute;digo que muestra el avatar del usuario.</p>
+
+
+``` /app/views/users/show.html.erb
+<%= link_to_if @user.url.present?, image_tag("avatars/#{avatar_name(@user)}", class: "avatar"), @user.url %>
+```
+
+<p>Esto lo cambiaremos por:</p>
+
+``` /app/views/users/show.html.erb
+&lt;%= @user.avatar %&gt;
+```
+
+<p>Este c&oacute;digo buscar&aacute; el m&eacute;todo <code>avatar</code> en el <code>UserDecorator</code> que escribiremos a continuaci&oacute;n.  Deberemos tener en cuenta varias cosas cuando escribamos este m&eacute;todo.  Cuando invoquemos a un m&eacute;todo <em>helper</em> desde el decorador (como por ejemplo <code>link_to_if</code>) tenemos que hacerlo a trav&eacute;s del m&eacute;todo <code>h</code>.  Cuando queramos referenciar al modelo invocaremos <code>model</code> en lugar de <code>@user</code> (en este caso).</p>
+
+<p>El c&oacute;digo que hemos copiado desde la vista en <code>avatar</code> invoca el m&eacute;todo <em>helper</em> <code>avatar_name</code>, como lo estamos llamando desde el decorador lo quitaremos de <code>UsersHelper</code> para llevarlo a <code>UsersDecorator</code>.  Con el m&eacute;todo en la misma clase no tendremos que pasar un <code>User</code>&nbsp;y podemos cambiar las llamadas por el modelo.</p>
+
+``` /app/decorators/user_decorator.rb
+class UserDecorator < ApplicationDecorator
+  decorates :user
+  
+  def avatar
+    h.link_to_if model.url.present?, h.image_tag("avatars/#{avatar_name}", class: "avatar"), model.url
+  end
+  
+  private
+  def avatar_name
+    if model.avatar_image_name.present?
+      model.avatar_image_name
+    else
+      "default.png"
+    end
+  end
+end
+```
+
+<p>A continuaci&oacute;n ordenaremos el c&oacute;digo que muestra el nombre del usuario.  Quitaremos el siguiente c&oacute;digo de la vista:</p>
+
+``` /app/views/users/show.html.erb
+<h1><%= link_to_if @user.url.present?, (@user.full_name.present? ? @user.full_name : @user.username), @user.url %></h1>
+```
+
+<p>Y lo reemplazaremos por este otro:</p>
+
+``` /app/views/users/show.html.erb
+<h1><%= @user.linked_name %></h1>
+```
+
+<p>Tendremos que escribir el m&eacute;todo <code>linked_name</code> en <code>UserDecorator</code>.  Hay bastante similitud entre este m&eacute;todo y el m&eacute;todo <code>avatar</code> que escribimos antes, porque ambos muestran un enlace cuyo contenido depende de que el usuario halla rellenado la <code>url</code>.  Como estamos en una clase es f&aacute;cil refactorizar esta duplicidad.</p>
+
+<p>Para gestionar el enlace crearemos un nuevo m&eacute;todo privado llamado <code>site_link</code>, que recibe el contenido como un par&aacute;metro.  Luego se puede invocar a este m&eacute;todo tanto en los m&eacute;todos <code>avatar</code> como en <code>linked_name</code> para que queden m&aacute;s ordenados.  Igual que antes, cambiaremos cualquier llamada a <code>@user</code> por <code>model</code> en el m&eacute;todo <code>linked_name</code>.  Con todo esto, nuestro decorador queda as&iacute;:</p>
+
+``` app/decorators/user_decorator.rb
+class UserDecorator < ApplicationDecorator
+  decorates :user
+  
+  def avatar
+    site_link h.image_tag("avatars/#{avatar_name}", class: "avatar")
+  end
+  
+  def linked_name
+    site_link(model.full_name.present? ? model.full_name : model.username)
+  end
+  
+  private
+  def site_link(content)
+    h.link_to_if model.url.present?, content, model.url
+  end
+  
+  def avatar_name
+    if model.avatar_image_name.present?
+      model.avatar_image_name
+    else
+      "default.png"
+    end
+  end
+end
+```
+
+<p>Si recargamos la p&aacute;gina del perfil de un usuario deber&iacute;a tener el mismo aspecto que antes.</p>
+
+<p>Nuestra plantilla est&aacute; quedando mucho m&aacute;s limpia, pero podemos hacer a&uacute;n m&aacute;s.  Lo siguiente que haremos ser&aacute; refactorizar un trozo  grande del c&oacute;digo de las vistas, el c&oacute;digo que muestra un enlace a la web del usuario.</p>
+
+``` /app/views/user/show.html.erb
+<dt>Website:</dt>
+<dd>
+  <% if @user.url.present? %>
+    <%= link_to @user.url, @user.url %>
+  <% else %>
+    <span class="none">None given</span>
+  <% end %>
+</dd>
+```
+<p>Que reemplazaremos por:</p>
+
+``` /app/views/user/show.html.erb
+<dt>Website:</dt>
+<dd><%= @user.website %></dd>
+```
+<p>Al igual que antes crearemos un m&eacute;todo en la clase del decorador.  Del c&oacute;digo que acabamos de quitar de la vista podemos ver que si el usuario no tiene <code>url</code> se muestra cierto texto en HTML.  Podr&iacute;amos devolverlo como una cadena pero no queremos poner HTML en crudo en una cadena Ruby.  Otra soluci&oacute;n ser&iacute;a mover el c&oacute;digo a un parcial y mostrarlo, pero como s&oacute;lo estamos mostrando un elemento de HTML tiene m&aacute;s sentido utilizar el m&eacute;todo <code>content_tag</code>.</p>
+
+``` /app/decorators/user_decorator.rb
+def website
+  if model.url.present?
+    h.link_to model.url, model.url
+  else
+    h.content_tag :span, "None given", class: "none"
+  end  
+end
+```
+
+<p>Podemos hacer lo mismo con las dos partes de la plantilla que muestran la informaci&oacute;n de Twitter y la biograf&iacute;a del usuario.  Ahora no mostraremos todos los detalles, pero tras haber hecho los cambios nuestro c&oacute;digo de la vista quedar&aacute; mucho mejor.</p>
+
+
+``` /app/views/users/show.html.erb
+<div id="profile">
+  <%= @user.avatar %>
+  <h1><%= @user.linked_name %></h1>
+  <dl>
+    <dt>Username:</dt>
+    <dd><%= @user.username %></dd>
+    <dt>Member Since:</dt>
+    <dd><%= @user.member_since %></dd>
+    <dt>Website:</dt>
+    <dd><%= @user.website %></dd>
+    <dt>Twitter:</dt>
+    <dd><%= @user.twitter %></dd>
+    <dt>Bio:</dt>
+    <dd><%= @user.bio %></dd>
+  </dl>
+</div>
+```
+
+<p>Los nuevos m&eacute;todos <code>twitter</code> y <code>bio</code> del decorador quedar&iacute;an as&iacute;:</p>
+
+``` /app/decorators/user_decorator.rb
+def website
+  if model.url.present?
+    h.link_to model.url, model.url
+  else
+    h.content_tag :span, "None given", class: "none"
+  end  
+end
+
+def twitter
+  if model.twitter_name.present?
+    h.link_to model.twitter_name, "http://twitter.com/#{model.twitter_name}"
+  else
+    h.content_tag :span, "None given", class: "none"
+  end
+end
+  
+def bio
+  if model.bio.present?
+    Redcarpet.new(model.bio, :hard_wrap, :filter_html, :autolink).to_html.html_safe
+  else
+    h.content_tag :span, "None given", class: "none"
+  end
+end
+```
+
+<p>Los dos nuevos m&eacute;todos tienen un aspecto similar y tienen tambi&eacute;n el m&eacute;todo <code>website</code> que escribimos anteriormente.  Hay mucho c&oacute;digo duplicado en estos tres m&eacute;todos, especialmente en la cl&aacute;usula <code>else</code>, por lo que estar&iacute;a bien extraer esta parte a su propio m&eacute;todo.</p>
+
+<p>Esto lo podemos resolver con un bloque, extrayendo la cl&aacute;usula <code>else</code> a su propio m&eacute;todo que llamaremos <code>handle_none</code>.  Pasaremos el valor del que queremos comprobar su presencia a este m&eacute;todo y un bloque.  Si el valor existe, se ejecutar&aacute; el fragmento del bloque, de lo contrario se crear&aacute; la etiqueta <code>span</code>.  Podemos usar este m&eacute;todo <code>handle_none</code> para refactorizar los m&eacute;todos <code>website</code>, <code>twitter</code> y <code>bio</code>.</p>
+
+``` /app/decorators/user_decorator.rb
+def website
+  handle_none model.url do
+    h.link_to model.url, model.url
+  end  
+end
+  
+def twitter
+  handle_none model.twitter_name do
+    h.link_to model.twitter_name, "http://twitter.com/#{model.twitter_name}"
+  end
+end
+  
+def bio
+  handle_none model.bio do
+    Redcarpet.new(model.bio, :hard_wrap, :filter_html, :autolink).to_html.html_safe
+  end
+end
+  
+private
+def handle_none(value)
+  if value.present?
+    yield
+  else
+    h.content_tag :span, "None given", class: "none"
+  end
+end
+```
+
+<p>Otro cambio que se puede hacer es extraer el procesado de Markdown al <code>ApplicationDecorator</code> para poder invocarlo desde cualquier otro decorador que utilicemos.  Crearemos el m&eacute;todo <code>markdown</code> que mostrar&aacute; el texto que se le pase.</p>
+
+``` /app/decorators/application_decorator.rb
+class ApplicationDecorator < Draper::Base
+  def markdown(text)
+    Redcarpet.new(text, :hard_wrap, :filter_html, :autolink).to_html.html_safe
+  end
+end
+```
+
+<p>Ahora, en <code>UserDecorator</code> podemos modificar el m&eacute;todo <code>bio</code> para que invoque <code>markdown</code>.</p>
+
+``` /app/decorators/user_decorator.rb
+def bio
+  handle_none model.bio do
+    markdown(model.bio)
+  end
+end
+```
+
+<h3>Modificaci&oacute;n del modelo</h3>
+
+<p>Con el decorador puesto en su sitio es buena idea examinar la capa del modelo para ver si hay c&oacute;digo relacionado con la vista que podamos llevar al decorador correspondiente.  Por ejemplo, en nuestro modelo <code>User</code> tenemos el m&eacute;todo <code>member_since</code> que formatea el atributo <code>created_at</code>.  Esto c&oacute;digo podr&iacute;a considerarse de la vista porque lo &uacute;nico que hace es devolver una cadena, por lo que lo movemos al decorador.</p>
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  def member_since
+    created_at.strftime("%B %e, %Y")
+  end
+end
+```
+
+<p>Tan s&oacute;lo tenemos que mover el m&eacute;todo al decorador y poner <code>model</code> delante de la llamada a <code>created_at</code>.</p>
+
+``` /app/decorators/user_decorator.rb
+def member_since
+  model.created_at.strftime("%B %e, %Y")
+end
+```
+
+<h3>Acceso restringido al modelo con el m&eacute;todo <code>allows</code>.</h3>
+
+<p>Draper ofrece otra funcionalidad que vamos a demostrar a la vez que seguimos modificando <code>UserDecorator</code>: el m&eacute;todo <code>allows</code>.  El <code>UserDecorator</code>, tal y como est&aacute; ahora, delegar&aacute; todos sus m&eacute;todos al objeto <code>User</code> que contiene, pero podemos escoger cu&aacute;les mediante <code>allows</code> y pasando el nombre de los m&eacute;todos que queremos que delegue.</p>
+
+``` /app/decorators/user_decorator.rb
+class UserDecorator < ApplicationDecorator
+  decorates :user
+  allows :username
+
+  # Other methods omitted
+end
+```
+
+<p>S&oacute;lo vamos a permitir que se delegue <code>username</code> al modelo <code>User</code>.  Es el &uacute;nico m&eacute;todo del modelo que necesitamos delegar porque es el &uacute;nico que se invoca desde la vista que no es implementado por el decorador, de esta manera tenemos m&aacute;s control sobre la interfaz expuesta por el decorador.</p>
+
+<p>Una vez concluida esta refactorizaci&oacute;n, intentemos cargar el perfil de un usuario para ver que todo sigue teniendo el mismo aspecto.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/749/original/E286I03.png" width="800" height="583" alt="El perfil del usuario completo tiene el mismo aspecto tras nuestros cambios."/>
+</div>
+
+<p>Tambi&eacute;n podemos comprobar el otro usuario y ver que tiene el mismo aspecto, aunque el c&oacute;digo de la vista ahora es mucho m&aacute;s claro.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/750/original/E286I04.png" width="800" height="469" alt="Tampoco ha cambiado la página de perfil de MrMystery."/>
+</div>
+
+<p>Mediante el uso del decorador la plantilla de la vista ha bajado de 1050 bytes en 34 lines a 382 bytes en 16 l&iacute;neas, una reducci&oacute;n de casi dos tercios.  Tambi&eacute;n ha quedado mucho m&aacute;s claro y la hemos hecho mucho m&aacute;s f&aacute;cil de editar si queremos modificar la estructura de la p&aacute;gina.</p>

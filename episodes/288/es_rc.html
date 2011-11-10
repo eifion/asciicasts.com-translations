@@ -1,0 +1,405 @@
+<p>Si alguna vez nos hace falta procesar pagos mediante tarjeta de cr&eacute;dito en nuestras aplicaciones  Rails deber&iacute;amos echarle un vistazo a  <a href="https://stripe.com">Stripe</a>. Stripe es una pasarela de pago muy f&aacute;cil de configurar y amistosa con el desarrollador.  S&oacute;lo cobra comisiones por transacci&oacute;n y adem&aacute;s son muy razonables.  No hay tarifas fijas mensuales u otros costes ocultos (y con me llevo comisi&oacute;n por decirlo aqu&iacute;).</p>
+
+<p>Por el momento Stripe s&oacute;lo est&aacute; disponible en los Estados Unidos por lo que si queremos usarlo en nuestras aplicaciones necesitaremos una cuenta en un banco norteamericano aunque pronto deber&iacute;a estar disponible  para cuentas internacionales.  Esto no quiere decir que no podamos facturar a usuarios de todas partes del mundo, s&oacute;lo quiere decir que el vendedor debe residir en los Estados Unidos.</p>
+
+<h3>Configuraci&oacute;n de Stripe en una aplicaci&oacute;n Rails</h3>
+
+<p>En este episodio vamos a ver c&oacute;mo utilizar Stripe para configurar pagos recurrentes en una aplicaci&oacute;n Rails.  La aplicaci&oacute;n que vamos a usar es un sitio que vende Besos de Llamas.  &iquest;Por qu&eacute;?  Porque Ryan Bates creci&oacute; en una granja de llamas y se perdi&oacute; la oportunidad de vender besos de llamas, as&iacute; que est&aacute; tratando de recuperar el tiempo perdido.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/760/original/E288I01.png" width="821" height="518" alt="El sitio de Besos de Llama."/>
+</div>
+
+<p>Ya tenemos escrita la mayor parte de la aplicaci&oacute;n.  Hay cuatro planes diferentes, y los usuarios pueden suscribirse a cualquiera de ellos.  Tan s&oacute;lo hay un campo de correo en el formulario de alta, y cuando enviemos dicho campo se crear&aacute; una nueva suscripci&oacute;n.  Tendremos que a&ntilde;adir algunos campos m&aacute;s para poder guardar los detalles de la tarjeta de cr&eacute;dito.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/761/original/E288I02.png" width="821" height="332" alt="Formulario de alta."/>
+</div>
+
+<p>Es muy f&aacute;cil empezar a usar Stripe.  Si visitamos  <a href="https://stripe.com/">stripe.com</a> y hacemos clic en el enlace &ldquo;Get Started with Stripe&rdquo; iremos a una p&aacute;gina donde podemos empezar a procesar transacciones de prueba, lo que tambi&eacute;n podremos hacer desde la l&iacute;nea de &oacute;rdenes utilizando <code>curl</code>.  Si copiamos el c&oacute;digo de ejemplo que aparece en la p&aacute;gina  <a href="https://manage.stripe.com">de introducci&oacute;n a Stripe</a> y lo ejecutamos en una ventana de terminal deber&iacute;amos ver devuelto cierto contenido en JSON.</p>
+
+``` terminal
+$ curl https://api.stripe.com/v1/charges \
+>   -u zVyGPfdmfhSGpHAxhFiJT7kFnHeSi9ZN: \
+>   -d amount=100 \
+>   -d currency=usd \
+>   -d 'card[number]=4242424242424242' \
+>   -d 'card[exp_month]=5' \
+>   -d 'card[exp_year]=2012' \
+>   -d 'description=test charge IFnFXZgdZk'
+
+{
+"amount": 100,
+"created": 1318355241,
+"currency": "usd",
+"description": "test charge IFnFXZgdZk",
+"fee": 0,
+"id": "ch_oVfzHImv8sN5TV",
+"livemode": false,
+"object": "charge",
+"paid": true,
+"refunded": false,
+"card": {
+"country": "US",
+"exp_month": 5,
+"exp_year": 2012,
+"last4": "4242",
+"object": "card",
+"type": "Visa"
+}
+}
+```
+
+<p>Si lanzamos las transacciones de prueba desde el sitio o desde la ventana de terminal, aparecen los pagos m&aacute;s recientes  en el cuadro de mandos al fondo de la p&aacute;gina.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/762/original/E288I03.png" width="822" height="586" alt="Stripe&rsquo;s dashboard showing our test payments."/>
+</div>
+
+<p>Para crear una cuenta con Stripe tan s&oacute;lo tenemos que introducir una direcci&oacute;n de correo y una clave en la p&aacute;gina de gesti&oacute;n. Tras hacer esto podemos visitar  <a href="https://manage.stripe.com/account">la p&aacute;gina de nuestra cuenta</a> donde, entre otras cosas, podremos ver las claves de API mediante las que nos podemos comunicar con la API REST de Stripe.  Stripe incluye una gema de Ruby para facilitar el uso de esta API desde una aplicaci&oacute;n Rails.  Instalemos a continuaci&oacute;n esta gema, como viene siendo habitual lo haremos referenci&aacute;ndola desde el <code>Gemfile</code> y luego ejecutando <code>bundle</code>.</p>
+
+``` /Gemfile
+source 'http://rubygems.org'
+gem 'rails', '3.1.1'
+gem 'sqlite3'
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+gem 'sass-rails',   '~> 3.1.4'
+gem 'coffee-rails', '~> 3.1.1'
+gem 'uglifier', '>= 1.0.3'
+end
+gem 'jquery-rails'
+gem 'stripe'
+```
+
+<p>Stripe requiere dos claves de API para reconocer con qu&eacute; cuenta est&aacute; trabajando.  Guardaremos dichas claves en un fichero de inicializaci&oacute;n <code>stripe.rb</code> en el directorio <code>/config/initializers</code> de nuestra aplicaci&oacute;n.  Las claves que debemos guardar aqu&iacute; son la clave secreta que aparece en la p&aacute;gina de nuestra cuenta y la clave p&uacute;blica de API.  Como la gema Ruby no necesita la clave p&uacute;blica ya que &eacute;sta que s&oacute;lo se usa en vistas y en JavaScript la guardaremos en una constante.</p>
+
+``` /config/initializers/stripe.rb
+Stripe.api_key = "5J7dr36JmNpLrXXFwAXChdRzZZwLyCHV"
+STRIPE_PUBLIC_KEY = "pk_B1SaM15nXXruDU3g2D6uns2kJeu9m"
+```
+
+<p>Como el fichero contiene informaci&oacute;n sensible es buena idea a&ntilde;adirlo en el fichero <code>.gitignore</code> de la aplicaci&oacute;n para que no se incluya con el repositorio.  Tambi&eacute;n utilizaremos claves diferentes en el sitio de producci&oacute;n, por lo que no queremos que este fichero se copie accidentalmente sobreescribiendo los datos de producci&oacute;n.</p>
+
+<h3>El JavaScript de Stripe y la clave de API</h3>
+
+<p>Cuando un usuario envia los datos de su tarjeta de cr&eacute;dito en el formulario, dicha informaci&oacute;n viaja directamente al servidor de Stripe y no pasa por nuestra aplicaci&oacute;n.  Con esto es mucho m&aacute;s f&aacute;cil <a href="http://en.wikipedia.org/wiki/Payment_Card_Industry_Data_Security_Standard">cumplir con la norma PCI</a>. En el formulario de ejemplo de <a href="https://stripe.com/api">la p&aacute;gina sobre la API de Stripe</a> veremos que ninguno de los campos tiene el atributo <code>name</code>, esto significa que cuando se env&iacute;e el formulario estos campos no van a nuestra aplicaci&oacute;n, y en su lugar hay cierto c&oacute;digo JavaScript que los lee al hacer clic en el bot&oacute;n del formulario.</p>
+
+<p>Para utilizar Stripe con nuestra aplicaci&oacute;n debemos incluir un fichero JavaScript que viene del servidor de Stripe.  Luego definimos nuestra clave publica y el JavaScript que se activar&aacute; cuando se env&iacute;e el formulario con los datos de la tarjeta.  Este JavaScript generar&aacute; un <em>token</em> bas&aacute;ndose en los datos de la tarjeta introducidos en el formulario.</p>
+
+<p>A&ntilde;adamos el fichero de JavaScript de Stripe en el <em>layout</em> de nuestra aplicaci&oacute;n.  Tiene que ir antes del propio JavaScript de la aplicaci&oacute;n.  Podr&iacute;amos a&ntilde;adir tambi&eacute;n algo de c&oacute;digo que compruebe si estamos en la p&aacute;gina de carrito de la compra y s&oacute;lo cargue este c&oacute;digo en ese caso pero por ahora no lo haremos.  Tambi&eacute;n tenemos que poner a disposici&oacute;n de este JavaScript la clave p&uacute;blica, lo que haremos igual que hace Rails con la clave CSRF, en una etiqueta <code>meta</code> en la cabecera de la p&aacute;gina.</p>
+
+``` /app/views/layouts/application.html.erb
+<!DOCTYPE html>
+<html>
+  <head>
+      <title>Llama Kisses</title>
+      <%= stylesheet_link_tag    "application" %>
+      <%= javascript_include_tag "https://js.stripe.com/v1/", "application" %>
+      <%= csrf_meta_tags %>
+      <%= tag :meta, :name => "stripe-key", :content => STRIPE_PUBLIC_KEY %>
+    </head>
+    <body>
+    <!-- Body omitted -->
+  </body>
+</html>
+```
+
+<h3>Campos de tarjeta de cr&eacute;dito en la p&aacute;gina de suscripci&oacute;n</h3>
+
+<p>A continuaci&oacute;n a&ntilde;adiremos los campos de la tarjeta de cr&eacute;dito al formulario de suscripci&oacute;n.  Dicho formulario ahora mismo contiene un campo oculto con el <code>id</code> del plan escogido y un campo de texto para introducir una direcci&oacute;n de correo.  A&ntilde;adamos m&aacute;s campos para un n&uacute;mero de tarjeta de cr&eacute;dito, un c&oacute;digo de seguridad y una fecha de expiraci&oacute;n.</p>
+
+``` /app/views/subscriptions/new.html.erb
+<%= form_for @subscription do |f| %>
+  <% if @subscription.errors.any? %>
+    <div class="error_messages">
+      <h2><%= pluralize(@subscription.errors.count, "error") %> prohibited this subscription from being saved:</h2>
+      <ul>
+      <% @subscription.errors.full_messages.each do |msg| %>
+        <li><%= msg %></li>
+      <% end %>
+      </ul>
+    </div>
+  <% end %>
+  <%= f.hidden_field :plan_id %>
+  <div class="field">
+    <%= f.label :email %>
+    <%= f.text_field :email %>
+  </div>  
+  <div class="field">
+      <%= label_tag :card_number, "Credit Card Number " %>
+      <%= text_field_tag :card_number, nil, name: nil %>
+  </div>
+  <div class="field">
+      <%= label_tag :card_code, "Security Code on Card (CVV)" %>
+      <%= text_field_tag :card_code, nil, name: nil %>
+  </div>
+  <div class="field">
+    <%= label_tag :card_month, "Card Expiration" %>
+    <%= select_month nil, {add_month_numbers_true: true}, {name: nil, id: "card_month"}%>
+    <%= select_year nil, {start_year: Date.today.year, end_year: Date.today.year+15}, {name: nil, id: "card_year"}%>
+  </div>
+  <div class="actions"><%= f.submit "Subscribe" %></div>
+<% end %>
+```
+
+<p>Hemos a&ntilde;adido dos campos de texto al formulario, uno para el n&uacute;mero de tarjeta, y otro para el c&oacute;digo de seguridad, as&iacute; como dos desplegables para la fecha de expiraci&oacute;n.  Hay un par de cosas que cabe destacar.  En el caso del n&uacute;mero de tarjeta y el c&oacute;digo de seguridad hemos utilizado <code>label_tag</code> y <code>text_field_tag</code> en lugar de usar el constructor de formulario porque estos atributos no son atributos de nuestro modelo <code>Subscription</code>.  No queremos que se env&iacute;en al servidor por lo que hemos puesto el nombre de cada campo a <code>nil</code>.  Igualmente, con los campos de expiraci&oacute;n, estamos usando <code>select_month</code> y <code>select_year</code> y hemos especificado el <code>id</code> manualmente por lo que no tenemos que preocuparnos por el que genera Rails.</p>
+
+<p>Los nuevos campos aparecer&aacute;n al recargar la p&aacute;gina.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/763/original/E288I04.png" width="822" height="505" alt="The subscription form with its new credit card fields."/>
+</div>
+
+<p>Lo siguiente que tenemos que hacer es escribir el JavaScript que se activa al enviar el formulario.  Este <em>script</em> enviar&aacute; los datos de la tarjeta a Stripe y enviar&aacute; mediante el formulario el <em>token</em> recibido desde Stripe.  Como nuestra aplicaci&oacute;n est&aacute; escrita en Rails 3.1 escribiremos este c&oacute;digo en CoffeeScript, en el fichero <code>subscriptions.js.coffee</code>.</p>
+
+``` /app/assets/javascripts/subscriptions.js.coffee
+jQuery -&gt;
+  Stripe.setPublishableKey($(&#x27;meta[name=&quot;stripe-key&quot;]&#x27;).attr(&#x27;content&#x27;))
+  subscription.setupForm()
+
+subscription =
+  setupForm: -&gt;
+    $(&#x27;#new_subscription&#x27;).submit -&gt;
+      $(&#x27;input[type=submit]&#x27;).attr(&#x27;disabled&#x27;, true)
+      subscription.processCard()
+  
+  processCard: -&gt;
+    card =
+      number: $(&#x27;#card_number&#x27;).val()
+      cvc: $(&#x27;#card_code&#x27;).val()
+      expMonth: $(&#x27;#card_month&#x27;).val()
+      expYear: $(&#x27;#card_year&#x27;).val()
+    Stripe.createToken(card, subscription.handleStripeResponse)
+  
+  handleStripeResponse: (status, response) -&gt;
+    if status == 200
+      alert(response.id)
+    else
+	 alert(response.error.message)
+```
+
+<p>El c&oacute;digo s&oacute;lo deber&iacute;a ejecutarse cuando el DOM de la p&aacute;gina se haya cargado y por tanto se define con la funci&oacute;n <code>jQuery</code>.  Lo primero que hace es configurar Stripe especificando la clave p&uacute;blica.  El valor de la clave se lee del atributo <code>meta</code> que pusimos en el <em>layout</em> de la aplicaci&oacute;n.  Lo podemos recuperar buscando una etiqueta <code>meta</code> cuyo atributo <code>name</code> tenga el valor <code>stripe</code> y guardando el contenido de su atributo <code>content</code>.  El resto de la l&oacute;gica se gestiona mediante el objeto <code>subscription</code>, que dispone de una funci&oacute;n llamada <code>setupForm</code> que es la que har&aacute; todo el trabajo.</p>
+
+<p>A continuaci&oacute;n creamos el objeto <code>subscription</code> y le damos la funci&oacute;n <code>setupForm</code>.  En esta funci&oacute;n recuperaremos el formulario de suscripci&oacute;n por su <code>id</code> y a&ntilde;adiremos un <em>callback</em> que se activa cuando se dispara el evento de env&iacute;o del formulario.  Cuando se env&iacute;e el formulario desactivaremos el bot&oacute;n de env&iacute;o (para evitar que se vuelva a pulsar accidentalmente) estableciendo su atributo <code>disabled</code> a <code>true</code>.  Luego llamamos a la funci&oacute;n <code>processCard</code> y devolvemos <code>false</code> de forma que se env&iacute;e el formulario.</p>
+
+<p>La funci&oacute;n <code>processCard</code> crea un objeto que representa los valores de la tarjeta de cr&eacute;dito en el formato que Stripe espera, y lee los valores apropiados de cada campo del formulario con la funci&oacute;n <code>val()</code>.  La siguiente l&iacute;nea es la m&aacute;s importante, llamamos a <code>Stripe.createToken</code> con dos argumentos, el primero de los cuales es el objeto de la tarjeta que acabamos de crear (tambi&eacute;n podemos pasar aqu&iacute; opcionalmente una cantidad) mientras que el segundo es una funci&oacute;n para gestionar la respuesta de Stripe, que ocurre de forma as&iacute;ncrona.  Pasaremos aqu&iacute; <code>subscription.handleStripeResponse</code>.</p>
+
+<p>La funci&oacute;n <code>handleStripeResponse</code> recibe dos argumentos; un <code>status</code> y una <code>response</code>.  Si <code>status</code> tiene el valor <code>200</code> esto quiere decir que la transacci&oacute;n ha tenido &eacute;xito y por tanto tendremos un <em>token</em> correcto en <code>response.id</code>.  Por ahora simplemente lanzaremos un <code>alert</code> con el valor de <code>status</code> para ver cu&aacute;l es.  Si el <code>status</code> no es <code>200</code> entonces quiere decir que ha habido alg&uacute;n tipo de error y lanzaremos un <code>alert</code> con el mensaje.</p>
+
+<p>Ya podemos darle una pasada a nuestro nuevo formulario.  Si lo recargamos e introducimos un n&uacute;mero v&aacute;lido de tarjeta recibiremos un <em>token</em> de vuelta.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/764/original/E288I05.png" width="827" height="506" alt="El token de respuesta para una petición válida."/>
+</div>
+
+<p>Si introducimos un n&uacute;mero incorrecto de tarjeta veremos que en lugar del <em>token</em> aparece un mensaje de error.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/765/original/E288I06.png" width="822" height="505" alt="Se devuelve un mensaje de error si los datos no son correctos."/>
+</div>
+
+<h3>Gesti&oacute;n de la respuesta</h3>
+
+<p>Ahora que ya sabemos que se procesan correctamente las llamadas a Stripe mejoraremos el c&oacute;digo que gestiona los mensajes de error.  En lugar de mostrar una alerta, mostraremos el mensaje de error en la p&aacute;gina en un <code>div</code> cuyo <em>id</em> sea <code>stripe_error</code> y volviendo a activar el bot&oacute;n de env&iacute;o para que el usuario pueda volver a introducir los datos.</p>
+
+``` /app/assets/javascripts/subscriptions.js.coffee
+handleStripeResponse: (status, response) ->
+  if status == 200
+    alert(response.id)
+  else
+    $('#stripe_error').text(response.error.message)
+    $('input[type=submit]').attr('disabled', false)
+```
+
+<p>Una vez hecho esto, tenemos que a&ntilde;adir el <code>div</code> a la vista.</p>
+
+``` /app/views/subscriptions/new.html.erb
+<%= form_for @subscription do |f| %>
+  <!-- Form fields omitted -->
+  <div id="stripe_error">
+    <noscript>JavaScript is not enabled and is required for this form. First enable it in your web browser settings.</noscript>
+  </div>
+  <div class="actions"><%= f.submit "Subscribe" %></div>
+<% end %>
+```
+
+<p>Hemos puesto tambi&eacute;n un elemento <code>noscript</code> para que se muestre un error si alguien intenta usar el formulario en un navegador sin soporte de JavaScript.  Si  volvemos a cargar la p&aacute;gina y enviamos el formulario con un n&uacute;mero de tarjeta incorrecto veremos el mensaje de error embebido en su <code>div</code> en lugar de una alerta.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/766/original/E288I07.png" width="822" height="534" alt="Ahora se muestra el mensaje de error en la página."/>
+</div>
+
+<p>A continuaci&oacute;n cambiaremos el c&oacute;digo que gestiona las transacciones correctas. En lugar de mostrar el <em>token</em> de respuesta en una alerta, lo pondremos en un campo oculto del formulario, que enviaremos a continuaci&oacute;n al servidor de nuestra aplicaci&oacute;n.  Llamaremos a este campo <code>stripe_card_token</code>.</p>
+
+``` /app/views/subscriptions/new.html.erb
+<%= f.hidden_field :stripe_card_token %>
+```  
+
+<p>La tabla de la base de datos de suscripciones no dispone de un campo <code>stripe_card_token</code> por lo que lo a&ntilde;adiremos como atributo virtual en nuestro modelo <code>Subscription</code>.</p>
+
+``` /app/models/subscription.rb
+class Subscription &lt; ActiveRecord::Base
+  belongs_to :plan
+  validates_presence_of :plan_id
+  validates_presence_of :email
+  
+  attr_accessible :stripe_card_token
+end
+```
+
+<p>De vuelta en nuestro fichero CoffeeScript cambiaremos el <code>alert</code> por c&oacute;digo que asignar&aacute; a nuestro nuevo campo oculto el valor recibido desde Stripe y luego enviar&aacute; el formulario, llamando a <code>submit</code> directamente sobre el objeto del formulario.  Al hacer esto no se activa el evento <code>onsubmit</code> y por tanto el formulario se env&iacute;a a nuestro servidor normalmente.</p>
+
+``` /app/assets/javascripts/subscriptions.js.coffee
+handleStripeResponse: (status, response) -&gt;
+  if status == 200
+    $(&#x27;#subscription_stripe_card_token&#x27;).val(response.id)
+    $(&#x27;#new_subscription&#x27;)[0].submit()
+  else
+    $(&#x27;#stripe_error&#x27;).text(response.error.message)
+    $(&#x27;input[type=submit]&#x27;).attr(&#x27;disabled&#x27;, false)
+```
+
+<p>El formulario lo recibe la acci&oacute;n <code>create</code> de <code>SubscriptionsController</code> y el <em>token</em> se pasar&aacute; a una nueva <code>Subscription</code>.  Podr&iacute;amos gestionar el pago mediante <code>before_create</code> pero en su lugar crearemos un nuevo m&eacute;todo en el modelo <code>Subscription</code> llamado <code>save_with_payment</code>, donde lo haremos.  Antes de crear este m&eacute;todo cambiaremos la llamada a <code>save</code> por <code>save_with_payment</code>.</p>
+
+``` /app/controllers/subscription_controller.rb
+def create
+  @subscription = Subscription.new(params[:subscription])
+  if @subscription.save_with_payment
+    redirect_to @subscription, :notice => "Thank you for subscribing!"
+  else
+    render :new
+  end
+end
+```
+
+<p>El m&eacute;todo <code>save_with_payment</code> utilizar&aacute; la gema <code>stripe</code> para gestionar el pago.  Cabr&iacute;a la idea de utilizar el <em>token</em> de respuesta para realizar el cobro utilizando <code>Stripe::Charge.create</code> pero no podemos hacerlo porque el <em>token</em> s&oacute;lo es v&aacute;lido una vez y queremos que se trate de un pago recurrente.  En su lugar utilizaremos el <em>token</em> para crear un nuevo <code>Stripe::Customer</code>, tras lo cual le asignaremos un plan a dicho cliente con pagos recurrentes y  Stripe gestionar&aacute; autom&aacute;ticamente dichos pagos para nosotros.  Todo esto se encuentra perfectamente cubierto en la excelente <a href="https://stripe.com/docs/api?lang=ruby">documentaci&oacute;n de la API</a>.</p>
+
+<p>Antes de hacer cambios en el modelo <code>Subscription</code> iremos a nuestra cuenta en Stirpe y configuraremos varios planes para que sepa c&oacute;mo gestionar nuestros pagos recurrentes.  A&ntilde;adiremos cuatro planes con nombres e identificadores que coincidan con los que ya manejamos en nuestra aplicaci&oacute;n Rails.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/767/original/E288I08.png" width="799" height="528" alt="Los planes en nuestra cuenta de Stripe."/>
+</div>
+
+<p>De vuelta a nuestro modelo <code>Subscription</code> podemos escribir el m&eacute;todo <code>save_with_payment</code>.</p>
+
+``` /app/models/subscription.rb
+class Subscription < ActiveRecord::Base
+  belongs_to :plan
+  validates_presence_of :plan_id
+  validates_presence_of :email
+  
+  attr_accessor :stripe_card_token
+  
+  def save_with_payment
+    if valid?
+      customer = Stripe::Customer.create(description:email, ↵ 
+        plan: plan_id, card: stripe_card_token)
+      self.stripe_customer_token = customer.id
+      save!
+    end
+  end
+end
+```
+
+<p>El m&eacute;todo comprueba que el modelo sea v&aacute;lido en cuyo caso crear&aacute; un nuevo <code>Stripe::Customer</code> pas&aacute;ndole la direcci&oacute;n de correo como descripci&oacute;n, el <code>plan_id</code> y el <code>stripe_card_token</code>.  Stripe crear&aacute; un nuevo <code>id</code> para el cliente que tendremos que guardar en la base de datos.  Lo guardaremos en nuestro campo llamado <code>stripe_customer_token</code>.  Crearemos una migraci&oacute;n para guardar este campo y luego ejecutaremos <code>rake db:migrate</code> para a&ntilde;adirlo a la base de datos.</p>
+
+<pre class="terminal">$ rails g migration add_stripe_to_subscriptions stripe_customer_token:string</pre>
+
+<p>Ya estamos listos para probar los pagos.  Si vamos a la p&aacute;gina de nueva suscripci&oacute;n, introducimos datos de una tarjeta de cr&eacute;dito correcta y luego hacemos clic en el bot&oacute;n de &ldquo;Subscribe&rdquo; se crear&aacute;n el token y el cliente en segundo plano se enviar&aacute; el formulario. Si luego visitamos la p&aacute;gina de pagos en nuestra cuenta de Stripe veremos que este pago aparece en el listado con el precio del  plan.  Se trata de un pago recurrente que se ejecutar&aacute; cada mes.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/768/original/E288I09.png" width="818" height="557" alt="El pago recurrente en el panel de control."/>
+</div>
+
+<h3>Control de errores</h3>
+
+
+<p>La llamada a <code>Stripe::Customer.create</code> podr&iacute;a elevar una excepci&oacute;n si alguno de los datos que le pasamos no son v&aacute;lidos.  Esto puede ocurrir, por ejemplo, si el usuario env&iacute;a el formulario sin tener JavaScript activado por lo que no se le ha generado el <code>stripe_card_token</code>.  Es buena pr&aacute;ctica utilizar <code>rescue</code> para gestionar estos casos.  Stripe elevar&aacute; una excepci&oacute;n <code>InvalidRequestError</code> en estos casos para que podamos capturarla, guardarla y mostrar el error correspondiente de validaci&oacute;n en la p&aacute;gina con el formulario de nuevo.</p>
+
+``` /app/models/subscription.rb
+def save_with_payment
+  if valid?
+    customer = Stripe::Customer.create(description:email, ↵
+      plan: plan_id, card: stripe_card_token)
+    self.stripe_customer_token = customer.id
+    save!
+  end
+rescue Stripe::InvalidRequestError => e
+  logger.error "Stripe error while creating customer: #{e.mesage}"
+  errors.add :base, "There was a problem with your credit card."
+end
+```
+
+<p>Tambi&eacute;n tenemos que gestionar mejor los errores que no tienen que ver con la tarjeta de cr&eacute;dito, como el campo de direcci&oacute;n de correo.  Ahora mismo si intentamos enviar una suscripci&oacute;n sin direcci&oacute;n de correo pero con datos correctos de tarjeta de cr&eacute;dito recibiremos el token correcto desde Stripe pero en lugar de ser redirigidos a la p&aacute;gina que muestra el alta correcta iremos de nuevo al formulario con un error de validaci&oacute;n.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/769/original/E288I10.png" width="799" height="600" alt="Los campos de la tarjeta de cradeta aparecen tras haber introducido los datos correctos."/> 
+</div>
+
+<p>En estos casos deber&iacute;amos ocultar los datos de la tarjeta de cr&eacute;dito porque ya tenemos un <em>token</em> v&aacute;lido.  Esto lo podemos hacer modificando la vista del formulario para que oculte los campos si ya existe un <code>stripe_card_token</code> para la suscripci&oacute;n, en cuyo caso se mostrar&aacute; un mensaje.</p>
+
+``` /app/views/subscriptions/new.html.erb
+<div class="field">
+  <%= f.label :email %>
+  <%= f.text_field :email %>
+</div>  
+<% if @subscription.stripe_card_token %>
+  Credit card has been provided
+<% else %>
+  <div class="field">
+    <%= label_tag :card_number, "Credit Card Number " %>
+    <%= text_field_tag :card_number, nil, name: nil %>
+  </div>
+  <div class="field">
+    <%= label_tag :card_code, "Security Code on Card (CVV)" %>
+    <%= text_field_tag :card_code, nil, name: nil %>
+  </div>
+  <div class="field">
+    <%= label_tag :card_month, "Card Expiration" %>
+    <%= select_month nil, {add_month_numbers_true: true}, ↵ 
+      {name: nil, id: "card_month"}%>
+    <%= select_year nil, {start_year: Date.today.year, ↵
+      end_year: Date.today.year+15}, ↵
+      {name: nil, id: "card_year"} %>
+  </div>
+</div>
+<% end %>
+```
+
+<p>Tambi&eacute;n tenemos que actualizar la funci&oacute;n <code>setupForm</code> de nuestro fichero CoffeeScript de forma que no intente procesar otra vez la tarjeta cuando el usuario env&iacute;a el formulario en este caso.  Podemos hacerlo comprobando si en el formulario ya aparece el n&uacute;mero de la tarjeta de cr&eacute;dito, si no es as&iacute; entonces est&aacute; oculto porque dicha informaci&oacute;n ya ha sido procesada. En este caso no lo volveremos a procesar y devolveremos <code>true</code> para que se env&iacute;e el formulario.</p>
+
+
+``` /app/assets/javascripts/subscriptions.js.coffee
+setupForm: ->
+  $('#new_subscription').submit ->
+    $('input[type=submit]').attr('disabled', true)
+    if $('#card_number').length
+      subscription.processCard()
+      false
+    else
+      true
+```
+
+<p>Si ahora enviamos el formulario con datos correctos de tarjeta pero sin una direcci&oacute;n de correo, veremos que se ocultan los campos de la tarjeta.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/770/original/E288I11.png" width="799" height="466" alt="Los campos de tarjeta están ocultos."/>
+</div>
+
+<p>Si ahora rellenamos el campo del correo y volvemos a enviar  el formulario se crear&aacute; la suscripci&oacute;n y Strip procesar&aacute; el pago.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/771/original/E288I12.png" width="799" height="321" alt="Si introducimos un correo válido se envía correctamente la suscripción."/>
+</div>
+
+<h3>WebHooks</h3>
+
+<p>Una de las funcionalidades de Stripe que no hemos visto son los <em>Webhooks</em>, que nos permiten definir una URL que Stripe invocar&aacute; cuando ocurran determinados eventos.  Por ejemplo si falla un pago recurrente queremos ser notificados  para poder suspender la cuenta del usuario o para  informarles del problema para que puedan actualizar los datos de su tarjeta de cr&eacute;dito.  A prop&oacute;sito de esto, todav&iacute;a no hay manera de que los usuarios puedan cambiar los datos de su tarjeta de cr&eacute;dito, cancelar las suscripciones, etc. en nuestra aplicaci&oacute;n,  pero no lo veremos aqu&iacute;.</p>
+
+<p>Stripe tiene muchas funcionalidades que hoy no hemos visto, pero esperamos haber dado informaci&oacute;n suficiente para empezar.  Stripe es una forma muy c&oacute;moda de procesar pagos con tarjeta de cr&eacute;dito.  Por desgracia, no est&aacute; disponible fuera de los Estados Unidos por ahora, aunque pronto estar&aacute; disponible en otros mercados.</p>

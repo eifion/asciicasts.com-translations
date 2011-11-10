@@ -1,0 +1,361 @@
+<p>In this episode we&rsquo;re going to look into the Behaviour Driven Development library <a href="http://cukes.info">Cucumber</a> in a little more depth. We&rsquo;ve covered Cucumber twice before, in episodes 155 [<a href="http://railscasts.com/episodes/155-beginning-with-cucumber">watch</a>, <a href="http://asciicasts.com/episodes/155-beginning-with-cucumber">read</a>] and 159 [<a href="http://railscasts.com/episodes/159-more-on-cucumber">watch</a>, <a href="http://asciicasts.com/episodes/159-more-on-cucumber">read</a>]. This episode will introduce a gem called <a href="http://github.com/ianwhite/pickle">Pickle</a> which makes working with Cucumber more convenient.</p>
+
+<p>To demonstrate Pickle we&rsquo;ll start to write a new Rails e-commerce application called <code>store</code>. We&rsquo;ll start in the usual way.</p>
+``` terminal
+rails store
+```
+<p>To use Pickle and Cucumber we&rsquo;ll need to add some gems to our application. These gems are only concerned with the application&rsquo;s testing environment so we&rsquo;ll add references to them in <code>/config/environments/test.rb</code>.</p> 
+``` ruby
+config.gem "rspec", :lib => false, :version => ">=1.2.9"
+config.gem "rspec-rails", :lib => false, :version => ">=1.2.9"
+config.gem "webrat", :lib => false, :version => ">=0.5.3"
+config.gem "cucumber", :lib => false, :version => ">= 0.4.3"
+config.gem "pickle", :lib => false, :version => ">= 0.1.21"
+```
+<p>The list above contains the gems that we&rsquo;ve used in the previous Cucumber episodes and also a reference to Pickle. To make sure that they are all installed we can run</p>
+``` terminal
+sudo RAILS_ENV=test rake gems:install
+```
+<p>to install the correct versions we need.</p>
+
+<p>The next step is to set up Cucumber, which we do by running</p>
+``` terminal
+script/generate cucumber
+```
+<p>This will create the files that Cucumber needs and show a flashing alert telling us that, as we didn&rsquo;t specify whether we were using RSpec or TestUnit, Cucumber has looked through our gems and chosen rspec for us. We are using RSpec here so that&rsquo;s fine.</p>
+<p>As we&rsquo;re using Pickle along with Cucumber we&rsquo;ll have to run its generate script too:</p>
+``` terminal
+script/generate pickle
+```
+<p>This will generate a couple of extra files, including a <code>pickle_steps.rb</code> file which gives us some convenient ways to generate ActiveRecord models in our Cucumber scenarios. We&rsquo;ll be making use of this soon.</p>
+
+<h3>The Product Page</h3>
+
+<p>Our application is now set up so we can begin to generate its functionality. We know that we want a product page that will show detailed information about a given product so we&rsquo;ll need a <code>Product</code> model along with a <code>Products</code> controller that has a <code>show</code> action.</p>
+
+<p>We&rsquo;ll create a <code>Product</code> model first with <code>name</code> and <code>price</code> attributes. We&rsquo;re using RSpec so we&rsquo;ll generate an <code>rspec_model</code>.</p>
+``` terminal
+script/generate rspec_model product name:string price:decimal
+```
+<p>Then we can migrate our database.</p>
+``` terminal
+rake db:migrate
+```
+<p>And clone it for the test environment.</p>
+``` terminal
+rake db:test:clone
+```
+<p>Next we&rsquo;ll create the products controller and give it a <code>show</code> action. Again, as we&rsquo;re using RSpec we&rsquo;re going to create an <code>rspec_controller</code>.</p>
+``` terminal
+script/generate rspec_controller products show
+```
+<p>We can now start defining the behaviour for the show action in a Cucumber feature. In our application&rsquo;s <code>features</code> directory we&rsquo;ll create a file called <code>display_products.feature</code>. At the top of the file we&rsquo;ll define our feature.</p>
+``` terminal cucumber
+Feature: Display Products
+	In order to purchase the right product
+	As a customer
+	I want to browse products and see detailed information
+```	
+<p>Below this we can start to define the scenario. We&rsquo;re going to have to create a new product and then check that the show page displays the information for that product properly.</p>
+
+<p>This is where Pickle comes in handy as it is great for generating ActiveRecord models in Cucumber scenarios. If you take a look at the API section of <a href="http://github.com/ianwhite/pickle">Pickle&rsquo;s Github page</a> you can see that it provides Cucumber step definitions for generating models. Another nice feature of Pickle is that if you&rsquo;re using Machinist or Factory Girl to create factory objects it will make use of those to create the models rather than generating them from scratch. The steps that Pickle uses are defined in the <code>pickle_steps.rb</code> file that was generated earlier and it&rsquo;s worth taking a look at this file to see what steps are provided, especially if you want to customise any of them. We&rsquo;re not doing anything quite that advanced here so we can get on and define our scenario.</p>
+``` terminal cucumber
+Scenario: Show product
+  Given a product exists with name: "Milk", price: "2.99"
+  When I go to the show page for that product
+  Then I should see "Milk" within "h1"
+  And I should see "&pound;2.99"
+```
+
+<p>The first line of this scenario creates a new <code>Product</code> with the name &ldquo;Milk&rdquo; and priced at 2.99. Once the product has been created we go to the show page for that product. Normally this would be a difficult step to write but Pickle provides a convenient way to refer to a model that has just been created that allows us to refer to it as <code>that product</code>. This scenario ends with a check to see that that product&rsquo;s title exists within an <code>h1</code> element and that the price is displayed with its currency symbol.</p>
+
+<p>Having written our scenario we can run the Cucumber features to see what fails.</p>
+``` terminal cucumber
+$ cucumber features -q
+Feature: Display Products
+	In order to purchase the right product
+	As a customer
+	I want to browse products and see detailed information
+
+  Scenario: Show product
+    Given a product exists with name: "Milk", price: "2.99"
+    When I go to the show page for that product
+    Can't find mapping from "the show page for that product" to a path.
+      Now, go and add a mapping in /Users/eifion/rails/apps_for_asciicasts/ep186/store/features/support/paths.rb (RuntimeError)
+      ./features/support/paths.rb:22:in `path_to'
+      ./features/step_definitions/webrat_steps.rb:16:in `/^I go to (.+)$/'
+      features/display_products.feature:8:in `When I go to the show page for that product'
+    Then I should see "Milk" within "h1"
+    And I should see "&pound;2.99"
+
+Failing Scenarios:
+cucumber features/display_products.feature:6 # Scenario: Show product
+
+1 scenario (1 failed)
+4 steps (1 failed, 2 skipped, 1 passed)
+0m0.049s
+```
+<p>We have one failing step: Cucumber can&rsquo;t find a mapping for <code>the show page for that product</code> and doesn&rsquo;t know how to convert that to a URL path.</p> 
+
+<p>This can be fixed by editing the <code>/features/support/paths.rb</code> file to map descriptions to a URL. We could just write a mapping for the products show page, but it will be better if we make the path more generic so that it works with any model. We can make use of one of Pickle&rsquo;s features to help with this.</p>
+``` ruby
+when /the show page for (.+)/
+  polymorphic_path(model($1))
+```  
+<p>Pickle provides a method called <code>model</code> to which you can pass a string such as &ldquo;that product&rdquo; and which will return the last model of that type that Pickle created. We can pass the argument from the regular expression to <code>model</code> and have it return (in this case) the last <code>Product</code> created.</p>
+
+<p>We want to return the path to that product&rsquo;s show page and we can do this by making use of a Rails helper method called <code>polymorphic_path</code> method which will do exactly that.</p>
+
+<p>If we run Cucumber again we&rsquo;ll see a different error message, this time about the undefined method &#x27; product_path&#x27;. This is because we&rsquo;ve not set up the routing for the <code>Product</code> resource yet. We can do that by changing our <code>/config/routes.rb</code> file to look like this:</p>
+``` ruby
+ActionController::Routing::Routes.draw do |map|
+  map.resources :products
+end
+```
+<p>If we try running our Cucumber features now we&rsquo;ll have two passing steps.</p>
+``` terminal cucumber
+$ cucumber features -q
+Feature: Display Products
+	In order to purchase the right product
+	As a customer
+	I want to browse products and see detailed information
+
+  Scenario: Show product
+    Given a product exists with name: "Milk", price: "2.99"
+    When I go to the show page for that product
+    Then I should see "Milk" within "h1"
+      expected the following element's content to include "Milk":
+      Products#show (Spec::Expectations::ExpectationNotMetError)
+      ./features/step_definitions/webrat_steps.rb:129
+      (eval):2:in `within'
+      ./features/step_definitions/webrat_steps.rb:128:in `/^I should see "([^\"]*)" within "([^\"]*)"$/'
+      features/display_products.feature:9:in `Then I should see "Milk" within "h1"'
+    And I should see "&pound;2.99"
+
+Failing Scenarios:
+cucumber features/display_products.feature:6 # Scenario: Show product
+
+1 scenario (1 failed)
+4 steps (1 failed, 1 skipped, 2 passed)
+0m0.034s
+```
+<p>The scenario is finding the page, but failing to find the product&rsquo;s title and price on it which is as we&rsquo;d expect as the <code>show</code> action is currently empty. We&rsquo;ll write just enough code to make the scenario pass. In the controller we&rsquo;ll get the product by its <code>id</code>.</p>
+``` ruby
+class ProductsController < ApplicationController
+  def show
+    @product = Product.find(params[:id])
+  end
+end
+```
+<p>And in the view (<code>/app/views/products/show.html.erb</code>) we&rsquo;ll output the product&rsquo;s title in an <code>h1</code> element and its price, converted to a currency.</p>
+``` ruby
+<h1><%= h(@product.name) %></h1>
+<p><%= number_to_currency(@product.price, :unit => "&pound;") %></p>
+```
+<p>If we run Cucumber one more time our scenario passes.</p>
+``` terminal cucumber
+$ cucumber features -q
+Feature: Display Products
+	In order to purchase the right product
+	As a customer
+	I want to browse products and see detailed information
+
+  Scenario: Show product
+    Given a product exists with name: "Milk", price: "2.99"
+    When I go to the show page for that product
+    Then I should see "Milk" within "h1"
+    And I should see "&pound;2.99"
+
+1 scenario (1 passed)
+4 steps (4 passed)
+0m0.028s
+```
+<p>That&rsquo;s it! We&rsquo;ve successfully implemented the show action and used Pickle to simplify the writing of the scenario.</p>
+
+<h3>Generating Multiple Models</h3>
+
+<p>Pickle also provides a convenient way to generate multiple models at once. As well as a show action we want our application to have an index page that shows a list of products so we&rsquo;ll define a scenario in <code>display_products.feature
+</code> to cover this.</p>
+``` terminal cucumber
+@index
+Scenario: List products
+  Given the following products exist
+    | name   | price |
+    | Milk   | 2.99  |
+    | Puzzle | 8.99  |
+  When I go to the list of products
+  Then I should see "Milk"
+  And I should see "Puzzle"
+```  
+<p>This scenario makes use of another of Pickle&rsquo;s steps. To create a number of products we just need to write <code>Given the following &lt;model&gt;s exist</code> and then define a Cucumber table below it to list the products. Once the products are created the scenario goes to the products index action and checks that each product&rsquo;s title is shown.</p>
+
+<p>If we run this scenario now it will fail. (Note that we&rsquo;ve made use of Cucumber&rsquo;s tagging feature to run just this one scenario.)</p>
+``` terminal cucumber
+$ cucumber features -q -t @index
+Feature: Display Products
+	In order to purchase the right product
+	As a customer
+	I want to browse products and see detailed information
+
+  @index
+  Scenario: List products
+    Given the following products exist
+      | name   | price |
+      | Milk   | 2.99  |
+      | Puzzle | 8.99  |
+    When I go to the list of products
+      Can't find mapping from "the list of products" to a path.
+      Now, go and add a mapping in /Users/eifion/rails/apps_for_asciicasts/ep186/store/features/support/paths.rb (RuntimeError)
+      ./features/support/paths.rb:25:in `path_to'
+      ./features/step_definitions/webrat_steps.rb:16:in `/^I go to (.+)$/'
+      features/display_products.feature:18:in `When I go to the list of products'
+    Then I should see "Milk"
+    And I should see "Puzzle"
+
+Failing Scenarios:
+cucumber features/display_products.feature:13 # Scenario: List products
+
+1 scenario (1 failed)
+4 steps (1 failed, 2 skipped, 1 passed)
+0m0.019s
+```
+<p>The scenario first fails because of a missing path. The way to fix this is to go and add another mapping in <code>paths.rb</code> to map this specific path, but as our application grows and the number of scenarios increases this can quickly become tiresome. One way around this is to define a more generic path and to use URLs in the Cucumber steps. The path we&rsquo;ll add is this</p>
+``` ruby
+when /path "(.+)"/
+  $1
+```  
+<p>which will allow us to replace</p>
+``` ruby
+When I go to the list of products
+```
+<p>in the scenario with</p>
+``` ruby
+When I go to path "/products"
+```
+<p>When we run the scenario again it will fail because we don&rsquo;t have an <code>index</code> action in the <code>ProductsController</code>. This is something that can be fixed fairly easily by first writing the <code>index</code> action.</p>
+``` ruby
+def index
+  @products = Product.all
+end
+```
+<p>And then creating a view file at <code>/app/views/products/index.html.erb</code> to go with it in which we&rsquo;ll put just enough code to satisfy the scenario.</p>
+``` ruby
+<% for product in @products %>
+  <p><%= h product.name %>
+<% end %>
+```
+<p>When we run our features again they all pass.</p>
+``` terminal cucumber
+$ cucumber features -q -t @index
+Feature: Display Products
+	In order to purchase the right product
+	As a customer
+	I want to browse products and see detailed information
+
+  @index
+  Scenario: List products
+   Given the following products exist
+     | name   | price |
+     | Milk   | 2.99  |
+     | Puzzle | 8.99  |
+    When I go to path "/products"
+    Then I should see "Milk"
+    And I should see "Puzzle"
+
+1 scenario (1 passed)
+4 steps (4 passed)
+0m0.034s
+```
+<h3>Table Diffs</h3>
+
+<p>We&rsquo;ll finish this episode by showing one more feature: table diffs. This isn&rsquo;t a Pickle-specific feature but something that has recently been added to Cucumber.  It&rsquo;s an easy way  to compare the data in an HTML table with the data in a Cucumber table.</p>
+
+<p>Let&rsquo;s modify the last scenario we wrote to make use of this by replacing the <code>Then</code> steps.</p>
+``` terminal cucumber
+@index
+Scenario: List products
+  Given the following products exist
+    | name   | price |
+    | Milk   | 2.99  |
+    | Puzzle | 8.99  |
+  When I go to path "/products"
+  Then I should see products table
+    | Milk   | 2.99  |
+    | Puzzle | 8.99  |
+```    
+<p>This new step is something we&rsquo;re have to going to have to generate. In the <code>/features/step_definitions</code> directory we&rsquo;ll create a new file called <code>product_steps.rb</code> in which we&rsquo;ll put the following step definition:</p>
+``` ruby
+Then(/^I should see products table$/) do |expected_table|
+  expected_table.diff!(table_at("#products").to_a)
+end
+```
+<p>In this step definition <code>expected_table</code> is the Cucumber table at the end of the scenario above. We can call <code>diff!</code> on this table and compare it to an HTML table with an <code>id</code> of <code>products</code>. If we want the scenario to pass we&rsquo;ll have to modify the <code>index</code> view so that the products are rendered as a table.</p>
+``` ruby
+<table id="products">
+<% for product in @products %>
+  <tr>
+    <td><%= h product.name %></td>
+    <td><%= number_to_currency product.price, :unit => "&pound;"%></td>
+  </tr>
+<% end %>
+</table>
+```
+<p>The step will look at the products table, convert it to an array and compare it to the Cucumber table in the scenario. Let&rsquo;s run our features again and see what happens.</p>
+``` terminal cucumber
+$ cucumber features -q -t @index
+Feature: Display Products
+	In order to purchase the right product
+	As a customer
+	I want to browse products and see detailed information
+
+  @index
+  Scenario: List products
+    Given the following products exist
+      | name   | price |
+      | Milk   | 2.99  |
+      | Puzzle | 8.99  |
+    When I go to path "/products"
+    Then I should see products table
+      | Milk   | 2.99 | &pound;2.99 |
+      | Puzzle | 8.99 | &pound;8.99 |
+      Tables were not identical (Cucumber::Ast::Table::Different)
+      ./features/step_definitions/product_steps.rb:2:in `/^I should see products table$/'
+      features/display_products.feature:19:in `Then I should see products table'
+
+Failing Scenarios:
+cucumber features/display_products.feature:13 # Scenario: List products
+
+1 scenario (1 failed)
+3 steps (1 failed, 2 passed)
+0m0.034s
+```
+<p>The scenario fails because the prices in the HTML table have a currency symbol before them which is missing from the Cucumber table that it&rsquo;s being compared against. If we add the escaped currency symbol to the Cucumber table&hellip;</p>
+``` terminal cucumber
+Then I should see products table
+  | Milk   | &pound;2.99  |
+  | Puzzle | &pound;8.99  |
+```  
+<p>... then the scenario will pass.</p>
+
+<p>We have to be careful if we have any HTML in the table. For example if the product name was a link to that&rsquo;s product&rsquo;s page then the scenario would fail. We can fix this by modifying the step definition so that any HTML tags are removed.</p>
+``` ruby
+Then(/^I should see products table$/) do |expected_table|
+  html_table = table_at("#products").to_a
+  html_table.map! { |r| r.map! { |c| c.gsub(/<.+?>/, '') } }
+  expected_table.diff!(html_table)
+end
+```
+<p>The step now loops through each row in the table and strips the HTML tags from it before making the comparison. Now the scenario will pass.</p>
+
+<p>The nice thing about this table diff technique is that we&rsquo;re comparing everything as it looks on the page. This means that we could change the order that the products appear in or not display some products in the list if, say, we had an &ldquo;available&rdquo; attribute and make sure that the user is seeing exactly what they should be.</p>
+
+<p>That&rsquo;s it for this episode. We&rsquo;ve covered some of the more advanced features of Cucumber here. If you&rsquo;re new to Cucumber or need to recap don&rsquo;t forget to take a look at the first two episodes.</p>
+
+<p>Actually, that&rsquo;s not quite it. We&rsquo;ll leave you with a final tip. If you&rsquo;re ever trying to debug a problem in Cucumber and can&rsquo;t work out what it is you can add the line</p>
+``` ruby
+Then show me the page
+```
+<p>to your scenario. As long as you have the <a href="http://copiousfreetime.rubyforge.org/launchy/">launchy</a> gem installed it will open a browser and show you exactly what Webrat is seeing.</p>
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/231/original/E186I01.png" width="795" height="281" alt="Seeing what Webrat sees in a browser."/>
+</div>

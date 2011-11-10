@@ -1,0 +1,399 @@
+<p>Episode 155 was all about <a href="http://www.cukes.info">Cucumber</a>, a high-level testing framework. This episode will show some of its more advanced features, so if you haven&rsquo;t seen the other episode then it&rsquo;s well worth <a href="http://asciicasts.com/episodes/155-beginning-with-cucumber">catching up</a> before reading this. We&rsquo;ll also be using Webrat and Factory Girl which were covered in episodes <a href="http://asciicasts.com/episodes/156-webrat/">156</a> and <a href="http://asciicasts.com/episodes/158-factories-not-fixtures">158</a>.</p> 
+
+<h3>Updating Cucumber</h3>
+<p>Cucumber has recently been updated to version 0.3.0, so the first thing we&rsquo;ll need to do is update the version of the gem that our application&rsquo;s using. In <code>/config/environments/test.rb</code> we&rsquo;ll change the reference to Cucumber so that it uses the latest version.</p>
+``` ruby
+config.gem "rspec", :lib => false, :version => ">=1.2.2"
+config.gem "rspec-rails", :lib => false, :version => ">=1.2.2"
+config.gem "webrat", :lib => false, :version => ">=0.4.3"
+config.gem "cucumber", :lib => false, :version => ">=0.3.0"
+config.gem "thoughtbot-factory_girl", :lib => "factory_girl", :source => "http://gems.github.com"
+```
+<p>Next we&rsquo;ll run rake to make sure the gems are all up to date.</p>
+``` terminal
+sudo rake gems:install RAILS_ENV=test
+```
+<p>Finally we&rsquo;ll regenerate Cucumber to update the files that have changed. As we&rsquo;ve used Cucumber in this application before the new version will want to overwrite some of the files. We can let it overwrite <code>webrat_steps.rb</code> and <code>env.rb</code>, but as we&rsquo;ve already made changes to <code>paths.rb</code>, we&rsquo;ll have to update it manually.</p>
+``` terminal
+$ script/generate cucumber
+      exists  features/step_definitions
+overwrite features/step_definitions/webrat_steps.rb? (enter "h" for help) [Ynaqdh] y
+       force  features/step_definitions/webrat_steps.rb
+      exists  features/support
+overwrite features/support/env.rb? (enter "h" for help) [Ynaqdh] y
+       force  features/support/env.rb
+overwrite features/support/paths.rb? (enter "h" for help) [Ynaqdh] n
+        skip  features/support/paths.rb
+      exists  lib/tasks
+   identical  lib/tasks/cucumber.rake
+   identical  script/cucumber
+```
+<p>The <code>paths.rb</code> file contains a list of the mappings from the names we give the pages in our Cucumber definitions to the actual paths in the application. The part that needs to change to make this file work with Cucumber 0.3 is the section at the end that adds this module to Cucumber&rsquo;s <code>World</code>. (The <code>World</code> is the context in which Cucumber runs its scenarios.)</p>
+``` ruby
+module NavigationHelpers
+  def path_to(page_name)
+    case page_name
+
+    when /the homepage/
+      root_path
+    when /the list of articles/
+      articles_path
+    else
+      raise "Can't find mapping from \"#{page_name}\" to a path."
+    end
+  end
+end
+
+World do |world|
+  world.extend NavigationHelpers
+  world
+end
+```
+<p>Cucumber 0.3 has a simpler syntax for this and so we can replace the bottom four lines in the code above with this one.</p>
+``` ruby
+World(NavigationHelpers)
+```
+<h3>A Quick Check</h3>
+<p>As a reminder of the steps we already have and to make sure we&rsquo;re starting with a passing set, we&rsquo;ll run the current set of scenarios.</p>
+
+``` terminal cucumber
+$ cucumber features -n
+Feature: Manage Articles
+  In order to make a blog
+  As an author
+  I want to create and manage articles
+
+  Scenario: Articles List
+    Given I have articles titled Pizza, Breadsticks
+    When I go to the list of article
+    Then I should see "Pizza"
+    And I should see "Breadsticks"
+
+  Scenario: Create Valid Article
+    Given I have no articles
+    And I am on the list of articles
+    When I follow "New Article"
+    And I fill in "Title" with "Spuds"
+    And I fill in "Content" with "Delicious potato wedges!"
+    And I press "Create"
+    Then I should see "New article created."
+    And I should see "Spuds"
+    And I should see "Delicious potato wedges!"
+    And I should have 1 article
+2 scenarios
+14 passed steps
+```
+
+<h3>Our First New Scenario</h3>
+<p>Now that we know that our current scenarios are all passing we can begin to add some new functionality. Below is the profile page for a user; we want to add a link to it so that if a user is viewing their own profile they have the option to edit it. The link should also be visible to admins who should be able to edit anyone&rsquo;s profile.</p>
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/85/original/E159I01.png" width="808" height="281" alt="The profile page for a user." />
+</div>
+<p>We&rsquo;ll be using Behaviour-Driven Development to implement this feature so we&rsquo;ll start off by defining the behaviour as a Cucumber feature. In the features folder we&rsquo;ll create a new file called manage_users.feature in which we&rsquo;ll put the feature and its scenarios. At the top of the file we&rsquo;ll define the feature.</p>
+``` cucumber_definition
+Feature: Manage Users
+  In order manage user details
+  As a security enthusiast
+  I want to edit user profiles only when authorized
+```
+<p>The first scenario we&rsquo;ll write is the one that says that the edit link should be visible for an admin. For this scenario we&rsquo;ll define two users, one &ldquo;normal&rdquo; user and an admin. To help us describe the users we&rsquo;ll make use of Cucumber&rsquo;s tables which provide a neat way of defining data in a scenario.</p>
+``` cucumber_definition
+Scenario: Show edit link as admin
+  Given the following user records
+  | username| password| admin |
+  | bob     | secret  | false |
+  | admin   | secret  | true  |
+  And I am logged in as "admin" with password "secret"
+  When I visit profile for "bob"
+  Then I should see "Edit Profile"
+```
+<p>The first row in the table defines the column names, and each subsequent row represents a a record. The columns are separated by a vertical bar. The vertical bars don&rsquo;t need to be aligned but it makes the data easier to read if you do. If you have the Cucumber bundle for Textmate5 installed then you can select the table and use the shortcut CMD+OPT+\ to automatically tidy the table data up.</p>
+<p>The rest of the scenario says that when we&rsquo;re logged in as admin an we visit Bob&rsquo;s profile page we should see the &ldquo;Edit Profile&rdquo; link.</p>
+<p>If we run Cucumber now we&rsquo;ll see the steps we need to define. (The output from the other scenarios isn&rsquo;t reproduced below.)</p>
+``` terminal cucumber
+Feature: Manage Users
+  In order manage user details
+  As a security enthusiast
+  I want to edit user profiles only when authorized
+
+  Scenario: Show edit link as admin
+    Given the following user records
+      | username | password | admin |
+      | bob      | secret   | false |
+      | admin    | secret   | true  |
+    And I am logged in as "admin" with password "secret"
+    When I visit profile for "bob"
+    Then I should see "Edit Profile"
+
+3 scenarios
+1 skipped step
+3 undefined steps
+14 passed steps
+
+You can implement step definitions for undefined steps with these snippets:
+Given /^the following user records$/ do |table|
+  # table is a Cucumber::Ast::Table
+  pending
+end
+
+Given /^I am logged in as "([^\"]*)" with password "([^\"]*)"$/ do |arg1, arg2|
+  pending
+end
+
+When /^I visit profile for "([^\"]*)"$/ do |arg1|
+  pending
+end
+
+```
+
+<h3>Tagging Features And Scenarios</h3>
+<p>As well as the steps for our current feature Cucumber will show the output from all of the other scenarios. If we had a hundred or so scenarios in our application there would be a lot of output generated which would make it difficult to focus on our current scenario. Cucumber supports tagging of scenarios which means that we can give scenarios tags and run only the scenarios that have a given tag. We do this by adding a word preceded by an @ before the scenario. We&rsquo;ll tag our new scenario with the tag <code>@focus</code> so that we can focus on just running that one scenario.</p>
+``` cucumber_definition
+@focus
+Scenario: Show edit link as admin
+(rest of scenario omitted)
+```
+<p>To run only scenarios with a certain tag we pass Cucumber a <code>-t</code> option and the name of the tag.</p>
+``` terminal
+cucumber features -n -t focus
+```
+<p>Now only our tagged scenario will be run. To run all of the scenarios except the ones with a certain tag we place a tilde before the tag name.</p>
+``` terminal
+cucumber features -n -t ~focus
+```
+<p>Note that depending on which shell you&rsquo;re running you might need to escape the tilde with a backslash.</p>
+<p>We can also apply tags to features. Tags applied to a feature will also apply to any scenarios that feature has so we&rsquo;ll move our <code>@focus</code> tag to our new feature so that we can run just that feature&rsquo;s scenarios.</p>
+``` cucumber_definition
+@focus
+Feature: Manage Users
+  In order manage user details
+  (rest of feature omitted)
+```	
+
+<h3>Defining The Steps For Our Scenario</h3>
+<p>When we ran Cucumber before it provided some skeleton code for the undefined steps in our scenario. We&rsquo;ll create a file called <code>user_steps.rb</code> to put this code in. This file should go in the <code>/features/step_definitions</code> directory.</p>
+``` ruby
+Given /^the following user records$/ do |table|
+  # table is a Cucumber::Ast::Table
+  pending
+end
+
+Given /^I am logged in as "([^\"]*)" with password "([^\"]*)"$/ do |arg1, arg2|
+  pending
+end
+
+When /^I visit profile for "([^\"]*)"$/ do |arg1|
+  pending
+end
+```
+<p>The first step has a table object passed to its block which, as the comment states, is a custom Cucumber object. To work with the data in the table we only need to use one of that object&rsquo;s methods: <code>hashes</code>. Calling <code>table.hashes</code> will return an array of hashes. Each element in the array is a hash representing one line of the table. We can use the data in the hash to create our users, but as there&rsquo;s not enough data in the table to create a valid user instead we&rsquo;ll use a Factory. We have Factory Girl set up in our application and a factory defined for the user model so we can pass the hash that represents the user in the table to the factory to create each user. The first step now looks like this.</p>
+``` ruby
+Given /^the following user records$/ do |table|
+  table.hashes.each do |hash|
+    Factory(:user, hash)
+  end
+end
+```
+<p>We have our factories defined in <code>/spec/factories.rb</code>, but they won&rsquo;t be available to Cucumber by default. To make them available we&rsquo;ll add the following line to <code>/features/support/env.rb</code> so that the factories are added to Cucumber&rsquo;s environment.</p>
+``` ruby
+require "#{Rails.root}/spec/factories"
+```
+<p>Before we go on to define any more of our steps we&rsquo;ll take another look at the step we&rsquo;ve just defined. It performs a useful task and it looks like it could be adapted to work with any model, rather than just with users. We can do this be replacing the word <code>user</code> with a variable in the regular expression and passing that variable to the block. The variable can then be used to define the type of factory object we want to use.</p>
+``` ruby
+Given /^the following (.+) records?$/ do |factory, table|
+  table.hashes.each do |hash|
+    Factory(factory, hash)
+  end
+end
+```
+<p>We now have a useful generic step that can be used to turn any Cucumber table into a number of models.</p>
+<p>With that done we can now move on and complete the other two steps. The first step covers logging a user in.</p>
+``` ruby
+Given /^I am logged in as "([^\"]*)" with password "([^\"]*)"$/ do |arg1, arg2|
+```
+<p>If we were using a lower-level testing framework we&rsquo;d create a  logged-in user by directly updating the session or something similar, but with Cucumber you&rsquo;re encouraged to use the routes so we&rsquo;ll need to go through the login page. We&rsquo;ll use Webrat to write this step. (If you need to find our more about Webrat you can <a href="http://asciicasts.com/episodes/156-webrat/">read</a> or <a href="http://railscasts.com/episodes/156-webrat">watch</a> episode 156.)  We&rsquo;ll write code to fill in the username and password fields and click the button on the form to log the user in.</p>
+``` ruby
+Given /^I am logged in as "([^\"]*)" with password "([^\"]*)"$/ do |username, password|
+  visit login_url
+  fill_in "Username", :with => username
+  fill_in "Password", :with => password
+  click_button "Log in"
+end
+```
+<p>For the final step we just need to find the user by their username and visit their profile page.</p>
+``` ruby
+When /^I visit profile for "([^\"]*)"$/ do |username|
+  user = User.find_by_username!(username)
+  visit user_url(user)
+end
+```
+<p>It might seem to have been a lot of work to create these three steps, but we&rsquo;ve created at least one fairly generic step that we&rsquo;ll be able to reuse later.</p>
+
+<p>If we run Cucumber now the step will fail because we haven&rsquo;t added the &ldquo;Edit Profile&rdquo; link to the profile page.  We&rsquo;ll do that now. Because we&rsquo;re using BDD we&rsquo;ll only write enough code to make the step pass, so there&rsquo;s no code to restrict who can see the link. The link should be added to <code>/app/views/users/show.html.erb</code>.</p>
+``` ruby
+<% title "Profile for " + @user.username %>
+<p>This user currently has no bio.</p>
+<p>Email: <%=h @user.email %></p>
+<%= link_to "Edit Profile", edit_user_path(@user) %>
+```
+<p>Our scenario&rsquo;s steps now all pass.</p>
+``` terminal cucumber
+$ cucumber features -n -t focus
+
+@focus
+Feature: Manage Users
+	In order manage user details
+	As a security enthusiast
+	I want to edit user profiles only when authorized
+
+  Scenario: Show edit link as admin
+    Given the following user records
+      | username | password | admin |
+      | bob      | secret   | false |
+      | admin    | secret   | true  |
+    And I am logged in as "admin" with password "secret"
+    When I visit profile for "bob"
+    Then I should see "Edit Profile"
+
+1 scenario
+4 passed steps
+```
+<p>We know that our code isn&rsquo;t correct yet because the &ldquo;Edit Profile&rdquo; link is currently visible to everyone.  We need to write another scenario that defines the correct behaviour for when the page is visited by someone who isn&rsquo;t logged in.</p>
+``` cucumber_definition
+Scenario: Hide edit link as guest
+  Given the following user records
+  | username   | password| admin |
+  | bob        | secret  | false |
+  | admin      | secret  | true  |
+  When I visit profile for "bob"
+  Then I should not see "Edit Profile"
+```
+<p>This scenario is similar to the last one, but we&rsquo;ve removed the line that logs the user in and we&rsquo;re now not expecting to see the &ldquo;Edit Profile&rdquo; link. If we run the step it will fail because  there are no conditions to restrict who can view the link. As our previous scenario said that admins should see the link to make the test pass we&rsquo;ll add a condition that restricts the link to admin users.</p>
+``` ruby
+<% title "Profile for " + @user.username %>
+<p>This user currently has no bio.</p>
+<p>Email: <%=h @user.email %></p>
+<% if current_user && current_user.admin? %>
+<p><%= link_to "Edit Profile", edit_user_path(@user) %></p>
+<% end %>
+```
+<p>The change we&rsquo;ve made means that only admins will see the &ldquo;Edit Profile&rdquo; link, but we want a user to be able to edit his own profile so we&rsquo;ll need one more scenario to describe that behaviour. The scenario is very similar to the one we wrote for the admin.</p>
+``` cucumber_definition
+Scenario: Show edit link as owner
+  Given the following user records
+    | username | password | admin |
+    | bob      | secret   | false |
+    | admin    | secret   | true  |
+    And I am logged in as "bob" with password "secret"
+    When I visit profile for "bob"
+    Then I should see "Edit Profile"
+```
+<p>Again the scenario will fail. We just need to make a small adjustment to make it pass.</p>
+``` ruby
+<% title "Profile for " + @user.username %>
+<p>This user currently has no bio.</p>
+<p>Email: <%=h @user.email %></p>
+<% if current_user && current_user.admin? || current_user == @user %>
+  <p><%= link_to "Edit Profile", edit_user_path(@user) %></p>
+<% end %>
+```
+<p>Now all three of the scenarios pass.</p>
+
+<h3>Removing Repetition</h3>
+<p>Our scenarios now pass but there&rsquo;s a lot of duplicated code across them and as we write more this will only get worse. We can reduce the duplication by moving the duplicated code that defines the user records into a background clause.</p>
+``` cucumber_definition
+@focus
+Feature: Manage Users
+  In order manage user details
+  As a security enthusiast
+  I want to edit user profiles only when authorized
+
+  Background:
+    Given the following user records
+    | username   | password | admin |
+    | bob        | secret   | false |
+    | admin      | secret   | true  |
+
+  Scenario: Show edit link as admin
+    Given I am logged in as "admin" with password "secret"
+    When I visit profile for "bob"
+    Then I should see "Edit Profile"
+
+  Scenario: Hide edit link as guest
+    When I visit profile for "bob"
+    Then I should not see "Edit Profile"
+
+  Scenario: Show edit link as owner		
+    Given I am logged in as "bob" with password "secret"
+    When I visit profile for "bob"
+    Then I should see "Edit Profile"
+```
+<p>The background will run before each scenario in the feature and populate the user records and allow us to remove some of the duplication in the code. The scenarios still have some duplication in them though. Each one performs similar steps with only slight differences. We can reduce some of this by using Cucumber&rsquo;s Scenario Outlines.</p>
+<p>Scenario Outlines allow us to replace parts of the scenario with variables. We can then use another Cucumber table to provide the data for those variables. Our feature now looks like this:</p>
+``` cucumber_definition
+@focus
+Feature: Manage Users
+  In order manage user details
+  As a security enthusiast
+  I want to edit user profiles only when authorized
+
+  Scenario Outline: Show or hide edit profile link 
+    Given the following user records
+    | username   | password| admin|
+    | bob        | secret  | false|
+    | admin      | secret  | true |
+    Given I am logged in as "<login>" with password "secret"
+    When I visit profile for "<profile>"
+    Then I should <action>
+
+    Examples:
+      | login | profile | action                 |
+      | admin | bob     | see "Edit Profile"     |
+      | bob   | bob     | see "Edit Profile"     |
+      |       | bob     | not see "Edit Profile" |
+      | bob   | admin   | not see "Edit Profile" |
+```    
+<p>When the feature runs now it will loop through each row in the Examples table and replace the variable names between the angle brackets with the appropriate column in the examples table. This makes it even easier for us to add a new scenario to the table, as all we have to do is add another row to the table. In the table above we&rsquo;ve done just that to add another scenario that says that when we log in as <code>bob</code> we shouldn&rsquo;t see the link on the admin&rsquo;s profile page.</p>
+
+<p>There&rsquo;s one other small change we&rsquo;ll need to make to use the <code>Examples</code> table. One of the rows in the table has a blank login value, which we want to mean that the page should be viewed as a guest. We&rsquo;ll alter <code>user_steps.rb</code> so that it only runs the Webrat steps to log a user in if a username is supplied.</p>
+``` ruby
+Given /^I am logged in as "([^\"]*)" with password "([^\"]*)"$/ do |login, password|
+  unless username.blank?
+    visit login_url
+    fill_in "login", :with => login
+    fill_in "Password", :with => password
+    click_button "Log in"
+  end
+end
+```
+<p>We&rsquo;ll run our features one last time to make sure they still run.</p>
+``` terminal cucumber
+$ cucumber features -n -t focus
+
+@focus
+Feature: Manage Users
+	In order manage user details
+	As a security enthusiast
+	I want to edit user profiles only when authorized
+
+  Scenario Outline: Show or hide edit profile link
+    Given the following user records
+      | username | password | admin |
+      | bob      | secret   | false |
+      | admin    | secret   | true  |
+    Given I am logged in as "<login>" with password "secret"
+    When I visit profile for "<profile>"
+    Then I should <action>
+
+  Examples: 
+    | login | profile | action                           |
+    | admin | bob     | see "Edit Profile"     |
+    | bob   | bob     | see "Edit Profile"     |
+    |       | bob     | not see "Edit Profile" |
+    | bob   | admin   | not see "Edit Profile" |
+
+4 scenarios
+16 passed steps
+```
+<p>They do, each row in the examples table is parsed and the scenario run with the appropriate values.</p>
+<p>That concludes our look at some of the more advanced features in Cucumber. I hope you&rsquo;ve found it useful.</p>

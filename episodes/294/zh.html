@@ -1,0 +1,186 @@
+<p>Pjax 是一个 jQuery 插件，由 Chris Wanstrath 开发，允许通过 AJAX 请求更新网页中的部分内容，而无需发送完整的 HTTP 请求。以下的示例页面展示了它是如何运作的。默认情况下，点击页面中的任何链接都会迫使整个页面重新加载，通过页面上的时间变化可以确认这一点。当我们选中 pjax 选项后，再点击链接就不会重新加载整个页面，时间也没有改变，但是页面上的主要内容区域却更新了。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/803/original/E294I01.png" width="800" height="531" alt="The pjax demo site."/>
+</div>
+
+<p>Pjax 使用了 pushState，所以用户不会察觉在后台进行的 AJAX 请求。通过 PJAX 更新页面时，地址栏中的 URL 地址会更新、页面的标题也会更新；前一个页面会被添加到浏览器的历史记录中，所以后退按钮可以正常使用。PJAX 同样支持优雅降级：如果用户的浏览器不支持 pushState、或者禁用了 Javascript，程序便会发送传统的 HTTP 请求。</p>
+
+<h3>将 Pjax 集成到 Rails 程序中</h3>
+
+<p>有很多中方法可以将 Pjax 集成到 Rails 程序中，在本文中只介绍其中的两个。下图显示了我们将使用的程序，列出了一个产品列表，点击某一个产品则会在右侧空白处显式一些产品的信息。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/804/original/E294I02.png" width="799" height="531" alt="Our site showing the information for one of the products."/>
+</div>
+
+<p>现在如果点击链接的话，整个页面都会重新加载。为了明示页面变化了多少内容，页面布局文件和模板文件会在页面加载后分别生成两个随机数字。如果两个数字都发生了变化就说明整个页面重新加载了，这也就是我们现在看到的情况。我们现在来使用 Pjax，页面中只有需要更新的地方才会更新。</p>
+
+<p>由 David Heinemeier Hansson 开发的 <a href="https://github.com/rails/pjax_rails">pjax_rails</a> gem 可以方便地将 Pjax 集成到 Rails 3.1 的程序中，虽然这个 gem 并不十分复合我们这个程序的要求，但是我们还是会使用它来展示它的运作原理。将 pjax_rails 加入 <code>/Gemfile</code>，然后运行 <code>bundle</code> 来安装这个 gem。</p>
+
+``` /Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.1.1'
+gem 'sqlite3'
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~> 3.1.4'
+  gem 'coffee-rails', '~> 3.1.1'
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+gem 'pjax_rails'
+```
+<p>Bundler 完成后，我们需要修改 <code>application.js</code>，这样程序才会加载 Pjax 的 Javascript 代码。</p>
+
+``` /assets/javascripts/application.js
+// This is a manifest file that'll be compiled into including all the files listed below.
+// Add new JavaScript/Coffee code in separate files in this directory and they'll automatically
+// be included in the compiled file accessible from http://example.com/assets/application.js
+// It's not advisable to add code directly here, but if you do, it'll appear at the bottom of the
+// the compiled file.
+//
+//= require jquery
+//= require jquery_ujs
+//= require pjax
+//= require_tree .
+```
+
+<p>最后，我们需要将布局文件中的 <code>yield</code> 放入一个 div 中，并给 div 加上 <code>data-pjax-container</code> 属性。</p>
+
+```/app/views/layouts/application.html.erb
+<!DOCTYPE html>
+<html>
+  <head>
+    <title><%= content_for?(:title) ? content_for(:title) : "Store" %></title>
+    <%= stylesheet_link_tag    "application" %>
+    <%= javascript_include_tag "application" %>
+    <%= csrf_meta_tag %>
+  </head>
+  <body>
+    <div id="container">
+      <div class="layout_time">Layout random: <strong><%= rand(900)+100 %></strong></div>
+      <% flash.each do |name, msg| %>
+        <%= content_tag :div, msg, :id => "flash_#{name}" %>
+      <% end %>
+      <div data-pjax-container>
+      <%= yield %>
+      </div>
+    </div>
+  </body>
+</html>
+```
+
+<p>重启服务器，然后刷新页面之后，页面中的每一个链接都已经激活了 Pjax。当我们点击一个链接后，页面并没有全部重新加载，只有模板随机数字改变可以确认这一点。这基本上就是我们要实现的功能，但是如果我们仔细观察就会发现，点击链接后页面的标题并没有改变。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/805/original/E294I03.png" width="799" height="411" alt="The title doesn't change when the rest of the page does."/>
+</div>
+
+<p>我们可以在模板中加入一个 <code>title</code> 来修正这一点。这样做可能有点怪而且会使页面的 HTML 无法通过验证，不过问题确实解决了。</p>
+
+``` /app/views/index.html.erb
+<% content_for :title, @product ? @product.name : "Products" %>
+<title><%= yield (:title) %></title>
+<!-- Rest of page omitted -->
+```
+
+<p>现在刷新页面，点击链接后标题会改变了，而且后退按钮和浏览历史可以正常使用。从用户的角度来看，一切都像之前一样可以正常运行，但感觉速度快了一点。这样很好，不过 <code>pjax_rails</code> 这个 gem 太强大了，默认情况下页面中的所有链接都被激活了对 Pjax 的支持，这并不是我们这个程序所需要的。同时，点击链接后整个模板总是会全部更新，而没有一种方法来限制只有页面中的某一部分会更新。有种方法可以禁止某些特定的链接使用 Pjax，不过这样做却显得太过笨拙。如果你有个简单的程序，它的布局文件不会变化，那么 pjax_rails 就很适合你的需求。</p>
+
+<p>可以通过使用 Rack 中间件的方式实现一个更灵活的解决方法，Gert Goet 的 <a href="https://github.com/eval/rack-pjax">rack-pjax</a> 就实现了这一方法，所以在我们的程序中将用它来取代 pjax_rails。首先在 <code>Gemfile</code> 中将 pjax_rails 替换成 rack-pjax，然后运行 <code>bundle</code> 命令。</p>
+
+``` /Gemfile
+# gem 'pjax_rails'
+gem 'rack-pjax
+```
+
+<p>然后，我们需要在程序的设置文件中加入这个 Rack 中间件。</p>
+
+``` /config/application.rb
+module Store
+  class Application < Rails::Application
+    config.middleware.use Rack::Pjax
+    # Other config commands omitted
+  end
+end
+```
+
+<p>rack-pjax 没有集成所需的 jQuery 插件，所以我们需要手动安装一下。新建 <code>vendor/assets/javascripts</code> 目录，然后通过 <code>curl</code> 下载 <code>jquery.pjax.js</code>。</p>
+
+``` terminal
+$ mkdir -p vendor/assets/javascripts
+$ curl https://raw.github.com/defunkt/jquery-pjax/master/jquery.pjax.js > vendor/assets/javascripts/jquery.pjax.js
+```
+
+<p>我们需要将这个文件加入程序的 Javascript 清单文件中，所以我们将 pjax_rails 的 Javascript 文件替换掉。</p>
+
+``` /assets/javascripts/application.js
+//= require jquery
+//= require jquery_ujs
+//= require jquery.pjax
+//= require_tree .
+```
+
+<p>有别于 pjax_rails，rack-pjax 默认情况下不会将所有链接都激活 pjax，所以我们需要指定一些链接来激活它。这些链接都出现在 <code>ProductsController</code> 的页面中，所以我们在产品的 CoffeeScript 文件中来激活。</p>
+
+```/app/assets/javascripts/products.js.coffee
+jQuery ->
+  $('.product a').pjax('[data-pjax-container]')
+```
+
+<p>在上面的代码中，我们先确保 DOM 已经加载，然后获取需要激活的链接。本例中需要激活的链接是 <code>product</code> 类下的所有链接。然后调用 <code>pjax</code>，再指定链接点击后想要更新的内容。</p>
+
+<p>使用 rack-pjax 后，我们不需要覆盖 <code>title</code> 元素了，所以我们将其从 <code>index</code> 模板中移除掉。当我们刷新页面后，一切都像之前那样运行正常，点击链接后模板更新了，而布局没有更新，只有模板随机数字发生了变化。即使没有在模板文件中指定，页面标题也更新了，因为标题是从布局文件中获取的。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/806/original/E294I04.png" width="799" height="411" alt="The title is now updated correctly."/>
+</div>
+
+<p>真正强大之处是，我们可以将 <code>data-pjax-container</code> 元素放在页面中任何想放的地方，没必要被放在布局文件的 <code>yield</code> 外层了。我们将其移到 <code>index</code> 模板文件中，放在产品详情区域的外层。</p>
+
+```/app/views/products/index.html.erb
+<% content_for :title, @product ? @product.name : "Products" %>
+
+<div class="template_time">Template random: <strong><%= rand(900)+100 %></strong></div>
+
+<h1>Products</h1>
+
+<% for product in @products %>
+  <div class="product">
+    <h2>
+      <%= link_to product.name, :product_id => product %>
+      <span class="price"><%= number_to_currency(product.price) %></span>
+    </h2>
+  </div>
+<% end %>
+
+<p><%= link_to "New Product", new_product_path %></p>
+
+<div data-pjax-container>
+  <% if @product %>
+  <div id="product_details">
+    <h3><%= @product.name %></h3>
+    <dl>
+      <dt>Price:</dt>
+      <dd><%= number_to_currency(@product.price) %></dd>
+      <dt>Released:</dt>
+      <dd><%= @product.released_at.strftime("%B %e, %Y") %></dd>
+      <dt>Category:</dt>
+      <dd><%= @product.category %></dd>
+    </dl>
+    <p class="actions">
+      <%= link_to "Edit", edit_product_path(@product) %> |
+      <%= link_to "Destroy", @product, method: :delete, confirm: "Are you sure?" %>
+    </p>
+  </div>
+  <% end %>
+</div>
+```
+
+<p>现在点击一个链接后，只有侧边的区域发生了变化，两个随机数字都没有发生变化。</p>
+
+<p>如果你对于这个 gem 的运作原理感到好奇的话，可以查看一下它的源码，很简单，只是一个约 50 行的 Ruby 代码文件。但是记住一点，在 rack-pjax 决定将哪一部分发送回给客户端之前，整个布局和模板仍由服务器渲染。如果渲染模板对你来说是个很大的性能考虑点，你最好去寻找一个替代解决方案，不过对于大多说的程序来说，rack-pjax 可以很好的运行。</p>

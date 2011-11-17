@@ -1,0 +1,291 @@
+<p><a href="http://jejacks0n.github.com/mercury/">Mercury</a>はJeremy Jacksonによるプロジェクトで、HTMLページの一部をブラウザで直接編集できるようにするものです。実際に動作する様子を確認するために、プロジェクトのホームページの「Test it Out」をクリックします。するとページ上部にツールバーが追加され、ページの一部分がハイライトされます。この部分を直接編集し変更点をサーバに保存することができます。今回のエピソードではRailsアプリケーションにMercuryを追加します。</p>
+
+<p>下の画面は簡単なコンテンツ管理システムの1ページです。このアプリケーションには<code>Page</code>モデルがあり、3件のページレコードがそれぞれ名称と内容を持っています。今はページを編集する手段がないため、アプリケーションにMercuryを追加してページを直接編集できるようにしましょう。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/823/original/E296I01.png" width="800" height="437" alt="簡単なCMSアプリケーション"/>
+</div>
+
+<h3>Mercuryのインストール</h3>
+
+<p>Mercuryをインストールするには、まず<code>/Gemfile</code>を開いて<code>mercury-rails</code> gemを追加します。このgemは活発に開発が行われているので最新バージョンを直接Githubから入手します。</p>
+
+
+
+``` /Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.1.1'
+gem 'sqlite3'
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~&gt; 3.1.4'
+  gem 'coffee-rails', '~&gt; 3.1.1'
+  gem 'uglifier', '&gt;= 1.0.3'
+end
+
+gem 'jquery-rails'
+gem 'mercury-rails', git: 'https://github.com/jejacks0n/mercury.git', ref: 'a2b16bcdc9'
+```
+
+<p>使用するバージョンのコミットSHAが上のファイルに含まれているので、どのバージョンを使ったかがわかるでしょう。いつものように、<code>Gemfile</code>を変更したらbundleコマンドを実行して新しいgemをインストールします。</p>
+
+<p>gemがインストールされたら、Mercuryのinstallation generatorを実行します。するとレイアウトとCSS overrideファイルをインストールするか聞かれるので、指示通りにインストールをおこないます。</p>
+
+
+
+``` terminal
+$ rails g mercury:install
+      create  app/assets/javascripts/mercury.js
+       route  Mercury::Engine.routes
+Install the layout and CSS overrides files? [yN] y
+      create  app/views/layouts/mercury.html.erb
+      create  app/assets/stylesheets/mercury_overrides.css
+```      
+      
+      
+      
+<p>このコマンドの実行結果の出力を見ると、もう一つのコマンドを実行してMercuryのmigrationをインストールするように指示があるので、続けてそれを実行してデータベースのmigrationを行います。</p>
+
+
+
+``` terminal
+$ rake mercury_engine:install:migrations
+Copied migration 20111108202946_create_images.rb from mercury_engine
+noonoo:cms eifion$ rake db:migrate
+==  CreateImages: migrating ===================================================
+-- create_table(:images)
+   -&gt; 0.0017s
+==  CreateImages: migrated (0.0018s) ==========================================
+```
+
+
+
+<p>これでアプリケーションのapp/assetsディレクトリに<code>mercury.js</code>ファイルができました。このファイルにはMercuryのすべての設定オプションとそれを説明しているコメントが含まれています。このファイルには後ほど触れることにして、まずはこのファイルがどうロードされるかについて説明します。Rails 3.1のアプリケーションでは、<code>application.js</code>のmanifestファイルが<code>app/assets/javascripts</code>の下のすべてのファイルをインクルードしているので、このファイルはデフォルトですべてのページでロードされます。MercuryのJavaScriptはかなり重いので、Mercuryで編集するページのみでロードするようにするのがいいでしょう。指定したファイルだけをロードするようmanifestを修正します。(代替案として<code>mercury.js</code>ファイルを<code>/vendor/assets</code>に移動する方法もあります。)ページの編集中はMercuryがこのJavaScriptファイルを含む独自のレイアウトファイルを使用するので、このファイルを完全に削除したように見えても、必要なときにはロードされます。</p>
+
+
+
+``` /app/assets/javascripts/application.js
+// This is a manifest file that'll be compiled into including all the files listed below.
+// Add new JavaScript/Coffee code in separate files in this directory and they'll automatically
+// be included in the compiled file accessible from http://example.com/assets/application.js
+// It's not advisable to add code directly here, but if you do, it'll appear at the bottom of the
+// the compiled file.
+//
+//= require jquery
+//= require jquery_ujs
+//= require pages
+```
+
+
+
+<p>Mercuryのスタイルシートについても同じ事をできますがここでは省略します。</p>
+
+<h3>ページを編集可能にする</h3>
+
+<p>Mercuryがインストールされたので、アプリケーションのどのページからでもMercuryエディタにアクセスできるようになりました。どのページでもURLのホストとパスの間に<code>/editor</code>を追加すれば編集モードに入ることができます。 </p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/824/original/E296I02.png" width="800" height="551" alt="Mercuryのツールバー"/>
+</div>
+
+<p>ページを編集するためのURLがわかったので、「Edit Page(ページを編集する)」リンクを追加できます。</p>
+
+
+
+```/app/views/pages/show.html.erb
+
+<div id="header">
+  <h1><%= raw @page.name %></h1>
+  <ul id="navigation">
+  <% Page.all.each do |page| %>
+    <li><%= link_to_unless_current page.name, page %></li>
+  <% end %>
+  </ul>
+</div>
+
+<div class="content">
+  <%= raw @page.content %>
+
+  <p><%= link_to "Edit Page", "/editor" + request.path %></p>
+</div>
+
+```
+
+
+
+<h3>編集可能なエリアを追加する</h3>
+
+<p>ページを編集するためのリンクができましたが、ページ上の編集可能エリアをまだ定義していません。編集できるようにしたいのは2ヶ所です。ページのタイトルと内容で、それぞれは<code>Page</code>モデルの属性に対応します。ページのある部分を編集可能にするには、<code>class</code>が<code>mercury-region</code>かつ<code>data-type</code>が<code>editable</code>である要素でそれをラップします。また更新されたページがサーバに送り返されたときに特定できるように、各ラッパー要素に<code>id</code>を付与します。2つの領域の名前をそれぞれ<code>page_name</code>と<code>page_content</code>にします。</p>
+
+
+
+```/app/views/pages/show.html.erb
+
+<div id="header">
+  <h1><span id="page_name" class="mercury-region" data-type="editable"><%= raw @page.name %></span></h1>
+  <ul id="navigation">
+  <% Page.all.each do |page| %>
+    <li><%= link_to_unless_current page.name, page %></li>
+  <% end %>
+  </ul>
+</div>
+
+<div class="content">
+  <div id="page_content" class="mercury-region" data-type="editable">
+    <%= raw @page.content %>
+  </div>
+
+  <p><%= link_to "Edit Page", "/editor" + request.path %></p>
+</div>
+
+```
+
+<p>ページをリロードすると、2つの編集可能な領域の周りが青くなっています。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/825/original/E296I03.png" width="800" height="551" alt="ページに編集可能な領域ができた"/>
+</div>
+
+<h3>変更を保存する</h3>
+
+<p>2つの領域を好きなだけ編集して、変更をプレビューできるようになりましたが、アプリケーションにまだ機能を準備していないために変更を保存することができません。「Save」アイコンをクリックするとMercuryからアラート画面が出て、変更を保存しようとした場所が表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/826/original/E296I04.png" width="420" height="153" alt="変更をサーバに保存できないとMercuryがアラートを表示する"/>
+</div>
+
+<p>Mercuryが保存しようとする先のURLはページのURLです。MercuryはこのURLに変更点を含んだPOSTリクエストを送ります。これを修正して、更新された内容が<code>PagesController</code>に新規に作成する<code>mercury_update</code>アクションに送られるようにします。routesファイルを修正して、routesがこの新規のアクションをどう処理すればいいかを教えます。</p>
+
+
+
+``` /config/routes.rb
+Cms::Application.routes.draw do
+  Mercury::Engine.routes
+
+  root to: 'pages#index'
+  resources :pages do
+    member { post :mercury_update }
+  end
+end
+```
+
+<p>Mercuryが、各ページのエディタURLを有効化するためにroutesファイルに独自の行を追加している点に注目してください。</p>
+
+<p>次に<code>mercury_update</code>アクションを新たに作成します。このアクションは、<code>id</code>に基づいてページを探し、更新をおこなってレスポンスを返します。今は仮に更新処理のコードが入る場所にプレイスホルダのコメントを入れておきます。</p>
+
+
+
+``` /app/controllers/pages_controller.rb
+def mercury_update
+  page = Page.find(params[:id])
+  # Update page
+  render text: ""
+end
+```
+
+
+
+<p>Mercuryに対して、編集ページの更新用にデフォルトのURLを使用しないことを伝えます。これをJavaScriptにハードコードするのではなく、「Edit Page」リンクの<code>data</code>属性で定義します。合わせてリンクに<code>id</code>を付与して、JavaScriptからアクセスできるようにします。</p>
+
+
+
+``` /app/views/pages/show.html.erb
+
+<p><%= link_to "Edit Page", "/editor" + request.path, id: "edit_link", data: { save_url: mercury_update_page_path(@page) } %></p>
+
+```
+
+
+
+<p>Mercuryに対してこのURLを伝えるために、<code>mercury.js</code>設定ファイルの末尾に次のコードを追加します。</p>
+
+
+
+``` /app/assets/javascripts/mercury.js
+$(window).bind('mercury:ready', function() {
+  var link = $('#mercury_iframe').contents().find('#edit_link');
+  Mercury.saveURL = link.data('save-url');
+  link.hide();
+});
+```
+
+
+
+<p>このコードは<code>mercury:ready</code>イベントにbindし、そのイベントが起動したときに「Edit Page」のリンクを探して、Mercuryの<code>saveURL</code>を、追加した<code>data-save-url</code>属性の値に設定します。Mercuryが現在のページの内容をiframeにロードするので、その内容を取得してそこからリンクを探します。このコードは、ページが編集モードに入るときに起動されるので、「Edit Page」リンクを隠す行もここに追加します。</p>
+
+<p>ページに変更を加えて保存しようとすると、もうエラーメッセージは出ないので、Mercuryは変更をサーバに送信できたということです。developmentログを見ると、ページの保存時に<code>mercury_update</code>アクションが起動され、 <code>Page</code>モデルを更新するのに必要なすべての属性が含まれているJSON文字列を送信しているのがわかります。</p>
+
+
+
+``` terminal
+Started POST "/pages/1/mercury_update" for 127.0.0.1 at 2011-11-10 18:31:59 +0000
+  Processing by PagesController#mercury_update as JSON
+  Parameters: {"content"=&gt;"{\"page_name\":{\"type\":\"editable\",\"value\":\"Welcome!!\",\"snippets\":{}},\"page_content\":{\"type\":\"editable\",\"value\":\"<p>In this ASCIIcasts&nbsp;episode we are going to look at the <a href=\\\"http://jejacks0n.github.com/mercury/\\\">Mercury Editor</a>. It allows you to edit a document in-place, right in the HTML. It works in the following browsers.</p>\\n<ul>\\n    <li>Firefox 4+</li>\\n    <li>Chrome 10+</li>\\n    <li>Safari 5+</li>\\n</ul>\\n<p>Try it out here by clicking on the <strong><em>Edit Page</em></strong> link below. There you will be able to change this page content and even the title above.</p>\",\"snippets\":{}}}", "id"=&gt;"1"}
+```  
+  
+  
+  
+<p>Mercuryには、JSONを使用する代わりに、ネスト形式のパラメータとしてデータを保存するオプションがあります。このオプションを設定するには、Mercury generatorを実行したときに生成された<code>mercury.html.erb</code>ファイルを修正します。このファイルには、<code>saveStyle</code>プロパティを持った<code>options</code>オブジェクトが含まれています。デフォルトではこのプロパティの値は<code>null</code>で、ページの更新がサーバに送り返されるときにはJSONが使われます。これを<code>'form'</code>に変更します。</p>
+
+
+
+``` /app/views/layouts/mercury.html.erb
+
+<script type="text/javascript">
+  var saveUrl = null;
+  var options = {
+    saveStyle: 'form',  // 'form', or 'json' (default json)
+    saveMethod: null, // 'POST', or 'PUT', (create, vs. update -- default POST)
+    visible: null     // if the interface should start visible or not (default true)
+  };
+  new Mercury.PageEditor(saveUrl, options);
+</script>
+
+```
+
+
+
+<p>ページへの変更を保存すると、JSONデータではなくネストされたパラメータとして送信され、このデータを使って変更をデータベースに保存することができます。ページの名称と内容は、<code>content</code>パラメータの下にネストされそれぞれが<code>value</code>プロパティを持っています。これらを用いてページの新しい内容をデータベースに戻して保存します。</p>
+
+
+
+``` /app/controllers/pages_controller.rb
+def mercury_update
+  page = Page.find(params[:id])
+  page.name = params[:content][:page_name][:value]
+  page.content = params[:content][:page_content][:value]
+  page.save!
+  render text: ""
+end
+```
+
+
+
+<p>ページを修正して変更を保存すると何も起きていないようですが、ページに戻ってみると変更点が保存されていることがわかります。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/827/original/E296I05.png" width="800" height="280" alt="変更が保存された"/>
+</div>
+
+<p>変更を保存したら元のページにリダイレクトしてほしいので、<code>mercury:saved</code>イベントを待機してそれが起動されたらリダイレクトするようにします。</p>
+
+
+
+``` /app/assets/javascripts/mercury.js
+$(window).bind('mercury:saved', function() {
+  window.location = window.location.href.replace(/\/editor\//i, '/');
+});
+```
+
+
+
+<p>これで変更を保存すると、元のページにリダイレクトされます。</p>
+
+<h3>さらにその先へ</h3>
+
+<p>Mercuryについてはここでカバーしきれなかったことがまだたくさんあります。<code>mercury.js</code>ファイルのコメントを一通り読めば、何ができるかについて具体的に理解できるでしょう。例えば、ツールバーに何を表示するかを細かく指定したり、スニペット、履歴、ノートを有効化したりなど、その他にもたくさんあります。これらはすべて<code>mercury.js</code>の中で説明されています。</p> 
+
+<p>Mercuryの紹介は以上です。すばらしいプロジェクトで、使っていてとても楽しいです。ただし自分のRailsプロジェクトに追加する場合は、Firefox、Chrome、Safariなどの最新版が必要になることを覚えておいてください。</p>

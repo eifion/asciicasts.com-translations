@@ -1,0 +1,512 @@
+<p>A partir de este episodio nos vamos a dedicar con m&aacute;s frecuencia al tema de la escritura de tests.  Esta vez vamos a ver c&oacute;mo habr&iacute;amos escrito los enlaces del episodio anterior  [<a href="http://railscasts.com/episodes/274-remember-me-reset-password">verlo</a>, <a href="http://asciicasts.com/episodes/274-recuerdame-y-recuperacion-de-contrasena">leerlo</a>], en concreto la funcionalidad de recuperaci&oacute;n de contrase&ntilde;as que a&ntilde;ad&iacute;amos al formulario de inicio de sesi&oacute;n.</p>
+
+<p>Cuando empezamos con el episodio anterior ya ten&iacute;amos una aplicaci&oacute;n con un formulario de inicio de sesi&oacute;n.  El formulario ya ten&iacute;a la autenticaci&oacute;n b&aacute;sica pero no implementaba la funcionalidad de inicio de sesi&oacute;n autom&aacute;tico o recuperaci&oacute;n de contrase&ntilde;a, que fue lo que a&ntilde;adimos.  Volveremos esta vez a a&ntilde;adir este enlace de recuperaci&oacute;n pero mediante un enfoque dirigido por tests (TDD).</p>
+
+
+<div class="imageWrapper">
+  <img src="/system/photos/707/original/E275I01.png" width="800" height="369" alt="La página de inicio de sesión."/>
+</div>
+
+<p>En el episodio anterior fuimos probando la aplicaci&oacute;n con el navegador seg&uacute;n &iacute;bamos desarroll&aacute;ndola.  Esta vez vamos a cerrar el navegador y vamos a escribir el c&oacute;digo para probar la funcionalidad abriendo el navegador s&oacute;lo cuando tengamos que centrarnos en la experiencia de usuario.</p>
+
+<p>Para poder escribir los tests vamos a a&ntilde;adir algunas de las gemas relacionadas con tests al <code>Gemfile</code> de nuestra aplicaci&oacute;n.  Como estamos usando Rails 3.1, todo lo que hagamos aqu&iacute; deber&iacute;a funcionar con Rails 3.0.  A&ntilde;adamos las gemas al final del archivo en el grupo de pruebas.</p>
+
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.1.0.rc4&#x27;
+
+gem &#x27;sqlite3&#x27;
+
+# Asset template engines
+gem &#x27;sass-rails&#x27;, &quot;~&gt; 3.1.0.rc&quot;
+gem &#x27;coffee-script&#x27;
+gem &#x27;uglifier&#x27;
+
+gem &#x27;jquery-rails&#x27;
+
+gem &quot;rspec-rails&quot;, :group =&gt; [:test, :development]
+group :test do
+  gem &quot;factory_girl_rails&quot;
+  gem &quot;capybara&quot;
+  gem &quot;guard-rspec&quot;
+end</pre>
+
+<p>Aunque podr&iacute;amos usar cualquier <em>framework</em> de pruebas, nosotros preferimos usar  <a href="http://relishapp.com/rspec">RSpec</a>.  Al contrario que las otras gemas relacionadas con los tests RSpec queda incluido en el grupo de desarrollo para poder ejecutar sus tareas de Rake.  Tambi&eacute;n hemos preferido utilizar  <a href="https://github.com/thoughtbot/factory_girl">Factory Girl</a> en lugar de fixturas, <a href="https://github.com/jnicklas/capybara">Capybara</a> para simular la interacci&oacute;n del usuario con un navegador y <a href="https://github.com/guard/guard">Guard</a> para ejecutar los tests autom&aacute;ticamente.   Hemos visto todas estas gemas en episodios anteriores.  Factory Girl en el episodio 158 [<a href="http://railscasts.com/episodes/158-factories-not-fixtures">verlo</a>, <a href="http://asciicasts.com/episodes/158-factories-not-fixtures">leerlo</a>], Capybara en el  257 [<a href="http://railscasts.com/episodes/257-request-specs-and-capybara">verlo</a>, <a href="http://es.asciicasts.com/episodes/257-especificaciones-de-peticion-y-capybara">leerlo</a>] y Guard en el  264 [<a href="http://railscasts.com/episodes/264-guard">verlo</a>, <a href="http://asciicasts.com/episodes/264-guard">leerlo</a>].</p> 
+
+<p>Podemos instalar las gemas ejecutando <code>bundle</code>.  Una vez que se hayan instalado configuraremos RSpec ejecutando</p>
+
+<pre class="terminal">$ rails g rspec:install</pre>
+
+<p>RSpec crear&aacute; algunos directorio debajo del directorio <code>/spec</code>, un directorio <code>support</code> para los ficheros de apoyo, otro llamado <code>models</code> y otro m&aacute;s llamado <code>routing</code> que hace falta para Guard.</p>
+
+<pre class="terminal">$ mkdir spec/support spec/models spec/routing</pre>
+
+<p>Este es un buen momento para lanzar la inicializaci&oacute;n de Guard.</p>
+
+
+<pre class="terminal">$ guard init rspec</pre>
+
+<p>Como estamos trabajando en Mac OS X, tambi&eacute;n nos interesa instalar la gema  <a href="https://rubygems.org/gems/rb-fsevent"><code>rb-fsevent</code></a> para que Guard pueda detectar los cambios en los archivos.  Una vez que quede instalado lanzaremos Guard en una pesta&ntilde;a del terminal y lo dejaremos en segundo plano.</p>
+
+<pre class="terminal">$ guard
+Please install growl gem for Mac OS X notification support and add it to your Gemfile
+
+Guard is now watching at &#x27;/Users/eifion/auth&#x27;
+Guard::RSpec is running, with RSpec 2!
+Running all specs
+No examples found.</pre>
+
+<p>Cuando ejecutamos anteriormente el generador de RSpec, &eacute;ste cre&oacute; un fichero llamado  <code>/spec/spec_helper.rb</code>. Tenemos que habilitar Capybara en este archivo, a&ntilde;adiendo <code>require &#x27;capybara/rspec&#x27;</code>.</p>
+
+<p class="codeFilePath">/spec/spec_helper.rb</p>
+<pre class="ruby"># This file is copied to spec/ when you run &#x27;rails generate rspec:install&#x27;
+ENV[&quot;RAILS_ENV&quot;] ||= &#x27;test&#x27;
+require File.expand_path(&quot;../../config/environment&quot;, __FILE__)
+require &#x27;rspec/rails&#x27;
+require &#x27;capybara/rspec&#x27;
+# rest of file...</pre>
+
+<p>Tambi&eacute;n deberemos seguir el consejo que nos dan los comentarios del fichero y eliminaremos la l&iacute;nea que establece la ruta de la fixturas porque no las vamos a usar.</p>
+
+<p class="codeFilePath">/spec/spec_helper.rb</p>
+<pre class="ruby"># Remove this line if you&#x27;re not using ActiveRecord or &crarr;
+  ActiveRecord fixtures
+config.fixture_path = &quot;#{::Rails.root}/spec/fixtures&quot;</pre>
+
+<h3>Nuestro primer test</h3>
+
+<p>Ya estamos listos para empezar a escribir los tests, empezaremos con un test de integraci&oacute;n que llamaremos <code>password_reset</code>.</p>
+
+<pre class="terminal">$ rails g integration_test password_reset</pre>
+
+<p>El generador de RSpec crear&aacute; lo que llama una especificaci&oacute;n de petici&oacute;n.  El c&oacute;digo por defecto de la especificaci&oacute;n tiene el siguiente aspecto:</p>
+
+
+<p class="codeFilePath">/spec/requests/password_resets_spec.rb</p>
+<pre class="ruby">require &#x27;spec_helper&#x27;
+
+describe &quot;PasswordResets&quot; do
+  describe &quot;GET /password_resets&quot; do
+    it &quot;works! (now write some real specs)&quot; do
+      # Run the generator again with the --webrat flag if you want to use webrat methods/matchers
+      get password_resets_path
+      response.status.should be(200)
+    end
+  end
+end</pre>
+
+<p>Vamos a eliminar la especificaci&oacute;n generada por defecto y vamos a poner la nuestra.  Comprobaremos que se env&iacute;a un correo a un usuario cuando solicitan la recuperaci&oacute;n de su contrase&ntilde;a.  Para ello nos hace falta un registro <code>User</code> sobre el que trabajar.  Podr&iacute;amos ir a la p&aacute;gina de registro y generar as&iacute; un usuario, pero es mejor centrarnos exactamente en lo que queremos probar por lo que crearemos el usuario a partir de una factor&iacute;a.  Crearemos la factor&iacute;a de <code>User</code> antes de empezar a escribir nuestro test, poni&eacute;ndola en el fichero <code>factories.rb</code> de la carpeta <code>/spec</code>.  El nombre sugiere que todas las factor&iacute;as que definamos aqu&iacute; ser&aacute;n autom&aacute;ticamente cargadas por Factory Girl.</p>
+
+
+<p class="codeFilePath">/spec/factories.rb</p>
+<pre class="ruby">Factory.define :user do |f|
+  f.sequence(:email) { |n| &quot;foo#{n}@example.com&quot; }
+  f.password &quot;secret&quot;
+end</pre>
+
+<p>La factor&iacute;a es muy sencilla y generar&aacute; un usuario con una direcci&oacute;n de correo &uacute;nico y una contrase&ntilde;a para que podamos usarlo en nuestro test.</p>
+
+
+<p class="codeFilePath">/spec/requests/password_resets_spec.rb</p>
+<pre class="ruby">require &#x27;spec_helper&#x27;
+
+describe &quot;PasswordResets&quot; do
+  it &quot;emails user when requesting password reset&quot;
+    user = Factory(:user)
+    visit login_path
+    click_link &quot;password&quot;
+    fill_in &quot;Email&quot;, :with =&gt; user.email
+    click_button &quot;Reset Password&quot;
+  end
+end</pre>
+
+<p>El cuerpo del test utiliza la factor&iacute;a para crear un usuario y luego simula los pasos que el usuario tendr&iacute;a que tomar para solicitar la recuperaci&oacute;n de contrase&ntilde;a, utilizando varias &oacute;rdenes de Capybara.  Se visita la p&aacute;gina de inicio de sesi&oacute;n, y luego se hace clic en el enlace que contiene la palabra  &ldquo;password&rdquo;, esto es una forma menos r&iacute;gida de escribir el test de forma que si el texto cambia de  &ldquo;Forgotten password&rdquo; a &ldquo;Forgot your password?&rdquo; el test seguir&aacute; pasando.  En la p&aacute;gina a la que nos lleva el enlace encontramos un campo de texto con una etiqueta asociada cuyo texto contiene  &ldquo;Email&rdquo; y lo rellena con la direcci&oacute;n de correo del usuario.  Por &uacute;ltimo tenemos que hacer clic en el bot&oacute;n  &ldquo;Reset Password&rdquo; .</p>
+
+<p>Nuestra especificaci&oacute;n todav&iacute;a no est&aacute; terminada, y cuando la guardamos Guard la ejecutar&aacute; y veremos el primer error.</p>
+
+<pre class="terminal">  1) PasswordResets emails user when requesting password reset
+     Failure/Error: click_link &quot;password&quot;
+     Capybara::ElementNotFound:
+       no link with title, id or text &#x27;password&#x27; found
+     # (eval):2:in `click_link&#x27;
+     # ./spec/requests/password_resets_spec.rb:7:in `block (2 levels) in &lt;top (required)&gt;&#x27;</pre>
+
+<p>La especificaci&oacute;n ha fallado porque Capybara no ha podido encontrar el enlace  &ldquo;password&rdquo; .  Corrijamos esto antes de continuar, lo &uacute;nico que tenemos que hacer es a&ntilde;adir el enlace en la p&aacute;gina de inicio de sesi&oacute;n.</p>
+
+<p class="codeFilePath">/app/views/sessions/new.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Log in&lt;/h1&gt;
+
+&lt;%= form_tag sessions_path do %&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= label_tag :email %&gt;
+    &lt;%= text_field_tag :email, params[:email] %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= label_tag :password %&gt;
+    &lt;%= password_field_tag :password %&gt;
+  &lt;/div&gt;
+  &lt;p&gt;&lt;%= link_to &quot;forgotten password?&quot;, new_password_reset_path %&gt;
+  &lt;div class=&quot;actions&quot;&gt;&lt;%= submit_tag &quot;Log in&quot; %&gt;&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p>El enlace lleva a <code>new_password_reset_path</code>, pero como todav&iacute;a no hemos definido la ruta Guard nos dar&aacute; otro error cuando vuelva a ejecutar la especificaci&oacute;n.</p>
+
+<pre class="terminal">  1) PasswordResets emails user when requesting password reset
+     Failure/Error: visit login_path
+     ActionView::Template::Error:
+       undefined local variable or method `new_password_reset_path&#x27; for #&lt;#&lt;Class:0x000001039349d8&gt;:0x000001039269f0&gt;</pre>
+       
+<p>Aqu&iacute; podemos apreciar la ventaja del desarrollo basado en tests.  Siempre vemos el siguiente error y para corregirlo s&oacute;lo deber&iacute;a ser necesario un peque&ntilde;o cambio en el c&oacute;digo.  En este caso generaremos un controlador <code>PasswordResets</code> con la acci&oacute;n &lt;ocde&gt;new&lt;/ocde&gt;.  Como estamos usando especificaciones de petici&oacute;n para probar el controlador y  las vistas no nos hacen falta los archivos de especificaci&oacute;n propiamente dichos, le podemos decir al generador que se los salte pas&aacute;ndole la opci&oacute;n <code>--no-test-framework</code>.</p>
+
+<pre class="terminal">$ rails g controller password_resets new --no-test-framework</pre>
+
+<p>Tenemos tambi&eacute;n que modificar el fichero de rutas para que  <code>PasswordResets</code> sea un recurso.</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Auth::Application.routes.draw do
+
+  get &quot;logout&quot; =&gt; &quot;sessions#destroy&quot;, :as =&gt; &quot;logout&quot;
+  get &quot;login&quot; =&gt; &quot;sessions#new&quot;, :as =&gt; &quot;login&quot;
+  get &quot;signup&quot; =&gt; &quot;users#new&quot;, :as =&gt; &quot;signup&quot;
+  root :to =&gt; &quot;home#index&quot;
+  resources :users
+  resources :sessions
+  resources :password_resets
+end</pre>
+
+<p>Cuando Guard ejecute la especificaci&oacute;n nos dir&aacute; que no puede encontrar el campo de texto del email en la p&aacute;gina de recuperaci&oacute;n de contrase&ntilde;a.</p>
+
+<pre class="terminal">  1) PasswordResets emails user when requesting password reset
+     Failure/Error: fill_in &quot;Email&quot;, :with =&gt; user.email
+     Capybara::ElementNotFound:
+       cannot fill in, no text field, text area or password field with id, name, or label &#x27;Email&#x27; found</pre>
+
+<p>Cambiemos para esto el c&oacute;digo por defecto en la vista de recuperaci&oacute;n de clave con un formulario que tenga los campos y botones apropiados.</p>
+
+<p class="codeFilePath">/app/views/password_resets/new.html.erb</p>
+<pre class="ruby">&lt;%= form_tag password_resets_path, :method =&gt; :post do %&gt;
+  &lt;div class=&quot;field&quot;&gt;
+    &lt;%= label_tag :email %&gt;
+    &lt;%= text_field_tag :email, params[:email] %&gt;
+  &lt;/div&gt;
+  &lt;div class=&quot;actions&quot;&gt;&lt;%= submit_tag &quot;Reset Password&quot; %&gt;&lt;/div&gt;
+&lt;% end %&gt;</pre>
+
+<p>El siguiente error que vamos a ver se debe a que no hay acci&oacute;n <code>create</code> a la que enviar el formulario.</p>
+
+<pre class="terminal">  1) PasswordResets emails user when requesting password reset
+     Failure/Error: click_button &quot;Reset Password&quot;
+     AbstractController::ActionNotFound:
+       The action &#x27;create&#x27; could not be found for PasswordResetsController</pre>
+
+<p>Creemos esta accion en el controlador y hagamos que redirija a la p&aacute;gina principal.</p>
+
+
+<p class="codeFilePath">/app/controllers/password_resets_controller.rb</p>
+<pre class="ruby">class PasswordResetsController &lt; ApplicationController
+  def new
+  end
+  
+  def create
+    redirect_to :root
+  end
+
+end</pre>
+
+<p>Con esto ya deber&iacute;a pasar el test.</p>
+
+<pre class="terminal">Running: spec/controllers/password_resets_controller_spec.rb
+.
+
+Finished in 0.14507 seconds
+1 example, 0 failures</pre>
+
+<h3>Ampliando nuestros tests</h3>
+
+<p>Ahora que pasa la especificaci&oacute;n ya podemos ampliarla.  Queremos mostrar un mensaje <em>flash</em> despu&eacute;s de que se env&iacute;e el bot&oacute;n de  &ldquo;Reset Password&rdquo;, por lo que lo a&ntilde;adiremos a la especificaci&oacute;n.</p>
+
+<p class="codeFilePath">/spec/requests/password_resets_spec.rb</p>
+<pre class="ruby">require &#x27;spec_helper&#x27;
+
+describe &quot;PasswordResets&quot; do
+  it &quot;emails user when requesting password reset&quot; do
+    user = Factory(:user)
+    visit login_path
+    click_link &quot;password&quot;
+    fill_in &quot;Email&quot;, :with =&gt; user.email
+    click_button &quot;Reset Password&quot; 
+    page.should have_content(&quot;Email sent&quot;)
+  end
+end</pre> 
+
+<p>Por supuesto esto falla porque todav&iacute;a no hemos escrito el c&oacute;digo para mostrar el mensaje.  Modifiquemos el controlador para que lo haga.</p>
+
+<p class="codeFilePath">/app/controllers/password_resets.rb</p>
+<pre class="ruby">class PasswordResetsController &lt; ApplicationController
+  def new
+  end
+  
+  def create
+    redirect_to :root, :notice =&gt; &quot;Email sent with password reset instructions.&quot;
+  end
+
+end</pre>
+
+<p>Con esto la especificaci&oacute;n ya pasa aunque realmente no estemos enviando  correo alguno.  Podemos hacer un test utilizando <code>ActionMailer::Base::deliveries</code> para recuperar el listado de los correos enviados y luego invocar <code>last</code> para ver el &uacute;ltimo.   Como haremos esto con frecuencia en nuestros tests vamos a crear un nuevo fichero en <code>/spec/support/</code> para escribir el c&oacute;digo necesario para recuperar el &uacute;ltimo correo enviado.</p>
+
+<p class="codeFilePath">/spec/support/mailer_macros.rb</p>
+<pre class="ruby">module MailerMacros
+  def last_email
+    ActionMailer::Base.deliveries.last
+  end
+  
+  def reset_email
+    ActionMailer::Base.deliveries = []
+  end
+end</pre>
+
+<p>Tambi&eacute;n hemos escrito un m&eacute;todo <code>reset_email</code> al que invocaremos cada vez que empecemos un test.  Con esto se borrar&aacute; la lista para que el test empiece en un estado claramente definido.</p>
+
+<p>Para poder usar estos nuevos m&eacute;todos en nuestros tests tenemos que invocar a <code>config.include</code> en <code>spec_helper</code>, para incluir este nuevo m&oacute;dulo.</p>
+
+
+<p class="codeFilePath">/spec/spec_helper.rb</p>
+<pre class="ruby"># This file is copied to spec/ when you run &#x27;rails generate rspec:install&#x27;
+ENV[&quot;RAILS_ENV&quot;] ||= &#x27;test&#x27;
+require File.expand_path(&quot;../../config/environment&quot;, __FILE__)
+require &#x27;rspec/rails&#x27;
+require &#x27;capybara/rspec&#x27;
+
+# Requires supporting ruby files with custom matchers and macros, etc,
+# in spec/support/ and its subdirectories.
+Dir[Rails.root.join(&quot;spec/support/**/*.rb&quot;)].each {|f| require f}
+
+RSpec.configure do |config|
+  config.mock_with :rspec
+  config.use_transactional_fixtures = true
+  config.include(MailerMacros)
+  config.before(:each) { reset_email }
+end</pre>
+
+<p>Tras incluir esta macro usaremos <code>config.before(:each)</code> para invocar a <code>reset_email</code> de forma que se borre la lista de correos enviados antes de cada test.</p>
+
+<p>Ya podemos usar nuestro nuevo m&eacute;todo <code>last_email</code> en nuestra especificaci&oacute;n, y comprobar que el &uacute;ltimo correo enviado fue enviado a nuestro usuario.</p>
+
+<p class="codeFilePath">/spec/requests/password_resets_spec.rb</p>
+<pre class="ruby">require &#x27;spec_helper&#x27;
+
+describe &quot;PasswordResets&quot; do
+  it &quot;emails user when requesting password reset&quot; do
+    user = Factory(:user)
+    visit login_path
+    click_link &quot;password&quot;
+    fill_in &quot;Email&quot;, :with =&gt; user.email
+    click_button &quot;Reset Password&quot; 
+    page.should have_content(&quot;Email sent&quot;)
+    last_email.to.should include(user.email)
+  end
+end</pre> 
+
+<p>Por supuesto esto fallar&aacute;, porque <code>last_email</code> ser&aacute; nulo ya que no hemos escrito el c&oacute;digo necesario para enviar el correo.  Generemos el <em>mailer</em> necesario.</p>
+
+<pre class="terminal">$ rails g mailer user_mailer password_reset</pre>
+
+<p>El generador escribe su propio fichero de especificaci&oacute;n que veremos m&aacute;s adelante.  Por ahora lo comentaremos todo para poder concentrarnos en nuestra propia especificaci&oacute;n.  Modificaremos el <em>mailer</em> para que env&iacute;e el correo a la direcci&oacute;n del usuario y establezca el asunto apropiado.</p>
+
+<p class="codeFilePath">/app/mailers/user_mailer.rb</p>
+<pre class="ruby">class UserMailer &lt; ActionMailer::Base
+  default from: &quot;from@example.com&quot;
+
+  def password_reset(user)
+    @user = user
+    mail :to =&gt; user.email, :subject =&gt; &quot;Password Reset&quot;
+  end
+end</pre>
+
+<p>En <code>PasswordResetsController</code> modificaremos la acci&oacute;n <code>create</code> para que encuentre al <code>User</code> por la direcci&oacute;n de correo introducida en el formulario y env&iacute;e el correo.</p>
+
+<p class="codeFilePath">/app/controllers/password_resets_controller.rb</p>
+<pre class="ruby">def create
+  user = User.find_by_email(params[:email])
+  UserMailer.password_reset(user).deliver
+  redirect_to :root, :notice =&gt; &quot;Email sent with password &crarr;
+   reset instructions.&quot;
+end</pre>
+
+<p>Con esto la especificaci&oacute;n ya pasa.</p>
+
+<h3>Gesti&oacute;n del <em>token</em> de recuperaci&oacute;n de contrase&ntilde;a</h3>
+
+<p>La funcionalidad dista mucho de estar completa, a pesar de que todas nuestras especificaciones pasan.  Deber&iacute;amos generar un <em>token</em> de reinicio de contrase&ntilde;a e incluirlo en el correo.  Estos detalles no tienen por qu&eacute; estar dentro de la especificaci&oacute;n, es mejor que todo quede m&aacute;s sencillo y s&oacute;lo definir el flujo general de la petici&oacute;n, en este caso comprobaremos que el usuario recibe un correo de recuperaci&oacute;n de contrase&ntilde;a cuando lo solicitan.  Podemos escribir m&aacute;s adelante tests de m&aacute;s bajo nivel para verificar los detalles.</p>
+
+<p>Ahora que tenemos un test que pasa es buen momento de mirar el c&oacute;digo para ver qu&eacute; podemos llevar del controlador al modelo.  Un buen ejemplo es la l&iacute;nea de c&oacute;digo de  <code>PasswordResetsController</code> que env&iacute;a el correo.  Podemos llevarla a  un m&eacute;todo llamado <code>send_password_reset</code> del modelo <code>User</code>.</p>
+
+<p class="codeFilePath">/app/controllers/password_resets_controller.rb</p>
+<pre class="ruby">def create
+  user = User.find_by_email(params[:email])
+  user.send_password_reset
+  redirect_to :root, :notice =&gt; &quot;Email sent with password &crarr;
+   reset instructions.&quot;
+end</pre>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  attr_accessible :email, :password, :password_confirmation
+  has_secure_password
+  validates_presence_of :password, :on =&gt; :create
+  
+  def send_password_reset
+    UserMailer.password_reset(self).deliver
+  end
+end</pre>
+
+<p>Llegados a este punto debemos comprobar que los tests siguen pasando, tras lo cual continuamos.  Lo siguiente que haremos ser&aacute; escribir m&aacute;s tests para afinar el modelo <code>User</code>.  Crearemos un fichero de especificaciones en <code>/spec/models/user.rb</code>.</p>
+
+<p class="codeFilePath">/spec/models/user_spec.rb</p>
+<pre class="ruby">require &#x27;spec_helper&#x27;
+
+describe User do
+  describe &quot;#send_password_reset&quot; do
+    let(:user) { Factory(:user) }
+    
+    it &quot;generates a unique password_reset_token each time&quot; do
+      user.send_password_reset
+      last_token = user.password_reset_token
+      user.send_password_reset
+      user.password_reset_token.should_not eq(last_token)
+    end
+    
+    it &quot;saves the time the password reset was sent&quot; do
+      user.send_password_reset
+      user.reload.password_reset_sent_at.should be_present
+    end
+    
+    it &quot;delivers email to user&quot; do
+      user.send_password_reset
+      last_email.to.should include (user.email)
+    end
+  end
+end</pre>
+
+<p>Queremos que el m&eacute;todo <code>send_password_reset</code> haga tres cosas.  Deber&iacute;a crear un <em>token</em> &uacute;nico de recuperaci&oacute;n de contrase&ntilde;a, guardar la hora en la que se ha generado el <em>token</em> y enviar un correo al usuario.  Ya hace lo &uacute;ltimo; as&iacute; que modificaremos el m&eacute;todo para que haga las otras dos cosas.  N&oacute;tese que antes de las especificaciones invocamos a <code>let(:user)</code>.  Esto asigna <code>user</code> a un nuevo usuario de la factoria antes de la ejecuci&oacute;n de cada test.</p>
+
+<p>Dos de las especificaciones fallan porque no tenemos <code>password_reset_token</code> ni <code>password_reset_sent_at</code> en la tabla de usuarios.  As&iacute; que ejecutaremos la migraci&oacute;n.</p>
+
+<pre class="terminal">$ rails g migration add_password_reset_to_users password_reset_token:string password_reset_sent_at:datetime</pre>
+
+<p>Con la nueva base de datos se seguir&aacute; produciendo un error, pero por otro motivo.</p>
+
+<pre class="terminal">Failures:
+
+  1) User#send_password_reset generates a unique password_reset_token each time
+     Failure/Error: user.password_reset_token.should_not eq(last_token)
+       
+       expected nil not to equal nil
+       
+       (compared using ==)
+     # ./spec/models/user_spec.rb:11:in `block (3 levels) in &lt;top (required)&gt;&#x27;
+
+  2) User#send_password_reset saves the time the password reset was sent
+     Failure/Error: user.reload.password_reset_sent_at.should be_present
+       expected present? to return true, got false
+     # ./spec/models/user_spec.rb:16:in `block (3 levels) in &lt;top (required)&gt;&#x27;</pre>
+       
+<p>El fallo ahora se debe a que <code>password_reset_token</code> y <code>password_reset_sent_at</code> no reciben ning&uacute;n valor en el m&eacute;todo <code>sent_password_reset</code>, lo que puede corregirse escribiendo un nuevo m&eacute;todo <code>generate_token</code> que genera un <em>token</em> &uacute;nico, y luego modificar <code>send_password_reset</code> para que invoque a <code>generate_token</code>, establezca la hora de <code>password_reset_sent_at</code> y luego guarde el usuario.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  attr_accessible :email, :password, :password_confirmation
+  has_secure_password
+  validates_presence_of :password, :on =&gt; :create
+  
+  def send_password_reset
+    generate_token(:password_reset_token)
+    self.password_reset_sent_at = Time.zone.now
+    save!
+    UserMailer.password_reset(self).deliver
+  end
+  
+  def generate_token(column)
+    begin
+      self[column] = SecureRandom.urlsafe_base64
+    end while User.exists?(column =&gt; self[column])
+  end
+end</pre>
+
+<p>Ya vuelven a pasar los tests.</p>
+
+<h3>Tests del correo</h3>
+
+<p>Ahora que ya pasan los tests volveremos a la especificaci&oacute;n del <em>mailer</em> que se gener&oacute; en su momento y que dejamos comentada.  Tendremos que modificar el c&oacute;digo por defecto para poder probar que nuestro <em>mailer</em> funciona correctamente.  En la especifiaci&oacute;n creamos un nuevo usuario a partir de la factor&iacute;a pero esta vez le estableceremos un <code>password_reset_token</code> para el usuario.  Luego modificaremos la l&iacute;nea que crea el correo de forma que se pase el usuario en la llamada a &lt;ocde&gt;UserMailer.password_reset&lt;/ocde&gt;.</p>
+
+<p>El test comprobar&aacute; que se env&iacute;a el correo a la direcci&oacute;n correcta y que el cuerpo contiene el enlace correcto con el <em>token</em> de recuperaci&oacute;n de contrase&ntilde;a del usuario.</p>
+
+<p class="codeFilePath">/spec/mailers/user_mailer_spec.rb</p>
+<pre class="ruby">require &quot;spec_helper&quot;
+
+describe UserMailer do
+  describe &quot;password_reset&quot; do
+    let(:user) { Factory(:user, :password_reset_token =&gt; &quot;anything&quot;) }
+    let(:mail) { UserMailer.password_reset(user) }
+
+    it &quot;sends user password reset url&quot; do
+      mail.subject.should eq(&quot;Password Reset&quot;)
+      mail.to.should eq([user.email])
+      mail.from.should eq([&quot;from@example.com&quot;])
+    end
+
+    it &quot;renders the body&quot; do
+      mail.body.encoded.should match(edit_password_reset_path(user.password_reset_token))
+    end
+  end
+end</pre>
+
+<p>Nuestra especificaci&oacute;n falla porque el cuerpo del correo no contiene el enlace correcto.  A&ntilde;ad&aacute;moslo.</p>
+
+<p class="codeFilePath">/app/views/user_mailer/password_reset.text.erb</p>
+<pre class="ruby">To reset your password, click the URL below.
+
+&lt;%= edit_password_reset_url(@user.password_reset_token) %&gt;
+
+If you did not request your password to be reset just ignore this email and your password will continue to stay the same.</pre>
+
+<p>Las especificaciones siguen fallando porque falta la opci&oacute;n <code>:host</code> para enviar el correo.  Podemos a&ntilde;adir la siguiente l&iacute;nea en nuestra configuraci&oacute;n de tests:</p>
+
+<p class="codeFilePath">/config/environments/test.rb</p>
+<pre class="ruby">config.action_mailer.default_url_options = { :host =&gt; &quot;www.example.com&quot; }</pre>
+
+<p>M&aacute;s adelante tendremos que poner este valor en nuestros entornos de desarrollo y producci&oacute;n pero de momento no lo haremos.</p>
+
+<p>Ya vuelven a pasar todos los tests y por cierto, si alguna vez tenemos que decirle a Guard que vuelva a ejecutar todos los tests podemos hacerlo con  <code>CTRL+\</code>.</p>
+
+<h3>Otros escenarios de test</h3>
+
+<p>Lo m&aacute;s dif&iacute;cil en el desarrollo dirigido por tests es echarse a andar y acostumbrarse a tener un flujo de trabajo.  Una vez que estemos en marcha es f&aacute;cil copiar y pegar tests para a&ntilde;adir las variaciones necesarias para probar el resto de la funcionalidad.  Por ejemplo supongamos que tenemos el caso en que un usunario introduce una direcci&oacute;n de correo incorrecta y solicita una recuperaci&oacute;n de contrase&ntilde;a.  Podemos copiar muy f&aacute;cilmente la especificaci&oacute;n existente en  <code>password_resets_spec.rb</code> para crear una nueva que compruebe exactamente ese escenario.</p>
+
+<p class="codeFilePath">/spec/requests/password_resets_spec.rb</p>
+<pre class="ruby">it &quot;does not email invalid user when requesting password reset&quot; do
+  visit login_path
+  click_link &quot;password&quot;
+  fill_in &quot;Email&quot;, :with =&gt; &quot;madeupuser@example.com&quot;
+  click_button &quot;Reset Password&quot; 
+  page.should have_content(&quot;Email sent&quot;)
+  last_email.should be_nil
+end</pre>
+
+<p>El test falla porque el c&oacute;digo del controlador falla si no encuentra un usuario.  Corrij&aacute;moslo.</p>
+
+<p class="codeFilePath">/app/controllers/password_resets_controller.rb</p>
+<pre class="ruby">def create
+  user = User.find_by_email(params[:email])
+  user.send_password_reset if user?
+  redirect_to :root, :notice =&gt; &quot;Email sent with password &crarr; 
+    reset instructions.&quot;
+end</pre>
+
+<p>Con esto se satisface el caso de test y ya vuelve a pasar toda la <em>suite</em>.</p>
+
+<p>Una vez que tengamos establecidos estos patrones de test es f&aacute;cil a&ntilde;adir la funcionalidad para restablecer la clave por ejemplo comprobando que el <em>token</em> no ha expirado, o casos de prueba en el que el <em>token</em> recibido es incorrecto, etc&eacute;tera.  En el c&oacute;digo fuente disponible para este episodio que est&aacute; en  <a href="https://github.com/ryanb/railscasts-episodes">la p&aacute;gina de Github de Ryan Bates</a> hay m&aacute;s tests escritos.</p>
+
+<p>Con esto terminamos  este episodio en el que hemos escrito tests que comprueban el buen funcionamiento de la recuperaci&oacute;n de contrase&ntilde;as.  La escritura de tests puede llegar a ser algo controvertida porque hay diversas opiniones sobre la mejor manera de escribir tests en aplicaciones Rails.  Lo m&aacute;s importante de todo es que, independientemente del m&eacute;todo que escojamos, escribamos tests en nuestras aplicaciones.</p>

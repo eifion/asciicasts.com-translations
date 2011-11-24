@@ -1,0 +1,257 @@
+<p>先週末Rails 3.1 HackFestが開催され、参加者の努力によってRails 3.1のリリース候補第5版が公開されました。このリリースには、マウント可能なエンジン(mountable engine)に関する重要な修正が含まれています。マウント可能なエンジンによって、任意のRailsアプリケーションを別のアプリケーションにマウントできるようになることについて、今回のエピソードで紹介します。</p>
+
+<p><a href="http://railscasts.com/episodes/104-exception-notifications">エピソード104</a>で紹介したException Notificationプラグインを覚えている方もいるでしょう。このプラグインをアプリケーションに追加することで、アプリケーションが発生させた例外をデータベースに蓄積することができました。ユーザインタフェースも提供され、例外の情報を表示することができました。今回のエピソードでは、このプラグインをマウント可能なエンジンとして作り直します。</p>
+
+<h3>はじめに</h3>
+
+<p>エンジンを書き始める前に、Rails 3.1 RC5以降を使用していることを確認してください。次のコマンドを実行することで、最新版をインストールできます。</p>
+
+<pre class="terminal">$ gem install rails --pre</pre>
+
+<p>Railsの正しいバージョンがインストールされたら、マウント可能なエンジンの作成に取りかかりましょう。すでにあるRailsアプリケーションの中から作業する必要はありません。エンジンの作成は、新規のRailsアプリケーションの作成と同じで、<code>rails new</code>コマンドを使用します。唯一の違いは、<code>rails plugin new</code>を実行するという点です。今回作成するアプリケーションは例外を扱うため、<code>uhoh</code>という名前にします。マウント可能なエンジンとして作成するために<code>--mountable</code>オプションを指定します。</p>
+
+<pre class="terminal">$ rails plugin new uhoh --mountable</pre>
+
+<p>エンジンのディレクトリ構造は、通常のRailsアプリケーションの構造にとても似ていて、別のアプリケーションの中にマウントされるように設計されているという点を除けば基本的には同じであるといえます。しかし実際にはいくつかの違いがあります。アプリケーション全体で、名前空間を設定されたディレクトリがいくつかあります。例えば、<code>application_controller</code>ファイルが<code>/app/controllers/uhoh</code>の下にあり、同じく <code>assets</code>、<code>helpers</code>、<code>views</code>の各ディレクトリの下にそれぞれファイルが置かれます。これによって、組み込まれる先のアプリケーションからエンジンのコードをきれいに切り離すことができます。<code>assets</code>ディレクトリを持つということは、エンジンがアプリケーションにマウントされるときに<code>public</code>ディレクトリにいちいちアセットをコピーしなくてもいいということです。asset pipelineによってこれらはすべて自動処理されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/712/original/E277I01.png" width="800" height="502" alt="エンジンのディレクトリ配置"/>
+</div>
+
+<p>アセットもディレクトリに名前空間を設定されるので、それらにリンクする場合はそのディレクトリを介する必要があります。これはlayoutsディレクトリにも当てはまりますが、RC5にはバグがあるようで、<code>application.html.erb</code>ファイルが2つ存在します。ここでは、<code>uhoh</code>ディレクトリの外にある方を削除しましょう。もう一つの方を見てみると、その中のアセットへの参照はすべて<code>uhoh</code>ディレクトリが追加で含まれています。画像やその他のアセットにリンクする場合は、その名前空間を含む必要があります。</p>
+
+
+<p class="codeFilePath">/app/views/layouts/uhoh/application.html.erb</p>
+<pre class="ruby">&lt;!DOCTYPE html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;title&gt;Uhoh&lt;/title&gt;
+  &lt;%= stylesheet_link_tag    "uhoh/application" %&gt;
+  &lt;%= javascript_include_tag "uhoh/application" %&gt;
+  &lt;%= csrf_meta_tags %&gt;
+&lt;/head&gt;
+&lt;body&gt;
+
+&lt;%= yield %&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;</pre>
+
+<p>次にエンジンのキーとなるファイルのひとつである、<code>/lib/uhoh</code>ディレクトリ内の<code>engine.rb</code>を見てみましょう。</p>
+
+<p class="codeFilePath">/lib/uhoh/engine.rb</p>
+<pre class="ruby">module Uhoh
+  class Engine &lt; Rails::Engine
+    isolate_namespace Uhoh
+  end
+end</pre>
+
+<p>これは<code>Rails::Engine</code>から継承されたクラスで、設定をカスタマイズする場合の中心的な場所になります。このクラスには最初から<code>isolate_namespace</code>の呼び出しがあり、つまりこれはエンジンが独立した単位として扱われ、マウント先のアプリケーションを気にしなくてもいいということを意味します。</p>
+
+<p>エンジンについてのこの簡単な概要で紹介する最後のパーツは、<code>/test</code>ディレクトリです。<code>/test/dummy</code>の下にはRailsアプリケーションがあり、それを見ると、アプリケーションにマウントされたエンジンがどういう仕組みで動くかを理解することができます。アプリケーションの<code>config</code>ディレクトリには<code>routes.rb</code>ファイルが含まれています。ここには<code>mount</code>の呼び出しが含まれ、 パスに割り当てられているエンジンのメインクラスが渡されます。</p>
+
+<p class="codeFilePath">/test/dummy/config/routes.rb</p>
+<pre class="ruby">Rails.application.routes.draw do
+  mount Uhoh::Engine =&gt; "/uhoh"
+end</pre>
+
+<p>この、適当なパスを決めてマウントする作業は、エンジンをアプリケーションにインストールした場合には誰かが行う必要があります。これはRackアプリケーションなので、/uhohに対してリクエストが来た場合は<code>Engine</code>クラスに渡されます。この行を、エンジンのREADMEファイルのインストール手順の中に含むようにすれば、アプリケーションのユーザがルートファイルの中でどのようにマウントすればいいかがわかって便利でしょう。</p>
+
+<p>このダミーのアプリケーションは<code>/test</code>ディレクトリ内にありますが、手作業でテストを行うときにも役に立つでしょう。エンジンのディレクトリから<code>rails s</code>を実行すると、ダミーのアプリケーションが起動します。<a href="http://localhost:3000/uhoh/"><code>http://localhost:3000/uhoh/</code></a>にアクセスすると、その場所にマウントされているエンジンの画面に導かれます。しかしそのページにアクセスすると、対応するコントローラを記述していないため、エラーが表示されます。</p>
+
+<p>そこで、エンジン内に<code>failures</code>コントローラを作成します。通常のRailsアプリケーションの場合と同じように、Railsのジェネレータを使用できます。エンジン内にいても、コントローラを名前空間で指定する必要はなく、すべて自動処理されます。</p> 
+
+<pre class="terminal">$ rails g controller failures index</pre>
+
+<p>このコマンドによって、通常のコントローラの場合と同じファイルが作成されます。ただ違うのは、すべてが正しいディレクトリに名前空間を指定されます。次にエンジンのルートを修正して、コントローラのindexアクションに<code>root</code>のルート(route)を設定します。この修正は、エンジンの<code>/config/routes.rb</code>ファイルに対して行われます。</p>
+
+<p class="codeFilePath">/config/routes.rb</p>
+<pre class="ruby">Uhoh::Engine.routes.draw do
+  root :to =&gt; "failures#index"
+end</pre>
+
+<p><a href="http://localhost:3000/uhoh/"><code>http://localhost:3000/uhoh/</code></a>にアクセスすると、アクションのビューが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/713/original/E277I02.png" width="801" height="280" alt="indexビューのデフォルトのテキスト"/>
+</div>
+
+<p>このページでは、発生した例外のリストを表示します。この情報を保存するためのモデルが必要なので、メッセージフィールドを持った簡単な<code>Failure</code>モデルを作成します。</p>
+
+<pre class="terminal">$ rails g model failure message:text</pre>
+
+<p>モデルを作成しましたが、どうやってマイグレーションを実行すればいいのでしょうか。エンジン内では通常通り<code>rake db:migrate</code>を実行でき、すべては期待通りに動作します。しかし、誰かがエンジンをアプリケーション内にマウントしようとするとうまく行きません。これは<code>rake</code>コマンドが、マウントされたエンジン内のmigrationを認識できないからです。エンジンのユーザに対して、代わりに<code>rake uhoh:install:migrations</code>を実行するように指示する必要があります。このコマンドによって、エンジンのmigrationをアプリケーションにコピーした上で<code>rake db:migrate</code>を通常のように実行できるようになります。この情報をエンジンのインストール手順書に入れておくのがいいでしょう。</p>
+
+<p>Railsコンソールも、エンジン内で期待通りに機能します。これを使って<code>Failure</code>の例を作成してみます。</p>
+
+<pre class="ruby">Uhoh::Failure.create!(:message =&gt; "hello world!")</pre>
+
+<p>クラスを参照する場合はつねに名前空間を含まなくてはいけない点に留意してください。Failureのレコードができたので、それを<code>FailuresController</code>の<code>index</code>アクションで表示します。 </p>
+
+<p class="codeFilePath">/app/controllers/uhoh/failures_controller.rb</p>
+<pre class="ruby">module Uhoh
+  class FailuresController &lt; ApplicationController
+    def index
+      @failures = Failure.all
+    end
+  end
+end</pre>
+
+<p>コンソールにいる場合と違い、ここではすでに<code>Uhoh</code>モジュールの中にいるので、名前空間を指定する必要はありません。ビューで、すべてのfailureをループするコードを書き、リスト表示させます。</p>
+
+<p class="codeFilePath">/app/views/uhoh/failures/index.html.erb</p>
+<pre class="ruby">&lt;h1&gt;Failures&lt;/h1&gt;
+&lt;ul&gt;
+  &lt;% for failure in @failures %&gt;
+  &lt;li&gt;&lt;%= failure.message %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;</pre>
+
+<p>ページを再度読み込むと、追加した<code>Failure</code>が表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/714/original/E277I03.png" width="801" height="280" alt="failureがリスト表示される"/>
+</div>
+
+<h3>例外をとらえる</h3>
+
+<p>これでfailureを記録するメソッドができたので、エンジンが組み込まれたアプリケーションが例外を発生させたときにfailureを生成するメソッドを作成します。これをテストするためにダミーアプリケーションで例外をシミュレートする方法が必要です。このためにエンジンのdummyアプリケーションのディレクトリに移動し、<code>simulate</code>というコントローラとその中に<code>failure</code>アクションを作成します。</p>
+
+<p class="terminal">$ rails g controller simulate failure</p>
+
+<p>アクション内で例外を発生させます。</p>
+
+<p class="codeFilePath">/test/dummy/app/controllers/simulate_controller.rb</p>
+<pre class="ruby">class SimulateController &lt; ApplicationController
+  def failure
+    raise "Simulating an exception"
+  end
+end</pre>
+
+<p>ブラウザでそのアクションにアクセスすると、期待通りに例外が表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/715/original/E277I04.png" width="800" height="420" alt="ブラウザに例外が表示される"/>
+</div>
+
+<p>ここでエンジンを修正して、例外の発生を待機するようにして、発生したら新規の<code>Failure</code>作成させるようにします。この解決策は効率的ではないかもしれませんが、シンプルで今回の場合には十分役に立ちます。ではまずエンジン内に初期化ファイル(initializer)を作成します。エンジンのconfigディレクトリには<code>initializers</code>ディレクトリはありませんが、自分で作成してそこに初期化ファイルを置くと認識されます。このディレクトリに<code>exception_handler.rb</code>というファイルを作成します。</p>
+
+
+<p class="codeFilePath">/app/config/exception_handler.rb</p>
+<pre class="ruby">ActiveSupport::Notifications.subscribe ↵
+  "process_action.action_controller" do ↵
+  |name, start, finish, id, payload|
+  if payload[:exception]
+    name, message = *payload[:exception]
+    Uhoh::Failure.create!(:message =&gt; message)
+  end
+end</pre>
+
+<p>このファイルで、notificationを購読設定します(notificationについてはエピソード249[<a href="http://railscasts.com/episodes/249-notifications-in-rails-3">動画を見る</a>, <a href="http://asciicasts.com/episodes/249-notifications-in-rails-3">読む</a>]で詳しく解説しています)。対象は、アクションが処理されたときに通知してくれるnotificationです。アクションが処理されたら、<code>payload</code>に例外が含まれるかどうかをチェックします。もし含まれていたら例外が発生したということで、そのメッセージを新規の<code>Failure</code>に保存します。</p>
+
+<p>これをテストする前にサーバを再起動します。そして再度<a href="http://localhost:3000/simulate/failure"><code>http://localhost:3000/simulate/failure</code></a>にアクセスして例外を発生させます。例外が表示されたら、<a href="http://localhost:3000/uhoh"><code>http://localhost:3000/uhoh</code></a>にアクセスしてそれを見ることができます。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/716/original/E277I05.png" width="800" height="420" alt="新しい例外がリストに表示される"/>
+</div>
+
+<h3>エンジンでURLを扱う</h3>
+
+<p>エンジン内で使用するURLヘルパーは、そのエンジン向けのURLを生成します。例えばfailuresの<code>index</code>ページからroot URLへのリンクを追加すると、このリンクはエンジンのroot URLを指定していて、組み込まれた先のアプリケーションのrootではありません。</p>
+
+<p class="codeFilePath">/app/views/uhoh/failures/index.html.erb</p>
+<pre class="ruby">&lt;p&gt;&lt;%= link_to "Failures", root_url %&gt;&lt;/p&gt;</pre>
+
+<p>このリンクは<a href="http://localhost:3000/uhoh"><code>http://localhost:3000/uhoh</code></a>を指しますが、これはエンジンのroot URLです。これは、リンクがあるのと同じページです。というのもroot URLはルート設定で<code>FailuresController</code>の<code>index</code>アクションを指すように定義されているからです。アプリケーション自体へのリンクを作成するには、次のように<code>main_app</code>のURLヘルパーを呼び出します。</p>
+
+<p class="codeFilePath">/app/views/uhoh/failures/index.html.erb</p>
+<pre class="ruby">&lt;p&gt;&lt;%= link_to "Failures", root_url %&gt;&lt;/p&gt;
+&lt;p&gt;&lt;%= link_to "Simulate Failure", main_app.simulate_failure_path %&gt;&lt;/p&gt;</pre>
+  
+<p>これによってアプリケーションのSimulate Failureページへのリンクが<a href="http://localhost:3000/simulate/failure"><code>http://localhost:3000/simulate/failure</code></a>に作成されます。</p> 
+
+<p>これの反対で、アプリケーションからエンジンにリンクを設定したい場合はどうすればいいでしょうか? まず最初にすることは、アプリケーションのルートファイルを修正して、エンジンをマウントしてそれに<code>:as</code>オプションで名前を与えます。</p>
+
+<p class="codeFilePath">/test/dummy/config/routes.rb</p>
+<pre class="ruby">Rails.application.routes.draw do
+
+  get "simulate/failure"
+
+  mount Uhoh::Engine =&gt; "/uhoh", :as =&gt; "uhoh_engine"
+end</pre>
+
+<p>これで、<code>uhoh_engine</code>のメソッドとして呼び出すことで、エンジンのURLヘルパーにアクセスできます。これを実際に見てみるために、failureアクションを一時的に修正して、例外を発生させる代わりにエンジンのroot URLにリダイレクトします。</p>
+
+<p class="codeFilePath">/test/dummy/app/controllers/simulate_controller.rb</p>
+<pre class="ruby">class SimulateController &lt; ApplicationController
+  def failure
+    redirect_to uhoh_engine.root_url
+  end
+end</pre>
+
+<p><a href="http://localhost:3000/simulate/failure"><code>http://localhost:3000/simulate/failure</code></a>にアクセスすると、engineヘルパーを使ってエンジンのURLにリダイレクトするように設定しているため、<a href="http://localhost:3000/uhoh"><code>http://localhost:3000/uhoh</code></a>にリダイレクトされます。これも、エンジンのREADMEファイルで言及しておくべき機能でしょう。</p>
+
+<p>これでエンジンの機能はほぼ出来上がりましたが、failureを表示するリストが質素なので、アセットを使って少し味付けします。まず画像を追加します。あらかじめ適当な画像を見つけて<code>/app/assets/images/uhoh</code>ディレクトリに置いてあります。それをページに追加するために、他の画像と同じように<code>image_tag</code>を使うことができます。</p>
+
+<p class="codeFilePath">/app/views/uhoh/failures/index.html.erb</p>
+<pre class="ruby">&lt;%= image_tag "uhoh/alert.png" %&gt;
+&lt;h1&gt;Failures&lt;/h1&gt;
+&lt;ul&gt;
+  &lt;% for failure in @failures %&gt;
+  &lt;li&gt;&lt;%= failure.message %&gt;&lt;/li&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;&lt;%= link_to "Failures", root_url %&gt;&lt;/p&gt;
+&lt;p&gt;&lt;%= link_to "Simulate Failure", ↵
+  main_app.simulate_failure_path %&gt;&lt;/p&gt;</pre>
+  
+<p>CSSも少し設定します。SASSとCoffeeScriptは、デフォルトではエンジンでは利用できませんが、依存関係として追加することができます。<code>failures.css</code>ファイルにCSSを追加すると、自動的にincludeされます。</p>
+
+<p class="codeFilePath">/app/assets/stylesheets/uhoh/failures.css</p>
+<pre class="css">html, body {
+  background-color: #DDD;
+  font-family: Verdana;
+}
+
+body {
+  padding: 20px 200px;
+}
+
+img {
+  display: block;
+  margin: 0 auto;
+}
+
+a {
+  color: #000;
+}
+
+ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+li {
+  background-color: #FFF;
+  margin-bottom: 10px;
+  padding: 5px 10px;
+}</pre>
+
+<p>JavaScriptも同じです。<code>failures.js</code>ファイルに記述されたコードは自動的にincludeされます。</p>
+
+<p class="codeFilePath">/app/assets/javascripts/uhoh/failures.js</p>
+<pre class="javascript">$(function() {
+  $("li").click(function() {
+    $(this).slideUp();
+  });
+});</pre>
+
+<p>ここでページを再度読み込むと、見た目はずっとよくなってクリックして例外を隠すことができるようになり、JavaScriptが有効になったことがわかります。</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/717/original/E277I06.png" width="799" height="436" alt="CSSとJavaScriptが適用されたfailureページ"/>
+</div>
+
+<p>今回のエピソードは以上です。マウント可能なエンジンはRails 3.1の優れた新機能なので、一度見てみることをお勧めします。</p>

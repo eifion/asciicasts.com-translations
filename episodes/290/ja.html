@@ -1,0 +1,292 @@
+<p>Webデベロッパーであれば、SOAP APIと通信しなくてはいけないという状況に遭遇することもあるでしょう。そのようなときにはシンプルなRubyコードから複雑な.NETやJavaアプリケーションとのやり取りが必要になります。ありがたいことに、この基本的にあまり楽しくない作業を助けてくれるツールがあります。<a href="http://savonrb.com/">Savon</a>はDaniel HarringtonによるRuby gemで、SOAP APIと通信するための優れたRubyインタフェースを提供します。今回のエピソードでは、このツールの仕組みを紹介します。</p>
+
+<h3>Zipコードのルックアップ</h3>
+
+<p>下の画面はZipコードの入力を受け付ける簡単なフォームを持つアプリケーションのページです。ここでユーザがZipコードを入れると情報が返されるようにしたいと思います。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/786/original/E290I01.png" width="800" height="388" alt="Zipコード参照アプリケーション"/>
+</div>
+
+<p>ご覧のとおり、アプリケーションはまだ動作しません。情報を入れるための場所は作りましたが、この情報を得るためには外部Webサービスと通信しなくてはいけないので、何も表示されていません。この情報を<a href="http://www.webservicex.net/ws/default.aspx">WebserviceX.NETのWebサイト</a>から取得することにします。このサイトにはSOAP APIがあり、多くの有用な情報を提供しています。株価、為替、天気など多くの情報がありますが、今回はZipコードに関する情報を取得するのに使用します。サイトの<a href="http://www.webservicex.net/ws/WSDetails.aspx?WSID=42&amp;CATID=7">このページ</a>のフォームから、Webサービスをテストすることができます。有効なZipコードをフォームに入力すると、そのZipコードに関するデータを含んだXMLが返されます。例えば90210と入力すると、次のようなレスポンスを得ます。</p>
+
+
+
+
+
+``` xml
+
+<NewDataSet>
+  <Table>
+    <CITY>Beverly Hills</CITY>
+    <STATE>CA</STATE>
+    <ZIP>90210</ZIP>
+    <AREA_CODE>310</AREA_CODE>
+    <TIME_ZONE>P</TIME_ZONE>
+  </Table>
+</NewDataSet>
+
+```
+
+
+
+<h3>soapUIを使用してSOAP呼び出しをテストする</h3>
+
+<p>アプリケーションですぐにSOAP APIを使い始める前に、それが期待通りの動作をすることを確認するためにすこし実験をしてみるのがいいでしょう。そのために役に立つツールとして、Webサービスをテストするための<a href="http://www.eviware.com/soapUI/soapui-products-overview.html">soapUI</a>というJavaアプリケーションを使います。インストールが完了したら、起動して新規プロジェクトを作成します。するとダイアログボックスが表示され、まずWSDL URLを聞かれます。先に見たページにこの情報があります。入力するURLは<code>http://www.webservicex.net/uszip.asmx?WSDL</code>です。</p>
+
+<p>WSDLは設計図のようなもので、そのURLから利用可能なアクションがわかります。soapUIにWSDL URLを入力すると、アクションのリストが表示されます。GetInfoByZipアクションを展開して表示される“Request 1”フィールドをクリックすると、リクエストを行うのに必要なXMLが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/787/original/E290I02.png" width="812" height="434" alt="soapUIで表示されたリクエストXML"/>
+</div>
+
+<p>これが、Railsアプリケーションで使用するSavonと比較するためにsoapUIから取得しなくてはいけない情報です。<code>&lt;web:USZip&gt;</code>要素内の?を実際のZipコードに変更して緑の矢印をクリックするとXML レスポンスが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/788/original/E290I03.png" width="812" height="434" alt="soapUIのレスポンスXML"/>
+</div>
+
+<h3>Savonを利用する</h3>
+
+<p>SOAPリクエストをテストする手段を得たので、アプリケーションでSavonを利用するための準備をします。gemのインストールは通常の方法で、Gemfileにgemを追加してbundleを実行します。
+</p>
+
+
+
+``` /Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.1.1'
+gem 'sqlite3'
+
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~> 3.1.4'
+  gem 'coffee-rails', '~> 3.1.1'
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+gem 'savon'
+```
+
+
+
+<p>Savonの利用イメージをつかむために、まずコンソールで試してみます。まず最初に新規にSavon::Clientを作成して、通信したいURLを渡します。</p>
+
+
+
+``` terminal
+> client = Savon::Client.new("http://www.webservicex.net/uszip.asmx?WSDL")
+```
+
+
+
+<p>追加の設定を行いたい場合はここでブロックを渡すこともできますが、今回の目的にはこれで十分です。次にアクションのリストを取得します。</p>
+
+
+
+``` terminal
+> client.wsdl.soap_actions
+HTTPI executes HTTP GET using the net_http adapter => [:get_info_by_zip, :get_info_by_city, :get_info_by_state, :get_info_by_area_code]
+```
+    
+
+    
+<p>返されたアクションの一つが、まさに探していたものです。(Savonが名称を<code>GetInfoByZip</code>からよりRubyらしい<code>get_info_by_zip</code>に変更していることに注意してください。)</p>
+
+<p>呼び出したいアクションを指定して<code>client.request</code>を呼び出し、リクエストを行います。オプションの1つ目の引数として名前空間も渡します。soapUI が生成したXMLを見ると、<code>web</code>名前空間が使われているので、これを渡します。最後にいくつかオプションを追加します。ここでもブロックを使うこともできますが、その代わりに<code>body</code>オプションを渡します。このオプションはハッシュをとり、ここでXMLリクエストで見たパラメータを渡します。soapUIではZipコードが<code>&lt;web:USZip&gt;</code>要素に渡されました。すでに名前空間を指定したので、あとはZipコードを<code>us_zip</code>として渡すだけです。(ここでもSavonがパラメータ名を小文字に変更しています。)</p>
+
+
+
+``` terminal
+> client.request :web, :get_info_by_zip, body: { us_zip: "90210" }
+```
+
+
+
+<p>このリクエストから大量のレスポンスが表示されます。通常これは開発用ログファイルに記録されるので、SOAP呼び出しをデバッグする場合はそこを見てリクエストとレスポンスを確認できます。レスポンスの重要な部分はリクエストXMLとレスポンスXMLで、レスポンスを見てみると期待する情報が含まれていません。</p>
+
+
+
+``` xml
+<?xml version="1.0" encoding="UTF-8"?>
+  <soap:Envelope 
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Body>
+    <GetInfoByZIPResponse xmlns="http://www.webserviceX.NET" />
+  </soap:Body>
+</soap:Envelope>
+```
+
+
+
+<p>リクエストに何か問題があるようです。この場合の問題は、パラメータのus_zip codeのcase(大文字/小文字の区別)が正しくないという点です。パラメータは大文字/小文字が区別され、リクエストXMLの対応する部分を見るとUSZipパラメータがusZipとなっています。</p>
+
+
+
+``` xml
+<web:usZip>90210</web:usZip>
+```
+
+
+
+<p>デフォルトではSavonはパラメータにはlowerCamelCaseを使用しますが、その名前をシンボルではなく文字列として渡せば大文字がそのままになります。</p>
+
+
+
+``` terminal
+> client.request :web, :get_info_by_zip, body: { "USZip" => "90210" }
+```  
+
+  
+
+<p>リクエストを送ると今度はレスポンスに必要な情報が含まれています。</p>
+
+
+
+``` xml
+
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Body>
+    <GetInfoByZIPResponse xmlns="http://www.webserviceX.NET">
+      <GetInfoByZIPResult>
+        <NewDataSet xmlns="">
+          <Table>
+            <CITY>Beverly Hills</CITY>
+            <STATE>CA</STATE>
+            <ZIP>90210</ZIP>
+            <AREA_CODE>310</AREA_CODE>
+            <TIME_ZONE>P</TIME_ZONE>
+          </Table>
+        </NewDataSet>
+      </GetInfoByZIPResult>
+    </GetInfoByZIPResponse>
+  </soap:Body>
+</soap:Envelope>
+
+```
+
+
+
+<p>最後に送ったコマンドがレスポンスオブジェクトを返すので、コンソールでこれを変数に割り当てます。そのためにはアンダースコアを使って最後に返されたものを取得します。</p>
+
+
+
+``` terminal
+> response = _
+```
+
+
+
+<p>このオブジェクトでto_hashを呼び出すと、簡単に解析できるRubyハッシュを取得できます。</p>
+
+
+
+``` terminal
+> response.to_hash
+ => {:get_info_by_zip_response=> {:get_info_by_zip_result=> {:new_data_set=>{:table=> {:city=>"Beverly Hills", :state=>"CA", :zip=>"90210", :area_code=>"310", :time_zone=>"P"}, :@xmlns=>""}}, :@xmlns=>"http://www.webserviceX.NET"}} 
+```   
+   
+   
+   
+<p>必要な情報はハッシュ内で深くネストされていますが、比較的簡単に操作できます。Savonが動作する仕組みがわかったので、Railsアプリケーションで使用します。</p> 
+
+<h3>RailsアプリケーションでSavonを使う</h3>
+
+<p>今回のアプリケーションには<code>ZipCode</code>モデルクラスがあります。これはActiveRecordモデルではなく、単にいくつかの属性と、Zipコードをとるinitializerを持つだけの Rubyクラスです。</p>
+
+
+
+``` /app/models/zip_code.rb
+class ZipCode
+  attr_reader :state, :city, :area_code, :time_zone
+
+  def initialize(zip)
+  end
+end
+```
+
+
+
+<p>新しい<code>ZipCode</code>オブジェクトのインスタンスが作成されるときに、その属性にSOAP呼び出しからの値を設定します。クラスに追加するコードは、コンソールで実行したものに似ています。</p>
+
+
+
+```/app/models/zip_code.rb
+class ZipCode
+  attr_reader :state, :city, :area_code, :time_zone
+
+  def initialize(zip)
+    client = Savon::Client.new("http://www.webservicex.net/uszip.asmx?WSDL")
+    response = client.request :web, :get_info_by_zip, body: { "USZip" => zip }
+    data = response.to_hash[:get_info_by_zip_response][:get_info_by_zip_result][:new_data_set][:table]
+    @state = data[:state]
+    @city = data[:city]
+    @area_code = data[:area_code]
+    @time_zone = data[:time_zone]
+  end
+end
+```
+
+
+
+<p>このコードがリクエストを生成し、レスポンスに対して<code>to_hash</code>を呼び出します。そして深くネストされたハッシュに入り込み、クラスの属性を対応する部分に設定します。ではこれを試してみます。Zipコードを入力して「Lookup」をクリックすると、SOAP呼び出しが行われページに情報が表示されるので、コードは正しく動作しています。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/789/original/E290I04.png" width="800" height="388" alt="アプリケーションが結果を取得する"/>
+</div>
+
+<h3>エラー処理</h3>
+
+<p>コードを修正してエラーを処理できるようにする必要があります。現状では不正なZipコードを入力して情報を取得しようとすると、期待するような深くネストされたハッシュをレスポンスが持っていないため、アプリケーションが例外を発生させます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/801/original/E290I05.png" width="800" height="388" alt="Invalid Zip codes aren&rsquo;t handled correctly."/>
+</div>
+
+<p>このような場合のひとつの対処方法は、属性を設定する前にレスポンスが成功したかどうかをチェックするという方法です。これをチェックするためには<code>response.success?</code>を使うことができて有用なのですが、今回の場合は不正なZipコードが入力されたときもレスポンスが成功となってしまい役に立ちません。問題はレスポンスが空になってしまうという点です。</p>
+
+<p>これに対処するためには、Savonの<code>to_array</code>メソッドを<code>to_hash</code>の代わりに使うことができます。これに対してハッシュキーのリストを渡すことができ、探しているネストが存在しない場合に例外を投げる代わりに空の配列を返します。配列が返されるので、欲しい結果を得るために<code>first</code>を呼び出します。結果がない場合<code>nil</code>が返されるので、属性を設定する前にそれをチェックします。</p>
+
+
+
+``` /app/models/zip_code.rb
+def initialize(zip)
+  client = Savon::Client.new("http://www.webservicex.net/uszip.asmx?WSDL")
+  response = client.request :web, :get_info_by_zip, body: { "USZip" => zip }
+  if response.success?
+    data = response.to_array(:get_info_by_zip_response, :get_info_by_zip_result, :new_data_set, :table).first
+    if data
+      @state = data[:state]
+      @city = data[:city]
+      @area_code = data[:area_code]
+      @time_zone = data[:time_zone]
+    end
+  end
+end
+```
+
+
+
+<p>ここでページをリロードすると、例外でなく空の結果が表示されます。</p>
+
+<p>不正なZipコードが入力されたときにエラーメッセージを表示させるためにできることはまだありますが、ここでは省略します。</p>
+
+<h3>最後のチップ</h3>
+
+今回のエピソードを終わる前にいくつかチップを紹介します。タグ名の最初の文字が大文字であるために多くのコードを書かなくてはいけない状況になった場合は、アプリケーションにこのコード行を追加して、タグにデフォルトのlowerCamelCaseではなくUpperCamelCaseを使わせるようにします。通信先のAPIがこの種の大文字の処理をしている場合、それは引数で文字列の代わりにシンボルを使うことができるということを意味します。
+
+``` ruby 
+Gyoku.convert_symbols_to :camelcase 
+```
+
+<p>WSDLファイルは頻繁に更新されることはないので、毎回ダウンロードするのではなくキャッシュするのがいいでしょう。WSDLファイルをダウンロードしてローカルに保存した上で、新規に<code>Savon::Client</code>を作成したときにはwebを参照するのではなくファイル参照を使うようにします。</p> 
+
+<p>Savonに関する今回のエピソードは以上です。Savonを使うとSOAP APIとの通信がとても簡単にできます。アプリケーションで利用する場合、一緒に利用すると便利な関連するプロジェクトがいくつかあります。一つ目は<a href="https://github.com/rubiii/savon_model">Savon Model</a>です。これは、クラス内にクライアントを設定するための便利なDSLを提供してくれるので、今回の<code>ZipCode</code>クラス内でもうまく機能してコードをきれいに整理できるようになるでしょう。</p>
+
+<p>もう一つは<a href="https://github.com/rubiii/savon_spec">Savon Spec</a>です。これは、SOAPリクエストを模擬することでテスト作業を助けてくれます。これは低レベルのテストには使えますが、全体的なテストには高レベルな統合テストで実際のAPIへのアクセスもテストするべきでしょう。この方法により、APIが変更されたらテストが失敗します。<a href="https://github.com/myronmarston/vcr">VCR gem</a>がこの問題に非常に役に立ちます。VCRについての詳細を今週のProエピソードで紹介しています。</p>

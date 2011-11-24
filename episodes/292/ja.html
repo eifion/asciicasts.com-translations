@@ -1,0 +1,342 @@
+<p>Railsデベロッパーとして、自分の開発環境が本番稼働環境とかなり違っていることに気づくときがあるでしょう。実際、本番稼働時とは違うOSでアプリケーションを開発するということもめずらしいことではありません。またRailsアプリケーションでは、別のマシンに再現するのが不可能なほど複雑な依存関係を持っているという場合もあります。</p>
+
+<p><a href="http://vagrantup.com/">Vagrant</a>はこのような場合に役に立ちます。仮想環境を設定・管理して自分のOSの中に小さなlinuxディストリビューションを構築できます。自分のアプリケーションとその依存関係を仮想マシンで実行でき、またそれを他の人と共有できるよう持ち運べる形式のパッケージに保存することができます。</p> 
+
+<p>すべてのRailsデベロッパーにVagrantを試してみることをお勧めします。少なくともそれによって、Railsアプリケーションのための本番稼働環境の構築方法をよりよく理解できるようになるでしょう。またステージング環境を構築したり、アプリケーションの開発時に使用することもできます。</p>
+
+<h3>VirtualBoxとVagrantをインストールする</h3>
+
+<p>VagrantはOracleの<a href="https://www.virtualbox.org/">VirtualBox</a>を利用します。もしマシンにインストールされていなければ、まずそこから始めます。VirtualBoxはWindows/OS X/Linuxで利用可能なので、いずれのOSを使用していても環境にあったバージョンを見つけることができます。VirtualBoxがインストールされればVagrantをインストール可能になります。VagrantはRuby gemで、このコマンドを実行してインストールを行います。</p>
+
+
+
+``` terminal
+$ gem install vagrant
+```
+
+
+
+<h3>Boxを追加する</h3>
+
+<p>次のステップでは仮想マシンを追加します。それをVagrantではboxと呼びます。<a href="http://www.vagrantbox.es/">Vagrantbox.es</a>では多くの種類のboxが公開されていて、ダウンロードが可能です。ここではubuntu <a href="http://www.vagrantbox.es/1/">lucid 32</a>を使うことにします。これはVagrantサイトで提供されていてUbuntu Linux 10.04をベースにしています。boxをインストールするには、boxの名前とURLを指定して<code>vagrant box add</code>を実行します。</p>
+
+
+
+``` terminal  
+$ vagrant box add lucid32 http://files.vagrantup.com/lucid32.box
+[vagrant] Downloading with Vagrant::Downloaders::HTTP...
+[vagrant] Downloading box: http://files.vagrantup.com/lucid32.box
+[vagrant] Extracting box...
+[vagrant] Verifying box...
+[vagrant] Cleaning up downloaded box...
+```
+
+
+
+<p>boxはかなり大きい(約数100MB)場合があり、ダウンロードに時間がかかります。もしすでにダウンロード済であれば代わりにファイルURLを渡してローカルのboxファイルからインストールできます。</p>
+
+<p>boxがダウンロードされてインストールされたら、それを用いて仮想環境を構築できます。Vagrantでは通常これをプロジェクトごとに設定します。まだ設定していないのでここで新規に作成し、そのディレクトリに移動します。</p>
+
+
+
+``` terminal
+$ rails new todo
+$ cd todo
+```
+
+
+
+<p>このアプリケーションとその依存関係専用に仮想マシンを作成するために、<code>vagrant init</code>を実行し、使用したいboxの名前を渡します。</p>
+
+
+
+``` terminal
+$ vagrant init lucid32
+      create  Vagrantfile
+```      
+
+      
+
+<p>このコマンドは<code>Vagrantfile</code>というファイルを作成するだけです。このファイルには、このアプリケーションのVagrant boxの設定情報が含まれています。デフォルトでは、どのboxを使用するかを指定する行を除いて、情報はすべてコメントアウトされています。</p>
+
+
+
+```/Vagrantfile
+Vagrant::Config.run do |config|
+  # All Vagrant configuration is done here. The most common configuration
+  # options are documented and commented below. For a complete reference,
+  # please see the online documentation at vagrantup.com.
+
+  # Every Vagrant virtual environment requires a box to build off of.
+  config.vm.box = "lucid32"
+
+  # Rest of file omitted.
+end
+```
+
+
+
+<p>その他にここで設定する多くのオプションがあるので、ここで少し時間をとってすべてに目を通しておくことをお勧めします。</p> 
+
+<h3>Vagrant仮想マシンを起動する</h3>
+
+<p>さあそれではマジックの時間です。<code>vagrant up</code>を実行すると、仮想マシンが構築されます。これは数分かかりますが、起動が完了するとSSHでアクセスすることができます。</p>
+
+
+
+``` terminal
+$ vagrant ssh
+```
+
+
+
+<p>これでUbuntu仮想マシンの中に入りました。これはほとんど何もインストールされていないかなりbarebones setupですが、何点か注記すべき点があります。ひとつは、<code>vagrant</code>という名前のユーザが作成されて、我々は今そのユーザでログインしています。もうひとつは、我々は<code>sudo</code>権限を持っておりパスワードを入力する必要がなく、これはローカルの開発マシンにとっては好都合です。Vagrantはまた<code>/vagrant</code>にshared direcotryを設定しますが、それはRailsアプリケーションがあるディレクトリをpointしています。</p>
+
+<h3>アプリケーションの依存関係をインストールする</h3>
+
+<p>ここでの目的は仮想マシン上にRailsアプリケーションを稼働させることなので、依存関係を設定する必要があります。まずRubyとSqliteがインストールされていることを確認します。仮想マシンには、すでにRuby 1.8.7がインストールされていますが、これは<a href="http://wiki.opscode.com/display/chef/Home">Chef</a>レシピを実行するためです。</p>
+
+<p>Chefはサーバ環境設定を自動化する方法を提供します。Ruby 1.9とSqliteをインストールするために必要なChefレシピを適用すると自動でインストールが行われます。ChefはVagrantとnicely統合できますが、それ自体で一つの大きな話題なので、将来のエピソードで独立して扱おうと思います。その代わりに今回はChefを使わずにサーバを構築することにします。それによって全体がどのように動作するかについてよりよく理解できるでしょう。</p>
+
+<p>まず<code>apt-get</code>を使ってインストールされたソフトウェアが最新であることを確認します。</p>
+
+
+
+``` terminal
+$ sudo apt-get update
+```
+
+
+
+<p>それが終わったら、必要なソフトウェア(build-essential, ZLib, Git, Sqlite3)をインストールします。</p>
+
+
+
+``` terminal
+$ sudo apt-get install build-essential zlib1g-dev git-core sqlite3 libsqlite3-dev
+```  
+
+  
+
+<p>後残っているインストールが必要なものはRuby 1.9です。これをゼロからインストールするか、あるいはRVMを使用できますが、今回はより新しい<a href="https://github.com/sstephenson/rbenv">rbenv</a>というツールを使います。Vagrantを使うことの意義は、このような今まで使ったことがないツールを安全な環境で実験的に試せるというところにあります。もしうまくいかなければ仮想マシンを削除して最初からやり直すことができます。</p>
+
+<p>仮想マシンにrbenvをインストールするためには、rbenvの<a href="https://github.com/sstephenson/rbenv/blob/master/README.md">README</a>のセクション2.1にあるコマンドを実行するだけです。まず最初にリポジトリを<code>~/.rbenv</code>にcloneします。</p>
+
+
+
+``` terminal
+$ cd
+$ git clone git://github.com/sstephenson/rbenv.git .rbenv
+```
+
+
+
+<p>次にrbenvの<code>bin</code>ディレクトリをPATHに追加し、initコマンドを.bash_profileに追加します。</p>
+
+
+
+``` terminal
+$ echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> ~/.bash_profile
+$ echo 'eval "$(rbenv init -)"' >> ~/.bash_profile
+```
+
+
+
+<p>これらの変更を有効化させるために.bash_profileを再読み込みします。</p>
+
+
+
+``` terminal
+$ source .bash_profile 
+```
+
+
+
+<p>これで<code>rbenv</code>コマンドを使用してRubyのバージョンを管理できるようになりましたが、まだRubyをインストールする方法がありません。このために<a href="https://github.com/sstephenson/ruby-build">Ruby Build</a>を使用します。必要な作業としては、Gitリポジトリをcloneしてそのディレクトリに移動し、インストールスクリプトを実行します。</p>
+
+
+
+``` terminal
+$ git clone https://github.com/sstephenson/ruby-build.git
+$ cd ruby-build
+$ sudo ./install.sh
+```
+
+
+
+<p>これでrbenvを使ってRuby 1.9.2の最新バージョンをインストールできます。</p>
+
+
+
+``` terminal
+$ rbenv install 1.9.2-p290
+```
+
+
+
+<p>これを実行するとしばらく時間がかかりますが、それが終わるとRuby 1.9.2のコンパイルに成功しているはずです。このようにバイナリファイルを修正した場合はいつも<code>rbenv rehash</code>を実行し、次のコマンドを実行して1.9.2 を仮想マシン上のRubyのデフォルトバージョンに設定します。</p>
+
+
+
+``` terminal
+$ rbenv global 1.9.2-p290
+```
+
+
+
+<p>Rubyのバージョンを確認してみると、期待どおり1.9.2となっています。</p>
+
+
+
+``` terminal
+$ ruby -v
+ruby 1.9.2p290 (2011-07-09 revision 32553) [i686-linux]
+```
+
+
+
+<h3>Railsアプリケーションのインストール</h3>
+
+<p>Rubyの正しいバージョンがインストールできたので、次はRailsアプリケーションを動かす作業に移ります。アプリケーションのあるshared directoryに移動して依存関係をインストールするためにbundleを実行すると、一つ問題が発生します。</p>
+
+
+
+``` terminal
+vagrant@lucid32:~$ cd /vagrant/
+vagrant@lucid32:/vagrant$ bundle
+bundle: command not found
+```
+
+
+
+<p>これを解決するためにはBundler gemをインストールします。</p>
+
+
+
+``` terminal
+$ gem install bundler
+```
+
+
+
+<p>このgemをインストールしたら<code>rbenv rehash</code>を再度実行して<code>bundle</code>の実行ファイルを設定します。これで<code>bundle</code>を実行してアプリケーションのgemをインストールできるようになりました。</p>
+
+<p>アプリケーションのサーバを起動しようとすると、JavaScriptランタイムが見つからないというエラーが返されます。Rails 3.1の実行にはJavaScriptが必要で、一方Ubuntuにはデフォルトでは入っていないため、このエラーは当然です。これを簡単に解決するためには、仮想マシン上でアプリケーションのGemfileに<a href="https://github.com/cowboyd/therubyracer">therubyracer</a>というgemを追加しbundleを実行します。これによってV8 JavaScriptエンジンがインストールされます。</p>
+
+
+
+``` /Gemfile
+gem 'therubyracer'
+```
+
+
+
+<p>gemがインストールされたので再度サーバを起動してみます。</p>
+
+
+
+``` terminal
+$ bundle exec rails s
+```
+
+
+
+<p>今回は起動が成功し、アプリケーションが3000番ポートで稼働してます。しかし仮想マシン上で動作しているため、ブラウザで確認することはできません。Vagrantに対してポートを我々のマシンにforwardするよう指示する必要があり、そのためにプロジェクトの<code>Vagrantfile</code>を修正します。次の行を非コメント化し、名前をよりふさわしいものに修正して、仮想マシンの3000番ポートをローカルマシンの同じポート番号にforwardするように指示します。</p>
+
+
+
+``` /Vagrantfile
+config.vm.forward_port "rails", 3000, 3000
+```
+
+
+
+<p>設定を変更したら、仮想マシン内で<code>exit</code>を実行してVagrantシェルから抜け出し、<code>vagrant reload</code>を実行して仮想マシンをリロードします。これによって仮想マシンがシャットダウンし、その後リロードされます。リロードされたら、再度SSHでその中に入れます。</p>
+
+
+
+``` terminal
+$ vagrant ssh
+```
+
+
+
+<p>仮想マシン上で、アプリケーションのディレクトリに移動し、再度サーバを起動します。</p>
+
+
+
+``` terminal
+vagrant@lucid32:~$ cd /vagrant
+vagrant@lucid32:/vagrant$ bundle exec rails s
+```
+
+
+
+<p>これによりサーバが再起動しますが、今回はローカルマシンからアクセスできます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/794/original/E292I01.png" width="829" height="361" alt="Vagrantの環境で実行中のアプリケーション"/>
+</div>
+
+<p>Rails applicationがVagrantと共有されるようになったので、おこなった修正はすべて仮想マシン内に反映されます。<code>/public/index.html</code>のデフォルトページを修正してからリロードすると修正をすぐに確認することができます。</p>
+
+
+
+```/public/index.html
+
+<h2>You’re riding Ruby on Rails on Vagrant!</h2>
+
+```
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/795/original/E292I02.png" width="829" height="361" alt="おこなった変更は、ページをリロードするとすべて反映されています。"/>
+</div>
+
+<h3>その他のVagrantコマンド</h3>
+
+<p>Vagrantには仮想マシンの管理に役立ついくつかのコマンドがあります。仮想マシンの現在の状態を確認するためには<code>vagrant status</code>を実行します。</p>
+
+
+
+``` terminal
+$ vagrant status
+Current VM states:
+
+default                  running
+
+The VM is running. To stop this VM, you can run `vagrant halt` to
+shut it down forcefully, or you can run `vagrant suspend` to simply
+suspend the virtual machine. In either case, to restart it again,
+simply run `vagrant up`.
+```
+
+
+
+<p>マシンの一時停止とそこからの復帰には<code>suspend</code>と<code>resume</code>を使用します。</p>
+
+
+
+``` terminal
+$ vagrant suspend
+[default] Saving VM state and suspending execution...
+
+$ vagrant resume
+[default] Resuming suspended VM...
+[default] Booting VM...
+[default] Waiting for VM to boot. This can take a few minutes.
+[default] VM booted and ready for use!
+```
+
+
+
+<p>仮想マシンを完全にシャットダウンするには<code>vagrant halt</code>を使用します。マシンを再度起動するには<code>vagrant up</code>を使用します。</p>
+
+<p>もっとも便利なコマンドのひとつは<code>vagrant package</code>です。このコマンドは現在の状態の仮想マシンを<code>package.box</code>という名前のファイルにパッケージ化します。そうすることによって、このファイルを配布して構築した仮想マシンを簡単に再現することができます。<code>vagrant destroy</code>を使って仮想マシンを削除したら、最初に仮想マシンを構築するときに使用したのと同じ<code>vagrant box add</code>コマンドで復元できます。</p>
+
+<p>Vagrantについての今回のエピソードは以上です。Railsアプリケーションの実行時の依存関係を取り込んで仮想環境に隔離した状態で構築してくれる優れたソリューションです。実行環境をパッケージ化して他の開発者に配布したり、本番稼働サーバをシミュレートしたり、ステージングサーバとしても使用できます。VagrantはChefと合わせて使うとさらに便利なツールになりますが、それについては将来のエピソードで取り上げることにします。</p>
+
+
+
+
+
+

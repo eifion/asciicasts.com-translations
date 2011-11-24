@@ -1,0 +1,73 @@
+<p>Hace poco Ryan Bates pregunt&oacute; en Twitter cu&aacute;l es la mejor manera de gestionar los procesos en segundo plano que necesita una aplicaci&oacute;n Rails en desarrollo.  En este episodio veremos la soluci&oacute;n que le propusieron varios lectores:  <a href="https://github.com/ddollar/foreman">Foreman</a>.</p>
+
+<p>Por ejemplo, para la aplicaci&oacute;n  <a href="https://github.com/ryanb/govsgo">GoVsGo</a> en desarrollo tenemos que lanzar de antemano varios procesos en segundo plano: Beanstalkd, un proceso <code>script/worker</code> y un servidor Faye.  Tenemos que arrancar todo esto cada vez que queramos usar la aplicaci&oacute;n en desarrollo, as&iacute; que ser&iacute;a mucho mejor si hubiera una forma m&aacute;s sencilla de gestionar todos estos procesos.  Aqu&iacute; es donde interviene Foreman.</p>
+
+<h3>Foreman: instalaci&oacute;n y uso</h3>
+
+<p>Foreman se instala como es habitual con el resto de gemas.</p>
+
+<pre class="terminal">$ gem install foreman</pre>
+
+<p>Foreman lee los procesos que tiene que gestionar a partir de un fichero llamado <code>Procfile</code> en el directorio de la aplicaci&oacute;n Rails, por lo que primero tenemos que crearlo.  Cada proceso se define mediante un nombre y dos puntos, as&iacute; como la ruta del proceso que queremos ejecutar, por lo que para nuestros tres procesos haremos lo siguiente:</p>
+
+<p class="codeFilePath">/Procfile</p>
+<pre class="ruby">beanstalk:  beanstalkd
+worker:     ./script/worker
+faye:       rackup faye.ru -s thin -E production</pre>
+
+<p>Una vez que hayamos escrito nuestro <code>Procfile</code> podemos comprobar su validez ejecutando <code>foreman check</code>.</p>
+
+<pre class="terminal">$ foreman check
+valid procfile detected (beanstalk, worker, faye)</pre>
+
+<p>Si utilizamos tabuladores en lugar de espacios para separar el nombre del ejecutable propiamente dicho veremos mensajes de aviso, lo que tendremos que tener en cuenta.  Si el fichero es v&aacute;lido podemos ejecutar Foreman con la orden <code>foreman start</code>.</p>
+
+<pre class="terminal">$ foreman start
+20:06:35 beanstalk.1  | started with pid 23140
+20:06:35 worker.1     | started with pid 23141
+20:06:35 faye.1       | started with pid 23143
+20:06:36 faye.1       | &gt;&gt; Thin web server (v1.2.11 codename Bat-Shit Crazy)
+20:06:36 faye.1       | &gt;&gt; Maximum connections set to 1024
+20:06:36 faye.1       | &gt;&gt; Listening on 0.0.0.0:9292, CTRL+C to stop
+20:06:38 worker.1     | [2011-08-29 20:06:38 +0100] Working 1 jobs: [ Game.move ]</pre>
+
+<p>Se ejecutar&aacute;n cada uno de los procesos que hayamos especificado en el <code>Procfile</code> y su salida aparecer&aacute; en el terminal.  Si escribimos <code>CTRL+C</code> en la ventana de terminal, se parar&aacute;n todos los procesos.</p>
+
+<p>Foreman dispone de una  <a href="http://ddollar.github.com/foreman/">p&aacute;gina de manual</a> que documenta su funcionalidad y las opciones disponibles, algunas de las cuales veremos a continuaci&oacute;n.  Si s&oacute;lo queremos arrancar un proceso podemos pasar su nombre directamente:</p>
+
+<pre class="terminal">$ foreman start faye
+20:35:41 faye.1       | started with pid 23322
+20:35:41 faye.1       | &gt;&gt; Thin web server (v1.2.11 codename Bat-Shit Crazy)
+20:35:41 faye.1       | &gt;&gt; Maximum connections set to 1024
+20:35:41 faye.1       | &gt;&gt; Listening on 0.0.0.0:9292, CTRL+C to stop</pre>
+
+<p>Si queremos arrancar m&uacute;ltiples copias de un proceso podemos hacerlo con <code>-c</code>.  Por ejemplo, podemos ejecutar cuatro procesos en segundo plano de Beanstalk con <code>foreman start -c worker=4</code>.</p>
+
+
+<pre class="terminal">$ foreman start -c worker=4
+20:39:41 beanstalk.1  | started with pid 23366
+20:39:41 worker.1     | started with pid 23368
+20:39:41 worker.2     | started with pid 23370
+20:39:41 worker.3     | started with pid 23372
+20:39:41 worker.4     | started with pid 23374
+20:39:41 faye.1       | started with pid 23376
+20:39:42 faye.1       | &gt;&gt; Thin web server (v1.2.11 codename Bat-Shit Crazy)
+20:39:42 faye.1       | &gt;&gt; Maximum connections set to 1024
+20:39:42 faye.1       | &gt;&gt; Listening on 0.0.0.0:9292, CTRL+C to stop
+20:39:46 worker.3     | [2011-08-29 20:39:46 +0100] Working 1 jobs: [ Game.move ]
+20:39:46 worker.1     | [2011-08-29 20:39:46 +0100] Working 1 jobs: [ Game.move ]
+20:39:46 worker.2     | [2011-08-29 20:39:46 +0100] Working 1 jobs: [ Game.move ]
+20:39:47 worker.4     | [2011-08-29 20:39:47 +0100] Working 1 jobs: [ Game.move ]</pre>
+
+<h3>Exportaci&oacute;n de procesos</h3>
+
+<p>Con Foreman disponemos de una orden <code>export</code> que es &uacute;til para exportar el listado de procesos en formato <code>inittab</code> o <code>upstart</code> que podemos utilizar en un servidor de producci&oacute;n.  Si ejecutamos <code>foreman export upstart .</code> Foreman escribir&aacute; los ficheros de configuraci&oacute;n necesarios para upstart en el directorio actual.  Si le echamos un vistazo veremos que ejecutar&aacute; la orden necesaria para arrancar un servidor <code>beanstalkd</code>, gestionando correctamente los <em>logs</em>.</p>
+
+<p class="codeFilePath">/govsgo-beanstalk-1.conf</p>
+<pre class="terminal">start on starting govsgo-beanstalk
+stop on stopping govsgo-beanstalk
+respawn
+
+exec su - govsgo -c &#x27;cd /Users/eifion/govsgo; export PORT=5000; beanstalkd &gt;&gt; /var/log/govsgo/beanstalk-1.log 2&gt;&amp;1&#x27;</pre>
+
+<p>Con esto concluye nuestro episodio sobre Foreman.  Ha sido un poco m&aacute;s breve que de costumbre, pero porque Foreman es una soluci&oacute;n muy sencilla para un problema espec&iacute;fico que hace bien su trabajo.  Si tenemos que arrancar varios procesos para que nuestra aplicaci&oacute;n Rails se encuentre operativa en modo de desarrollo, Foreman es una opci&oacute;n que merece la pena considerar.</p>

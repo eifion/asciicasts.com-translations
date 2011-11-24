@@ -1,0 +1,232 @@
+<p>pjaxはChris WanstrathによるjQueryプラグインで、HTTPリクエストでページ全体を取得するのではなく、AJAXリクエストによってページの一部を簡単に更新できるようにします。デモページでどのように動作するかを見ることができます。デフォルトでは、このページにあるいずれかのリンクをクリックするとページ全体がリロードされます。これはページ上の時刻表示が変わることでわかります。チェックボックスをクリックしてpjaxを有効化すると、リンクをクリックしてもページ全体がリロードされることはなく時刻も更新されませんが、ページのメインセクションは変化します。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/803/original/E294I01.png" width="800" height="531" alt="pjaxのデモサイト"/>
+</div>
+
+<p>pjaxはpushStateを使用するのでユーザはAJAXリクエストがバックグラウンドで生成されていることに気づきません。pjaxがページを更新するごとにアドレスバーのURLが更新され、ページのタイトルが変わり、前のページがブラウザの履歴に追加されるので「戻る」ボタンが正しく機能します。pjaxはまた巧みに機能を縮退させます。ユーザのブラウザがpushStateをサポートしていないかJavaScriptを無効化していた場合、機能を落として従来のHTTPリクエストを発行します。</p>
+
+<h3>Railsアプリケーションにpjaxを統合する</h3>
+
+<p>Railsアプリケーションにpjaxを統合する方法はいくつかありますが、今回のエピソードではそのうちの2つを試してみます。対象にするアプリケーションを下に示します。商品のリストを表示していて、商品をクリックするとサイドバーが現れてその商品に関する情報を表示します。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/804/original/E294I02.png" width="799" height="531" alt="サイトに商品の情報が表示される"/>
+</div>
+
+<p>現状ではリンクをクリックするとページ全体がリロードされます。ページのどの程度が変わったかを示すために、レイアウトファイルとページのテンプレートの読み込み時に共に乱数を生成します。数字が両方変わった場合はページ全体がリロードされたことを意味しますが、今はその状態です。ここでpjaxを使用すると、変更しなくてはいけないページの一部のみが更新されます。</p>
+
+<p>David Heinemeier Hanssonによる<a href="https://github.com/rails/pjax_rails">pjax_rails</a>というgemがあり、Rails 3.1のアプリケーションにpjaxを追加する作業を簡単にしてくれます。今回のアプリケーションのニーズにぴったりフィットするわけではないですが、どのように動作するかを見るために取りあえず試してみましょう。インストールするためにpjax_rails gemを<code>/Gemfile</code>に追加し<code>bundle</code>コマンドを実行します。</p>
+
+``` /Gemfile 
+source 'http://rubygems.org' 
+gem 'rails', '3.1.1' 
+gem 'sqlite3' 
+# Gems used only for assets and not required 
+# in production environments by default. 
+group :assets do 
+  gem 'sass-rails', '~> 3.1.4' 
+  gem 'coffee-rails', '~> 3.1.1' 
+  gem 'uglifier', '>= 1.0.3' 
+end 
+gem 'jquery-rails' 
+gem 'pjax_rails' 
+```
+
+<p>Bundlerが終了したら<code>application.js</code>マニフェストファイルを修正して、 pjaxのJavaScriptをロードするようにします。</p>
+
+
+
+``` /assets/javascripts/application.js
+// This is a manifest file that'll be compiled into including all the files listed below.
+// Add new JavaScript/Coffee code in separate files in this directory and they'll automatically
+// be included in the compiled file accessible from http://example.com/assets/application.js
+// It's not advisable to add code directly here, but if you do, it'll appear at the bottom of the
+// the compiled file.
+//
+//= require jquery
+//= require jquery_ujs
+//= require pjax
+//= require_tree .
+```
+
+
+
+<p>最後にレイアウトファイルの<code>yield</code>の呼び出しを<code>data-pjax-container</code>属性がついたdivでラップします。</p>
+
+
+
+```/app/views/layouts/application.html.erb
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+    <title><%= content_for?(:title) ? content_for(:title) : "Store" %></title>
+    <%= stylesheet_link_tag    "application" %>
+    <%= javascript_include_tag "application" %>
+    <%= csrf_meta_tag %>
+  </head>
+  <body>
+    <div id="container">
+      <div class="layout_time">Layout random:  <strong><%= rand(900)+100 %></strong></div>
+      <% flash.each do |name, msg| %>
+        <%= content_tag :div, msg, :id => "flash_#{name}" %>
+      
+      <% end %>
+      <div data-pjax-container>
+      <%= yield %>
+      </div>
+    </div>
+  </body>
+</html>
+
+```
+
+
+
+<p>サーバを再起動してページをリロードすると、ベージのすべてのリンクでpjaxが有効になります。リンクをクリックすると、ページは全体がリロードされません。これは、テンプレートの乱数だけが変わることでわかります。これでほぼ目的の動作になりましたが、よく見るとリンクをクリックしたときにページのタイトルは変化していません。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/805/original/E294I03.png" width="799" height="411" alt="ページの他の部分が変わってもタイトルは変わらない"/>
+</div>
+
+<p>テンプレートに<code>title</code>タグを追加することでこれを修正できます。これは少しハッカー的な対応でページのHTMLはinvalidになってしまいますが、少なくとも目的は達成できました。</p>
+
+
+
+``` /app/views/index.html.erb
+
+<% content_for :title, @product ? @product.name : "Products" %>
+<title><%= yield (:title) %></title><!-- Rest of page omitted -->
+
+
+```
+
+
+
+<p>ここでページをリロードしてリンクのひとつをクリックするとタイトルが変わり、「戻る」ボタンと履歴は正しく動作するようになりました。ユーザの視点でいうと、動作はすべて以前と変わりませんが、速度は少し速くなった気がします。これはこれでよかったのですが、<code>pjax_rails</code> gemは少し強引なところがあります。デフォルトではページ上のすべてのリンクでpjaxが有効化されますが、これは今回のアプリケーションで求めているものではありません。また、リンクをクリックするとテンプレート全体が毎回更新され、更新されるページの部分を一部に限定する方法はありません。あるリンクのpjaxを無効にする方法はありますが、これを記録管理しなくてはいけなくなるのは面倒です。もしシンプルなアプリケーションでレイアウトファイルが変わらない場合は、pjax-railsが目的に合うかも知れません。</p>
+
+<p>Rackミドルウェアを利用してより柔軟に解決することも可能で、Gert Goetの<a href="https://github.com/eval/rack-pjax">rack-pjax</a> gemはまさにこの手法をとっています。ではアプリケーションのpjax_railsをrack-pjaxに置き換えてみましょう。まず<code>Gemfile</code>のpjax_railsをrack-pjaxに置き換え、再度<code>bundle</code>コマンドを実行します。</p>
+
+
+
+``` /Gemfile
+# gem 'pjax_rails'
+gem 'rack-pjax
+```
+
+
+
+<p>次に使用するRackミドルウェアをアプリケーションの設定ファイルに追加します。</p>
+
+
+
+``` /config/application.rb
+module Store
+  class Application < Rails::Application 
+    config.middleware.use Rack::Pjax
+    # Other config commands omitted
+  end
+end
+```
+
+
+
+<p>Rack-pjaxはjQueryプラグインが組み込まれていないので、これを別途インストールします。アプリケーションに<code>vendor/assets/javascripts</code>ディレクトリを作成し、<code>curl</code>を使って<code>jquery.pjax.js</code>ファイルをダウンロードします。</p>
+
+
+
+``` terminal
+$ mkdir -p vendor/assets/javascripts
+$ curl https://raw.github.com/defunkt/jquery-pjax/master/jquery.pjax.js > vendor/assets/javascripts/jquery.pjax.js
+``` 
+
+ 
+
+<p>このファイルをアプリケーションのJavaScript manifestファイルにインクルードしなくてはいけないので、pjax_railsのJavaScriptファイルをこのファイルと置き換えます。</p>
+
+
+
+``` /assets/javascripts/application.js
+//= require jquery
+//= require jquery_ujs
+//= require jquery.pjax
+//= require_tree .
+```
+
+
+
+<p>pjax_railsとは違い、rack-pjaxはデフォルトではすべてのリンクでpjaxを有効化しないので、有効化させるものを個別に指定する必要があります。これらはすべて<code>ProductsController</code>内のページにあるので、これをproductsのCoffeeScriptファイルで設定します。</p>
+
+
+
+```/app/assets/javascripts/products.js.coffee
+jQuery ->
+  $('.product a').pjax('[data-pjax-container]')
+```  
+
+  
+
+<p>このコードではまずDOMがロードしたことを確認した後に、有効化したいリンクを取得しています。今回の場合、<code>product</code>クラスのparent要素の中のすべてのリンクが該当します。それらに対して<code>pjax</code>を呼び出して、リンクがクリックされたときに何を更新するかを指定します。</p>
+
+<p>rack-pjaxでは<code>title</code>要素をオーバーライドする必要はないので、これを<code>index</code>テンプレートから削除します。ページをリロードすると前と同じように動作します。リンクをクリックするとテンプレートは更新されますがレイアウトはそのままで、テンプレートの乱数だけが更新されています。テンプレートでは指定されていないのですがレイアウトからは検知されるので、今度はタイトルも更新されています。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/806/original/E294I04.png" width="799" height="411" alt="タイトルが正しく更新される"/>
+</div>
+
+<p>これによる利点は、<code>data-pjax-container</code>要素をどこに移動させてもいいということです。もうレイアウトファイルの<code>yield</code>の呼び出しの近くに置く必要はありません。そこでこれを<code>index</code>テンプレート内に移動し、商品詳細セクション(商品の詳細情報を表示するセクション)をラップする形にします。</p>
+
+
+
+```/app/views/products/index.html.erb
+
+<% content_for :title, @product ? @product.name : "Products" %>
+
+<div class="template_time">Template random:  <strong><%= rand(900)+100 %></strong></div>
+
+<h1>Products</h1>
+
+<% for product in @products %>
+  <div class="product">
+    <h2>
+      <%= link_to product.name, :product_id => product %>
+      
+      <span class="price"><%= number_to_currency(product.price) %></span>
+    </h2>
+  </div>
+<% end %>
+
+<p><%= link_to "New Product", new_product_path %></p>
+
+<div data-pjax-container>
+  <% if @product %>
+  <div id="product_details">
+    <h3><%= @product.name %></h3>
+    <dl>
+      <dt>Price:</dt>
+      <dd><%= number_to_currency(@product.price) %></dd>
+      <dt>Released:</dt>
+      <dd><%= @product.released_at.strftime("%B %e, %Y") %></dd>
+      <dt>Category:</dt>
+      <dd><%= @product.category %></dd>
+    </dl>
+    <p class="actions">
+      <%= link_to "Edit", edit_product_path(@product) %>  |
+      
+      <%= link_to "Destroy", @product, method: :delete, confirm: "Are you sure?" %>
+    </p>
+  </div>
+  <% end %>
+</div>
+
+```
+
+
+
+<p>リンクをクリックするとサイドパネルだけが変わり、乱数はどちらも変わりません。</p>
+
+<p>このgemがどのように動作するかに興味があれば、ソースコードを見てみることをお勧めします。とてもシンプルで、わずか50行のRubyファイルひとつだけです。注意しなくてはいけないのは、rack-pjaxがどの部分をクライアントに返すかを決定する前に、サーバ側ではレイアウトとテンプレートの全体がレンダリングされるという点です。もしテンプレートのレンダリングが大きなパフォーマンス上の問題であれば、別のソリューションを検討した方がいいでしょう。ですが、ほとんどのアプリケーションではこれでうまくいくはずです。</p>
+
+<p>pjaxに関する今回のエピソードは以上です。シンプルなソリューションなので、もしアプリケーションのニーズに合うかもしれないと思ったら一見の価値があります。</p>

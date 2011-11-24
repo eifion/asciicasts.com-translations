@@ -1,0 +1,235 @@
+<p>There comes a time in every web developer&rsquo;s life when they have to communicate with a SOAP API; when simple Ruby code needs to talk with complex .Net and Java applications. Thankfully there&rsquo;s help for this potentially unpleasant task. <a href="http://savonrb.com/">Savon</a> is a Ruby gem written by Daniel Harrington that provides a nice Ruby interface for communicating with SOAP APIs. In this episode we&rsquo;ll show you how it works.</p>
+
+<h3>ZipCode Lookups</h3>
+
+<p>Below is a page from an application with a simple form that takes a Zip code. We want users to be able to enter a Zip code and have information it returned.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/786/original/E290I01.png" width="800" height="388" alt="Our Zip code lookup application."/>
+</div>
+
+<p>As you can see our application doesn&rsquo;t work yet. We have placeholders for the information but nothing is shown as we need to communicate with an external Web Service to get this information. We&rsquo;ll get this information from the <a href="http://www.webservicex.net/ws/default.aspx">WebserviceX.NET website</a>. This site has a SOAP API that can provide a lot of useful information such as stock market quotes, currency conversion, weather information and a whole lot more and we&rsquo;ll use it to fetch information about a Zip code. The site has a <a href="http://www.webservicex.net/ws/WSDetails.aspx?WSID=42&amp;CATID=7">page</a> with a form we can use to test the web service. If we enter a valid zip code in the form we&rsquo;ll set some XML returned containing data about that Zip code. If, for example, we enter 90210 we&rsquo;ll get this response.</p>
+
+
+``` xml
+<NewDataSet>
+  <Table>
+    <CITY>Beverly Hills</CITY>
+    <STATE>CA</STATE>
+    <ZIP>90210</ZIP>
+    <AREA_CODE>310</AREA_CODE>
+    <TIME_ZONE>P</TIME_ZONE>
+  </Table>
+</NewDataSet>
+```
+
+<h3>Using soapUI To Test SOAP calls</h3>
+
+<p>Before we jump right in and use a SOAP API in an application it&rsquo;s a good idea to experiment with it a little to make sure that it works the way we expect it to. To help with this we&rsquo;ll use a Java application called <a href="http://www.eviware.com/soapUI/soapui-products-overview.html">soapUI</a> that we can use to test Web Services. Once we&rsquo;ve installed it we can run it and create a new project. When we do we&rsquo;ll be shown a dialog box that asks for a WSDL URL, among other things. The page we viewed before has this information and the URL we need to enter is <code>http://www.webservicex.net/uszip.asmx?WSDL</code>.</p>
+
+<p>A WSDL is like a blueprint and it tells us they actions that are available at that URL. Once we&rsquo;ve entered the WSDL URL into soapUI we&rsquo;ll see a list of the actions. If we expand the GetInfoByZip action and click the &ldquo;Request 1&rdquo; field that&rsquo;s revealed we&rsquo;ll see the XML that&rsquo;s required for making a request.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/787/original/E290I02.png" width="812" height="434" alt="The request XML showing in soapUI."/>
+</div>
+
+<p>This is the information we need to get from soapUI so that we can compare it to Savon as we use it in our Rails application. If we replace the question mark in the <code>&lt;web:USZip&gt;</code> element with a real Zip code and click the green arrow we see the XML response.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/788/original/E290I03.png" width="812" height="434" alt="The response XML in soapUI."/>
+</div>
+
+<h3>Getting Started With Savon</h3>
+
+<p>Now that we have a way of testing SOAP requests we can start using Savon in our application. As is usual when installing a gem we do this by adding the gem to the Gemfile and then running bundle.
+</p>
+
+``` /Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.1.1'
+gem 'sqlite3'
+
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~> 3.1.4'
+  gem 'coffee-rails', '~> 3.1.1'
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+gem 'savon'
+```
+
+<p>To get a feel for how Savon works we&rsquo;ll experiment with it in the console. The first thing we need to do is create a new Savon::Client, passing it the URL we want to to communicate with.</p>
+
+``` terminal
+> client = Savon::Client.new("http://www.webservicex.net/uszip.asmx?WSDL")
+```
+
+<p>We can provide a block here if we want to provide additional configuration, but for our purposes this is enough. Next we&rsquo;ll get a list of the actions.</p>
+
+``` terminal
+> client.wsdl.soap_actions
+HTTPI executes HTTP GET using the net_http adapter => [:get_info_by_zip, :get_info_by_city, :get_info_by_state, :get_info_by_area_code]
+```
+    
+<p>One of the actions that is returned is just the one we&rsquo;re looking for. (Note that Savon has changed the name from <code>GetInfoByZip</code> to the more Ruby-like <code>get_info_by_zip</code>).</p>
+
+<p>We make a request by calling <code>client.request</code> and passing in the action we want to call. We can also pass in a namespace as an optional first argument. If we look at the XML that was generated by soapUI we&rsquo;ll see that a <code>web</code> namespace is used so we&rsquo;ll need to pass that in. Finally we&rsquo;ll need to add some options. Again, we could  use a block here, but instead we&rsquo;ll pass in a <code>body</code> option. This option takes a hash and it&rsquo;s here where we pass the parameters in that we saw in the XML request. In soapUI the Zip code was passed in in a <code>&lt;web:USZip&gt;</code> element. We&rsquo;ve already specified the namespace so we just need to pass in the Zip code as <code>us_zip</code>. (Again, Savon changes the capitalization of the parameter.</p>
+
+``` terminal
+> client.request :web, :get_info_by_zip, body: { us_zip: "90210" }
+```
+
+<p>We&rsquo;ll see a large response from this request. This usually goes to the development log file so if we need to debug SOAP calls we can look there to see what the request and response were. The important parts of the response are the request XML and response XML and if we look at the response we&rsquo;ll see that it doesn&rsquo;t contain the information we were expecting.</p>
+
+``` xml
+<?xml version="1.0" encoding="utf-8"?>
+  <soap:Envelope 
+    xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Body>
+    <GetInfoByZIPResponse xmlns="http://www.webserviceX.NET" />
+  </soap:Body>
+</soap:Envelope>
+```
+
+<p>It looks like something&rsquo;s wrong with our request. The problem in this case is that the case of the us_zip code parameter is incorrect. Parameters are case sensitive and if we look at the relevant part of the request XML we&rsquo;ll see that the USZip parameter was sent as usZip instead.</p>
+
+``` xml
+<web:usZip>90210</web:usZip>
+```
+
+<p>By default Savon uses lowerCamelCase for parameters, but if we pass the name in as a string instead of as a symbol the capitalization will be preserved.</p>
+
+``` terminal
+> client.request :web, :get_info_by_zip, body: { "USZip" => "90210" }
+```  
+
+<p>When we send the request this time the response contains the information we need.</p>
+
+``` xml
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+  <soap:Body>
+    <GetInfoByZIPResponse xmlns="http://www.webserviceX.NET">
+      <GetInfoByZIPResult>
+        <NewDataSet xmlns="">
+          <Table>
+            <CITY>Beverly Hills</CITY>
+            <STATE>CA</STATE>
+            <ZIP>90210</ZIP>
+            <AREA_CODE>310</AREA_CODE>
+            <TIME_ZONE>P</TIME_ZONE>
+          </Table>
+        </NewDataSet>
+      </GetInfoByZIPResult>
+    </GetInfoByZIPResponse>
+  </soap:Body>
+</soap:Envelope>
+```
+
+<p>The last command we sent returns a response object and we can assign this to a variable in the console by using an underscore to get the last thing returned.</p>
+
+``` terminal
+> response = _
+```
+
+<p>Calling to_hash on this object gives us a Ruby hash that&rsquo;s easy to parse.</p>
+
+``` terminal
+> response.to_hash
+ => {:get_info_by_zip_response=> {:get_info_by_zip_result=> {:new_data_set=>{:table=> {:city=>"Beverly Hills", :state=>"CA", :zip=>"90210", :area_code=>"310", :time_zone=>"P"}, :@xmlns=>""}}, :@xmlns=>"http://www.webserviceX.NET"}} 
+```   
+   
+<p>The information we need is fairly deeply nested in the hash but we can still get at it fairly easily. Now that we know how Savon works we can start to use it in our Rails application.</p> 
+
+<h3>Using Savon in a Rails Application</h3>
+
+<p>Our application has a <code>ZipCode</code> model class. This isn&rsquo;t an ActiveRecord model just a Ruby class with some attributes and an initializer that takes a Zip code.</p>
+
+``` /app/models/zip_code.rb
+class ZipCode
+  attr_reader :state, :city, :area_code, :time_zone
+
+  def initialize(zip)
+  end
+end
+```
+
+<p>When a new <code>ZipCode</code> object is instantiated we want to set the attributes with values from the SOAP call. The code we’ll need to add to the class is similar to that we ran in the console.</p>
+
+```/app/models/zip_code.rb
+class ZipCode
+  attr_reader :state, :city, :area_code, :time_zone
+
+  def initialize(zip)
+    client = Savon::Client.new("http://www.webservicex.net/uszip.asmx?WSDL")
+    response = client.request :web, :get_info_by_zip, body: { "USZip" => zip }
+    data = response.to_hash[:get_info_by_zip_response][:get_info_by_zip_result][:new_data_set][:table]
+    @state = data[:state]
+    @city = data[:city]
+    @area_code = data[:area_code]
+    @time_zone = data[:time_zone]
+  end
+end
+```
+
+<p>This code makes a request and calls <code>to_hash</code> on the response. We then go into that deeply-nested hash and set the class&rsquo;s attributes to the relevant parts of it. We can try this out now. When we enter a Zip code and click &ldquo;Lookup&rdquo; the SOAP call is made and we&rsquo;ll see the information on the page so our code is working.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/789/original/E290I04.png" width="800" height="388" alt="Our application now fetches results."/>
+</div>
+
+<h3>Handling Errors</h3>
+
+<p>We&rsquo;ll need to modify our code so that it handles errors. As it stands if we enter an invalid Zip code and try to look it up the application raises an exception as the response doesn&rsquo;t have the deeply-nested hash we&rsquo;re expecting.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/801/original/E290I05.png" width="800" height="388" alt="Invalid Zip codes aren&rsquo;t handled correctly."/>
+</div>
+
+<p>One way to handle these cases is to check that the response is successful before trying to set the attributes. We could use <code>response.success?</code> to check this and while this is useful, it won&rsquo;t help in this case as the response is successful when an invalid Zip code is entered, the problem is that the response is empty.</p>
+
+<p>To help us here we can use Savon&rsquo;s <code>to_array</code> method here instead of <code>to_hash</code>. We can pass this a list of hash keys and rather than throwing an exception if the nesting we&rsquo;re looking for doesn&rsquo;t exist it will return an empty array. As an array is returned we need to call <code>first</code> to get the results we want. If there are no results we&rsquo;ll get <code>nil</code> so we can check for that before setting the attributes.</p>
+
+``` /app/models/zip_code.rb
+def initialize(zip)
+  client = Savon::Client.new("http://www.webservicex.net/uszip.asmx?WSDL")
+  response = client.request :web, :get_info_by_zip, body: { "USZip" => zip }
+  if response.success?
+    data = response.to_array(:get_info_by_zip_response, :get_info_by_zip_result, :new_data_set, :table).first
+    if data
+      @state = data[:state]
+      @city = data[:city]
+      @area_code = data[:area_code]
+      @time_zone = data[:time_zone]
+    end
+  end
+end
+```
+
+<p>If we reload the page now we&rsquo;ll see an empty result rather than an exception.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/802/original/E290I06.png" width="800" height="388" alt="Invalid Zip codes no longer throw an exception."/>
+</div>
+
+<p>There&rsquo;s more work we can do here to show an error message when an invalid Zip code is entered but we won&rsquo;t do that here.</p>
+
+<h3>Some Final Tips</h3>
+
+We&rsquo;ll finish this episode with a couple of tips. If you find yourself having to use strings a lot because the first part of a tag name is capitalized you can add this line of code to our application to make the tags use UpperCamelCase rather than the default lowerCamelCase. If the API you&rsquo;re talking to uses this kind of casing this means that you can use symbols instead of strings in the arguments.
+
+``` ruby
+Gyoku.convert_symbols_to :camelcase
+```
+
+<p>A WSDL file shouldn&rsquo;t change so often so it&rsquo;s a good idea to cache it rather than downloading it every time. We can download the WSDL file, store it locally and then use a file reference when we create a new <code>Savon::Client</code> rather than a web reference.</p> 
+
+<p>That&rsquo;s it for our episode on Savon. Savon makes it much easier to communicate with a SOAP API. If you use it in your applications there are a couple of related projects that you might find useful. The first of these is <a href="https://github.com/rubiii/savon_model">Savon Model</a>. This provides a nice DSL for setting up the client inside a class and it would probably work well inside our <code>ZipCode</code> class and allow us to clean up the code there.</p>
+
+<p>The other project is <a href="https://github.com/rubiii/savon_spec">Savon Spec</a>. This can help in testing by mocking the SOAP requests. This is fine for lower-level tests but to test thoroughly you should also have some higher level integration tests that test hitting that actual API. This way if the API changes the tests will break. The <a href="https://github.com/myronmarston/vcr">VCR gem</a> can help greatly with this and there&rsquo;s more information about VCR in this week&rsquo;s pro episode.</p>

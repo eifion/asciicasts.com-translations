@@ -1,0 +1,241 @@
+<p>As a Rails developer you&rsquo;ll often find that your development environment is quite different from the production environment. Indeed it&rsquo;s not unusual to develop an application on a different operating system from the one it will run on in production. Rails applications can also have a heavy set of dependencies that can be difficult to replicate across different machines.</p>
+
+<p><a href="http://vagrantup.com/">Vagrant</a> can help with this. It allows us to set up and manage virtual environments so we can set up a small Linux distribution inside our OS and run our application and all of its dependencies on a virtual machine that we can save to a portable package that we be easily shared with others.</p> 
+
+<p>Every Rails developer give Vagrant a try. At the least it will give you a better understanding of how to set up a production environment for your Rails apps. It&rsquo;s also useful to use to set up a staging environment or even while developing an app.</p>
+
+<h3>Installing Virtual Box and Vagrant</h3>
+
+<p>Vagrant uses Oracle&rsquo;s <a href="https://www.virtualbox.org/">VirtualBox</a>. If you don&rsquo;t have it installed on your machine you&rsquo;ll need to install it first. VirtualBox is available for Windows, OS X and Linux so whatever OS you&rsquo;re running you should be able to find a suitable version. Once we&rsquo;ve installed VirtualBox we can install Vagrant. This is a Ruby gem and we install it by running this command.</p>
+
+``` terminal
+$ gem install vagrant
+```
+
+<h3>Adding a Box</h3>
+
+<p>The next step is to add a virtual machine, known as a  box to Vagrant. There&rsquo;s a long list of publicly available boxes at <a href="http://www.vagrantbox.es/">Vagrantbox.es</a> and we can download one from there. We&rsquo;ll use, ubuntu <a href="http://www.vagrantbox.es/1/">lucid 32</a>, which is provided by the Vagrant site and which is based on Ubuntu Linux 10.04. To install the box we run <code>vagrant box add</code>, passing in a name and the URL of the box.</p>
+
+``` terminal  
+$ vagrant box add lucid32 http://files.vagrantup.com/lucid32.box
+[vagrant] Downloading with Vagrant::Downloaders::HTTP...
+[vagrant] Downloading box: http://files.vagrantup.com/lucid32.box
+[vagrant] Extracting box...
+[vagrant] Verifying box...
+[vagrant] Cleaning up downloaded box...
+```
+
+<p>Boxes can be fairly large (in the order of a few hundred megabytes) so they can take a while to download. If you&rsquo;ve already downloaded one you can pass in a file URL instead to install from a local box file.</p>
+
+<p>Once the box has downloaded and installed we can use it to set up our virtual environment. In Vagrant this is usually done for a specific project. We don&rsquo;t have one so we&rsquo;ll create a new one to work with, then move into its directory.</p>
+
+``` terminal
+$ rails new todo
+$ cd todo
+```
+
+<p>We can create a virtual machine just for this application and its dependencies by running <code>vagrant init</code> and passing in the name of the box we want to use.</p>
+
+``` terminal
+$ vagrant init lucid32
+      create  Vagrantfile
+```      
+
+<p>All this command does is create a file called <code>Vagrantfile</code>. This file contains the configuration information for this application&rsquo;s Vagrant box. By default all of the information is commented out, apart from the line that specifies which box to use.</p>
+
+```/Vagrantfile
+Vagrant::Config.run do |config|
+  # All Vagrant configuration is done here. The most common configuration
+  # options are documented and commented below. For a complete reference,
+  # please see the online documentation at vagrantup.com.
+
+  # Every Vagrant virtual environment requires a box to build off of.
+  config.vm.box = "lucid32"
+
+  # Rest of file omitted.
+end
+```
+
+<p>There are many other configuration options that we can specify here and it&rsquo;s worth taking a minute to look through them all.</p> 
+
+<h3>Starting up The Vagrant VM</h3>
+
+<p>Now it&rsquo;s time for the magic. Running <code>vagrant up</code> will set up our virtual machine. This can take a few minutes but once it&rsquo;s booted up we can SSH into it with</p>
+
+``` terminal
+$ vagrant ssh
+```
+
+<p>We&rsquo;re now inside our Ubuntu virtual machine. This is a fairly barebones setup with very little installed on it, but there are a couple of things worthy of note. One is that it has a user called <code>vagrant</code> set up (and which we&rsquo;re logged in as), the other is that we have <code>sudo</code> privileges that don&rsquo;t require a password which is fine for our local development machine. Vagrant has also set up a shared directory at <code>/vagrant</code> that points to the directory where we have our Rails application.</p>
+
+<h3>Installing Our Application&rsquo;s Dependencies</h3>
+
+<p>Our objective is to get our Rails application up and running on our virtual machine so we&rsquo;re doing to have to set up its dependencies. First we&rsquo;ll make sure we have Ruby and Sqlite installed. Our virtual machine already has Ruby 1.8.7 installed which has been done so that it can run <a href="http://wiki.opscode.com/display/chef/Home">Chef</a> recipes.</p>
+
+<p>Chef provides a way to automate server setup. To install Ruby 1.9 and Sqlite we could apply the necessary Chef recipes and they will be installed for us. Chef integrates nicely with Vagrant but it&rsquo;s a big topic in itself and is something we&rsquo;ll cover in a future episode. Instead we&rsquo;ll set up our server without using Chef which will give us a better idea of how everything works together.</p>
+
+<p>First we&rsquo;ll use <code>apt-get</code> to make sure that all of our installed software is up to date.</p>
+
+``` terminal
+$ sudo apt-get update
+```
+
+<p>Once that has finished we&rsquo;ll install some of the software we need: the build essentials, ZLib, Git and Sqlite3.</p>
+
+``` terminal
+$ sudo apt-get install build-essential zlib1g-dev git-core sqlite3 libsqlite3-dev
+```  
+
+<p>All we have left to install now is Ruby 1.9. We could install this from scratch or by using RVM but we&rsquo;ll use something newer called <a href="https://github.com/sstephenson/rbenv">rbenv</a>. Using Vagrant means that we can experiment with tools such as this that we haven&rsquo;t used before in a safe environment and, if we mess up, delete the virtual machine and start again.</p>
+
+<p>To install rbenv in our virtual machine we just run the commands listed in section 2.1 of rbenv&rsquo;s <a href="https://github.com/sstephenson/rbenv/blob/master/README.md">README</a>. First we clone the repository into <code>~/.rbenv</code>.</p>
+
+``` terminal
+$ cd
+$ git clone git://github.com/sstephenson/rbenv.git .rbenv
+```
+
+<p>Next we add rbenv&rsquo;s <code>bin</code> directory to our PATH and add the init command to our bash profile.</p>
+
+``` terminal
+$ echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> ~/.bash_profile
+$ echo 'eval "$(rbenv init -)"' >> ~/.bash_profile
+```
+
+<p>We&rsquo;ll have to reload the bash profile for these changes to take effect.</p>
+
+``` terminal
+$ source .bash_profile 
+```
+
+<p>We now have an <code>rbenv</code> command that we can use to manage our Ruby versions but still no way to install Ruby. We&rsquo;ll use <a href="https://github.com/sstephenson/ruby-build">Ruby Build</a> to do this. All we need to do is clone its Git repository, then move into its directory and run its install script.</p>
+
+``` terminal
+$ git clone https://github.com/sstephenson/ruby-build.git
+$ cd ruby-build
+$ sudo ./install.sh
+```
+
+<p>We can now use rbenv to install the current version of Ruby 1.9.2.</p>
+
+``` terminal
+$ rbenv install 1.9.2-p290
+```
+
+<p>This will take a while to run but when it finishes it will have successfully compiled Ruby 1.9.2. We&rsquo;ll need to run <code>rbenv rehash</code> whenever we change the binaries like this and then we&rsquo;ll run this command to make 1.9.2 the default version of Ruby on our virtual machine.</p>
+
+``` terminal
+$ rbenv global 1.9.2-p290
+```
+
+<p>When we check our version of Ruby now it&rsquo;s 1.9.2 just like we want.</p>
+
+``` terminal
+$ ruby -v
+ruby 1.9.2p290 (2011-07-09 revision 32553) [i686-linux]
+```
+
+<h3>Installing Our Rails Application</h3>
+
+<p>Now that we have the correct version of Ruby installed we can work on getting our Rails application working. If we move to the shared directory our application is in and run bundle to install its dependencies we&rsquo;ll hit a problem.</p>
+
+``` terminal
+vagrant@lucid32:~$ cd /vagrant/
+vagrant@lucid32:/vagrant$ bundle
+bundle: command not found
+```
+
+<p>All we need to do to fix this is install the Bundler gem.</p>
+
+``` terminal
+$ gem install bundler
+```
+
+<p>Once this gem has installed we&rsquo;ll need to run <code>rbenv rehash</code> again to set up the <code>bundle</code> executable. We can now run <code>bundle</code> to install our application&rsquo;s gems.</p>
+
+<p>If we try to start our application&rsquo;s server now, it will throw a error complaining that it couldn&rsquo;t find a JavaScript runtime. This makes sense as Rails 3.1 requires a JavaScript runtime and Ubuntu doesn&rsquo;t have one by default. The quick solution to this is to add a gem called <a href="https://github.com/cowboyd/therubyracer">therubyracer</a> to our application&rsquo;s Gemfile and run bundle on our virtual machine. This will install the V8 JavaScript engine.</p>
+
+``` /Gemfile
+gem 'therubyracer'
+```
+
+<p>Once the gem has installed we can try running our server again.</p>
+
+``` terminal
+$ bundle exec rails s
+```
+
+<p>This time it starts successfully and our application is up and running on port 3000. We can&rsquo;t view it in a browser, though, as it&rsquo;s running on the virtual machine. We have to tell Vagrant to forward the port to our machine and we do this by modifying our project&rsquo;s <code>Vagrantfile</code>. We need to uncomment the line below, change the name to something more suitable tell it to forward port 3000 on the virtual machine to the same port on our local machine.</p>
+
+``` /Vagrantfile
+config.vm.forward_port "rails", 3000, 3000
+```
+
+<p>Having changed the configuration we&rsquo;ll need to exit out of our Vagrant shell by running <code>exit</code> in the VM and then reload the virtual machine by running <code>vagrant reload</code>. This will shutdown our virtual machine and then reload it. Once it&rsquo;s reloaded we can SSH into it again.</p>
+
+``` terminal
+$ vagrant ssh
+```
+
+<p>Then on the virtual machine we can move to our application&rsquo;s directory and start up the server again.</p>
+
+``` terminal
+vagrant@lucid32:~$ cd /vagrant
+vagrant@lucid32:/vagrant$ bundle exec rails s
+```
+
+<p>This boots up the server again but we can now access it from our local machine.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/794/original/E292I01.png" width="829" height="361" alt="Our application running under Vagrant."/>
+</div>
+
+<p>As our Rails application is shared with Vagrant any changes we make to it will be reflected in our virtual machine. If we modify the default page at <code>/public/index.html</code>  and reload the page the changes will be shown immediately.</p>
+
+```/public/index.html
+<h2>You&rsquo;re riding Ruby on Rails on Vagrant!</h2>
+```
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/795/original/E292I02.png" width="829" height="361" alt="Any changes we make are reflected when we reload the page."/>
+</div>
+
+<h3>Other Vagrant Commands</h3>
+
+<p>Vagrant provides a number of commands to help us manage our virtual machine. To get the current status of our VM we can run <code>vagrant status</code>.</p>
+
+``` terminal
+$ vagrant status
+Current VM states:
+
+default                  running
+
+The VM is running. To stop this VM, you can run `vagrant halt` to
+shut it down forcefully, or you can run `vagrant suspend` to simply
+suspend the virtual machine. In either case, to restart it again,
+simply run `vagrant up`.
+```
+
+<p>To temporarily stop and restart the machine we can use <code>suspend</code> and <code>resume</code>.</p>
+
+``` terminal
+$ vagrant suspend
+[default] Saving VM state and suspending execution...
+
+$ vagrant resume
+[default] Resuming suspended VM...
+[default] Booting VM...
+[default] Waiting for VM to boot. This can take a few minutes.
+[default] VM booted and ready for use!
+```
+
+<p>To completely shut down the VM we can use <code>vagrant halt</code>. We&rsquo;ll then need to use <code>vagrant up</code> again to bring that machine back up.</p>
+
+<p>One of the most useful commands is <code>vagrant package</code>. This will package up the virtual machine in its current state into a file called <code>package.box</code>. We can then share and distribute this file or use it to quickly recreate our virtual machine. If we use <code>vagrant destroy</code> to delete our virtual machine we can then restore it with the same <code>vagrant box add</code> command we used to set up our virtual machine in the first place.</p>
+
+<p>That&rsquo;s it for our episode on Vagrant. It&rsquo;s a great solution for taking your Rails apps&rsquo; runtime dependencies and isolating them in a virtualized environment that can be packaged up and distributed among other developers, used to simulate the production server or used as a staging server. Vagrant becomes even more useful when used in combination with Chef and we&rsquo;ll be covering that in a future episode.</p>
+
+
+
+
+
+

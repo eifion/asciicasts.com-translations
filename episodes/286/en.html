@@ -1,0 +1,384 @@
+<p>In this episode we&rsquo;ll take a look a <a href="https://github.com/jcasimir/draper">Draper</a>, a gem that lets us add decorators to a Rails application&rsquo;s views much like a presenter pattern. If you find that you have a lot of complex view logic in your templates and helper methods Draper can help to clean up this code by taking a more object-orientated approach. We&rsquo;ll show you how it works in this episode.</p>
+
+<p>The application we&rsquo;ll be working with is shown below. It has a user profile page that shows various pieces of information about a given user including their avatar, full name, username, a short biography in Markdown and links to a website and Twitter feed. If a user has supplied a website the avatar and full name will link to that site.</p> 
+
+<div class="imageWrapper">
+  <img src="/system/photos/747/original/E286I01.png" width="800" height="595" alt="The profile page for a user who has entered all of their details."/>
+</div>
+
+<p>The page seems fairly simple but we also have to handle those users who haven&rsquo;t entered so much data such as &ldquo;MrMystery&rdquo;.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/748/original/E286I02.png" width="800" height="470" alt="The profile page for a user who has entered few details."/>
+</div>
+
+<p>This user has only entered a username so we display that in place of their full name, show a default avatar and some placeholder text for the other fields. This makes the template for this page more complex, with many if conditions needed to handle users with different amounts of information. We could make this template much cleaner if we could move some of this logic out to somewhere else.</p>
+
+<p class="codeFilePath">/app/views/users/show.html.erb</p>
+<pre class="ruby">&lt;div id=&quot;profile&quot;&gt;
+  &lt;%= link_to_if @user.url.present?, &crarr; 
+  image_tag(&quot;avatars/#{avatar_name(@user)}&quot;, class: &quot;avatar&quot;), &crarr;
+  @user.url %&gt;
+  &lt;h1&gt;&lt;%= link_to_if @user.url.present?, &crarr;
+    (@user.full_name.present? ? @user.full_name : &crarr;
+    @user.username), @user.url %&gt;&lt;/h1&gt;
+  &lt;dl&gt;
+    &lt;dt&gt;Username:&lt;/dt&gt;
+    &lt;dd&gt;&lt;%= @user.username %&gt;&lt;/dd&gt;
+    &lt;dt&gt;Member Since:&lt;/dt&gt;
+    &lt;dd&gt;&lt;%= @user.member_since %&gt;&lt;/dd&gt;
+    &lt;dt&gt;Website:&lt;/dt&gt;
+    &lt;dd&gt;
+    &lt;% if @user.url.present? %&gt;
+      &lt;%= link_to @user.url, @user.url %&gt;
+    &lt;% else %&gt;
+      &lt;span class=&quot;none&quot;&gt;None given&lt;/span&gt;
+    &lt;% end %&gt;
+    &lt;/dd&gt;
+    &lt;dt&gt;Twitter:&lt;/dt&gt;
+    &lt;dd&gt;
+    &lt;% if @user.twitter_name.present? %&gt;
+      &lt;%= link_to @user.twitter_name, &crarr;
+  &quot;http://twitter.com/#{@user.twitter_name}&quot; %&gt;
+    &lt;% else %&gt;
+      &lt;span class=&quot;none&quot;&gt;None given&lt;/span&gt;
+    &lt;% end %&gt;
+    &lt;/dd&gt;
+    &lt;dt&gt;Bio:&lt;/dt&gt;
+    &lt;dd&gt;
+    &lt;% if @user.bio.present? %&gt;
+      &lt;%=raw Redcarpet.new(@user.bio, :hard_wrap, :filter_html, &crarr;
+        :autolink).to_html %&gt;
+    &lt;% else %&gt;
+      &lt;span class=&quot;none&quot;&gt;None given&lt;/span&gt;
+    &lt;% end %&gt;
+    &lt;/dd&gt;
+  &lt;/dl&gt;
+&lt;/div&gt;</pre>
+
+<p>As this logic is view-related we can&rsquo;t really extract it out into the model. One solution for this would be to use helper methods. We already use one called <code>image_tag</code> in this template to render the avatar. Let&rsquo;s take a look at it.</p>
+
+<p class="codeFilePath">/app/helpers/users_helper.rb</p>
+<pre class="ruby">module UsersHelper
+  def avatar_name(user)
+    if user.avatar_image_name.present?
+      user.avatar_image_name
+    else
+      &quot;default.png&quot;
+    end
+  end
+end</pre>
+
+<p>This helper method determines whether the current user has an avatar and returns the name of a default image if they don&rsquo;t. We could extract more of the logic from the view into helper methods but the problem with is that they&rsquo;re simple methods in a global namespace; there&rsquo;s nothing object-orientated about them.</p>
+
+<h3>Installing Draper</h3>
+
+<p>This scenario is a good case for using a presenter, or a decorator as Draper refers to them, so let&rsquo;s add it to our application. The Draper gem is installed in the usual way, by adding it to the <code>Gemfile</code> then running <code>bundle</code>.</p>
+
+<p class="codeFilePath">/Gemfile</p>
+<pre class="ruby">source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.1.0&#x27;
+gem &#x27;sqlite3&#x27;
+
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem &#x27;sass-rails&#x27;, &quot;  ~&gt; 3.1.0&quot;
+  gem &#x27;coffee-rails&#x27;, &quot;~&gt; 3.1.0&quot;
+  gem &#x27;uglifier&#x27;
+end
+
+gem &#x27;jquery-rails&#x27;
+gem &#x27;redcarpet&#x27;
+
+gem &#x27;draper&#x27;</pre>
+
+<p>Once Draper has installed we&rsquo;ll create a decorator for our <code>User</code> model by running the <code>draper:decorator</code> generator.</p>
+
+<pre class="ruby">$ rails g draper:decorator user
+      create  app/decorators
+      create  app/decorators/application_decorator.rb
+      create  app/decorators/user_decorator.rb</pre>
+      
+<p>As this is our first decorator an <code>application_decorator</code> will also be generated. Any decorators we generate inherit from ApplicationDecorator so we can place any functionality that we want to share across decorators there.</p> 
+
+<p>The <code>UserDecorator</code> class is fairly straightforward, consisting mainly of comments that explain how it works. We&rsquo;ll dive right in and start using it to clean up our templates.</p>
+
+<h3>Tidying Up The Profile Page</h3>
+
+<p>To use Draper in our profile page we first need to make a change to the <code>show</code> action in the <code>UsersController</code>. This action currently fetches a <code>User</code> in the usual way.</p>
+
+<p class="codeFilePath">/app/controllers/users_controller.rb</p>
+<pre class="ruby">class UsersController &lt; ApplicationController
+  def index
+    @users = User.all
+  end
+
+  def show
+    @user = User.find(params[:id])
+  end
+end</pre>
+
+<p>We need to wrap this user in our decorator which we do by replacing <code>User.find</code> with <code>UserDecorator.find</code>.</p>
+
+<p class="codeFilePath">/app/controllers/users_controller.rb</p>
+<pre class="ruby">def show
+  @user = UserDecorator.find(params[:id])
+end</pre>
+
+<p>This code will now return a <code>UserDecorator</code> instance that wraps the <code>User</code> record and delegates all methods to it by default (more on this later). The action will still work as it did before even though we&rsquo;re working with a <code>UserDecorator</code> instead of a <code>User</code>. Now we can start to clean up our views and we&rsquo;ll begin with the code that renders the user&rsquo;s avatar.</p>
+
+<p class="codeFilePath">/app/views/users/show.html.erb</p>
+<pre class="ruby">&lt;%= link_to_if @user.url.present?, image_tag( &crarr; 
+  &quot;avatars/#{avatar_name(@user)}&quot;, class: &quot;avatar&quot;), @user.url %&gt;</pre>
+  
+<p>We&rsquo;ll replace this in the view with this:</p>
+
+<p class="codeFilePath">/app/views/users/show.html.erb</p>
+<pre class="ruby">&lt;%= @user.avatar %&gt;</pre>
+
+<p>This code will look for an avatar method in the <code>UserDecorator</code> which we&rsquo;ll write next. There are some things we&rsquo;ll need to be aware of  when writing this method. Whenever we call a helper method from a decorator, such as our <code>link_to_if</code> method, we need to call it through the <code>h</code> method (this stands for &ldquo;helpers&rdquo;). When we want to reference the model we call <code>model</code> instead of, in this case, <code>@user</code>.</p>
+
+<p>The code we&rsquo;ve copied from the the view into <code>avatar</code> calls the <code>avatar_name</code> helper method. As we&rsquo;re calling <code>avatar_name</code> from our decorator we&rsquo;ll move it there from the <code>UsersHelper</code> class. Now that we have the method in the same class we don&rsquo;t need to pass it a <code>User</code> and we can replace its calls to user with model.</p>
+
+<p class="codeFilePath">/app/decorators/user_decorator.rb</p>
+<pre class="ruby">class UserDecorator &lt; ApplicationDecorator
+  decorates :user
+  
+  def avatar
+    h.link_to_if model.url.present?, h.image_tag(&quot;avatars/#{avatar_name}&quot;, class: &quot;avatar&quot;), model.url
+  end
+  
+  private
+  def avatar_name
+    if model.avatar_image_name.present?
+      model.avatar_image_name
+    else
+      &quot;default.png&quot;
+    end
+  end
+end</pre>
+
+<p>Next we&rsquo;ll tidy up the code that renders the user&rsquo;s name. We&rsquo;ll replace this code in the view:</p>
+
+<p class="codeFilePath">/app/views/users/show.html.erb</p>
+<pre class="ruby">&lt;h1&gt;&lt;%= link_to_if @user.url.present?, (@user.full_name.present? ? @user.full_name : @user.username), @user.url %&gt;&lt;/h1&gt;</pre>
+ 
+<p>with this:</p>
+
+<p class="codeFilePath">/app/views/users/show.html.erb</p>
+<pre class="ruby">&lt;h1&gt;&lt;%= @user.linked_name %&gt;&lt;/h1&gt;</pre>
+
+<p>We&rsquo;ll need to write the <code>linked_name</code> method in the <code>UserDecorator</code>. There are similarities between the code we&rsquo;ve taken from the template and the <code>avatar</code> method we wrote earlier; both of these render a link whose content is dependent on whether the user&rsquo;s <code>url</code> if it&rsquo;s present. As we&rsquo;re in a class it&rsquo;s easy to refactor this duplication out.</p>
+
+<p>To handle the link creation we&rsquo;ll create a new private method called <code>site_link</code>, which takes the content as a parameter. We can then call this method in both the <code>avatar</code> and <code>linked_name</code> methods to tidy them up. As before we replace any calls to <code>@user</code> in the <code>linked_name</code> with <code>model</code>. With all that done our decorator now looks like this.</p>
+
+<p class="codeFilePath">app/decorators/user_decorator.rb</p>
+<pre class="ruby">class UserDecorator &lt; ApplicationDecorator
+  decorates :user
+  
+  def avatar
+    site_link h.image_tag(&quot;avatars/#{avatar_name}&quot;, &crarr;
+      class: &quot;avatar&quot;)
+  end
+  
+  def linked_name
+    site_link(model.full_name.present? ? model.full_name : &crarr;
+      model.username)
+  end
+  
+  private
+  def site_link(content)
+    h.link_to_if model.url.present?, content, model.url
+  end
+  
+  def avatar_name
+    if model.avatar_image_name.present?
+      model.avatar_image_name
+    else
+      &quot;default.png&quot;
+    end
+  end
+end</pre>
+
+<p>If we reload a user&rsquo;s profile page now it should look just as it did before.</p>
+
+<p>Our template is already looking a lot cleaner but there&rsquo;s more we can do yet. Next we&rsquo;ll refactor a larger chunk of the view code, the code that renders a link to the user&rsquo;s website.</p>
+
+<p class="codeFilePath">/app/views/user/show.html.erb</p>
+<pre class="ruby">&lt;dt&gt;Website:&lt;/dt&gt;
+&lt;dd&gt;
+  &lt;% if @user.url.present? %&gt;
+    &lt;%= link_to @user.url, @user.url %&gt;
+  &lt;% else %&gt;
+    &lt;span class=&quot;none&quot;&gt;None given&lt;/span&gt;
+  &lt;% end %&gt;
+&lt;/dd&gt;</pre>
+
+<p>We&rsquo;ll replace this with:</p>
+
+<p class="codeFilePath">/app/views/user/show.html.erb</p>
+<pre class="ruby">&lt;dt&gt;Website:&lt;/dt&gt;
+&lt;dd&gt;&lt;%= @user.website %&gt;&lt;/dd&gt;</pre>
+
+<p>As before we&rsquo;ll create a method in the decorator class. We can see from the code that we&rsquo;ve removed from the view that if the user has no <code>url</code> then some HTML is rendered. We could just return this as a string but we don&rsquo;t want to put raw HTML into a Ruby string. Another solution would be to move the code into a partial and to render that, but as we only output a single HTML element it makes more sense to use the <code>content_tag</code> helper method.</p>
+
+<p class="codeFilePath">/app/decorators/user_decorator.rb</p>
+<pre class="ruby">def website
+  if model.url.present?
+    h.link_to model.url, model.url
+  else
+    h.content_tag :span, &quot;None given&quot;, class: &quot;none&quot;
+  end  
+end</pre>
+
+<p>We can do a similar thing for the two parts of the template that render the Twitter information and the user&rsquo;s biography. We won&rsquo;t show the details of that here, but after we&rsquo;ve made the changes our view code will look a lot cleaner.</p>
+
+<p class="codeFilePath">/app/views/users/show.html.erb</p>
+<pre class="ruby">&lt;div id=&quot;profile&quot;&gt;
+  &lt;%= @user.avatar %&gt;
+  &lt;h1&gt;&lt;%= @user.linked_name %&gt;&lt;/h1&gt;
+  &lt;dl&gt;
+    &lt;dt&gt;Username:&lt;/dt&gt;
+    &lt;dd&gt;&lt;%= @user.username %&gt;&lt;/dd&gt;
+    &lt;dt&gt;Member Since:&lt;/dt&gt;
+    &lt;dd&gt;&lt;%= @user.member_since %&gt;&lt;/dd&gt;
+    &lt;dt&gt;Website:&lt;/dt&gt;
+    &lt;dd&gt;&lt;%= @user.website %&gt;&lt;/dd&gt;
+    &lt;dt&gt;Twitter:&lt;/dt&gt;
+    &lt;dd&gt;&lt;%= @user.twitter %&gt;&lt;/dd&gt;
+    &lt;dt&gt;Bio:&lt;/dt&gt;
+    &lt;dd&gt;&lt;%= @user.bio %&gt;&lt;/dd&gt;
+  &lt;/dl&gt;
+&lt;/div&gt;</pre>
+
+<p>The new <code>twitter</code> and <code>bio</code> methods in the decorator look like this:</p>
+
+<p class="codeFilePath">/app/decorators/user_decorator.rb</p>
+<pre class="ruby">def website
+  if model.url.present?
+    h.link_to model.url, model.url
+  else
+    h.content_tag :span, &quot;None given&quot;, class: &quot;none&quot;
+  end  
+end
+
+def twitter
+  if model.twitter_name.present?
+    h.link_to model.twitter_name, &crarr;  
+      &quot;http://twitter.com/#{model.twitter_name}&quot;
+  else
+    h.content_tag :span, &quot;None given&quot;, class: &quot;none&quot;
+  end
+end
+  
+def bio
+  if model.bio.present?
+    Redcarpet.new(model.bio, :hard_wrap, :filter_html, &crarr;
+ 		:autolink).to_html.html_safe
+  else
+    h.content_tag :span, &quot;None given&quot;, class: &quot;none&quot;
+  end
+end</pre>
+
+<p>The two new methods look very similar to each other and also to the <code>website</code> method we wrote earlier. There&rsquo;s a fair amount of duplication between the three methods, especially in each <code>else</code> clause, so it would be good if we could extract this part out into its own method.</p>
+
+<p>We can use a block to help with this. We&rsquo;ll extract the <code>else</code> clause out into its own method which we&rsquo;ll call <code>handle_none</code>. We&rsquo;ll pass the value we want to check the presence of to this method and also a block. If the value is present the code in the block will be executed, otherwise the span tag will be rendered. We can then use this <code>handle_none</code> to tidy up the website, <code>twitter</code> and <code>bio</code> methods.</p>
+
+<p class="codeFilePath">/app/decorators/user_decorator.rb</p>
+<pre class="ruby">def website
+  handle_none model.url do
+    h.link_to model.url, model.url
+  end  
+end
+  
+def twitter
+  handle_none model.twitter_name do
+    h.link_to model.twitter_name, &crarr; 
+      &quot;http://twitter.com/#{model.twitter_name}&quot;
+  end
+end
+  
+def bio
+  handle_none model.bio do
+    Redcarpet.new(model.bio, :hard_wrap, :filter_html, &crarr;
+      :autolink).to_html.html_safe
+  end
+end
+  
+private
+def handle_none(value)
+  if value.present?
+    yield
+  else
+    h.content_tag :span, &quot;None given&quot;, class: &quot;none&quot;
+  end
+end</pre>
+
+<p>Another change we could make is to extract the Markdown rendering into the <code>ApplicationDecorator</code> so that we can call it from any other decorators we might make.  We&rsquo;ll create a new <code>markdown</code> method there now that will render any text we pass to it.</p>
+
+<p class="codeFilePath">/app/decorators/application_decorator.rb</p>
+<pre class="ruby">class ApplicationDecorator &lt; Draper::Base
+  def markdown(text)
+    Redcarpet.new(text, :hard_wrap, :filter_html, &crarr; 
+      :autolink).to_html.html_safe
+  end
+end</pre>
+
+<p>Now in the <code>UserDecorator</code> we can now modify the <code>bio</code> method so that it calls <code>markdown</code>.</p>
+
+<p class="codeFilePath">/app/decorators/user_decorator.rb</p>
+<pre class="ruby">def bio
+  handle_none model.bio do
+    markdown(model.bio)
+  end
+end</pre>
+
+<h3>Modifying The Model</h3>
+
+<p>Now that we have the decorator in place it&rsquo;s a good idea to look through the model layer for any view-related code that we can move up to the relevant decorator. For example in our <code>User</code> model we have a <code>member_since</code> method that formats the user&rsquo;s <code>created_at</code> time. This code can be considered view-related as all it does is return a formatted string so we&rsquo;ll move it to the decorator.</p>
+
+<p class="codeFilePath">/app/models/user.rb</p>
+<pre class="ruby">class User &lt; ActiveRecord::Base
+  def member_since
+    created_at.strftime(&quot;%B %e, %Y&quot;)
+  end
+end</pre>
+
+<p>All we need to do is move the method to the decorator and prepend <code>model</code> before <code>created_at</code>.</p>
+
+<p class="codeFilePath">/app/decorators/user_decorator.rb</p>
+<pre class="ruby">def member_since
+  model.created_at.strftime(&quot;%B %e, %Y&quot;)
+end</pre>
+
+<h3>Restricting Access To The Model With The <code>allows</code> Method</h3>
+
+<p>While we&rsquo;re modifying the <code>UserDecorator</code> there&rsquo;s one more feature of Draper that we&rsquo;ll demonstrate: the <code>allows</code> method. As it stands the <code>UserDecorator</code> will delegate all of its methods to the <code>User</code> object, but we can choose which methods are 
+delegated to the <code>User</code> model by using <code>allows</code> and passing it the name of the methods we want to delegate.</p>
+
+<p class="codeFilePath">/app/decorators/user_decorator.rb</p>
+<pre class="ruby">class UserDecorator &lt; ApplicationDecorator
+  decorates :user
+  allows :username
+
+  # Other methods omitted
+end</pre>
+
+<p>We&rsquo;ll allow only <code>username</code> to be delegated and this way only the <code>username</code> method will be delegated down to the User model. This is the only method we need to delegate as it&rsquo;s the only method that&rsquo;s called in the view that doesn&rsquo;t come from the decorator. This gives us more control over the decorator&rsquo;s interface.</p> 
+
+<p>Now that we&rsquo;re done with refactoring everything out to the decorator we&rsquo;ll try loading a user&rsquo;s profile page again to make sure that everything still looks the same.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/749/original/E286I03.png" width="800" height="583" alt="The full user profile page looks the same after our changes."/>
+</div>
+
+<p>It does. We can even check our other user and that still looks the same too but our view code is much cleaner.</p>
+
+<div class="imageWrapper">
+  <img src="/system/photos/750/original/E286I04.png" width="800" height="469" alt="The profile page for MrMystery is unchanged, too."/>
+</div>
+
+<p>By using a decorator our show template has been reduced from 1050 bytes in 34 lines to 382 bytes in 16 lines, a reduction in size of almost two thirds. It looks much cleaner too and we&rsquo;ve made it much easier to edit should we want to change the layout of the page.</p>

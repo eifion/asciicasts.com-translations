@@ -1,0 +1,151 @@
+<p><a href="https://github.com/">Github</a>の登場によって、オープンソースプロジェクトへの貢献がかつては信じられなかったほど簡単になりました。今回のエピソードでは、オープンソースへ貢献する具体的な方法を、<a href="https://github.com/myronmarston/vcr">VCR project</a>にpull requestを送信する手順を例にして紹介します。このgemは、テストをスピードアップするためにHTTPによる通信を記録して再生する手段を提供するもので、<a href="http://railscasts.com/episodes/291-testing-with-vcr">エピソード291</a>で取り上げました。gemの作者のMyron Marstonは他の人からの貢献に対して迅速に対応しています。</p>
+
+<p>例えばこのgemに問題を発見したとして、パッチを提供して貢献したいとします。まずやるべきことはgemのissue tracker(問題追跡リスト)を見て、すでに過去に報告されていないかどうかを確認します。もしそのプロジェクトにメーリングリストがあれば、見つけた問題に関連する項目がないか探すのもいいでしょう。大きな変更をおこなう場合は、まずその変更が本当に必要かどうかを議論するのがいいでしょう。</p>
+
+<h3><a href="http://www.youtube.com/watch?feature=player_detailpage&amp;v=nHLzj_6HCjU#t=270s">forkする</a></h3>
+
+<p>修正をおこなうとなったら、まず最初にプロジェクトをforkします。このためにはまずプロジェクトのホームページにアクセスして「fork」ボタンをクリックします。数秒で自分用のリポジトリのコピーが作成されるので、新しいforkのページに移ってcloneするためのURLを取得します。</p>
+
+``` terminal
+$ git clone git@github.com:eifion/vcr.git
+$ cd vcr
+```
+
+<p>リポジトリをcloneしたら、どんなブランチがあるかを確認します。</p>
+
+``` terminal
+$ git branch -r
+  origin/1-x-stable
+  origin/HEAD -&gt; origin/master
+  origin/jruby_nailgun
+  origin/master
+``` 
+
+<p>ここでわかるのは、安定版であるバージョン1のブランチがあり、これがこのgemの最新版だということです。マスターブランチはバージョン2を指していて、現在はプレリリース版です。今自分が使っているgemのバージョンが今見ているコードのバージョンとは違うかもしれないということに常に気をつけるようにしてください。</p>
+
+<p>プロジェクトの開発環境を設定するときには、ドキュメントをチェックすることが大事です。今回のケースでは<a href="https://github.com/eifion/vcr/blob/master/README.md">READMEファイル</a>にdevelopmentセクションがあり、そこにはpull requestは歓迎とありますが、修正箇所はすべてテストされていなくてはいけないとあります。READMEにはgemのテストスイートの実行方法については何も指示がありませんが、心強いことにTravis CIによるとテストは現状すべて<a href="http://travis-ci.org/#!/myronmarston/vcr">成功している</a>とあります。</p>
+
+<p>プロジェクトにはGemfileがあり、Bundlerで依存関係を管理しています。<code>bundle install</code>を実行することでインストールできるはずですが、これを試してみるとエラーが発生します。すべてのシステムは構成が違っているため、これは予想されることです。プロジェクトを自分の環境に導入しようとしたら不具合の一つや二つにはひっかかるものだと考えておく方がいいでしょう。</p>
+
+<p>表示されているエラーは<code>rb-fsevent</code> gemの関連で、検索してみるとこの問題は設定環境に関連しているようです。OS XでフルのXcodeインストールではなく<a href="https://github.com/kennethreitz/osx-gcc-installer">GCCインストーラ</a>を使っていますが、現在のバージョンではこの方法ではインストールできません。この問題は最新の<a href="https://github.com/kennethreitz/osx-gcc-installer"><code>rb-fsevent</code></a>では修正されていますが、安定版にはまだ修正はおこなわれていません。これを解決するにはGemfileの<code>rb-fsevent</code>のバージョンを最新のプレリリース版に設定します。</p>
+
+```/Gemfile
+# Additional gems that are useful, but not required for development.
+group :extras do
+  gem 'guard-rspec'
+  gem 'growl'
+  gem 'relish', '~&gt; 0.5.0'
+  gem 'fuubar'
+  gem 'fuubar-cucumber'
+
+  platforms :mri do
+    gem 'rcov'
+    gem 'rb-fsevent', '0.9.0.pre4'
+  end
+
+  platforms :mri_18, :jruby do
+    gem 'ruby-debug'
+  end
+
+  platforms :mri_19 do
+    gem 'ruby-debug19'
+  end unless RUBY_VERSION == '1.9.3'
+end
+```
+
+<p>bundleコマンドを実行すると、すべては正常にインストールされます。</p>
+
+<h3>テストを実行する</h3>
+
+<p>次にgemのテストを実行します。これはデフォルトのRakeタスクとして設定されていることが多いので、<code>rake</code>コマンドで実行できるはずです。しかし、明示的にBundlerを使用するよう<code>bundle exec rake</code>を実行します。</p>
+
+``` terminal
+$ bundle exec rake
+  1504/1504:   100% |==========================================| ETA:  00:00:00
+```  
+  
+<p>テストはいくつかの保留された問題を除いて成功したとありますが、これは問題ありません。テストの実行後、Cucumberのシナリオが実行されます。1件の失敗があり長いエラーメッセージが表示されますが、その要点は“<code>no such file to load -- spec</code>"とあります。Bundlerが設定しなかったものに対する依存関係が足りないようです。</p> 
+
+<p>調べてみると、このプロジェクトは<a href="http://book.git-scm.com/5_submodules.html">Git submodules</a>を使用しているため、正常に動かすためには次の2つのコマンドを実行します。</p>
+
+``` terminal
+$ git submodule init
+$ git submodule update
+```
+
+<p>これらによって、サブモジュールのリポジトリがコピーされます。ここで再度テストを実行してみると、今度は成功します。</p>
+
+<h3>変更を加える</h3>
+
+<p>テストをおこなう上でいくつかの問題が発生しましたが、ついに成功させることができました。個々の開発環境は異なるため、これは予想されたことです。プロジェクトの設定方法についてさらによくドキュメント化されていれば、いくらか時間を節約できたかも知れません。そこで我々の最初のpull requestは、開発環境を設定するために必要な改良されたドキュメントをREADMEファイルに追加することにします。</p> 
+
+<p>すでにVCRプロジェクト専用のwikiページがあるようですが、環境設定については基本的な記述しか含まれていません。このページを編集して、経験した問題に基づいたより詳しい情報を追加します。修正を終えたら、READMEにこの貢献の仕方の案内へのリンクを追加したpull requestを送信します。</p>
+
+<p>コードを変更する前に、作業をおこなったディレクトリがクリーンであることを確認します。</p> 
+
+``` terminal
+$ git status
+# On branch master
+# Changes not staged for commit:
+#   (use "git add <file>..." to update what will be committed)
+#   (use "git checkout -- <file>..." to discard changes in working directory)
+#
+#	modified:   Gemfile
+#
+no changes added to commit (use "git add" and/or "git commit -a")
+```
+
+<p>Gemfileを修正したので、先に進む前にこの変更を取り消します。</p>
+
+``` terminal
+$ git checkout .
+noonoo:vcr eifion$ git status
+# On branch master
+nothing to commit (working directory clean)
+```
+
+<p>pull requestをおこなうごとに個別のGitブランチを立てる方がいいので、そのようにします。</p>
+
+``` terminal
+$ git checkout -b readme-contributing-link
+```
+
+<p>これで変更をおこなえます。<code>README.md</code>のdevelopmentセクションに変更したwikiページへのリンクを追加します。</p>
+
+``` /README.md
+## Development
+
+* Source hosted on [GitHub](http://github.com/myronmarston/vcr).
+* Direct questions and discussions to the [mailing list](http://groups.google.com/group/vcr-ruby).
+* Report issues on [GitHub Issues](http://github.com/myronmarston/vcr/issues).
+* Pull requests are very welcome! Please include spec and/or feature coverage for every patch,
+  and create a topic branch for every separate change you make.
+* See the [Contributing](https://github.com/myronmarston/vcr/blob/master/CONTRIBUTING.md)
+  guide for instructions on running the specs and features.
+```  
+  
+<p>修正をおこなったら、git diffを実行して変更点を確認することができます。問題がなければ、コミットするために次のコマンドを実行します。</p>
+
+``` terminal
+$ git commit -a -m "adding contributing link to readme."Next we need to push our branch to our remote repository.
+$ git push origin readme-contributing-link
+Counting objects: 5, done.
+Delta compression using up to 2 threads.
+Compressing objects: 100% (3/3), done.
+Writing objects: 100% (3/3), 328 bytes, done.
+Total 3 (delta 2), reused 0 (delta 0)
+To git@github.com:eifion/vcr.git
+ * [new branch]      readme-contributing-link -&gt; readme-contributing-link
+```
+ 
+<p>これによってGithubリポジトリにブランチが追加されます。</p>
+
+<p>Githubのforkされたリポジトリにアクセスすると、現在のブランチを今追加したブランチに変更します。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/851/original/E300I01.png" width="944" height="563" alt="Githubで正しいブランチを選択する"/>
+</div>
+
+<p>次に「Pull Request」をクリックして元の所有者にpull requestを送信します。フォームにおこなった変更の内容を記入してリクエストを送ります。</p>
+
+<p>Githubのオープンソースプロジェクトに対してpull requestを送信する手順は以上です。もしリクエストが取り入れられれば、その変更によって、貢献したいと思っている次の人を助けることになるでしょう。さあ次はあなたの番です。</p>

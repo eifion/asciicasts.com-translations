@@ -1,0 +1,195 @@
+<p><a href="http://spreecommerce.com/">Spree</a>は、Railsアプリケーションに簡単に統合できる、フル機能のEコマースソリューションです。Railsアプリケーションを商品を販売するオンラインストアにしたいという場合に、Spreeはこれをすぐ実現するための方法の一つです。今回のエピソードでは、新規のRailsアプリケーションにSpreeを設定し、いくつかの機能をカスタマイズしながらその仕組みを理解して、自分のアプリケーションのニーズに合うかどうかを判断できるための知識を身につけます。</p>
+
+<h3>Spreeのインストール</h3>
+
+<p>Spreeはイメージ処理のために<a href="http://www.imagemagick.org/script/index.php">ImageMagick</a>に依存するので、Spreeをインストールする前にそれをインストールする必要があります。これをおこなう一番簡単な方法としてHomeBrewを利用します。</p>
+
+``` terminal
+$ brew install imagemagick
+```
+
+<p>ImageMagickをインストールしたら、新規のRails 3.1アプリケーションを<code>store</code>という名前で作成します。Spreeは既存のRailsアプリケーションに統合することもできますが、まずは新規のアプリケーションで試して、何が追加されるかを見てみるのがいいでしょう。</p>
+
+``` terminal
+$ rails new store
+```
+
+<p>Spreeとその多くの依存関係をインストールするために、それらをアプリケーションの<code>Gemfile</code>に追加して<code>bundle</code>コマンドを実行します。Spreeは頻繁に更新されているので、ここではバージョン番号を指定しました。この記事の公開時点では、バージョン<code>0.70.1</code>が最新です。</p>
+
+``` /Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.1.1'
+
+gem 'sqlite3'
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~&gt; 3.1.4'
+  gem 'coffee-rails', '~&gt; 3.1.1'
+  gem 'uglifier', '&gt;= 1.0.3'
+end
+
+gem 'jquery-rails'
+
+group :test do
+  # Pretty printed test output
+  gem 'turn', :require =&gt; false
+end
+
+gem 'spree', '0.70.1'
+```
+
+<p>gemをインストールしたら、generatorを実行してSpreeをサイトに追加します。</p>
+
+``` terminal
+$ rails g spree:site
+```
+
+<p>このコマンドでいつかのことがおこなわれます。Spreeに必要なデータベーステーブルを生成するmigrationファイルをコピーし、アプリケーションのいくつかのファイル(主に<code>app/assets</code>にあるもの)をカスタマイズします。またgeneratorは<code>application.js</code>と<code>application.css</code>の2つのファイルを削除するので、もしこれらのファイルをカスタマイズしている場合は、変更点をSpreeがアプリケーションのアセットを構成する方法に統合する必要があります。</p>
+
+<p>アプリケーションの<code>/app/assets</code>ディレクトリを見てみると、そこにある<code>images</code>、<code>javascripts</code>、<code>stylesheets</code>の各ディレクトリがそれぞれ<code>admin</code>と<code>store</code>というサブディレクトリを持っていることがわかります。これは公開されているストア用のアセットと非公開の管理ページを分けるためです。ストア用の<code>all.css</code>ファイル(または<code>application.js</code>ファイル)を見ると、それがSpree内のいくつかのファイルを<code>require</code>して、自動的にロードします。</p>
+
+``` /app/assets/stylesheests/store/all.css
+/*
+ * This is a manifest file that'll automatically include all the stylesheets available in this directory
+ * and any sub-directories. You're free to add application-wide styles to this file and they'll appear at
+ * the top of the compiled file, but it's generally better to create a new file per style scope.
+ *
+
+ *= require store/spree_core
+ *= require store/spree_auth
+ *= require store/spree_api
+ *= require store/spree_promo
+ *= require store/spree_dash
+
+ *= require_self
+ *= require_tree .
+*/
+```
+
+<p>すべての設定を完了するために、もう一つのコマンドを実行します。これは前にコピーされたmigrationを実行します。データベースの既存のデータを削除していいかを確認されることに注意してください。</p>
+
+``` terminal
+$ rake db:bootstrap
+This task will destroy any data in the database. Are you sure you want to 
+continue? [y/n] y
+db/development.sqlite3 already exists
+...
+```
+
+<p>このコマンドはまたadminユーザのためのメールアドレスとパスワードを求めてきます。表示されるデフォルト値をそのまま使用します。最後にサンプルデータをロードするか聞かれるので、yと答えストアに何らか商品がある状態にします。</p>
+
+``` terminal
+Email [spree@example.com]: 
+Password [spree123]: 
+Load Sample Data? [y/n]: y
+```
+
+<p>これでアプリケーションのサーバを起動してストアを見ることができます。</p>
+
+<h3>Spreeの外観</h3>
+
+<p>これがストアの外観です。デフォルトではテーマが適用されていないのでかなりプレーンな状態です。しかし、サイトはフル機能のEコマースストアで、generatorを実行したときにロードされたサンプルの商品を持ち、ショッピングカートとチェックアウト処理も含まれています。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/841/original/E298I01.png" width="842" height="368" alt="基本的なSpreeサイト"/>
+</div>
+
+<p>管理セクションも<a href="http://localhost:3000/admin"><code>http://localhost:3000/admin</code></a>で提供されていて、generatorを実行したときに設定したメールアドレスとパスワードを使ってログインすると表示されます。こちらも機能が完備していて、受注状況や、どの商品が売れているかを見るための各種のチャートを見ることができます。商品や注文の確認や編集をするためのページもあります。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/842/original/E298I02.png" width="842" height="464" alt="管理用ページ"/>
+</div>
+
+<p>管理セクションにはいくつかの設定オプションがあり、ストアが対応する支払い方法を変更する機能も含まれています。environmentごとに支払い方法があり、これらの内の一つを編集すると、それが使用する支払い方法を変更することができます。変更をおこなうと、Spreeがそのゲートウェイ用の認証情報を入力するためのオプションを表示します。これによって選択したペイメントゲートウェイ用の設定をおこなうことができます。</p>
+
+<h3>Spreeのカスタマイズ</h3>
+
+<p>ここまででRailsアプリケーション内に総合的なEコマースソリューションがほぼ出来上がりましたが、顧客に対しての見た目をさらに細かく制御したい場合はどうすればいいでしょうか? デフォルトの見た目はかなり地味ですが、これはテーマが何も適用されていないからです。このエピソードの残りを使って、ストアの見た目や振る舞いをカスタマイズするいろいろな方法を紹介します。</p> 
+
+<p>Spreeはテーマと機能拡張をサポートしていて、<a href="https://github.com/spree/spree_blue_theme">Blue Theme</a>がSpreeをカスタマイズする方法のいい例になるでしょう。このテーマは、Spreeのほとんどの部品と同じようにRailsエンジンのしくみを利用していて、これを用いて<code>app/assets</code>と<code>app/overrides</code>の2つのディレクトリの多くのものをオーバーライドします。このテーマをインストールするために<code>Gemfile</code>に次の行を追加して、<code>bundle</code>コマンドを実行します。</p>
+
+``` /Gemfile
+gem 'spree_blue_theme', :git =&gt; 'git://github.com/spree/spree_blue_theme.git'
+```
+
+<p>テーマを有効化するためにはスタイルシートファイルを修正して、デフォルトのスタイル(<code>require store/</code>で始まるもの)をそのテーマ用のものに置き換える必要があります。</p>
+
+``` /app/assets/stylesheets/store/all.css
+/*
+ * This is a manifest file that'll automatically include all the stylesheets available in this directory
+ * and any sub-directories. You're free to add application-wide styles to this file and they'll appear at
+ * the top of the compiled file, but it's generally better to create a new file per style scope.
+ *
+
+ *= require store/screen
+ *= require_self
+ *= require_tree .
+*/
+```
+
+<p>ストアの見た目はすっかり違うものになりました。これは、テーマを使うか使わないかのいずれを選択するにしても、Spreeアプリケーションの外観を自由にカスタマイズできることを示すいい例となります。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/843/original/E298I03.png" width="842" height="562" alt="テーマが適用されたページ"/>
+</div>
+
+<h3>サイトのパーツのカスタマイズ</h3>
+
+<p>次にサイトの個々のパーツをカスタマイズする方法を見ていきます。例えばページの左上部のロゴを独自のものに変更したい場合はそれも可能です。デフォルトの画像は<code>/assets/admin/bg/spree_50.png</code>に保存されていてSpreeエンジンが表示していますが、このアプリケーションでこれをオーバーライドできます。</p>
+
+<p>これをおこなう方法は2つあります。一つはアプリケーションに<code>/app/assets/images/admin/bg</code>ディレクトリを作成してそこに別の画像(例えばデフォルトの<code>rails.png</code>)をコピーして、ファイル名を<code>spree_50.png</code>に変更します。この画像がデフォルト画像をオーバーライドして、ページをリロードするとそれが表示されます。(ただし変更を有効にするにはサーバの再起動が必要です。)</p> 
+
+<p>ロゴを変更するもう一つの方法はSpreeの設定の一部をオーバーライドする方法です。デフォルトの設定は、多数の設定オプションを持った<a href="https://github.com/spree/spree/blob/master/core/app/models/spree/app_configuration.rb">このファイル</a>でおこないます。ここにはロゴオプションもあり、デフォルトのロゴファイルの場所が指定されています。Spreeは完全な設定選択の仕組みを持っていて、これらの設定を複数の方法でおこなえる手段を提供します。データベースから、管理パネルから、あるいは初期化ファイルを作成してRubyからおこなうという方法があります。一番最後の方法を選択して、新規に<code>spree.rb</code>設定ファイルを作成します。</p>
+
+``` /config/initializers/spree.rb
+Spree::Config.set(logo: "store/rails.png")
+```
+
+<p><code>Spree::Config.set</code>を呼び出してオプションを設定します。ロゴオプションを指定したら画像を<code>/app/assets/images/store/</code>に移動し名前を<code>rails.png</code>に変更します。ページをリロードすると、画像の場所は<code>http://localhost:3000/assets/store/rails.png</code>になっています。</p>
+
+<p>テンプレートの一部をオーバーライドしてSpreeをカスタマイズする方法もあります。これをおこなうには、まずSpreeのソースコードを見てテンプレートを探します。これは難しくはありませんが、インストールしたSpreeと同じバージョンのソースコードを探す必要があります。今回の場合は <a href="https://github.com/spree/spree/tree/v0.70.1">バージョン0.70.1</a>を見ます。正しいバージョンを見ていることを確認したら、<code>core/app/views/layouts</code>にある<code>spree_application.html.erb</code>ファイルを探します。ここにロゴを表示するコードが含まれているので、このテンプレートをオーバーライドします。</p>
+
+``` /app/views/layouts/spree_application.html.erb
+<div id="logo" data-hook>
+  <%= logo %>
+</div>
+```
+
+<p>表示を変更するためにこれをオーバーライドする方法はいくつかあります。アプリケーションの同じ場所にレイアウトファイル全体をそのままコピーすることも可能です。するとSpreeはデフォルトではなくこちらのテンプレートを使用し、変更を加えたらそれがアプリケーションに反映されます。</p>
+
+<p>もう一つは、<a href="https://github.com/railsdog/deface">Deface</a>というgemを使う方法です。このgemはすでにSpreeの依存関係なので改めてインストールする必要はなく、 Spreeが作成した<code>/app/overrides</code>ディレクトリで使用してSpreeのテンプレートをオーバーライドします。プロジェクトのホームページのREADMEの情報に、その仕組みについて示したいろいろな例が含まれています。リストの最初の例を、このディレクトリに新規に作成する<code>logo.rb</code>にコピーして、ページの変更したい部分のための修正をおこないます。</p>
+
+``` /app/overrides/logo.rb
+Deface::Override.new(:virtual_path =&gt; "layouts/spree_application", 
+                     :name =&gt; "logo", 
+                     :replace_contents =&gt; "#logo", 
+                     :text =&gt; "Store")
+```                     
+
+<p>ここで4つのオプションを指定します。<code>virtual_path</code>は修正するerbテンプレートのパスで、<code>name</code>には好きな名前をつけます。<code>div</code>のうち<code>id</code>が<code>logo</code>であるものの内容を置き換えたいので、<code>replace_contents</code>オプションを使って、その<code>div</code>に一致するCSSセレクタを指定します。最後のオプションでは、内容を何で置き換えたいかを指定します。今回の例ではロゴをStoreというテキストに置き換えます。</p>
+
+<p>ページをリロードすると、ロゴはなくなりその場所にテキストが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/844/original/E298I04.png" width="842" height="370" alt="ロゴがStoreという言葉に置き換えられた"/>
+</div>
+
+<p>画像をテキストに置き換えましたが、少しスタイルを設定することにします。スタイル情報を<code>stylesheets/store</code>ディレクトリに追加しますが、新規ファイルを作成するのがいいでしょう。テキストを大きく色を白にします。</p>
+
+``` /app/assets/stylesheets/store/layout.css.scss
+#logo {
+  font-size: 32px;
+  color: #FFF;
+}
+```
+
+<p>アプリケーションにアクセスすると、カスタマイズしたスタイルで表示されています。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/845/original/E298I05.png" width="842" height="370" alt="テキストにスタイルが適用された"/>
+</div>
+
+<p>今回のエピソードは以上です。Spreeについてここでカバーしきれなかったことはまだたくさんあるので、追加の情報については<a href="http://guides.spreecommerce.com/">Spree Guides</a>を読むことをお勧めします。Spreeについて知っておくべきおよそすべてのことについてのトピックが見つかるでしょう。</p>

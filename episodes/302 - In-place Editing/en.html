@@ -1,0 +1,186 @@
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/858/original/E302I01.png" width="800" height="418" alt="The user profile page."/>
+</div>
+
+<p>Above is a user profile page from a Rails application. There&rsquo;s an &ldquo;Edit Profile&rdquo; link at the bottom of the page and clicking this link will take us to a page where we can edit our details.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/859/original/E302I02.png" width="800" height="543" alt="The edit user profile page."/>
+</div>
+
+<p>Instead using a separate editing page we want to give users the ability to edit the fields directly inline on the profile page by clicking on any field. Doing this should make the field editable and hitting Enter or tabbing out of the field should save any changes made to the database.</p>
+
+<h3>Best In Place</h3>
+ 
+<p>There are a number of Rails plugins that can help us to add in-place editing to our application and there&rsquo;s a comprehensive list of them at <a href="https://www.ruby-toolbox.com/categories/rails_in_place_editing">The Ruby Toolbox</a>. The one we&rsquo;ll be using is called <a href="https://github.com/bernat/best_in_place">Best In Place</a>, although the others are worth talking a look at. Best In Place is a fork of another project called <a href="https://github.com/janv/rest_in_place">Rest in Place</a> and what makes it worth using is the <code>best_in_place</code> helper method it offers. This makes it easy to add in-place editing fields in our Rails applications.</p>
+
+<p>Best In Place has a <a href="https://github.com/janv/rest_in_place">demo page</a> and if we try it we&rsquo;ll see that we can edit any field by clicking it. Doing this replaces the static text with a form field appropriate for that type of data that&rsquo;s being edited. When we hit enter for click out of the field the changes are sent back to the server and the database is updated. Best in place supports validations so if we enter, say, an invalid email address we&rsquo;ll see an error message and the entered value will revert back to the last valid value.  It also supports different data types and so can show a dropdown menu for editing an association or toggle between two values for a boolean field. Let&rsquo;s see what&rsquo;s involved in adding it to our profile page.</p>
+
+<h3>Adding Best In Place to Our Application</h3>
+
+<p>To add Best in Place to our app we first need to add its gem to our application&rsquo;s Gemfile and run <code>bundle</code>.</p>
+
+```/Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.1.3'
+
+gem 'sqlite3'
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~> 3.1.5'
+  gem 'coffee-rails', '~> 3.1.1'
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+gem 'best_in_place'
+```
+
+<p>The gem includes two JavaScript files that we&rsquo;ll need to include in our application, <code>jquery.purr</code>, a jQuery plugin, and <code>best_in_place</code>. Since this is a Rails 3.1 app we can add them to the JavaScript manifest file.</p> 
+
+``` /app/assets/javascripts/application.js
+//= require jquery
+//= require jquery_ujs
+//= require jquery.purr
+//= require best_in_place
+//= require_tree .
+```
+
+<p>We need to define the fields that will be editable and we&rsquo;ll do this in the <code>users</code> CoffeeScript file. All we have to do is call <code>best_in_place()</code> on any elements we want to be editable. We&rsquo;ll apply it to elements with the class <code>best_in_place</code> which is what Best In Place uses internally.</p>
+
+``` /app/assets/javascripts/users.js.coffee
+jQuery ->
+  $('.best_in_place').best_in_place()
+```  
+
+<p>Now that we have Best In Place set up we can start to apply it to our User Profile page. Here&rsquo;s how the page&rsquo;s template currently looks:</p>
+
+``` /app/views/users/show.html.erb
+<h1>User Profile</h1>
+
+<p>
+  <b>Name:</b>
+  <%= @user.name %>
+</p>
+<p>
+  <b>Email:</b>
+  <%= @user.email %>
+</p>
+<p>
+  <b>Gender:</b>
+  <%= @user.gender %>
+</p>
+<p>
+  <b>Public profile:</b>
+  <%= @user.public_profile %>
+</p>
+<p>
+  <%= @user.bio %>
+</p>
+
+<%= link_to 'Edit Profile', edit_user_path(@user) %>
+```
+
+<p>The template simply outputs the value for each field. We&rsquo;ll add Best In Place&rsquo;s helper method to the <code>name</code> and <code>email</code> fields. This method takes two arguments, the object we&rsquo;re viewing and a symbol for the field we want to edit.</p>
+
+```/app/views/users/show.html.erb
+<p>
+  <b>Name:</b>
+  <%= best_in_place @user, :name %>
+</p>
+<p>
+  <b>Email:</b>
+  <%= best_in_place @user, :email %>
+</p>
+```
+
+<p>When we load the user profile page now and click on either the <code>name</code> or <code>email</code> field that field becomes editable.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/860/original/E302I03.png" width="800" height="429" alt="The name field is now editable."/>
+</div>
+
+<h3>Storing Changes</h3>
+
+<p>When we make a change a field then click away from it the field reverts to its previous value, which isn&rsquo;t what we want to happen. If we then reload the page, though, we&rsquo;ll see a message telling us that the user has been updated and the page shows the changed value.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/861/original/E302I04.png" width="800" height="458" alt="The page shows as updated when we reload it."/>
+</div>
+
+<p>This is happening because Best In Place uses JSON to send updates back to the server but our <code>UsersController</code> isn&rsquo;t set to respond to JSON requests correctly. This controller uses the usual seven RESTful action, which Best In Place expects, and when we change value in the name field the <code>update</code> action is triggered. The correct parameters are sent to the action but it doesn&rsquo;t respond to JSON requests as it should.</p>
+
+<p>To fix this we could add a <code>respond_to</code> block in <code>update</code> or, as this is a Rails 3 application, use <code>respond_with</code> which will handle everything for us. This expects a <code>respond_to</code> call at the top of the controller so we&rsquo;ll need to add that as well.</p>
+
+```/app/controllers/users_controller.rb
+class UsersController < ApplicationController
+  respond_to :html, :json
+ 
+  # Other actions omitted.
+ 
+  def update
+    @user = User.find(params[:id])
+    @user.update_attributes(params[:user])
+    respond_with @user
+  end
+
+end
+```
+
+<p>If we need to customize this behaviour further we can use a full <code>respond_to</code> block in the update action and there&rsquo;s an example of how to do this in Best in Place&rsquo;s <a href="https://github.com/bernat/best_in_place/blob/master/README.md">README</a>.</p> 
+
+<p>Now that our controller responds to JSON the in-place functionality works correctly. Any changes we make are added to the database and the UI updates as we expect.</p> 
+
+<p>Validations also work, too. If we enter an invalid email address an error message will show, although the by default it isn&rsquo;t particularly visible.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/862/original/E302I05.png" width="800" height="475" alt="Validation errors aren't pretty by default."/>
+</div>
+
+<p>We can pretty this error message up with some CSS.</p>
+
+``` /app/assets/stylesheets/users.css.scss
+.purr {
+  position: fixed;
+  top: 30px;
+  right: 100px;
+  width: 250px;
+  padding: 20px;
+  background-color: #FCC;
+  border: solid 2px #666;
+  &:first-letter { text-transform: uppercase };
+}
+```
+
+<p>All of the styles are in a <code>purr</code> class which is what Best in Place uses. When we reload the page now and enter a bad email address again we get a prettier error message.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/863/original/E302I06.png" width="800" height="475" alt="Validation error messages look better after adding some CSS."/>
+</div> 
+
+<h3>Handling Other Types of Data</h3>
+
+<p>We&rsquo;ve only made the <code>name</code> and <code>email</code> fields editable so far, now we&rsquo;ll look at the other attributes on the user page. The <code>bio</code> field contains a long piece of text but by default <code>best_in_place</code> will only show a single line text box. We can change this behaviour by specifying the <code>type</code> attribute.</p>
+
+``` /app/views/users/show.html.erb
+<%= best_in_place @user, :bio, type: :textarea %>
+```
+
+<p>The <code>public_profile</code> field is boolean so we should use the <code>checkbox</code> type and pass in the values that should be displayed in a <code>:collection</code> option.</p> 
+
+``` /app/views/users/show.html.erb
+<%= best_in_place @user, :public_profile, type: :checkbox, collection: %w[No Yes] %>
+```  
+
+<p>Clicking on the current public profile option now will toggle between these two options. The gender option can be treated in a similar way, but here we use <code>:select</code> instead of <code>:checkbox</code> and pass in a two-dimensional array of options.</p>
+
+``` /app/views/users/show.html.erb
+  <%= best_in_place @user, :gender, type: :select, :collection [["Male", "Male"], ["Female", "Female"], ["", "Unspecified"]] %>
+```  
+<p>This option will show a dropdown menu when we click the current gender.</p>
+
+<p>That&rsquo;s is for this episode. We now have a fully-featured in-place editing option for each field in our User Profile page. There may be times when we want to do something a little more complicated, for instance displaying options for an association or maybe a formatted price field where the value displayed may be different from the one in the edit field. Unfortunately this is a little difficult to do with the current version of Best In Place. For these situations it&rsquo;s still best to fall back to a &lsquo;traditional&rsquo; edit form or write your own solution from scratch.</p>

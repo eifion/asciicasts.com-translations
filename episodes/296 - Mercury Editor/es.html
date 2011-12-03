@@ -1,0 +1,245 @@
+<p><a href="http://jejacks0n.github.com/mercury/">Mercury</a> es un proyecto de Jeremy Jackson que permite editar secciones de una p&aacute;gina HTML directamente en el navegador. Se puede ver en funcionamiento haciendo clic en  &ldquo;Test it Out&rdquo; en la p&aacute;gina del proyecto.  Al hacerlo aparece una barra de herramientas en la parte superior de la p&aacute;gina, en la que se iluminan ciertas secciones que  se podr&aacute;n editar directamente y enviar sus cambios al servidor.  En este episodio veremos c&oacute;mo a&ntilde;adir Mercury a una aplicaci&oacute;n Rails.</p>
+
+<p>Debajo aparece una p&aacute;gina de un sencillo gestor de contenidos.  La aplicaci&oacute;n tiene un modelo <code>Page</code> con  tres registros cada uno de los cuales tiene un nombre y contenido.  Ahora mismo no tenemos forma de editar estas p&aacute;ginas por lo que a&ntilde;adiremos el editor Mercury para poder modificarlas directamente.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/823/original/E296I01.png" width="800" height="437" alt="Nuestra sencilla aplicación de CMS"/>
+</div>
+
+<h3>Instalaci&oacute;n de Mercury</h3>
+
+<p>El primer paso para instalar Mercury es ir al <code>/Gemfile</code> y a&ntilde;adir la gema <code>mercury-rails</code>. Al tratarse de un proyecto de mucha actividad descargaremos una versi&oacute;n reciente directamente desde Github.</p>
+
+
+``` /Gemfile
+source &#x27;http://rubygems.org&#x27;
+
+gem &#x27;rails&#x27;, &#x27;3.1.1&#x27;
+gem &#x27;sqlite3&#x27;
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem &#x27;sass-rails&#x27;,   &#x27;~&gt; 3.1.4&#x27;
+  gem &#x27;coffee-rails&#x27;, &#x27;~&gt; 3.1.1&#x27;
+  gem &#x27;uglifier&#x27;, &#x27;&gt;= 1.0.3&#x27;
+end
+
+gem &#x27;jquery-rails&#x27;
+gem &#x27;mercury-rails&#x27;, git: &#x27;https://github.com/jejacks0n/mercury.git&#x27;, ref: &#x27;a2b16bcdc9&#x27;
+```
+
+<p>Puede verse la versi&oacute;n que hemos utilizado en este episodio examinando el SHA de su <em>commit</em>.  Como siempre que cambiamos el <code>Gemfile</code> tenemos que ejecutar bundle para instalar la nueva gema.</p>
+
+<p>Tras la instalaci&oacute;n de la gema tenemos que ejecutar el generador de instalaciones de Mercury, que nos preguntar&aacute; si queremos instalar los ficheros de CSS y <em>layout</em> y le diremos que s&iacute;.</p>
+
+``` terminal
+$ rails g mercury:install
+      create  app/assets/javascripts/mercury.js
+       route  Mercury::Engine.routes
+Install the layout and CSS overrides files? [yN] y
+      create  app/views/layouts/mercury.html.erb
+      create  app/assets/stylesheets/mercury_overrides.css
+```      
+
+<p>La salida de la orden nos indica que tenemos que instalar  las migraciones de Mercury tras lo cual migraremos la base de datos.</p>
+
+``` terminal
+$ rake mercury_engine:install:migrations
+Copied migration 20111108202946_create_images.rb from mercury_engine
+noonoo:cms eifion$ rake db:migrate
+==  CreateImages: migrating ===================================================
+-- create_table(:images)
+   -&gt; 0.0017s
+==  CreateImages: migrated (0.0018s) ==========================================
+```
+
+<p>Tras todo esto nuestra aplicaci&oacute;n ahora tiene un fichero llamado <code>mercury.js</code> en el directorio <code>app/assets</code>.  Este fichero contiene todas las opciones de configuraci&oacute;n de Mercury as&iacute; como comentarios que explican su cometido.  M&aacute;s adelante volveremos a este archivo; por ahora tenemos que ver c&oacute;mo lo cargamos.  En una aplicaci&oacute;n de Rails 3.1 este JavaScript ser&aacute; cargado por defecto en todas las p&aacute;ginas porque el fichero de manifiesto <code>application.js</code> incluye todos los archivos que cuelguen de <code>app/assets/javascripts</code>.  El JavaScript de Mercury es bastante pesado por lo que s&oacute;lo queremos cargarlo en las p&aacute;ginas editables as&iacute; que vamos a cambiar el fichero de manifiesto para que s&oacute;lo cargue los ficheros que queramos (como alternativa, podr&iacute;amos mover el fichero <code>mercury.js</code> a <code>/vendor/assets</code>).  Cuando estamos editando una p&aacute;gina Mercury utilizar&aacute; su propio fichero de <em>layout</em> que incluir&aacute; este JavaScript por lo que aunque en principio hemos quitado este fichero, seguir&aacute; carg&aacute;ndose cuando haga falta.</p>
+
+``` /app/assets/javascripts/application.js
+// This is a manifest file that&#x27;ll be compiled into including all the files listed below.
+// Add new JavaScript/Coffee code in separate files in this directory and they&#x27;ll automatically
+// be included in the compiled file accessible from http://example.com/assets/application.js
+// It&#x27;s not advisable to add code directly here, but if you do, it&#x27;ll appear at the bottom of the
+// the compiled file.
+//
+//= require jquery
+//= require jquery_ujs
+//= require pages
+```
+
+<p>Podr&iacute;amos hacer lo mismo con la hoja de estilos de Mercury pero por ahora no nos ser&aacute; necesario.</p>
+
+<h3>C&oacute;mo hacer que las p&aacute;ginas sean editables</h3>
+
+<p>Una vez instalado Mercury ya tenemos acceso al editor desde cualquier p&aacute;gina de la aplicaci&oacute;n.  Para poner en modo edici&oacute;n una p&aacute;gina tna s&oacute;lo tenemos que a&ntilde;adir <code>/editor</code>  entre el <em>host</em> y la ruta de la URL.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/824/original/E296I02.png" width="800" height="551" alt="La barra de herramientas de Mercury."/>
+</div>
+
+<p>Como ya sabemos la URL para editar una p&aacute;gina podemos a&ntilde;adir el enlace de edici&oacute;n.</p>
+
+```/app/views/pages/show.html.erb
+<div id="header">
+  <h1>&lt;%= raw @page.name %&gt;</h1>
+  <ul id="navigation">
+  &lt;% Page.all.each do |page| %&gt;
+    <li>&lt;%= link_to_unless_current page.name, page %&gt;</li>
+  &lt;% end %&gt;
+  </ul>
+</div>
+
+<div class="content">
+  &lt;%= raw @page.content %&gt;
+
+  <p>&lt;%= link_to &quot;Edit Page&quot;, &quot;/editor&quot; + request.path %&gt;</p>
+</div>
+```
+
+<h3>C&oacute;mo hacer &aacute;reas editables</h3>
+
+<p>Ya tenemos un enlace que nos permite editar cualquier p&aacute;gina pero todav&iacute;a no hemos definido cu&aacute;les son las &aacute;reas editables de la misma.  Tenemos dos secciones que queremos poder editar: el t&iacute;tulo de la p&aacute;gina y su contenido, que se mapean a atributos en el modelo <code>Page</code>.  Para que una secci&oacute;n de una p&aacute;gina sea editable tiene que estar rodeada por un elemento que tenga la clase <code>mercury-region</code> y <code>data-type</code> <code>editable</code>.  Tambi&eacute;n tenemos que darle a cada envoltorio un <code>id</code> para que puedan ser identificados cuando se env&iacute;e la p&aacute;gina actualizada al servidor.  Nuestras dos regiones se llamar&aacute;n <code>page_name</code> y <code>page_content</code>.</p>
+
+
+```/app/views/pages/show.html.erb
+<div id="header">
+  <h1><span id="page_name" class="mercury-region" data-type="editable">&lt;%= raw @page.name %&gt;</span></h1>
+  <ul id="navigation">
+  &lt;% Page.all.each do |page| %&gt;
+    <li>&lt;%= link_to_unless_current page.name, page %&gt;</li>
+  &lt;% end %&gt;
+  </ul>
+</div>
+
+<div class="content">
+  <div id="page_content" class="mercury-region" data-type="editable">
+    &lt;%= raw @page.content %&gt;
+  </div>
+
+  <p>&lt;%= link_to &quot;Edit Page&quot;, &quot;/editor&quot; + request.path %&gt;</p>
+</div>
+```
+
+<p>Si recargamos la p&aacute;gina veremos las dos secciones editables en azul.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/825/original/E296I03.png" width="800" height="551" alt="Ya aparecen las regiones editables en la página."/>
+</div>
+
+<h3>Almacenamiento de los cambios</h3>
+
+<p>Podemos editar las regiones y previsualizar los cambios, pero todav&iacute;a no los podemos guardar porque no hemos configurado nuestra aplicaci&oacute;n para que lo haga.  Al hacer clic en el icono  &ldquo;Save&rdquo; Mercury mostrar&aacute; una alerta indicando a d&oacute;nde estaba intentando enviar los cambios.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/826/original/E296I04.png" width="420" height="153" alt="Mercury muestra una alerta porque no puede enviar los cambios al servidor."/>
+</div>
+
+<p>La URL en la que Mercury intenta guardar los cambios es la URL de la p&aacute;gina. Mercury env&iacute;a una petici&oacute;n POST a esta URL con los cambios.  Modificaremos este comportamiento para que el contenido actualizado se env&iacute;e a la acci&oacute;n <code>mercury_update</code> del <code>PagesController</code>.  Tenemos que modificar el fichero de rutas para que sepa qu&eacute; hacer con esta nueva acci&oacute;n.</p>
+
+``` /config/routes.rb
+Cms::Application.routes.draw do
+  Mercury::Engine.routes
+
+  root to: &#x27;pages#index&#x27;
+  resources :pages do
+    member { post :mercury_update }
+  end
+end
+```
+
+<p>N&oacute;tese que Mercury ya ha a&ntilde;adido una l&iacute;nea al fichero de rutas para activar la URL de edici&oacute;n de cada p&aacute;gina.</p>
+
+<p>Lo siguiente es escribir la acci&oacute;n <code>mercury_update</code>.  Tendremos que encontrar la p&aacute;gina por su <code>id</code> y luego actualizarla y devolver la respuesta.  Por ahora, pondremos un comentario en el sitio donde tendr&iacute;amos que escribir el c&oacute;digo.</p>
+
+
+``` /app/controllers/pages_controller.rb
+def mercury_update
+  page = Page.find(params[:id])
+  # Update page
+  render text: &quot;&quot;
+end
+```
+
+<p>Ahora tenemos que decirle a Mercury que no queremos usar la URL que se utiliza por defecto para actualizar las p&aacute;ginas.   Para no tener que configurar la URL en  JavaScript directamente editaremos el atributo <code>data</code> del enlace a  &ldquo;Edit Page&rdquo;.  Tambi&eacute;n le daremos al enlace un  <code>id</code> para poder acceder a &eacute;l desde JavaScript.</p>
+
+``` /app/views/pages/show.html.erb
+<p>&lt;%= link_to &quot;Edit Page&quot;, &quot;/editor&quot; + request.path, id: &quot;edit_link&quot;, data: { save_url: mercury_update_page_path(@page) } %&gt;</p>
+```
+
+<p>Le podemos informar a Mercury de esta nueva URL al final de la configuraci&oacute;n de  <code>mercury.js</code> a&ntilde;adiendo el siguiente c&oacute;digo:</p>
+
+
+``` /app/assets/javascripts/mercury.js
+$(window).bind(&#x27;mercury:ready&#x27;, function() {
+  var link = $(&#x27;#mercury_iframe&#x27;).contents().find(&#x27;#edit_link&#x27;);
+  Mercury.saveURL = link.data(&#x27;save-url&#x27;);
+  link.hide();
+});
+```
+
+<p>El c&oacute;digo se engancha al evento <code>mercury:ready</code>, y cuando dicho evento se produzca buscar&aacute; el enlace a  &ldquo;Edit Page&rdquo; y establecer&aacute;  el atributo <code>saveURL</code> de Mercury al valor que aparec&iacute;a en el atributo <code>data-save-url</code> que le a&ntilde;adimos.  Mercury carga el contenido de la p&aacute;gina actual en un iframe por lo que tenemos que obtener su contenido para buscar en &eacute;l el enlace.  Como este c&oacute;digo s&oacute;lo se activa cuando la p&aacute;gina pasa a modo de edici&oacute;n le hemos a&ntilde;adido una l&iacute;nea para ocultar el enlace.</p>
+
+<p>Si ahora hacemos algunos cambios en la p&aacute;gina e intentamos guardarlo veremos que el mensaje de error ya no aparece, lo que significa que Mercury ha enviado los cambios al servidor.  Si inspeccionamos el registro de desarrollo veremos que al guardar la p&aacute;gina se invoca la acci&oacute;n <code>mercury_update</code>, envi&aacute;ndose el contenido como una cadena JSON que contiene todos los atributos necesarios para actualizar nuestro modelo <code>Page</code>.</p>
+
+
+``` terminal
+Started POST &quot;/pages/1/mercury_update&quot; for 127.0.0.1 at 2011-11-10 18:31:59 +0000
+  Processing by PagesController#mercury_update as JSON
+  Parameters: {&quot;content&quot;=&gt;&quot;{\&quot;page_name\&quot;:{\&quot;type\&quot;:\&quot;editable\&quot;,\&quot;value\&quot;:\&quot;Welcome!!\&quot;,\&quot;snippets\&quot;:{}},\&quot;page_content\&quot;:{\&quot;type\&quot;:\&quot;editable\&quot;,\&quot;value\&quot;:\&quot;<p>In this ASCIIcasts&nbsp;episode we are going to look at the <a href=\\\"http://jejacks0n.github.com/mercury/\\\">Mercury Editor</a>. It allows you to edit a document in-place, right in the HTML. It works in the following browsers.</p>\\n<ul>\\n  <li>Firefox 4+</li>\\n  <li>Chrome 10+</li>\\n  <li>Safari 5+</li>\\n</ul>\\n<p>Try it out here by clicking on the <strong><em>Edit Page</em></strong> link below. There you will be able to change this page content and even the title above.</p>\&quot;,\&quot;snippets\&quot;:{}}}&quot;, &quot;id&quot;=&gt;&quot;1&quot;}
+```  
+
+<p>En lugar de usar JSON Mercury puede tambi&eacute;n  guardar los datos como par&aacute;metros de formularios anidados.  Para que se comporte de esta forma tenemos que cambiar el fichero <code>mercury.html.erb</code> que se gener&oacute; autom&aacute;ticamente.  Este fichero contiene un objeto <code>options</code> que posee la propiedad <code>saveStyle</code>.  Por defecto esta propiedad tiene el valor <code>null</code> por lo que se usar&aacute; JSON para enviar la p&aacute;gina al servidor.  Nosotros los cambiaremos a <code>&#x27;form&#x27;</code>.</p>
+
+``` /app/views/layouts/mercury.html.erb
+<script type="text/javascript">
+  var saveUrl = null;
+  var options = {
+    saveStyle: &#x27;form&#x27;,  // &#x27;form&#x27;, or &#x27;json&#x27; (default json)
+    saveMethod: null, // &#x27;POST&#x27;, or &#x27;PUT&#x27;, (create, vs. update -- default POST)
+    visible: null     // if the interface should start visible or not (default true)
+  };
+  new Mercury.PageEditor(saveUrl, options);
+</script>
+```
+
+<p>Cuando ahora se guarden los cambios en las p&aacute;ginas veremos que se env&iacute;a como par&aacute;metros anidados en lugar de datos JSON, que podemos emplear para guardar los cambios en la base de datos.  El nombre y contenido de la p&aacute;gina aparecer&aacute;n anidados en el par&aacute;metro <code>content</code>, y cada uno de ellos tendr&aacute; una propiedad <code>value</code>, que es lo que nos hace falta para guardar el contenido en base de datos.</p>
+
+
+``` /app/controllers/pages_controller.rb
+def mercury_update
+  page = Page.find(params[:id])
+  page.name = params[:content][:page_name][:value]
+  page.content = params[:content][:page_content][:value]
+  page.save!
+  render text: &quot;&quot;
+end
+```
+
+<p>Si ahora cambiamos la p&aacute;gina y guardamos la p&aacute;gina no parecer&aacute; que ocurra nada pero si volvemos a la p&aacute;gina veremos que los cambios se han guardado.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/827/original/E296I05.png" width="800" height="280" alt="Los cambios se han guardado."/>
+</div>
+
+<p>Queremos que nuestra aplicaci&oacute;n redirija a la p&aacute;gina una vez que se hayan efectuado los cambios, lo que podemos hacer atendiendo al evento <code>mercury:saved</code> y haciendo ah&iacute; la redirecci&oacute;n.</p>
+
+
+``` /app/assets/javascripts/mercury.js
+$(window).bind(&#x27;mercury:saved&#x27;, function() {
+  window.location = window.location.href.replace(/\/editor\//i, &#x27;/&#x27;);
+});
+```
+
+<p>Cuando se guarden los cambios, esto nos dirigir&aacute; de vuelta a la p&aacute;gina del contenido.</p>
+
+
+<h3>Para ir m&aacute;s lejos</h3>
+
+<p>Mercury ofrece mucho m&aacute;s de lo que hemos podido repasar aqu&iacute;.  Podemos hacernos una idea de todas sus posibilidades leyendo los comentarios del fichero <code>mercury.js</code>. Podemos, por ejemplo, personalizar lo que aparece en la barra de herramientas; hay varias funcionalidades como fragmentos de c&oacute;digo, historial y notas que podemos activar y muchas m&aacute;s cosas.  Todas se encuentran documentadas en <code>mercury.js</code>.</p>
+
+<p>Con esto terminamos nuestro repaso a Mercury.  Es una proyecto muy interesante y divertido, pero debemos tener en cuenta que para utilizarlo en nuestros proyectos Rails debemos usar una versi&oacute;n moderna de Firefox, Chrome o Safari.</p>
+
+

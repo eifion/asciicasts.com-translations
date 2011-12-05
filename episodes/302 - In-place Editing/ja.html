@@ -1,0 +1,187 @@
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/858/original/E302I01.png" width="800" height="418" alt="ユーザプロファイルのページ"/>
+</div>
+
+<p>上の画面は、あるRailsアプリケーションのユーザプロファイルのページです。ページの一番下に「Edit Profile(プロファイルを編集する)」のリンクがあり、このリンクをクリックすると詳細情報を編集できるページに切り替わります。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/859/original/E302I02.png" width="800" height="543" alt="ユーザプロファイルの編集ページ"/>
+</div>
+
+<p>このような独立した編集ページを使う代わりに、ユーザがプロファイルページ上でフィールドをクリックしたら直接その場所で編集できるようにしたいと思います。クリックによってフィールドが編集可能に変わり、Enterキーを押すかTabでフィールドを移動したら変更をデータベースに保存します。</p>
+
+<h3>Best In Place</h3>
+ 
+<p>アプリケーションにインライン編集機能を追加するためのRailsプラグインはいくつかあり、<a href="https://www.ruby-toolbox.com/categories/rails_in_place_editing">The Ruby Toolbox</a>にそれらをまとめたリストがあります。いずれも一見の価値がありますが、今回は<a href="https://github.com/bernat/best_in_place">Best In Place</a>を使用します。Best In Placeは、<a href="https://github.com/janv/rest_in_place">Rest in Place</a>という別のプロジェクトのフォークですが、これを使う意味は<code>best_in_place</code>ヘルパーメソッドにあります。これによってRailsアプリケーションに、その場で編集できるフィールドを簡単に追加できるようになります。</p>
+
+<p>Best In Placeには<a href="https://github.com/janv/rest_in_place">デモページ</a>があり、試してみるとクリックでフィールドを編集できる様子がわかります。クリックによって静的テキストがデータ型に応じたフォームフィールドに置き換わります。Enterキーを押してフィールドから抜けると変更がサーバに送信されデータベースが更新されます。Best in placeはバリデーションをサポートしているので、例えば無効なメールアドレスを入力するとエラーメッセージが表示されて、入力した値は直前の有効な値に戻ります。また複数のデータ型をサポートしているので、関連を編集するためのドロップダウンメニューを表示したり、ブール値のフィールドでは2つの値を切り替えたりできます。ではこの機能をプロファイルページに追加する作業を見ていきましょう。</p>
+
+<h3>アプリケーションにBest In Placeを追加する</h3>
+
+<p>アプリケーションにBest in Placeを追加するためには、まずアプリケーションのGemfileにgemを追加して、<code>bundle</code>コマンドを実行します。</p>
+
+```/Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.1.3'
+
+gem 'sqlite3'
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~&gt; 3.1.5'
+  gem 'coffee-rails', '~&gt; 3.1.1'
+  gem 'uglifier', '&gt;= 1.0.3'
+end
+
+gem 'jquery-rails'
+gem 'best_in_place'
+```
+
+<p>gemにはアプリケーションにインクルードする2つのJavaScriptファイルが含まれています。jQueryプラグインの<code>jquery.purr</code>と、<code>best_in_place</code>です。このアプリケーションはRails 3.1なので、それらをJavaScriptのapplication.jsファイルのmanifestに追加します。</p> 
+
+``` /app/assets/javascripts/application.js
+//= require jquery
+//= require jquery_ujs
+//= require jquery.purr
+//= require best_in_place
+//= require_tree .
+```
+
+<p>編集可能にするフィールドを定義する必要がありますが、それをCoffeeScriptファイルの<code>users.js.coffee</code>でおこないます。必要な作業は、編集可能にしたい要素で<code>best_in_place()</code>を呼び出すだけです。それを<code>best_in_place</code>クラスで要素に適用します。これをBest In Placeが内部で使用します。</p>
+
+``` /app/assets/javascripts/users.js.coffee
+jQuery -&gt;
+  $('.best_in_place').best_in_place()
+```  
+
+<p>Best In Placeが設定できたので、これからユーザプロファイルのページに適用していきます。ページのテンプレートは現状は以下の通りです。</p>
+
+``` /app/views/users/show.html.erb
+<h1>User Profile</h1>
+
+<p>
+  <b>Name:</b>
+  <%= @user.name %>
+</p>
+<p>
+  <b>Email:</b>
+  <%= @user.email %>
+</p>
+<p>
+  <b>Gender:</b>
+  <%= @user.gender %>
+</p>
+<p>
+  <b>Public profile:</b>
+  <%= @user.public_profile %>
+</p>
+<p>
+  <%= @user.bio %>
+</p>
+
+<%= link_to 'Edit Profile', edit_user_path(@user) %>
+```
+
+<p>テンプレートは単純に各フィールドの値を出力するだけです。Best In Placeのヘルパーメソッドを、<code>name</code>と<code>email</code>のフィールドに追加します。このメソッドは引数を2つとります。今表示されているオブジェクトと、編集したいフィールドのシンボルです。</p>
+
+```/app/views/users/show.html.erb
+<p>
+  <b>Name:</b>
+  <%= best_in_place @user, :name %>
+</p>
+<p>
+  <b>Email:</b>
+  <%= best_in_place @user, :email %>
+</p>
+```
+
+<p>ユーザプロファイルのページを読み込んで、<code>name</code>か<code>email</code>のいずれかのフィールドをクリックすると、そのフィールドが編集可能に変わります。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/860/original/E302I03.png" width="800" height="429" alt="nameフィールドが編集可能になった"/>
+</div>
+
+<h3>変更を保存する</h3>
+
+<p>フィールドの値を変更して他の場所をクリックするとフィールドは前の値に戻ってしまいますが、これは期待する動きではありません。しかしページをリロードすると、ユーザ情報が更新されたというメッセージが表示され、ページには変更後の値が表示されます。</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/861/original/E302I04.png" width="800" height="458" alt="ページをリロードすると値が更新されている"/>
+</div>
+
+<p>これは、Best In PlaceがJSONを用いて更新情報をサーバに送り返しているのにも関わらず、<code>UsersController</code> がJSONリクエストに正しくレスポンスするよう設定されていないからです。このコントローラは、Best In Placeが期待する通り、通常の7つのRESTfulアクションを使用し、nameフィールドの値を変更すると<code>update</code>アクションが起動されます。正しいパラメータがアクションに送られるのですが、JSONリクエストに対して本来返すべきレスポンスを返していません。</p>
+
+<p>これを修正するためには、<code>update</code>に<code>respond_to</code>ブロックを追加するか、あるいはRails 3アプリケーションなので<code>respond_with</code>を使えば自動的に処理されます。これにはコントローラの最初に<code>respond_to</code>の呼び出しが必要なので、それも追加します。</p>
+
+```/app/controllers/users_controller.rb
+class UsersController &lt; ApplicationController
+  respond_to :html, :json
+ 
+  # Other actions omitted.
+ 
+  def update
+    @user = User.find(params[:id])
+    @user.update_attributes(params[:user])
+    respond_with @user
+  end
+
+end
+```
+
+<p>この振る舞いをさらにカスタマイズする場合は、updateアクションでフルの<code>respond_to</code>ブロックを使います。この方法についてはBest in Placeの<a href="https://github.com/bernat/best_in_place/blob/master/README.md">README</a>にサンプルがあります。</p> 
+
+<p>これでコントローラがJSONにレスポンスを返すようになったので、インライン編集の機能は正しく動作するようになりました。変更をおこなうとそれがデータベースに追加され、画面も期待する通りに更新されます。</p> 
+
+<p>バリデーションも機能しています。無効なメールアドレスを入力するとエラーメッセージが表示されます。しかしデフォルトではあまり見やすくありません。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/862/original/E302I05.png" width="800" height="475" alt="バリデーションエラーはデフォルトでは見にくい"/>
+</div>
+
+<p>このエラーメッセージをCSSで整えます。</p>
+
+``` /app/assets/stylesheets/users.css.scss
+.purr {
+  position: fixed;
+  top: 30px;
+  right: 100px;
+  width: 250px;
+  padding: 20px;
+  background-color: #FCC;
+  border: solid 2px #666;
+  &amp;:first-letter { text-transform: uppercase };
+}
+```
+
+<p>スタイルはすべて、Best in Placeが使用する<code>purr</code>クラスの中にあります。ページをリロードして再度無効なメールアドレスを入力すると、より見やすいエラーメッセージが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/863/original/E302I06.png" width="800" height="475" alt="CSSを追加してバリデーションエラーのメッセージが見やすくなった"/>
+</div> 
+
+<h3>その他のデータ型を扱う</h3>
+
+<p>ここまでで<code>name</code>と<code>email</code>の2つのフィールドを編集可能に変更しました。続いてユーザページのその他のフィールドを見ていきます。<code>bio</code>フィールドには長いテキストが含まれていますが、デフォルトでは<code>best_in_place</code>は1行のみのテキストボックスを表示します。これは<code>type</code>属性を指定することで変更できます。</p>
+
+``` /app/views/users/show.html.erb
+<%= best_in_place @user, :bio, type: :textarea %>
+```
+
+<p><code>public_profile</code>フィールドはブール値なので<code>checkbox</code>タイプを使用して、<code>:collection</code>オプションに表示する値を渡します。</p> 
+
+``` /app/views/users/show.html.erb
+<%= best_in_place @user, :public_profile, type: :checkbox, collection: %w[No Yes] %>
+```  
+
+<p>現在のpublic profileオプションをクリックすると、2つの選択肢が切り替わるようになりました。性別オプションも同じように処理できますが、ここでは<code>:checkbox</code>の代わりに<code>:select</code>を使用して、オプションを2次元配列で渡します。</p>
+
+``` /app/views/users/show.html.erb
+  <%= best_in_place @user, :gender, type: :select, :collection [["Male", "Male"], ["Female", "Female"], ["", "Unspecified"]] %>
+```  
+  
+<p>現在の性別をクリックすると、ドロップダウンメニューが表示されます。</p>
+
+<p>今回のエピソードは以上です。これでユーザプロファイルのページの全フィールドでインライン編集ができるようになりました。もう少し複雑なことをしたいという場合もあるでしょう。例えば、関連テーブルからオプションを表示したり、価格フィールドで表示される値を編集フィールドとは違う形でフォーマットして表示したいなどです。残念ながらこれは現行バージョンのBest In Placeでは少し難しいです。このような場合には、従来通りの編集用フォームに戻すか、自分でゼロから書くことになります。</p>

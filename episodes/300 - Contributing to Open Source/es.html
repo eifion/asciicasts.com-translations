@@ -1,0 +1,159 @@
+<p><a href="https://github.com/">Github</a> hace que sea muy f&aacute;cil colaborar con proyectos de c&oacute;digo abierto.  En este episodio veremos c&oacute;mo hacerlo enviando una petici&oacute;n de cambio al  <a href="https://github.com/myronmarston/vcr">proyecto VCR</a>. Vimos esta gema, que proporciona una manera de guardar las transacciones HTTP y reproducirlas para acelerar los tests, en el  <a href="http://railscasts.com/episodes/291-testing-with-vcr?view=asciicast">episodio 291</a>. Myron Marston, el autor de la gema, suele estar muy pendiente de las colaboraciones que recibe su proyecto.</p>
+
+<p>Supongamos que hemos encontrado un problema en esta gema, y que queremos enviar un parche que lo corrige.  Lo primero que hay que hacer es ver la herramienta de incidencias de la gema y ver si este problema ha sido ya atacado.  Si el proyecto dispone de lista de correo es buena idea hacer algunas b&uacute;squedas en ella para ver si hay mensajes relacionados con el problema que hemos encontrado.  Si se trata de cambios grandes es buena idea discutirlos primero para ver si hay inter&eacute;s en dicho cambio.</p>
+
+<h3><a href="http://www.youtube.com/watch?feature=player_detailpage&amp;v=nHLzj_6HCjU#t=270s">Fork It!</a></h3>
+
+<p>Una vez que estemos listos para empezar en nuestra correcci&oacute;n, el primer paso es bifurcar el proyecto.  Para esto tenemos que visitar la p&aacute;gina del mismo y hacer clic en el bot&oacute;n   &lsquo;fork&rsquo;, que al cabo de unos segundos crear&aacute; nuestra propia copia del repositorio, y una vez que haya acabado podemos visitar nuestra propia versi&oacute;n y clonarla a partir de su URL.</p>
+
+``` terminal
+$ git clone git@github.com:eifion/vcr.git
+$ cd vcr
+```
+
+<p>Tras el clonado, deber&iacute;amos poder ver las ramas que tenemos:</p>
+
+
+``` terminal
+$ git branch -r
+  origin/1-x-stable
+  origin/HEAD -> origin/master
+  origin/jruby_nailgun
+  origin/master
+``` 
+
+<p>Merece la pena destacar que hay una rama para la versi&oacute;n estable 1, que es la versi&oacute;n actual de la gema.  La rama <code>master</code> apunta a la versi&oacute;n 2, que se encuentra actualente en fase de pre-lanzamiento.  Debemos tener esto en cuenta: la versi&oacute;n de la gema con la que estamos trabajando puede que sea distinta de la que estamos viendo su c&oacute;digo.</p>
+
+<p>Siempre es buena idea leer la documentaci&oacute;n al montar el entorno de desarrollo de un proyecto.  En este caso hay una secci&oacute;n de desarrollo en el fichero <a href="https://github.com/eifion/vcr/blob/master/README.md">README</a> que nos dice que las peticiones de cambio ser&aacute;n bienvenidas siempre que los cambios que hagamos vengan con tests.  El fichero README no da instrucciones sobre la suite de tests de la gema, pero al menos Travis CI dice que todos los tests est&aacute;n  <a href="http://travis-ci.org/#!/myronmarston/vcr">pasando</a>.</p>
+
+<p>El proyecto tiene un Gemfile, por lo que sabemos que utiliza Bundler para sus dependencias.  Deber&iacute;amos poder instalarlas ejecutando <code>bundle install</code>, pero al hacerlo vemos un error.  Esto no es de extra&ntilde;ar porque la configuraci&oacute;n var&iacute;a de un sistema a otro por lo que deber&iacute;amos esperar encontrarnos con algunas pegas a la hora de instalar un proyecto en nuestro entorno.</p>
+
+<p>El error que vemos est&aacute; relacionado con la gema  <code>rb-fsevent</code>, y una b&uacute;squeda r&aacute;pida nos indica que el problema tiene que ver con nuestra configuraci&oacute;n.  Estamos usando  <a href="https://github.com/kennethreitz/osx-gcc-installer">GCC Installer</a> en lugar de la instalaci&oacute;n completa de XCode en nuestro equipo, lo que impide que se instale rb-fsevent.  El problema ya est&aacute; corregido en esta gema, pero no en su versi&oacute;n estable, por lo que podemos corregirlo estableciendo la versi&oacute;n de <code>rb-fsevent</code> a la versi&oacute;n de pre-lanzamiento.</p>
+
+```/Gemfile
+# Additional gems that are useful, but not required for development.
+group :extras do
+  gem 'guard-rspec'
+  gem 'growl'
+  gem 'relish', '~> 0.5.0'
+  gem 'fuubar'
+  gem 'fuubar-cucumber'
+
+  platforms :mri do
+    gem 'rcov'
+    gem 'rb-fsevent', '0.9.0.pre4'
+  end
+
+  platforms :mri_18, :jruby do
+    gem 'ruby-debug'
+  end
+
+  platforms :mri_19 do
+    gem 'ruby-debug19'
+  end unless RUBY_VERSION == '1.9.3'
+end
+```
+
+<p>Al ejecutar <code>bundle</code> todo se instalar&aacute; correctamente.</p>
+
+<h3>Ejecuci&oacute;n de los tests</h3>
+
+<p>Intentemos pasar a continuaci&oacute;n los tests de la gema.  Con frecuencia viene una tarea Rake por defecto que hace esto, por lo que deber&iacute;a bastar con lanzar <code>rake</code>, pero es mejor ejecutar <code>bundle exec rake</code> para asegurarnos que estamos usando los binarios de las gemas instaladas por Bundler.</p>
+
+
+``` terminal
+$ bundle exec rake
+  1504/1504:   100% |==========================================| ETA:  00:00:00
+```  
+  
+<p>Los tests pasan, quedando un par de ellos pendientes, lo que est&aacute; bien.  Tras esto se ejecutan los escenarios de Cucumber, donde vemos un mensaje de error bastante largo, que b&aacute;sicamente viene a decir  &ldquo;<code>no such file to load -- spec</code>&rdquo;. Parece ser que nos falta una dependencia que Bundler no ha instalado.</p>
+
+<p>Despu&eacute;s de investigar un poco resulta que el proyecto utiliza  <a href="http://book.git-scm.com/5_submodules.html">subm&oacute;dulos de Git</a> por lo que para que funcione debemos ejecutar estas dos &oacute;rdenes:</p>
+
+``` terminal
+$ git submodule init
+$ git submodule update
+```
+
+<p>Con esto se copiar&aacute;n los subm&oacute;dulos a nuestro repositorio.  Ya podemos intentar ejecutar los tests y ver si pasan, cosa que esta vez s&iacute; ocurre.</p>
+
+
+<h3>Desarrollo de nuestros cambios</h3>
+
+<p>Hemos tenido algunos problemas para que pasen los tests pero lo hemos conseguido al fin.  Podr&iacute;amos habernos ahorrado algo de tiempo si la documentaci&oacute;n hubiera sido un poco m&aacute;s detallada en cuanto a la configuraci&oacute;n del entorno.  Por tanto, nuestra primera petici&oacute;n de cambio consistir&aacute; en la mejora de la documentaci&oacute;n del fichero README para configurar el entorno de desarrollo.</p>
+
+<p>Resulta que ya existe una p&aacute;gina de wiki dedicada a la colaboraci&oacute;n con el proyecto VCR, pero s&oacute;lo contiene lo m&aacute;s b&aacute;sico de la configurac&oacute;n.  Editemos esta p&aacute;gina para a&ntilde;adir m&aacute;s informaci&oacute;n, bas&aacute;ndonos en los problemas que hemos encontrado.  Tras esto podemos enviar una petici&oacute;n de cambio para a&ntilde;adir el enlace a esta gu&iacute;a en el README.</p>
+
+<p>Antes de hacer cambios al c&oacute;digo debemos estar seguros de que tenemos el directorio limpio.</p>
+
+
+``` terminal
+$ git status
+# On branch master
+# Changes not staged for commit:
+#   (use "git add <file>..." to update what will be committed)
+#   (use "git checkout -- <file>..." to discard changes in working directory)
+#
+#	modified:   Gemfile
+#
+no changes added to commit (use "git add" and/or "git commit -a")
+```
+
+<p>Como hemos modificado el Gemfile, ser&aacute; mejor que deshagamos este cambio antes de avanzar.</p>
+
+
+``` terminal
+$ git checkout .
+noonoo:vcr eifion$ git status
+# On branch master
+nothing to commit (working directory clean)
+```
+
+<p>Es buena idea establecer una rama Git separada para cada petici&oacute;n de cambio que queramos hacer.</p>
+
+
+``` terminal
+$ git checkout -b readme-contributing-link
+```
+
+<p>Con esto ya podemos hacer nuestro cambio.  En la secci&oacute;n de desarrollo de  <code>README.md</code> hemos a&ntilde;adido un enlace a la p&aacute;gina del wiki que acabamos de cambiar.</p>
+
+
+``` /README.md
+## Development
+
+* Source hosted on [GitHub](http://github.com/myronmarston/vcr).
+* Direct questions and discussions to the [mailing list](http://groups.google.com/group/vcr-ruby).
+* Report issues on [GitHub Issues](http://github.com/myronmarston/vcr/issues).
+* Pull requests are very welcome! Please include spec and/or feature coverage for every patch,
+  and create a topic branch for every separate change you make.
+* See the [Contributing](https://github.com/myronmarston/vcr/blob/master/CONTRIBUTING.md)
+  guide for instructions on running the specs and features.
+```  
+
+<p>Una vez que hayamos hecho estos cambios podemos ejecutar <code>git diff</code> para repasarlos.  Si estamos satisfechos, podemos entregar los cambios :</p>
+
+
+``` terminal
+$ git commit -a -m "adding contributing link to readme."Next we need to push our branch to our remote repository.
+$ git push origin readme-contributing-link
+Counting objects: 5, done.
+Delta compression using up to 2 threads.
+Compressing objects: 100% (3/3), done.
+Writing objects: 100% (3/3), 328 bytes, done.
+Total 3 (delta 2), reused 0 (delta 0)
+To git@github.com:eifion/vcr.git
+ * [new branch]      readme-contributing-link -> readme-contributing-link
+```
+
+<p>Esto a&ntilde;adir&aacute; la rama a nuestro repositorio en Github.</p>
+
+<p>Cuando ahora visitemos nuestro repositorio en Github podremos cambiar la rama actual a la que tenemos reci&eacute;n creada.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/851/original/E300I01.png" width="944" height="563" alt="Selección de la rama correcta en Github."/>
+</div>
+
+<p>Luego podemos hacer clic en  &ldquo;Pull Request&rdquo; para enviar nuestra solicitud de cambio al due&ntilde;o original.  Tendremos que rellenar un formulario explicando los cambios que hemos hecho, tras lo cual podremos enviar nuestra petici&oacute;n.</p>
+
+<p>Esto es todo lo que hace falta para enviar una petici&oacute;n de cambio a un proyecto de c&oacute;digo abierto en Github.  Si nuestro cambio es aceptado, pondr&aacute; las cosas m&aacute;s f&aacute;ciles para el siguiente que quiera colaborar.  Ahora es tu turno.</p>

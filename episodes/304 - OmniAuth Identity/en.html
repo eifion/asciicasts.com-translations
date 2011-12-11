@@ -1,0 +1,303 @@
+<p><a href="http://www.omniauth.org/">OmniAuth</a> recently reached version 1.0 and has a number of nice additions. In this episode we&rsquo;ll take a look at a new strategy called OmniAuth Identity which allows users to create an account by supplying a user name and password instead of logging in through an external provider.</p>
+
+<h3>How Our Application Currently Works</h3>
+
+<p>Below is a screenshot from the application we&rsquo;ll be working with. We already have OmniAuth set up with three external providers.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/874/original/E304I01.png" width="800" height="341" alt="Our application currently only allows signing-in through an external provider."/>
+</div>
+
+<p>If we sign in through one of these providers, say Twitter, we&rsquo;ll be redirected to Twitter&rsquo;s website and asked if we want to authorize the application to access our Twitter account details. If we agree the application will grab our profile information from Twitter and we&rsquo;ll be signed in.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/875/original/E304I02.png" width="800" height="379" alt="Profile information from the external provider is shown once we've logged in."/>
+</div>
+
+<p>Once we&rsquo;ve authorized this application we won&rsquo;t need to do it again and we can log in to our application through Twitter by just clicking the icon on the home page.</p>
+
+<p>This is a convenient way of allowing users to sign in to but we&rsquo;re excluding those who don&rsquo;t want to sign in through one of these services. We should give these users the option of creating an account with a password directly in the site and this is where OmniAuth Identity comes in.</p>
+
+<p>Before we do this we&rsquo;ll walk through some of the application&rsquo;s code to give you an idea of how it works. The source code is based on the application from <a href="http://railscasts.com/episodes/241-simple-omniauth">episode 241</a> and if you&rsquo;re unfamiliar with OmniAuth it&rsquo;s worth taking a look at that episode first.</p> 
+
+<p>Since episode 241 was written there have been some changes to OmniAuth and one of the most significant is in the gemfile. Each provider now has a separate gem for OmniAuth so its necessary to include the right gem for each provider we want to support.</p>
+
+``` /Gemfile
+gem 'omniauth-twitter'
+gem 'omniauth-facebook'
+gem 'omniauth-google-oauth2'
+```
+
+<p>OmniAuth&rsquo;s initializer looks much the same as it did before. In it we add OmniAuth as middleware and add a provider for each provider we want to use.</p>
+
+``` /config/initializers/omniauth.rb
+Rails.application.config.middleware.use OmniAuth::Builder do
+  provider :twitter, ENV['TWITTER_KEY'], ENV['TWITTER_SECRET']
+  provider :google_oauth2, ENV['GOOGLE_KEY'], ENV['GOOGLE_SECRET']
+  provider :facebook, ENV['FACEBOOK_ID'], ENV['FACEBOOK_SECRET']
+end
+```
+
+<p>The application has a <code>SessionsController</code> whose create action is triggered as the OmniAuth callback. In it we create a user based on the OmniAuth hash and store that new user&rsquo;s <code>id</code> in a session variable.</p>
+
+``` /app/controllers/sessions_controller.rb
+class SessionsController < ApplicationController
+  def new
+  end
+
+  def create
+    user = User.from_omniauth(env["omniauth.auth"])
+    session[:user_id] = user.id
+    redirect_to root_url, notice: "Signed in!"
+  end
+
+  def destroy
+    session[:user_id] = nil
+    redirect_to root_url, notice: "Signed out!"
+  end
+
+  def failure
+    redirect_to root_url, alert: "Authentication failed, please try again."
+  end
+end
+```
+<p>The user is fetched from OmniAuth in a <code>from_omniauth</code> method in the <code>User</code> model.</p>
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  def self.from_omniauth(auth)
+    find_by_provider_and_uid(auth["provider"], auth["uid"]) || create_with_omniauth(auth)
+  end
+
+  def self.create_with_omniauth(auth)
+    create! do |user|
+      user.provider = auth["provider"]
+      user.uid = auth["uid"]
+      user.name = auth["info"]["name"]
+    end
+  end
+end
+```
+
+<p>This method first checks to see if a user with the selected provider and user id exists. If so that user is returned, if not a <code>create_with_omniauth</code> method is called which creates that new user based on information from the OmniAuth hash that&rsquo;s passed in. There&rsquo;s one change to note in the hash. The <code>info</code> parameter was called <code>user_info</code> in earlier versions so if you&rsquo;re upgrading an application to use OmniAuth 1.0 your code may break.</p>
+
+<h3>Adding OmniAuth Identity to an Application</h3>
+
+<p>That&rsquo;s all the code that&rsquo;s necessary to handle authentication through OmniAuth. Next we&rsquo;ll add OmniAuth Identity to so that users can create an account without having to use an external authentication service. As we mentioned earlier each OmniAuth provider requires a separate gem so the first thing we&rsquo;ll need to do is add the <code>omniauth-identity</code> gem to the gemfile.</p> 
+
+``` /Gemfile
+# To use ActiveModel has_secure_password
+gem 'bcrypt-ruby', '~> 3.0.0'
+
+gem 'omniauth-twitter'
+gem 'omniauth-facebook'
+gem 'omniauth-google-oauth2'
+gem 'omniauth-identity'
+```
+
+<p>This gem relies on <code>bcrypt-ruby</code> for password hashing, but it&rsquo;s not a dependency so it&rsquo;s necessary to add <code>bcrypt-ruby</code> to the gemfile as well. There should be a comment in the gemfile that we can uncomment to add this gem. As ever we&rsquo;ll need to run bundle to make sure all the gems are installed.</p>
+
+<p>Next we&rsquo;ll need to go to OmniAuth&rsquo;s initializer and add the identity provider. We don&rsquo;t need to add any parameters to this provider for now.</p>
+
+``` /config/initializers/omniauth.rb
+Rails.application.config.middleware.use OmniAuth::Builder do
+  provider :twitter, ENV['TWITTER_KEY'], ENV['TWITTER_SECRET']
+  provider :google_oauth2, ENV['GOOGLE_KEY'], ENV['GOOGLE_SECRET']
+  provider :facebook, ENV['FACEBOOK_ID'], ENV['FACEBOOK_SECRET']
+  provider :identity
+end
+```
+
+<p>We&rsquo;ll need a model to store login information. By default this model should be called <code>identity</code>, but we can customize this if we need to. We&rsquo;ll need to give it <code>name</code>, <code>email</code> and <code>password_digest</code> fields.</p>
+
+``` terminal
+$ rails g model identity name:string email:string password_digest:string
+```
+
+<p>We&rsquo;ll need to migrate the database to add the table.</p>
+
+``` terminal
+$ rake db:migrate
+```
+
+<p>OmniAuth Identity&rsquo;s <a href="https://github.com/intridea/omniauth-identity/blob/master/README.markdown">README</a> shows us what we need to do to get the Identity model to work with various ORMs, including ActiveRecord. We&rsquo;ll need to change the model so that it inherits from <code>OmniAuth::Identity::Models::ActiveRecord</code> instead of <code>ActiveRecord::Base</code>.</p>
+
+``` /app/models/identity.rb
+class Identity < OmniAuth::Identity::Models::ActiveRecord
+end
+```
+
+<p>We&rsquo;re almost done. All we need to do now is make a link to the new provider from the sign in page under the links for logging in through an external provider.</p>
+
+``` /app/views/sessions/new.html.erb
+<p>
+  <strong>Don&rsquo;t use these services?</strong>
+  <%= link_to "Create an account", "/auth/identity/register" %> or
+  <%= link_to "login", "/auth/identity" %> with a password.
+</p>
+```
+
+<p>We need to restart the server for the changes to OmniAuth to be picked up. Once we have when we visit the sign-in page we&rsquo;ll see new links for registering or logging in. First we&rsquo;ll register a new account.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/876/original/E304I03.png" width="800" height="555" alt="OmniAuth's registration form."/>
+</div>
+
+<p>OmniAuth Identity provides a simple registration form with a clean interface and once we&rsquo;ve filled it in correctly we&rsquo;ll be signed in and taken to our profile page.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/877/original/E304I04.png" width="800" height="382" alt="Signed in successfully through OmniAuth."/>
+</div>
+
+<p>The login page looks similar, but has just two fields. The login field expects the email address we entered when we registered, though this isn&rsquo;t obvious.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/878/original/E304I05.png?" width="800" height="439" alt="OmniAuth&rsquo;s login form."/>
+</div>
+
+<h3>Creating Custom Registration and Login Forms</h3>
+
+<p>Registration and logging-in pretty much just work and because Identity uses the same OmniAuth interface as the code for the other providers we don&rsquo;t have to change much of our core application to add this functionality. That said, there are a few pitfalls we should be aware of. If we have validations on our <code>Identity</code> model the user won&rsquo;t see any errors if they fill in the form incorrectly. To demonstrate this we&rsquo;ll add some validations to the <code>Identity</code> model now.</p>
+
+``` /app/models/identity.rb
+class Identity < OmniAuth::Identity::Models::ActiveRecord
+  validates_presence_of :name
+  validates_uniqueness_of :email
+  validates_format_of :email, :with => /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+end
+```
+
+<p>If we enter an invalid email address on the registration form now and try to register we&rsquo;ll be taken back to the form with no indication of what we did wrong.</p>
+
+<p>Similarly, the login form doesn&rsquo;t make it clear that the &ldquo;Login&rdquo; field expects the user&rsquo;s email address.  There are options to customize the way this form looks but nothing particularly extensive. A better solution is to create our own custom forms in to the app itself to give us complete control over how they&rsquo;re rendered and how they behave.</p>
+
+<p>We&rsquo;ll move the login form first. Instead of displaying a link to OmniAuth&rsquo;s login form on the sign-in page we&rsquo;ll show our custom login form.</p>
+
+``` /app/views/sessions/new.html.erb
+<p>
+  <strong>Don&rsquo;t use these services?</strong>
+  <%= link_to "Create an account", "/auth/identity/register" %> or login below.
+</p>
+  
+<%= form_tag "/auth/identity/callback" do %>
+  <div class="field">
+    <%= label_tag :auth_key, "Email" %><br>
+    <%= text_field_tag :auth_key %>
+  </div>
+  <div class="field">
+    <%= label_tag :password %><br>
+    <%= password_field_tag :password %>
+  </div>
+  <div class="actions"><%= submit_tag "Login" %></div>
+<% end %>
+```
+
+<p>This form POSTs to <code>/auth/identity/callback</code> which is where OmniAuth&rsquo;s own form submits its data. We also give the form fields the same names they have on OmniAuth&rsquo;s form. When we reload the sign in page now we have a login form and we can use it to enter our details and log in to the site just as we did with the other form.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/879/original/E304I06.png" width="800" height="516" alt="Signing in through our custom form."/>
+</div>
+
+<p>We can take a similar approach to replacing the registration form, although we&rsquo;ll need to create a new controller to do this.</p>
+
+``` termnial
+$ rails g controller identities
+```
+
+<p>We&rsquo;ll treat this controller as a resource so we&rsquo;ll modify the routes file to add it as such there.</p>
+
+``` /config/routes.rb
+Auth::Application.routes.draw do
+  root to: "sessions#new"
+  match "/auth/:provider/callback", to: "sessions#create"
+  match "/auth/failure", to: "sessions#failure"
+  match "/logout", to: "sessions#destroy", :as => "logout"
+  resources :identities
+end
+```
+
+<p>We&rsquo;ll give the controller a <code>new</code> action. There&rsquo;s a chance that if the validation for the registration form fails the <code>identity</code> object will be stored in a Rack environment variable so we&rsquo;ll fetch it from there so that we can show any error messages on it.</p>
+
+``` /app/controllers/identities_controller.rb
+class IdentitiesController < ApplicationController
+  def new
+    @identity = env['omniauth.identity']
+  end
+end
+```
+
+<p>The associated template is fairly large but there&rsquo;s nothing unusual in it.</p>
+
+``` app/views/identities/new.html.erb
+<h1>New Account</h1>
+
+<%= form_tag "/auth/identity/register" do %>
+  <% if @identity && @identity.errors.any? %>
+    <div class="error_messages">
+      <h2><%= pluralize(@identity.errors.count, "error") %> prohibited this account from being saved:</h2>
+      <ul>
+      <% @identity.errors.full_messages.each do |msg| %>
+        <li><%= msg %></li>
+      <% end %>
+      </ul>
+    </div>
+  <% end %>
+  <div class="field">
+    <%= label_tag :name %><br>
+    <%= text_field_tag :name, @identity.try(:name) %>
+  </div>
+  <div class="field">
+    <%= label_tag :email %><br>
+    <%= text_field_tag :email, @identity.try(:email) %>
+  </div>
+  <div class="field">
+    <%= label_tag :password %><br>
+    <%= password_field_tag :password %>
+  </div>
+  <div class="field">
+    <%= label_tag :password_confirmation %><br>
+    <%= password_field_tag :password_confirmation %>
+  </div>
+  <div class="actions"><%= submit_tag "Register" %></div>
+<% end %>
+```
+
+<p>The form in this template POSTs to <code>/auth/identity/register</code>. At the top of the form we display any errors; below it are the same fields that OmniAuth&rsquo;s registration form has. We populate the name and email fields if they exist in the current <code>identity</code> object.</p>
+
+<p>We&rsquo;ll need to alter the &ldquo;Create an account&rdquo; link on the sign in page so that it points to our new form instead of OmniAuth&rsquo;s default.</p>
+
+``` /app/views/sessions/new.html.erb
+<p>
+  <strong>Don&rsquo;t use these services?</strong>
+  <%= link_to "Create an account", new_identity_path %> or login below.
+</p>
+```
+
+<p>When we click this link now we&rsquo;ll be taken to our new form and we can use it to register a new account.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/880/original/E304I07.png" width="800" height="457" alt="Our new registration form."/>
+</div>
+
+<p>Our new form works well for creating new valid accounts but if we enter some invalid information then submit the form we&rsquo;ll be redirected back to OmniAuth&rsquo;s registration form. To fix this we&rsquo;ll need to go to OmniAuth&rsquo;s initializer file and modify the <code>identity</code> provider we added earlier.</p>
+
+``` /config/initializers/omniauth.rb
+Rails.application.config.middleware.use OmniAuth::Builder do
+  provider :twitter, ENV['TWITTER_KEY'], ENV['TWITTER_SECRET']
+  provider :google_oauth2, ENV['GOOGLE_KEY'], ENV['GOOGLE_SECRET']
+  provider :facebook, ENV['FACEBOOK_ID'], ENV['FACEBOOK_SECRET']
+  provider :identity, on_failed_registration: lambda { |env|    
+    IdentitiesController.action(:new).call(env)
+  }
+end
+```
+
+<p>The option we&rsquo;ve added, <code>on_failed_registration</code>, takes a Rack application as an argument. We&rsquo;ve set it to point to the new action in the <code>IdentitiesController</code> so that our new form is shown again. There&rsquo;s an issue with calling this action directly: in development mode the action won&rsquo;t always be reloaded so we&rsquo;ve wrapped the code in a lambda to stop the action being cached.</p> 
+
+<p>We&rsquo;ll need to start the Rails server for these changes to be picked up, but once we have the form will behave as we expect it to when we enter invalid information.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/881/original/E304I08.png" width="800" height="457" alt="Our registration form shows validation errors correctly."/>
+</div>
+
+<p>We now have OmniAuth identity working smoothly. Creating the custom forms took quite a bit of work but this is a still a nice solution if you&rsquo;re already using OmniAuth and just need to add account registration.</p>

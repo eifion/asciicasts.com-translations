@@ -1,0 +1,202 @@
+<p>Below is a page from a Rails application that shows a list of articles. We want to add 
+a search feature to this page and, as these articles are text-based, we&rsquo;ll use a full-text search engine instead of stringing together SQL queries.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/890/original/E306I01.png" width="800" height="476" alt="The page that shows the list of articles."/>
+</div>
+
+<p>We&rsquo;ve covered this topic in previous episodes. In <a href="http://railscasts.com/episodes/120-thinking-sphinx">episode 120</a> we used Thinking Sphinx and in <a href="http://railscasts.com/episodes/278-search-with-sunspot">episode 278</a> we used Sunspot with Solr. In this episode we&rsquo;ll be using <a href="http://www.elasticsearch.org/">Elasticsearch</a> to add full-text searching to our application.</p> 
+
+<p>Elasticsearch is a full-featured search engine build on top of Apache Lucene, much like Solr. It has a REST API and communicates over JSON. Elasticsearch isn&rsquo;t Ruby-specific so we&rsquo;ll be using a gem called  <a href="https://github.com/karmi/tire">Tire</a> to communicate with it. Tire can be used in any Ruby project, but it also has some nice model functionality to make it easy to integrate into a Rails application. There&rsquo;s even a Rails template we can use to set up a new app with Elasticsearch.</p>
+
+``` terminal
+$ rails new searchapp -m https://raw.github.com/karmi/tire/master/examples/rails-application-template.rb
+```
+
+<p>This will set up a new Rails application and set up Elasticsearch and Tire. If the template doesn&rsquo;t detect that Elasticsearch is running it will download and install it automatically for us and set it up just for this new application. Once the command has finished we can visit <code><a href="http://localhost:3000/">http://localhost:3000/</a></code> where we&rsquo;ll see a basic application that lets us use Elasticsearch to  search through a small number of records. The <a href="https://raw.github.com/karmi/tire/master/examples/rails-application-template.rb">source code for the template</a> is worth taking a look at as it&rsquo;s a good example of what can be done with a Rails application template.</p>
+
+<h3>Adding Elastic Search to Our Application</h3>
+
+<p>The example application is interesting but how do we use Elasticsearch in our application? The first step is to install it. If you&rsquo;re running Homebrew on OS X this is simple; if not the <a href="http://www.elasticsearch.org/download/">Elasticsearch</a> website has details on how to download it.</p>
+
+``` terminal
+$ brew install elasticsearch
+```
+
+<p>Once Elasticsearch has installed it gives us instructions on how to get it running. We start it up with this command (note that this might be different based on the version of Elasticsearch you&rsquo;re running):</p>
+
+``` terminal
+$ elasticsearch -f -D es.config=/usr/local/Cellar/elasticsearch/0.18.1/config/elasticsearch.yml
+```
+
+<p>This command starts up the server on port 9200 and we can talk to this server manually if we want through the JSON REST API. We&rsquo;re going to use Tire, though, so the next thing to do is install that. As usual this is done by adding the gem to the application&rsquo;s gemfile and running <code>bundle</code>.</p>
+
+``` /Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.1.3'
+
+# Bundle edge Rails instead:
+# gem 'rails',     :git => 'git://github.com/rails/rails.git'
+
+gem 'sqlite3'
+
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~> 3.1.4'
+  gem 'coffee-rails', '~> 3.1.1'
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+gem 'tire'
+```
+
+<p>We can add Tire to any model we want to search against by adding two modules. We want to search articles so we&rsquo;ll add them to our application&rsquo;s <code>Article</code> model.</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  belongs_to :author
+  has_many :comments
+  
+  include Tire::Model::Search
+  include Tire::Model::Callbacks
+  
+end
+```
+
+<p>The first of these modules adds various searching and indexing methods while the second one adds callbacks so that when an article is created, updated or destroyed the index is automatically updated.</p>
+
+<p>We already have some articles in our application&rsquo;s database and these won&rsquo;t be included in the index. All of the records are defined in the application&rsquo;s seeds file, though, so we run the setup file again and the records will be indexed automatically when they are reloaded.</p>
+
+``` terminal
+$ rake db:setup
+```
+
+<h3>Adding The Search Form</h3>
+
+<p>Now that our articles have been indexed we can add a form for searching them on the articles page. This page&rsquo;s template looks like this:</p>
+
+``` /app/views/articles/index.html.erb
+<h1>Articles</h1>
+
+<div id="articles">
+<% @articles.each do |article| %>
+  <h2>
+    <%= link_to article.name, article %>
+    <span class="comments">(<%= pluralize(article.comments.size, 'comment') %>)</span>
+  </h2>
+  <div class="info">
+    by <%= article.author.name %>
+    on <%= article.published_at.strftime('%b %d, %Y') %>
+  </div>
+  <div class="content"><%= article.content %></div>
+<% end %>
+</div>
+```
+
+<p>We&rsquo;ll add this simple form below the page&rsquo;s header. This form will submit to the articles page, the same page that the form itself is on, and use GET.</p>
+
+``` /app/views/articles/index.html.erb
+<%= form_tag articles_path, method: :get do %>
+  <p>
+    <%= text_field_tag :query, params[:query] %>
+    <%= submit_tag "Search", name: nil %>
+  </p>
+<% end %>
+```
+
+<p>When the search form is submitted it triggers the <code>ArticlesController</code>&rsquo;s <code>index</code> action and this action currently returns all of the articles. We&rsquo;ll add a check in the code so that if the <code>query</code> parameter from the form is present Tire&rsquo;s <code>search</code> method is called instead.</p>
+
+``` /app/controllers/articles_controller.rb
+def index
+  if params[:query].present?
+    @articles = Article.search(params[:query])
+  else
+    @articles = Article.all
+  end
+end
+```
+
+<p>When we reload the page now we&rsquo;ll see the search form. When we enter a search term and submit the form, however, we&rsquo;ll get an error.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/891/original/E306I02.png" width="800" height="432" alt="The search page shows an error when we make a search."/>
+</div>
+
+<p>The error is caused by calling <code>article.comments.size</code> to display the number of comments that each article has so it seems that the associations aren&rsquo;t working on the articles that are returned by Tire.</p> 
+
+<p>Tail tries to minimize access to the database and when we call <code>Article.search</code> what&rsquo;s returned is not the actual ActiveRecord models but instead a found result set from Tire with attributes based on what&rsquo;s stored in the search index. The index doesn&rsquo;t know about the comments association so doesn&rsquo;t know how to set it up. To fix this we can add a <code>load</code> option to the call to <code>search</code> to tell Tire to load the actual records from the database.</p>
+
+``` /app/controllers/articles_controller.rb
+def index
+  if params[:query].present?
+    @articles = Article.search(params[:query], load: true)
+  else
+    @articles = Article.all
+  end
+end
+```
+
+<p>When we make a search now the page loads and shows the correct results.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/892/original/E306I03.png" width="800" height="482" alt="The search page now works correctly."/>
+</div>
+
+<p>It would be better if all of the data we need was inside the search index so that we don&rsquo;t need to use <code>load: true</code> to fetch the records from the database. We can do this, but we won&rsquo;t be covering that here. Instead we&rsquo;ll show you how to do this in the next episode. What we will show next is how to further customize the query by passing in additional options. We&rsquo;ll do this by redefining the <code>search</code> model in <code>Article</code> so that it accepts the params hash that the user passes in.</p> 
+
+``` /app/models/article.rb
+def self.search(params)
+  tire.search(load: true) do
+    query { string params[:query]} if params[:query].present?
+  end
+end
+```
+
+<p>As we&rsquo;re overriding Tire&rsquo;s <code>search</code> method we use <code>tire.search</code> to call the overridden method and, as we want to fetch the actual models we&rsquo;ve used the <code>load: true</code> option. Instead of passing the search parameters directly to this method we&rsquo;ve used a block so that we can further customize the query with more options. In this block we call <code>query</code> and pass it another block. In this block we pass the parameters to the <code>string</code> method but only if the parameters exist.</p>
+
+<p>We can simplify the <code>ArticlesController</code> now so that it just calls our custom <code>search</code> method and passes it the params hash.</p>
+
+``` /app/controllers/articles_controller.rb
+def index
+  @articles = Article.search(params)
+end
+```
+
+<p>If we reload the articles page now will still work and if we clear the search box and click &ldquo;Search&rdquo; we&rsquo;ll see all of the results returned.</p> 
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/893/original/E306I04.png" width="800" height="387" alt="All the search result data now comes from the index."/>
+</div>
+
+<p>There&rsquo;s an article showing in the results that we don&rsquo;t want there as it has a publication date in the future. We&rsquo;ll change the search so that it doesn&rsquo;t show articles that haven&rsquo;t yet been published. To do this just we need to add a filter to the <code>search</code> block in the model.</p>
+
+``` /app/models/article.rb
+def self.search(params)
+  tire.search(load: true) do
+    query { string params[:query]} if params[:query].present?
+    filter :range, published_at: {lte: Time.zone.now }
+  end
+end
+```
+
+<p>The first argument is the type of filter we want, in this case a <code>range</code> filter. Next we pass a hash containing the attributes we want to filter by. In this case we filter by <code>published_at</code> and include only those articles with a <code>published_at</code> time less that or equal to the current time.</p>
+
+<p>You might be wondering what other options you can pass to a search to customize it. There is some documentation on this topic but it&rsquo;s rather scattered. A good place to start is <a href="https://github.com/karmi/tire/blob/master/README.markdown">Tire&rsquo;s README file</a>, although the beginning of the file may be a little confusing as it discusses indexing and mapping which you don&rsquo;t need to worry about as we&rsquo;re doing dynamic mapping. There&rsquo;s some <a href="http://karmi.github.com/tire/">additional documentation</a> available that Tire provides which is also worth reading.</p>
+
+<p>Most of Tire&rsquo;s options map one-to-one with Elasticsearch so it&rsquo;s a good idea to look at its <a href="http://www.elasticsearch.org/guide/">documentation</a>. The page on the <a href="http://www.elasticsearch.org/guide/reference/query-dsl/">Query DSL</a> has a whole section on filtering which includes the range filter we used earlier and which lists all of the options we can use. The code snippets are written in JSON but it&rsquo;s easy to covert them to use with Tire.</p>
+
+
+
+
+
+
+
+
+
+
+
+

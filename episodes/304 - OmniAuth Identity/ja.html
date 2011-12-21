@@ -1,0 +1,304 @@
+<p><a href="http://www.omniauth.org/">OmniAuth</a>は最近バージョンが1.0になり、いくつかの便利な機能が追加されました。今回のエピソードでは、新機能のOmniAuth Identityを紹介します。これによって、ユーザに外部プロバイダを介してログインさせるのではなく、ユーザ名とパスワードを与えてアカウントを作成できるようになりました。</p>
+
+<h3>現状のアプリケーションのしくみ</h3>
+
+<p>下の画面が今回の対象のアプリケーションです。すでに3つの外部プロバイダでOmniAuthが設定されています。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/874/original/E304I01.png" width="800" height="341" alt="このアプリケーションは現在は外部プロバイダを介してのログインのみが可能です。"/>
+</div>
+
+<p>これらのプロバイダのいずれか、例えばTwitterからログインをおこなうと、Twitterのウェブサイトにリダイレクトされ、アプリケーションがTwitterのアカウント情報にアクセスすることを許可するかどうかを聞かれます。許可をすると、アプリケーションはTwitterからプロファイル情報を取得して、ユーザはログインされます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/875/original/E304I02.png" width="800" height="379" alt="ログインすると外部プロバイダからのプロファイル情報が表示される"/>
+</div>
+
+<p>一度このアプリケーションのアクセスを許可すると、その後確認を求められることはなく、ページ上のアイコンをクリックするだけでTwitterを介してアプリケーションにログインできるようになります。</p>
+
+<p>これはユーザのログインを許可する便利な方法ですが、これらの外部サービスを使いたくないユーザを排除していることになります。それらのユーザに対しても、直接サイト内でパスワード付きのアカウントを作成するという選択肢を与えるべきです。そこでOmniAuth Identityが登場します。</p>
+
+<p>この作業に入る前に、アプリケーションのいくつかのコードを見て、しくみの概要を理解しておきましょう。ソースコードは<a href="http://railscasts.com/episodes/241-simple-omniauth">エピソード241</a>で使用したアプリケーションに基づいています。OmniAuthについてよく知らないという方はまずその回のエピソードを見ることをお勧めします。</p> 
+
+<p>エピソード241が書かれてからOmniAuthにはいくつか変更点がありましたが、もっとも重要な点のひとつはgemfileです。各プロバイダは、OmniAuth用の個別のgemを持つようになったので、サポートしたいプロバイダ用の正しいgemをインクルードする必要があります。</p>
+
+``` /Gemfile
+gem 'omniauth-twitter'
+gem 'omniauth-facebook'
+gem 'omniauth-google-oauth2'
+```
+
+<p>OmniAuthの初期化ファイルは以前とほとんど一緒です。そこでOmniAuthをミドルウェアとして追加し、使用したいプロバイダ用のproviderエントリーを追加します。</p>
+
+``` /config/initializers/omniauth.rb
+Rails.application.config.middleware.use OmniAuth::Builder do
+  provider :twitter, ENV['TWITTER_KEY'], ENV['TWITTER_SECRET']
+  provider :google_oauth2, ENV['GOOGLE_KEY'], ENV['GOOGLE_SECRET']
+  provider :facebook, ENV['FACEBOOK_ID'], ENV['FACEBOOK_SECRET']
+end
+```
+
+<p>アプリケーションの<code>SessionsController</code>のcreateアクションはOmniAuthコールバックとして起動されます。その中でOmniAuthハッシュにもとづいてユーザを作成し、その新規ユーザの<code>id</code>をセッション変数に保存します。</p>
+
+``` /app/controllers/sessions_controller.rb
+class SessionsController &lt; ApplicationController
+  def new
+  end
+
+  def create
+    user = User.from_omniauth(env["omniauth.auth"])
+    session[:user_id] = user.id
+    redirect_to root_url, notice: "Signed in!"
+  end
+
+  def destroy
+    session[:user_id] = nil
+    redirect_to root_url, notice: "Signed out!"
+  end
+
+  def failure
+    redirect_to root_url, alert: "Authentication failed, please try again."
+  end
+end
+```
+
+<p>ユーザは、<code>User</code>モデルの<code>from_omniauth</code>メソッドで、OmniAuthから取得されます。</p>
+
+``` /app/models/user.rb
+class User &lt; ActiveRecord::Base
+  def self.from_omniauth(auth)
+    find_by_provider_and_uid(auth["provider"], auth["uid"]) || create_with_omniauth(auth)
+  end
+
+  def self.create_with_omniauth(auth)
+    create! do |user|
+      user.provider = auth["provider"]
+      user.uid = auth["uid"]
+      user.name = auth["info"]["name"]
+    end
+  end
+end
+```
+
+<p>このメソッドはまず選択されたプロバイダのユーザとユーザidが存在するかどうかをチェックします。存在すればそのユーザが返され、存在しなければ<code>create_with_omniauth</code>メソッドが呼び出されて、渡されたOmniAuthハッシュからの情報にもとづいて新規ユーザが作成されます。ハッシュには一つ変更があります。<code>info</code>パラメータは前のバージョンでは<code>user_info</code>と呼ばれていたため、OmniAuth 1.0を使用するために既存のアプリケーションをアップグレードしている場合は、コードは正しく動作しません。</p>
+
+<h3>アプリケーションにOmniAuth Identityを追加する</h3>
+
+<p>OmniAuthを介して認証を処理するために必要なコードは以上です。次にOmniAuth Identityを追加して、ユーザが外部認証サービスを使用しなくてもアカウントを作成できるようにします。前にも触れたとおり各認証プロバイダは個別のgemが必要になったので、まずおこなうのはgemfileに<code>omniauth-identity</code> gemを追加することです。</p> 
+
+``` /Gemfile
+# To use ActiveModel has_secure_password
+gem 'bcrypt-ruby', '~&gt; 3.0.0'
+
+gem 'omniauth-twitter'
+gem 'omniauth-facebook'
+gem 'omniauth-google-oauth2'
+gem 'omniauth-identity'
+```
+
+<p>このgemは<code>bcrypt-ruby</code>を利用してパスワードハッシュを行いますが、依存関係が設定されていないため、手動で<code>bcrypt-ruby</code>もgemfileに追加する必要があります。gemfileにコメント行があるはずなので、コメントを外してこのgemを追加します。いつもと同じようにbundleコマンドを実行して、すべてのgemがインストールされていることを確認します。</p>
+
+<p>次にOmniAuthの初期化ファイルを開いて、identity providerを追加します。今のところはこのproviderにパラメータを追加する必要はありません。</p>
+
+``` /config/initializers/omniauth.rb
+Rails.application.config.middleware.use OmniAuth::Builder do
+  provider :twitter, ENV['TWITTER_KEY'], ENV['TWITTER_SECRET']
+  provider :google_oauth2, ENV['GOOGLE_KEY'], ENV['GOOGLE_SECRET']
+  provider :facebook, ENV['FACEBOOK_ID'], ENV['FACEBOOK_SECRET']
+  provider :identity
+end
+```
+
+<p>ログイン情報を保存するためにはモデルが必要です。デフォルトではこのモデルは<code>identity</code>という名前にするべきですが、必要であればカスタマイズすることも可能です。そのモデルに<code>name</code>、<code>email</code>、<code>password_digest</code>の各フィールドを設定します。</p>
+
+``` terminal
+$ rails g model identity name:string email:string password_digest:string
+```
+
+<p>テーブルを追加するためにデータベースのマイグレーションをおこないます。</p>
+
+``` terminal
+$ rake db:migrate
+```
+
+<p>OmniAuth Identityの<a href="https://github.com/intridea/omniauth-identity/blob/master/README.markdown">README</a>には、IdentityモデルをActiveRecordを含む各種のORMで動作させる方法が示されています。モデルを変更して、<code>ActiveRecord::Base</code>ではなく、<code>OmniAuth::Identity::Models::ActiveRecord</code>を継承するよう修正します。</p>
+
+``` /app/models/identity.rb
+class Identity &lt; OmniAuth::Identity::Models::ActiveRecord
+end
+```
+
+<p>ほぼ完成に近づきました。後は、ログインページからIdentity providerへのリンクを、外部プロバイダを介したログインのリンクの下に作成します。</p>
+
+``` /app/views/sessions/new.html.erb
+<p>
+  <strong>Don’t use these services?</strong>
+  <%= link_to "Create an account", "/auth/identity/register" %> or
+  <%= link_to "login", "/auth/identity" %> with a password.
+</p>
+```
+
+<p>OmniAuthの設定変更を有効化するためにサーバを再起動します。その後ログインページにアクセスすると、登録とログインのための新しいリンクが表示されます。まず新規アカウントを登録します。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/876/original/E304I03.png" width="800" height="555" alt="OmniAuthの登録フォーム"/>
+</div>
+
+<p>OmniAuth Identityはすっきりしたインターフェースのシンプルな登録フォームを提供します。そこに正しい情報を入力するとログインが完了しプロファイルページが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/877/original/E304I04.png" width="800" height="382" alt="OmniAuthを介してログインされた"/>
+</div>
+
+<p>ログインページは似ていますが、フィールドが2つしかありません。loginフィールドには、画面からはわかりづらいですが、登録時に入力したメールアドレスを入力します。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/878/original/E304I05.png" width="800" height="439" alt="OmniAuthのログインフォーム"/>
+</div>
+
+<h3>カスタムの登録・ログイン用フォームを作成する</h3>
+
+<p>登録とログインはうまく動くようになりました。Identityは他のプロバイダ用のコードと同じOmniAuthのインターフェースを使用しているため、この機能を追加するためにコアのアプリケーションをそれほど修正する必要はありません。とはいうものの、注意をしなくてはいけない点がいくつかあります。<code>Identity</code>モデルにバリデーションがある場合、フォームに誤った情報を入力してもエラーが表示されません。これを示すために、ここで<code>Identity</code>モデルにバリデーションを追加します。</p>
+
+``` /app/models/identity.rb
+class Identity &lt; OmniAuth::Identity::Models::ActiveRecord
+  validates_presence_of :name
+  validates_uniqueness_of :email
+  validates_format_of :email, :with =&gt; /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+end
+```
+
+<p>登録フォームで無効なメールアドレスを入力し登録をおこなおうとすると、どこが問題だったかが何も示されずにフォームに戻されます。</p>
+
+<p>同じように、ログインフォームもLoginフィールドにメールアドレスを入力しなくてはいけないことを明示しません。このフォームの見た目をカスタマイズするオプションもありますが、それほど種類は多くありません。よりよい対応としては、カスタムのフォームをアプリケーション自体の中に作ることで、見た目や振る舞いを完全に自由に制御するという方法があります。</p>
+
+<p>まずログインフォームを移動します。ログインページでOmniAuthのログインフォームの代わりに、カスタムのログインフォームを表示します。</p>
+
+``` /app/views/sessions/new.html.erb
+<p>
+  <strong>Don’t use these services?</strong>
+  <%= link_to "Create an account", "/auth/identity/register" %> or login below.
+</p>
+  
+<%= form_tag "/auth/identity/callback" do %>
+  <div class="field">
+    <%= label_tag :auth_key, "Email" %><br>
+    <%= text_field_tag :auth_key %>
+  </div>
+  <div class="field">
+    <%= label_tag :password %><br>
+    <%= password_field_tag :password %>
+  </div>
+  <div class="actions"><%= submit_tag "Login" %></div>
+<% end %>
+```
+
+<p>このフォームは<code>/auth/identity/callback</code>にPOSTします。これはOmniAuthの元のフォームがデータを送信する先です。またフォームフィールドにはOmniAuthのフォームにあるのと同じ名前をつけます。ログインページをリロードするとログインフォームが表示され、他のフォームと同じにそこにユーザ情報を入力してログインすることができます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/879/original/E304I06.png" width="800" height="516" alt="カスタムのフォームを介してログインする"/>
+</div>
+
+<p>同じアプローチで登録フォームも置き換えることができますが、そのためには新規にコントローラを作成する必要があります。</p>
+
+``` termnial
+$ rails g controller identities
+```
+
+<p>このコントローラはリソースとして扱うので、routesファイルを修正してそれをリソースとして追加します。</p>
+
+``` /config/routes.rb
+Auth::Application.routes.draw do
+  root to: "sessions#new"
+  match "/auth/:provider/callback", to: "sessions#create"
+  match "/auth/failure", to: "sessions#failure"
+  match "/logout", to: "sessions#destroy", :as =&gt; "logout"
+  resources :identities
+end
+```
+
+<p>コントローラに<code>new</code>アクションを追加します。登録フォームのバリデーションがうまくいかない場合、Rack環境変数に<code>identity</code>オブジェクトが保存されることがあるので、それを取得してなんらかエラーメッセージがあれば表示します。</p>
+
+``` /app/controllers/identities_controller.rb
+class IdentitiesController &lt; ApplicationController
+  def new
+    @identity = env['omniauth.identity']
+  end
+end
+```
+
+<p>関連付けられたテンプレートはかなり大きいですが、変わったところは特にありません。</p>
+
+``` app/views/identities/new.html.erb
+<h1>New Account</h1>
+
+<%= form_tag "/auth/identity/register" do %>
+  <% if @identity && @identity.errors.any? %>
+    <div class="error_messages">
+      <h2><%= pluralize(@identity.errors.count, "error") %>  prohibited this account from being saved:</h2>
+      <ul>
+      <% @identity.errors.full_messages.each do |msg| %>
+        <li><%= msg %></li>
+      <% end %>
+      </ul>
+    </div>
+  <% end %>
+  <div class="field">
+    <%= label_tag :name %><br>
+    <%= text_field_tag :name, @identity.try(:name) %>
+  </div>
+  <div class="field">
+    <%= label_tag :email %><br>
+    <%= text_field_tag :email, @identity.try(:email) %>
+  </div>
+  <div class="field">
+    <%= label_tag :password %><br>
+    <%= password_field_tag :password %>
+  </div>
+  <div class="field">
+    <%= label_tag :password_confirmation %><br>
+    <%= password_field_tag :password_confirmation %>
+  </div>
+  <div class="actions"><%= submit_tag "Register" %></div>
+<% end %>
+```
+
+<p>このテンプレートのフォームが<code>/auth/identity/register</code>にPOSTします。エラーがあったらフォームの一番上の部分に表示します。その下にはOmniAuthの登録フォームと同じフィールドが並びます。現在の<code>identity</code>オブジェクトにデータが存在する場合は、nameとemailフィールドに値を設定します。</p>
+
+<p>ログインページの「Create an account」のリンクを修正して、OmniAuthのデフォルトフォームではなく新規に作成したフォームにリンクをはり直します。</p>
+
+``` /app/views/sessions/new.html.erb
+<p>
+  <strong>Don’t use these services?</strong>
+  <%= link_to "Create an account", new_identity_path %> or login below.
+</p>
+```
+
+<p>このリンクをクリックすると、新しいフォームが表示され、そこから新規アカウントを登録することができます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/880/original/E304I07.png" width="800" height="457" alt="新しい登録フォーム"/>
+</div>
+
+<p>新しいフォームは有効なアカウントを新規に作成するためにはうまく動作しますが、何らか無効な情報を入力してフォームを送信すると、OmniAuthの登録画面にリダイレクトされてしまいます。これを直すには、OmniAuthの初期化ファイルで前に追加した<code>identity</code> providerを修正します。</p>
+
+``` /config/initializers/omniauth.rb
+Rails.application.config.middleware.use OmniAuth::Builder do
+  provider :twitter, ENV['TWITTER_KEY'], ENV['TWITTER_SECRET']
+  provider :google_oauth2, ENV['GOOGLE_KEY'], ENV['GOOGLE_SECRET']
+  provider :facebook, ENV['FACEBOOK_ID'], ENV['FACEBOOK_SECRET']
+  provider :identity, on_failed_registration: lambda { |env|    
+    IdentitiesController.action(:new).call(env)
+  }
+end
+```
+
+<p>追加した<code>on_failed_registration</code>のオプションはRackアプリケーションを引数にとります。<code>IdentitiesController</code>のnewアクションを指定するよう設定して、再度新しく作成したフォームが表示されるようにします。このアクションを直接呼び出す場合にひとつ問題があります。developmentモードではアクションは常にリロードされないので、コードをラムダ(lambda)でラップしてアクションがキャッシュされないようにします。</p> 
+
+<p>これらの変更を有効化するためにRailsサーバを再起動する必要がありますが、その後は無効な情報を入力した場合にもフォームは期待どおりの動きをします。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/881/original/E304I08.png" width="800" height="457" alt="登録フォームが正しく検証エラーを表示する"/>
+</div>
+
+<p>これでOmniAuth identityが正しく動作するようになりました。カスタムフォームを作成するのは手間がかかりますが、すでにOmniAuthを使用していてアカウント登録機能を追加するだけでいいのであれば、優れたソリューションとして検討する価値があるでしょう。</p>

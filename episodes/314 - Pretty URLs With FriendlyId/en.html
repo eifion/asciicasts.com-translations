@@ -1,0 +1,193 @@
+<p>We have a simple Rails blogging application. Its home page shows a list of the most recent articles with a link to each one. If we click one of the links we&rsquo;re taken to that article&rsquo;s page but the URL isn&rsquo;t very descriptive of its content.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/926/original/E314I01.png" width="800" height="379" alt="One of our articles with its id in the URL."/>
+</div>
+
+<p>The article is described in the URL only by its internal <code>id</code> which is the default behaviour in Rails. We&rsquo;d have better URLs if the article&rsquo;s name was included somehow.</p>
+
+<p>The easiest way to do this is to override the <code>to_param</code> method in the model whose URLs we want to change, in this case <code>Article</code>. This is an internal method that Rails uses to convert an object to a URL parameter.</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  def to_param
+    "#{id} #{name}".parameterize
+  end
+end
+```
+
+<p>We&rsquo;ve overridden this so that it returns the article&rsquo;s name as well. We need to call <code>parameterize</code> on the string to covert it to a URL-friendly value. This will change our article&rsquo;s URL to this:</p>
+
+```
+http://localhost:3000/articles/1-superman
+```
+
+<p>It&rsquo;s important when we do this that the object&rsquo;s <code>id</code> is at the beginning so that ActiveRecord&rsquo;s <code>find</code> method still works. If we don&rsquo;t want the <code>id</code> included in the URL it&rsquo;s a bit more challenging to get this working, but it can be done.</p>
+
+<h3>Introducing FriendlyId</h3>
+
+<p>This is where the <a href="https://github.com/norman/friendly_id">FriendlyId</a> plugin comes in. This makes it easier to use the name of a model in a URL without having to prefix it with an <code>id</code>. The gem has a number of  features but before we look into them we&rsquo;ll see what&rsquo;s involved in adding it to our application. As ever, the first thing we&rsquo;ll need to do is add it to our application&rsquo;s gemfile and then run <code>bundle</code> to install it.</p>
+
+``` /Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.1.3'
+
+# Bundle edge Rails instead:
+# gem 'rails',     :git => 'git://github.com/rails/rails.git'
+
+gem 'sqlite3'
+
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~> 3.1.4'
+  gem 'coffee-rails', '~> 3.1.1'
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+gem 'friendly_id'
+```
+
+<p>In the model instead of overriding <code>to_param</code> we extend the model with the <code>FriendlyId</code> module and define the attribute we want to use in the URL.</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  extend FriendlyId
+  friendly_id :name
+end
+```
+
+<p>Now our article will have a URL that includes the article&rsquo;s <code>name</code> but not its <code>id</code>.</p>
+
+```
+http://localhost:3000/articles/Superman
+```
+
+<p>This approach isn&rsquo;t particularly pretty for articles with more complex names, though; an article called &ldquo;Batman &amp; Robin&rdquo; will get this URL:</p>
+
+```
+http://localhost:3000/articles/Batman%20&%20Robin
+```
+
+<h3>Using Slugs</h3>
+
+<p>The URL is generated from the full name of the article including spaces and punctuation. This won&rsquo;t be a problem if the parameter passed to FriendlyId is already URL-friendly, but this isn&rsquo;t the case for our articles&rsquo; names so we&rsquo;ll use a new <a href="http://en.wikipedia.org/wiki/Slug_(web_publishing)">slug</a> attribute. We can do this by using friendly_id&rsquo;s use option.</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  extend FriendlyId
+  friendly_id :name, use: :slugged
+end
+```
+
+<p>This will look for a <code>slug</code> column in the database&rsquo;s <code>articles</code> table so we&rsquo;ll need to create it and we&rsquo;ll create a migration to do so.</p>
+
+``` terminal
+$ rails g migration add_slug_to_articles slug:string
+```
+
+<p>It&rsquo;s a good idea to add an index for this attribute as it will be used for finding records.</p> 
+
+``` /db/migrate/20120101000000_add_slug_to_articles.rb
+class AddSlugToArticles < ActiveRecord::Migration
+  def change
+    add_column :articles, :slug, :string
+    add_index :articles, :slug
+  end
+end
+```
+
+<p>We can now run <code>rake db:migrate</code> to add the column and index to the database table. There&rsquo;s one more thing we need to do here: we already have some existing article records and their slug column won&rsquo;t be filled in. To fix this we can open the Rails console and re-save each record.</p>
+
+``` irb
+1.9.2-p290 :001 &gt; Article.find_each(&amp;:save)
+```
+
+<p>Now our &ldquo;Batman &amp; Robin&rdquo; article will have a much nicer URL based on its new slug.</p>
+
+```
+http://localhost:3000/articles/batman-robin
+```
+
+<h3>Handling Changed Article Names</h3>
+
+<p>If we edit an article and alter its name its slug will be updated as well. Changing our &ldquo;Batman &amp; Robin&rdquo; article to be called &ldquo;Batman &amp; Robin 2&rdquo; will change its slug to <code>batman-robin-2</code> and therefore its URL. If we visit the article&rsquo;s old URL now we&rsquo;ll see an error message.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/927/original/E314I02.png" width="800" height="379" alt="Visiting the old URL shows an error."/>
+</div>
+
+<p>There are a couple of solutions for this problem. One is to instruct FriendlyId to not update the slug when an article&rsquo;s name changes which we can do by overriding the <code>should_generate_new_friendly_id?</code> method.</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  extend FriendlyId
+  friendly_id :name, use: :slugged
+  
+  def should_generate_new_friendly_id?
+    new_record?
+  end
+end
+```
+
+<p>With this code in place the slug will only be generated when a new <code>Article</code> is created. If we update our &ldquo;Batman &amp; Robin 2&rdquo; article now so that its name is &ldquo;Batman &amp; Robin 3&rdquo; its slug will remain <code>batman-robin-2</code>.</p>
+
+<p>What if we want the best of both worlds so that the slug updates when the name changes but older slugs are still recognised so that old URLs don&rsquo;t break? We can do this by using FriendlyId&rsquo;s <code>history</code> option. We&rsquo;ll need to remove the overriden <code>should_generate_new_friendly_id?</code> method and add the <code>history</code> option which will keep a record of the previous slugs.</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  extend FriendlyId
+  friendly_id :name, use: [:slugged, :history]
+end
+```
+
+<p>This history needs to be stored somewhere so we&rsquo;ll create a new database table. FriendlyId provides a generator that will do this for us.</p>
+
+``` terminal
+$ rails g friendly_id
+      create  db/migrate/20120101000001_create_friendly_id_slugs.rb
+```	  
+
+<p>This will create a <code>friendly_id_slugs</code> table once we&rsquo;ve run <code>rake db:migrate</code>.</p> 
+
+<p>There&rsquo;s a gotcha involved with this, however: the history feature only seems to work on newly-created records. If we have any existing records we&rsquo;ll need to regenerate them when we add this feature. We&rsquo;ll create a new article called &ldquo;Hello World&rdquo; so that we can test this out. This article will have the following URL:</p>
+
+```
+http://localhost:3000/articles/hello-world
+```
+
+<p>If we edit the article and set the name to &ldquo;Hello World 2&rdquo; its slug will change to <code>hello-world-2</code> but the original URL will still work.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/928/original/E314I03.png" width="800" height="379" alt="The original URL still works."/>
+</div>
+
+<p>It would be better if we were redirected to the current URL when we visit an out-of-date URL. To do this we&rsquo;re going to need to make some changes to the controller. The <code>ArticlesController</code> is a standard RESTful-style controller with the usual seven actions. We&rsquo;ll change to the show action as this is the action that shows a single article. This is how it currently looks:</p>
+
+``` /app/controllers/articles_controller.rb
+def show
+  @article = Article.find(params[:id])
+end
+```
+
+<p>We want this action to redirect us to the article&rsquo;s current URL if the URL used to visit the page isn&rsquo;t the current one. We can do this by seeing if the path used to visit the  page is not equal to the current article&rsquo;s path. If this is the case then the user used an older slug or the article&rsquo;s <code>id</code>. In either of these cases we should redirect to the current URL.</p>
+
+```/app/controllers/articles_controller.rb
+def show
+  @article = Article.find(params[:id])
+  if request.path != article_path(@article)
+    redirect_to @article, status: :moved_permanently
+  end
+end
+```
+
+<p>If we visit http://localhost:3000/articles/hello-world now we&rsquo;ll be redirected to that article&rsquo;s current URL.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/929/original/E314I04.png" width="800" height="379" alt="Visiting the old URL now redirects us to the new one."/>
+</div>
+
+<p>We&rsquo;ve only covered a few of FriendlyId&rsquo;s features here and you should read the <a href="http://rubydoc.info/github/norman/friendly_id/master/frames">documentation</a> to see what else it can do. For example its Reserved module allows us to reserve certain keywords, such as new and edit,  so that they&rsquo;re not taken by a slug. The Scoped module lets us scope slugs within an association while the SimpleI18n module add internationalization support for multiple languages.</p>

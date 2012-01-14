@@ -1,0 +1,202 @@
+<p>A continuaci&oacute;n se muestra una p&aacute;gina de una aplicaci&oacute;n Rails que muestra un listado de art&iacute;culos.  Queremos implementar la funcionalidad de b&uacute;squeda y, como los art&iacute;culos muestran sobre todo contenido de texto, utilizaremos un motor de b&uacute;squeda textual en lugar de buscar cadenas mediante consultas SQL.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/890/original/E306I01.png" width="800" height="476" alt="La página donde se muestran todos los artículos."/>
+</div>
+
+<p>Ya hemos visto este tema en otros episodios.  En el <a href="http://railscasts.com/episodes/120-thinking-sphinx">episodio 120</a> usamos Thinking sphinx y en el <a href="http://es.asciicasts.com/episodes/278-busquedas-con-sunspot">episodio 278</a> usamos Sunspot con Solr.  En este episodio vamos a utilizar <a href="http://www.elasticsearch.org/">Elasticsearch</a>  para implementar las b&uacute;squedas de texto en nuestra aplicaci&oacute;n.</p>
+
+<p>Elasticsearch es un motor de b&uacute;squeda textual basado en Apache Lucene, igual que Solr.  Dispone de una API REST con la que podemos comunicarnos mediante JSON.  Elasticsearch no es un proyecto espec&iacute;fico de Ruby, por lo que usaremos una gema llamada <a href="https://github.com/karmi/tire">Tire</a> para comunicarnos con Elasticsearch.  Tire se puede utilizar en cualquier proyecto Ruby, pero implementa una interesante funcionalidad de modelos que hace que sea muy sencillo integrarlo con Rails.  Hay incluso una plantilla de aplicaci&oacute;n Rails que podemos utilizar para crear una nueva aplicaci&oacute;n que utilice Elasticsearch.</p>
+
+``` terminal
+$ rails new searchapp -m https://raw.github.com/karmi/tire/master/examples/rails-application-template.rb
+```
+
+<p>Con esto configuraremos una nueva aplicaci&oacute;n Rails con Elasticsearch y Tire.  Si la plantilla no detecta una instalaci&oacute;n activa de  Elasticsearch lo descargar&aacute; e instalar&aacute; autom&aacute;ticamente, realizando una configuraci&oacute;n espec&iacute;fica para esta aplicaci&oacute;n.  Despu&eacute;s de que finalice la orden podemos visitar  <code><a href="http://localhost:3000/">http://localhost:3000/</a></code> donde veremos una aplicaci&oacute;n b&aacute;sica que nos permite utilizar Elasticsearch para buscar en algunos registros.  Merece la pena examinar el  <a href="https://raw.github.com/karmi/tire/master/examples/rails-application-template.rb">c&oacute;digo fuente de esta plantilla</a> porque es un buen ejemplo de todo lo que se puede hacer con una plantilla de aplicaci&oacute;n en Rails.</p>
+
+<h3>C&oacute;mo a&ntilde;adir Elastic Search a nuestra aplicaci&oacute;n</h3>
+
+<p>La aplicaci&oacute;n de ejemplo es muy interesante pero, &iquest;c&oacute;mo podemos utilizar Elasticsearch en nuestra propia aplicaci&oacute;n?  El primer paso es instalarlo.  Los que est&eacute;n usando Homebrew en OS X lo tienen muy f&aacute;cil; los que no disponen de  <a href="http://www.elasticsearch.org/download/">instrucciones de descarga en la web de Elasticsearch</a> .</p>
+
+``` terminal
+$ brew install elasticsearch
+```
+
+<p>Tras la instalaci&oacute;n de Elasticsearch con Homebrew veremos instrucciones sobre c&oacute;mo dejarlo funcionando.  Lo arrancaremos con esta orden (n&oacute;tese que puede ser diferente dependiendo de la versi&oacute;n de Elasticsearch):</p>
+
+``` terminal
+$ elasticsearch -f -D es.config=/usr/local/Cellar/elasticsearch/0.18.1/config/elasticsearch.yml
+```
+
+<p>Con esta orden se arranca el servidor en el puerto 9200, por donde podremos comunicarnos manualmente si queremos mediante la API REST basada en JSON.  Como vamos a usar Tire, lo siguiente que haremos ser&aacute; instalarlo.  Como es habitual, esto se hace a&ntilde;adiendo la gema al <code>Gemfile</code> de la aplicaci&oacute;n y ejecutando <code>bundle</code>.</p>
+
+``` /Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.1.3'
+
+# Bundle edge Rails instead:
+# gem 'rails',     :git => 'git://github.com/rails/rails.git'
+
+gem 'sqlite3'
+
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~> 3.1.4'
+  gem 'coffee-rails', '~> 3.1.1'
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+gem 'tire'
+```
+
+<p>Podemos a&ntilde;adir Tire en cualquier modelo sobre el que queramos hacer b&uacute;squedas a&ntilde;adiendo dos m&oacute;dulos.  Queremos buscar en los art&iacute;culos por lo que a&ntilde;adiremos lo siguiente al modelo <code>Article</code> de nuestra aplicaci&oacute;n:</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  belongs_to :author
+  has_many :comments
+  
+  include Tire::Model::Search
+  include Tire::Model::Callbacks
+  
+end
+```
+
+<p>El primero de estos dos m&oacute;dulos a&ntilde;ade varios m&eacute;todos de b&uacute;squeda e indexado, mientras que el segundo a&ntilde;ade funciones as&iacute;ncronas que se ejecutan para actualizar el &iacute;ndice seg&uacute;n se crean, actualizan o borran los art&iacute;culos.</p>
+
+<p>Ya tenemos varios art&iacute;culos en la base de datos de nuestra aplicaci&oacute;n, y estos no estar&aacute;n incluidos en el &iacute;ndice.  Pero como todos los art&iacute;culos ya est&aacute;n definidios en el fichero <code>seed.rb</code> de nuestra aplicaci&oacute;n, si volvemos a cargar estos registros ser&aacute;n indexados automaticamente.</p>
+
+``` terminal
+$ rake db:setup
+```
+
+<h3>C&oacute;mo a&ntilde;adir el formulario de b&uacute;squeda</h3>
+
+<p>Una vez que se hayan indexado nuestros art&iacute;culos podemos a&ntilde;adir un formulario para buscar en la p&aacute;gina de los art&iacute;culos.  La plantilla de esta p&aacute;gina presenta el siguiente aspecto:</p>
+
+
+``` /app/views/articles/index.html.erb
+<h1>Articles</h1>
+
+<div id="articles">
+<% @articles.each do |article| %>
+  <h2>
+    <%= link_to article.name, article %>
+    <span class="comments">(<%= pluralize(article.comments.size, 'comment') %>)</span>
+  </h2>
+  <div class="info">
+    by <%= article.author.name %>
+    on <%= article.published_at.strftime('%b %d, %Y') %>
+  </div>
+  <div class="content"><%= article.content %></div>
+<% end %>
+</div>
+```
+
+<p>A&ntilde;adamos el siguiente sencillo formulario bajo el encabezado de la p&aacute;gina.  Este formulario nos llevar&aacute; a la misma p&aacute;gina de art&iacute;culos que estamos viendo utilizando GET.</p>
+
+
+``` /app/views/articles/index.html.erb
+<%= form_tag articles_path, method: :get do %>
+  <p>
+    <%= text_field_tag :query, params[:query] %>
+    <%= submit_tag "Search", name: nil %>
+  </p>
+<% end %>
+```
+
+<p>Cuando se env&iacute;e este formulario de b&uacute;squeda invocar&aacute; la acci&oacute;n <code>index</code> de <code>ArticlesController</code>, que ahora mismo devuelve todos los art&iacute;culos.  Pero modificaremos el c&oacute;digo para comprobar si est&aacute; presente el par&aacute;metro <code>query</code> en cuyo caso utilizaremos el m&eacute;todo <code>search</code> de Tire.</p>
+
+``` /app/controllers/articles_controller.rb
+def index
+  if params[:query].present?
+    @articles = Article.search(params[:query])
+  else
+    @articles = Article.all
+  end
+end
+```
+
+<p>Si ahora recargamos la p&aacute;gina veremos el formulario de b&uacute;squeda, pero si intentamos enviar el formulario con un t&eacute;rmino de b&uacute;squeda veremos un error.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/891/original/E306I02.png" width="800" height="432" alt="La página de búsqueda devuelve un error."/>
+</div>
+
+<p>El error lo provoca la llamada a <code>article.comments.size</code> para mostrar el número de comentarios que tiene cada artículo, por lo que parece que las asociaciones no funcionan en los artículos devueltos por Tire.</p>
+
+<p>Tire intenta minimizar en lo posible el acceso a la base de datos, por lo que cuando llamamos a <code>Article.search</code> lo que se devuelven no son los modelos de ActiveRecord sino un conjunto de resultados obtenidos a partir de lo que hay almacenado en el &iacute;ndice.  El &iacute;ndice no sabe acerca de la asociaci&oacute;n de comentarios, por lo que no hay forma de cargarlos.  Para corregir esto podemos utilizar la opci&oacute;n <code>load</code> para invocar a <code>search</code> y decirle a Tire c&oacute;mo cargar los registros de la base de datos.</p>
+
+``` /app/controllers/articles_controller.rb
+def index
+  if params[:query].present?
+    @articles = Article.search(params[:query], load: true)
+  else
+    @articles = Article.all
+  end
+end
+```
+
+<p>La b&uacute;squeda devolver&aacute; ahora los resultados correctos:</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/892/original/E306I03.png" width="800" height="482" alt="La página de búsqueda ya funciona correctamente."/>
+</div>
+
+<p>Por supuesto ser&iacute;a mucho mejor si todos los datos que necesit&aacute;semos estuviesen contenidos en el &iacute;ndice de forma que no tuvi&eacute;semos que utilizar la opci&oacute;n <code>load</code>.  Esto es posible, pero lo veremos en el pr&oacute;ximo episodio.  Lo que veremos a continuaci&oacute;n es c&oacute;mo personalizar m&aacute;s la consulta mediante otras opciones, lo que se hace redefiniendo el m&eacute;todo <code>search</code> del modelo <code>Article</code> para que acepte un <em>hash</em> de par&aacute;metros que le pasa el usuario.</p>
+
+``` /app/models/article.rb
+def self.search(params)
+  tire.search(load: true) do
+    query { string params[:query]} if params[:query].present?
+  end
+end
+```
+
+<p>Como estamos redefiniendo el m&eacute;todo <code>search</code> de Tire tenemos que utilizar <code>tire.search</code> para llamar al m&eacute;todo redefinido y, como queremos recuperar los modelos reales, tenemos que utilizar la opci&oacute;n <code>load: true</code>.  En lugar de pasar los par&aacute;metros de b&uacute;squeda directamente a este m&eacute;todo hemos utilizado un bloque para poder personalizar a&uacute;n m&aacute;s la consulta con otras opciones.  En este bloque invocaremos a <code>query</code> y le pasamos otro bloque, en el cual pasamos los par&aacute;metros al m&eacute;todo <code>string</code> pero s&oacute;lo si dichos par&aacute;metros aparecen.</p>
+
+<p>Se puede ahora simplificar <code>ArticlesController</code> para que invoque nuestro nuevo m&eacute;todo <code>search</code> en el modelo pas&aacute;ndole el <em>hash</em> de par&aacute;metros:</p>
+
+``` /app/controllers/articles_controller.rb
+def index
+  @articles = Article.search(params)
+end
+```
+
+<p>Si ahora recargamos la p&aacute;gina de art&iacute;culos todo seguir&aacute; funcionando igual.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/893/original/E306I04.png" width="800" height="387" alt="Ahora vienen del índicie todos los resultados de búsqueda."/>
+</div>
+
+<p>Pero hay un art&iacute;culo que no queremos que aparezca en los resultados porque tienen una fecha de publicaci&oacute;n en el futuro.  Cambiaremos la b&uacute;squeda para que no incluya aquellos art&iacute;culos que tengan fecha de publicaci&oacute;n en el futuro.  Para hacer esto tan s&oacute;lo tenemos que a&ntilde;adir un filtro al bloque <code>search</code> del modelo.</p>
+
+``` /app/models/article.rb
+def self.search(params)
+  tire.search(load: true) do
+    query { string params[:query]} if params[:query].present?
+    filter :range, published_at: {lte: Time.zone.now }
+  end
+end
+```
+
+<p>El primer argumento es el tipo de filtro que buscamos, en este caso un filtro de rango.  Lo siguiente que queremos es pasar un <em>hash</em> que contiene los atributos sobre los que queremos filtrar.  En este caso filtramos por <code>published_at</code> e incluimos s&oacute;lo aquellos art&iacute;culos cuyo atributo <code>published_at</code> sea menor o igual que la hora actual.</p>
+
+<p>Cabe preguntarse qu&eacute; otras opciones hay disponibles a la hora de personalizar las b&uacute;squedas.  Hay algo de documentaci&oacute;n, pero es bastante dispersa.  Un buen sitio por donde empezar es  <a href="https://github.com/karmi/tire/blob/master/README.markdown">el README de Tire</a>, aunque el comienzo es bastante confuso porque en &eacute;l se discute el indexado y el mapeado, que en principio no nos interesan demasiado porque estamos haciendo un mapeado din&aacute;mico.   Tambi&eacute;n hay  <a href="http://karmi.github.com/tire/">documentaci&oacute;n adicional</a> proporcionada por Tire que merece la pena leer.</p>
+
+<p>Es buena idea tambi&eacute;n leer la documentaci&oacute;n de Elasticsearch porque la mayor&iacute;a de las opciones de Tire coinciden directamente con opciones de Elasticsearch.  La p&aacute;gina sobre el  <a href="http://www.elasticsearch.org/guide/reference/query-dsl/">DSL de consultas</a> contiene una secci&oacute;n completa sobre las posibilidades de filtrado incluyendo el filtro de rangos que hemos utilizando antes, con todas sus opciones.  Los fragmentos de c&oacute;digo aparecen en JSON pero es muy f&aacute;cil adaptarlos para su uso con Tire.</p>
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,193 @@
+<p>ここに簡単なRailsのブログアプリケーションがあります。トップページには最近の記事のリストがあり、それぞれの記事へのリンクになっています。リンクの一つをクリックするとその記事のページが開きますが、そのURLはページの内容をよく表しているとは言えません。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/926/original/E314I01.png" width="800" height="379" alt="記事のURLにidが含まれている"/>
+</div>
+
+<p>記事はURLの中では内部的な<code>id</code>だけで記述されていて、これがRailsのデフォルトの振る舞いです。もし何らかの形で記事の名前がURLに含まれるようにすれば、URLの表記が改善されるのではないでしょうか。</p>
+
+<p>これを実現する一番簡単な方法は、URLを変更したいモデル(今回の場合は<code>Article</code>)の<code>to_param</code>メソッドをオーバーライドする方法です。これはRailsがオブジェクトをURLパラメータに変換するために利用している内部的なメソッドです。</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  def to_param
+    "#{id} #{name}".parameterize
+  end
+end
+```
+
+<p>これをオーバーライドして記事の名前も返すようにしました。この文字列に対して<code>parameterize</code>を呼び出して、URLとして使いやすい値に変換します。これによって記事のURLは次のようになります。</p>
+
+```
+http://localhost:3000/articles/1-superman
+```
+
+<p>この場合にオブジェクトの<code>id</code>が最初に付いていることが重要で、それによってActiveRecordの<code>find</code>メソッドがそのまま機能します。もし<code>id</code>をURLに含めたくないという場合は、少し難しくはなりますがそれも可能です。</p>
+
+<h3>FriendlyIdを導入する</h3>
+
+<p>ここで<a href="https://github.com/norman/friendly_id">FriendlyId</a>プラグインを利用します。これによって、頭に<code>id</code>を付けずに、URLにモデルの名前を簡単に使用できるようになります。このgemには多くの機能が含まれていますが、その前にアプリケーションへの追加方法を見ていきましょう。いつもと同じようにまず最初にアプリケーションのgemfileに追加して、<code>bundle</code>コマンドを実行してインストールします。</p>
+
+``` /Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.1.3'
+
+# Bundle edge Rails instead:
+# gem 'rails',     :git => 'git://github.com/rails/rails.git'
+
+gem 'sqlite3'
+
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~> 3.1.4'
+  gem 'coffee-rails', '~> 3.1.1'
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+gem 'friendly_id'
+```
+
+<p>モデルの中で<code>to_param</code>をオーバーライドする代わりに、<code>FriendlyId</code>でモデルを拡張し、URLで使用したい属性を指定します。</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  extend FriendlyId
+  friendly_id :name
+end
+```
+
+<p>これで記事のURLに記事の名前だけが使われて<code>id</code>は含まれなくなります。</p>
+
+```
+http://localhost:3000/articles/Superman
+```
+
+<p>この方法は、特殊な名前を持つ記事の場合にきれいではありません。例えば「Batman &amp; Robin」という名前の記事は次のようなURLを持ちます。</p>
+
+```
+http://localhost:3000/articles/Batman%20&%20Robin
+```
+
+<h3>Slugを使う</h3>
+
+<p>URLは、空白や区切り文字も含んだ記事の名前全体から生成されます。これは、FriendlyIdに渡されるパラメータがすでにURLとして見やすいものであれば問題にはなりませんが、例のような記事の名前の場合は問題です。そこで新たに<a href="http://en.wikipedia.org/wiki/Slug_(web_publishing)">slug</a>属性を利用します。そのためにはfriendly_idのuseオプションを利用します。</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  extend FriendlyId
+  friendly_id :name, use: :slugged
+end
+```
+
+<p>これはデータベースの<code>articles</code>テーブルで<code>slug</code>列を検索するので、それを作成する必要があります。ここでそのためのmigrationを作成します。</p>
+
+``` terminal
+$ rails g migration add_slug_to_articles slug:string
+```
+
+<p>この属性はレコードの検索に利用されるため、インデックスを追加しておくのがいいでしょう。</p> 
+
+``` /db/migrate/20120101000000_add_slug_to_articles.rb
+class AddSlugToArticles < ActiveRecord::Migration
+  def change
+    add_column :articles, :slug, :string
+    add_index :articles, :slug
+  end
+end
+```
+
+<p><code>rake db:migrate</code>を実行して、データベースのテーブルに 列とインデックスを追加します。ここでおこなうことがもう一つあります。すでに記事のレコードがいくつか存在していますが、それらのslug列は空のままです。これを修正するためにRailsコンソールを開いて、各レコードを保存しなおします。</p>
+
+``` irb
+1.9.2-p290 :001 > Article.find_each(&:save)
+```
+
+<p>これで「Batman &amp; Robin」の記事には、新しいslugに基づいてずっときれいなURLが付きます。</p>
+
+```
+http://localhost:3000/articles/batman-robin
+```
+
+<h3>修正された記事の名前の扱い</h3>
+
+<p>記事を編集して名前を変更した場合、slugも更新されます。「Batman &amp; Robin」の記事を「Batman &amp; Robin 2」に変更すると、slugが<code>batman-robin-2</code>に変わり、それに従ってURLも変わります。ここで記事の古いURLにアクセスすると、エラーメッセージが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/927/original/E314I02.png" width="800" height="379" alt="古いURLにアクセスするとエラーが表示される"/>
+</div>
+
+<p>この問題を解決する方法はいくつかあります。一つはFriendlyIdに対して記事の名前が変わったときにもslugを更新しないように指示する方法で、そのためには<code>should_generate_new_friendly_id?</code>メソッドをオーバーライドします。</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  extend FriendlyId
+  friendly_id :name, use: :slugged
+  
+  def should_generate_new_friendly_id?
+    new_record?
+  end
+end
+```
+
+<p>このコードによって、新規に<code>Article</code>が作成されたときにだけslugが生成されるようになります。「Batman &amp; Robin 2」の記事を更新して名前が「Batman &amp; Robin 3」になっても、slugは<code>batman-robin-2</code>のままです。</p>
+
+<p>そこで両方のいいところをとって、名前が変更されたらslugは更新されながら、古いslugも認識されて古いURLも有効なままにしたい場合は、どうすればいいでしょうか?これはFriendlyIdの<code>history</code>オプションを使用することで可能です。オーバーライドされた<code>should_generate_new_friendly_id?</code>メソッドを削除して<code>history</code>オプションを追加すると、過去のslugの履歴を保存してくれます。</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  extend FriendlyId
+  friendly_id :name, use: [:slugged, :history]
+end
+```
+
+<p>この履歴をどこかに保存しなくてはいけないので、新規にデータベーステーブルを作成します。FriendlyIdにはこれを自動でおこなうジェネレーターが含まれています。</p>
+
+``` terminal
+$ rails g friendly_id
+      create  db/migrate/20120101000001_create_friendly_id_slugs.rb
+```	  
+
+<p><code>rake db:migrate</code>を実行すると<code>friendly_id_slugs</code>というテーブルが作成されます。</p> 
+
+<p>一つ注意しなくては点があります。履歴の機能は新規の作成されたレコードでのみ動作するようです。すでにレコードが存在する場合は、この機能を追加した後でそれらを再生成する必要があります。テストのために「Hello World」という記事を新たに作成します。この記事は次のようなURLを持ちます。</p>
+
+```
+http://localhost:3000/articles/hello-world
+```
+
+<p>記事を編集して名前を「Hello World 2」に設定するとslugは<code>hello-world-2</code>に変わりますが、元のURLも引き続き機能します。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/928/original/E314I03.png" width="800" height="379" alt="元のURLが引き続き機能する"/>
+</div>
+
+<p>古いURLにアクセスした場合は、現在のURLにリダイレクトされる方がいいでしょう。そのためにコントローラを一部変更します。<code>ArticlesController</code>は標準的なRESTfulなスタイルのコントローラで、通常の7つのアクションをサポートします。個別の記事を表示するアクションであるshowアクションに修正を加えます。現状は次のようになっています。</p>
+
+``` /app/controllers/articles_controller.rb
+def show
+  @article = Article.find(params[:id])
+end
+```
+
+<p>このアクションを修正して、ページにアクセスするのに使われたURLが現在のものでなかった場合に、記事の現在のURLにリダイレクトするようにします。これを実現するためには、ページにアクセスするのに使われたパスが現在の記事のパスと違うかどうかをチェックします。もし違う場合は、ユーザは古いslugか記事の<code>id</code>を使用したことになります。これらの場合には、現在のURLにリダイレクトするようにします。</p>
+
+```/app/controllers/articles_controller.rb
+def show
+  @article = Article.find(params[:id])
+  if request.path != article_path(@article)
+    redirect_to @article, status: :moved_permanently
+  end
+end
+```
+
+<p>http://localhost:3000/articles/hello-worldにアクセスすると、その記事の現在のURLにリダイレクトされます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/929/original/E314I04.png" width="800" height="379" alt="古いURLにアクセスすると新しい方にリダイレクトされる"/>
+</div>
+
+<p>今回はFriendlyIdの一部の機能しか紹介できなかったので、その他にどのようなことができるかを知るために<a href="http://rubydoc.info/github/norman/friendly_id/master/frames">ドキュメンテーション</a>を読むことをお勧めします。例えばReservedモジュールを使うと、newやeditなどの特定のキーワードを予約語として除外(reserve)してslugで使われないようにします。Scopedモジュールを使うとslugのscopeをassociation内に限定します。SimpleI18nモジュールは複数の言語で国際化をサポートします。</p>

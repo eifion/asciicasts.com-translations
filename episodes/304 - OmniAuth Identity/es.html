@@ -1,0 +1,310 @@
+<p><a href="http://www.omniauth.org/">OmniAuth</a> ha alcanzado hace poco la versi&oacute;n 1.0 y dispone de varias novedades interesantes.  En este episodio veremos una nueva estrategia llamada OmniAuth Identity que permite que los usuarios creen una cuenta simplemente especificando un nombre de usuario y un correo electr&oacute;nico en lugar de utilizar un proveedor externo.</p>
+
+<h3>C&oacute;mo funciona por ahora nuestra aplicaci&oacute;n</h3>
+
+<p>Debajo se muestra una captura de pantalla de la aplicaci&oacute;n con la que estamos trabajando.  Ya hemos configurado OmniAuth con tres proveedores externos.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/874/original/E304I01.png" width="800" height="341" alt="La aplicación sólo permite el registro con proveedores externos."/>
+</div>
+
+<p>Si iniciamos la sesi&oacute;n con uno de estos servicios, por ejemplo Twitter, iremos a la web de Twitter donde nos preguntar&aacute;n si queremos autorizar la aplicaci&oacute;n para que acceda al detalle de nuestra cuenta en Twitter.  Si lo aceptamos la aplicaci&oacute;n recuperar&aacute; la informaci&oacute;n de nuestro perfil de Twitter y tendremos la sesi&oacute;n iniciada.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/875/original/E304I02.png" width="800" height="379" alt="Una vez que hemos iniciado la sesión se muestra la información de perfil del proveedor externo."/>
+</div>
+
+<p>Esta autorizaci&oacute;n s&oacute;lo ser&aacute; necesaria la primera vez, tras la cual podremos iniciar la sesi&oacute;n en nuestra aplicaci&oacute;n mediante Twitter haciendo clic en el icono de la p&aacute;gina principal.</p>
+
+<p>Se trata de una forma muy c&oacute;moda de permitir a los usuarios que inicien la sesi&oacute;n, pero estamos excluyendo a aquellos que no quieran registrarse mediante uno de estos servicios.  Podemos usar OmniAuth Identity para que estos usuarios tengan la opci&oacute;n de crear una cuenta con su propia clave en el sitio.</p>
+
+<p>Antes de empezar veremos parte del c&oacute;digo de la aplicaci&oacute;n para hacernos una idea de su funcionamiento.  El c&oacute;digo fuente est&aacute; basado en la aplicaci&oacute;n del  <a href="http://railscasts.com/episodes/241-simple-omniauth">episodio 241</a>, que merece la pena consultar si no estamos familiarizados con OmniAuth.</p>
+
+<p>Ha habido varios cambios en OmniAuth desde que se escribi&oacute; el episodio, y uno de los m&aacute;s significativos ha sido la reorganizaci&oacute;n del Gemfile.  Ahora cada proveedor tiene su propia gema de OmniAuth, por lo que hay que incluir la gema correcta para cada proveedor que queramos soportar.</p>
+
+
+``` /Gemfile
+gem 'omniauth-twitter'
+gem 'omniauth-facebook'
+gem 'omniauth-google-oauth2'
+```
+
+<p>El inicializador de OmniAuth tiene el mismo aspecto que antes.  Se a&ntilde;ade OmniAuth como <em>middleware</em> y se incluyen los proveedores que deseamos utilizar.</p>
+
+``` /config/initializers/omniauth.rb
+Rails.application.config.middleware.use OmniAuth::Builder do
+  provider :twitter, ENV['TWITTER_KEY'], ENV['TWITTER_SECRET']
+  provider :google_oauth2, ENV['GOOGLE_KEY'], ENV['GOOGLE_SECRET']
+  provider :facebook, ENV['FACEBOOK_ID'], ENV['FACEBOOK_SECRET']
+end
+```
+
+<p>La aplicaci&oacute;n tiene un controlador <code>SessionsController</code> cuya acci&oacute;n <code>create</code> es la que se activa por la <em>callback</em> de OmniAuth.  En esta acci&oacute;n intentamos crear el usuario basado en el <em>hash</em> de OmniAuth y guardamos el <code>id</code> de dicho usuario en una variable de sesi&oacute;n.</p>
+
+``` /app/controllers/sessions_controller.rb
+class SessionsController < ApplicationController
+  def new
+  end
+
+  def create
+    user = User.from_omniauth(env["omniauth.auth"])
+    session[:user_id] = user.id
+    redirect_to root_url, notice: "Signed in!"
+  end
+
+  def destroy
+    session[:user_id] = nil
+    redirect_to root_url, notice: "Signed out!"
+  end
+
+  def failure
+    redirect_to root_url, alert: "Authentication failed, please try again."
+  end
+end
+```
+
+<p>Recuperamos el usuario en el modelo <code>User</code> con el m&eacute;todo <code>from_omniauth</code>.</p>
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  def self.from_omniauth(auth)
+    find_by_provider_and_uid(auth["provider"], auth["uid"]) || create_with_omniauth(auth)
+  end
+
+  def self.create_with_omniauth(auth)
+    create! do |user|
+      user.provider = auth["provider"]
+      user.uid = auth["uid"]
+      user.name = auth["info"]["name"]
+    end
+  end
+end
+```
+
+<p>El m&eacute;todo comprueba en primer lugar si ya existe un usuario con el mismo identificador y proveedor.  En tal caso se devuelve dicho usuario, y si no se encuentra se llama al m&eacute;todo <code>create_with_omniauth</code> que crear&aacute; dicho usuario bas&aacute;ndose en la informaci&oacute;n del <em>hash</em> que ha pasado OmniAuth, que ha sufrido un cambio que es que el par&aacute;metro <code>user_info</code> ahora se llama <code>info</code>, por lo que podemos tener problemas si actualizamos nuestro c&oacute;digo a OmniAuth 1.0.</p>
+
+<h3>C&oacute;mo a&ntilde;adir OmniAuth Identity a una aplicaci&oacute;n</h3>
+
+<p>Lo que hemos visto es suficiente para gestionar la autenticaci&oacute;n con OmniAuth.  A continuaci&oacute;n a&ntilde;adiremos OmniAuth Identity para que los usuarios puedan crear una cuenta sin que medie un servicio externo de autenticaci&oacute;n.  Como vimos antes, cada proveedor de OmniAuth requiere el uso de una gema separada por lo que lo primero que haremos ser&aacute; a&ntilde;adir la gema <codE>omniauth-identity</codE> al Gemfile.</p>
+
+
+``` /Gemfile
+# To use ActiveModel has_secure_password
+gem 'bcrypt-ruby', '~> 3.0.0'
+
+gem 'omniauth-twitter'
+gem 'omniauth-facebook'
+gem 'omniauth-google-oauth2'
+gem 'omniauth-identity'
+```
+
+<p>La gema necesita <code>bcrypt-ruby</code> para cifrar las claves, pero no la declara como dependencia por lo que es necesario a&ntilde;adir tambi&eacute;n <code>bcrypt-ruby</code> al Gemfile.  Como siempre, tenemos que ejecutar <code>bundle</code> para que se instalen todas las gemas.</p>
+
+<p>A continuaci&oacute;n tenemos que ir al inicializador de OmniAuth para a&ntilde;adir al nuevo proveedor.  No tenemos que a&ntilde;adir m&aacute;s par&aacute;metros en este proveedor.</p>
+
+
+``` /config/initializers/omniauth.rb
+Rails.application.config.middleware.use OmniAuth::Builder do
+  provider :twitter, ENV['TWITTER_KEY'], ENV['TWITTER_SECRET']
+  provider :google_oauth2, ENV['GOOGLE_KEY'], ENV['GOOGLE_SECRET']
+  provider :facebook, ENV['FACEBOOK_ID'], ENV['FACEBOOK_SECRET']
+  provider :identity
+end
+```
+
+<p>Nos har&aacute; falta un modelo para almacenar la informaci&oacute;n para iniciar la sesi&oacute;n.  Por defecto este modelo se debe llamar <code>identity</code> pero si queremos podemos personalizarlo.  Tendremos que darle los atributos <code>name</code>, <code>email</code> y <code>password_digest</code>.</p>
+
+``` terminal
+$ rails g model identity name:string email:string password_digest:string
+```
+
+<p>Migremos la base de datos para añadir la tabla.</p>
+
+
+``` terminal
+$ rake db:migrate
+```
+
+<p>El <a href="https://github.com/intridea/omniauth-identity/blob/master/README.markdown">README</a> de OmniAuth nos indica lo que tenemos que hacer para que el modelo Identity funcione con varios ORMs, incluyendo ActiveRecord.  Tenemos que cambiar el modelo de forma que herede de <code>OmniAuth::Identity::Models::ActiveRecord</code> en lugar de <code>ActiveRecord::Base</code>.</p>
+
+``` /app/models/identity.rb
+class Identity < OmniAuth::Identity::Models::ActiveRecord
+end
+```
+
+<p>Ya casi hemos acabado.  Lo &uacute;nico que tenemos que hacer es mostrar un enlace al nuevo proveedor en el formulario de registro junto a los enlaces de los proveedores externos.</p>
+
+``` /app/views/sessions/new.html.erb
+<p>
+  <strong>Don&rsquo;t use these services?</strong>
+  <%= link_to "Create an account", "/auth/identity/register" %> or
+  <%= link_to "login", "/auth/identity" %> with a password.
+</p>
+```
+
+<p>Tendremos que reiniciar el servidor para que aparezcan los cambios en OmniAuth, tras visitar la p&aacute;gina de registro veremos los enlaces de registro e inicio de sesi&oacute;n.  Empezaremos registrando una nueva cuenta.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/876/original/E304I03.png" width="800" height="555" alt="Formulario de registro de OmniAuth."/>
+</div>
+
+<p>OmniAuth Identity incluye un peque&ntilde;o formulario de registro, tras rellenarlo habremos completado el registro e iremos a nuestra p&aacute;gina de perfil.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/877/original/E304I04.png" width="800" height="382" alt="Inicio de sesión con OmniAuth."/>
+</div>
+
+<p>La p&aacute;gina de inicio de sesi&oacute;n tiene un aspecto parecido pero con s&oacute;lo dos campos.  El campo de inicio de sesi&oacute;n espera la direcci&oacute;n de correo que introducimos cuando nos dimos de alta, aunque esto puede no parecer obvio.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/878/original/E304I05.png?" width="800" height="439" alt="Formulario de inicio de sesión de OmniAuth."/>
+</div>
+
+<h3>C&oacute;mo crear formularios personalizados de registro e inicio de sesi&oacute;n</h3>
+
+<p>Con esto ya tenemos funcionando el registro e inicio de sesi&oacute;n, sin haber tenido que cambiar casi nada en nuestra aplicaci&oacute;n porque Identity utiliza la misma interfaz que el resto de OmniAuth para los otros proveedores.  Con esto dicho, debemos tener en cuenta algunos problemas que pueden surgir.  Si  nuestro modelo <code>Identity</code> tiene validaciones y se rellena mal el formulario el usuario no ver&aacute; ning&uacute;n error.  Para comprobar esto, a&ntilde;adamos algunas validaciones en el modelo <code>Identity</code>.</p>
+
+``` /app/models/identity.rb
+class Identity < OmniAuth::Identity::Models::ActiveRecord
+  validates_presence_of :name
+  validates_uniqueness_of :email
+  validates_format_of :email, :with => /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+end
+```
+
+<p>Si introducimos una direcci&oacute;n de correo no v&aacute;lida en el formulario de registro e intentamos crear una cuenta, volveremos al formulario sin ninguna indicaci&oacute;n acerca de qu&eacute; hicimos mal.</p>
+
+<p>Igualmente, el formulario de inicio de sesi&oacute;n tampoco indica que el campo  &ldquo;Login&rdquo; espera que el usuario introduzca su direcci&oacute;n de correo.  Hay opciones para personalizar este formulario pero no son especialmente exhaustivas.  Es m&aacute;s f&aacute;cil crear nuestros propios formularios en la misma aplicaci&oacute;n y as&iacute; podremos tener completo control sobre su comportamiento y aspecto.</p>
+
+<p>Empecemos con el formulario de inicio de sesi&oacute;n.  En lugar de mostrar un enlace al formulario de inicio de sesi&oacute;n de OmniAuth en la p&aacute;gina de registro lo que haremos ser&aacute; mostrar nuestro propio formulario de inicio de sesi&oacute;n:</p>
+
+``` /app/views/sessions/new.html.erb
+<p>
+  <strong>Don&rsquo;t use these services?</strong>
+  <%= link_to "Create an account", "/auth/identity/register" %> or login below.
+</p>
+  
+<%= form_tag "/auth/identity/callback" do %>
+  <div class="field">
+    <%= label_tag :auth_key, "Email" %><br>
+    <%= text_field_tag :auth_key %>
+  </div>
+  <div class="field">
+    <%= label_tag :password %><br>
+    <%= password_field_tag :password %>
+  </div>
+  <div class="actions"><%= submit_tag "Login" %></div>
+<% end %>
+```
+
+<p>Este formulario env&iacute;a un POST a <code>/auth/identity/callback</code> que es donde el  formulario  original de OmniAuth env&iacute;a sus datos.  Tambi&eacute;n le daremos los mismos nombres a los campos de formulario, y cuando recarguemos la p&aacute;gina de registro veremos un formulario de inicio de sesi&oacute;n que podemos usar para introducir nuestros datos e iniciar la sesi&oacute;n igual que con el otro formulario.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/879/original/E304I06.png" width="800" height="516" alt="Registro con nuestro propio formulario."/>
+</div>
+
+<p>Podemos hacer los mismo para cambiar el formulario de registro aunque esta vez tendremos que crear un nuevo controlador.</p>
+
+``` terminal
+$ rails g controller identities
+```
+
+<p>Como vamos a tratar este controlador como un recurso tendremos que modificar el fichero de rutas para a&ntilde;adirlo.</p>
+
+
+``` /config/routes.rb
+Auth::Application.routes.draw do
+  root to: "sessions#new"
+  match "/auth/:provider/callback", to: "sessions#create"
+  match "/auth/failure", to: "sessions#failure"
+  match "/logout", to: "sessions#destroy", :as => "logout"
+  resources :identities
+end
+```
+
+<p>El controlador tendr&aacute; una acci&oacute;n <code>new</code>.  Cabe la posibilidad de que haya fallado la validaci&oacute;n del formulario de registro y el objeto <code>identity</code> est&eacute; almacenado en una variable de entorno de Rack, por lo que lo recuperaremos de ah&iacute; para ver si hay mensajes que mostrar.</p>
+
+``` /app/controllers/identities_controller.rb
+class IdentitiesController < ApplicationController
+  def new
+    @identity = env['omniauth.identity']
+  end
+end
+```
+
+<p>La plantilla asociada es bastante grande, pero no hay nada raro en ella:</p>
+
+
+``` app/views/identities/new.html.erb
+<h1>New Account</h1>
+
+<%= form_tag "/auth/identity/register" do %>
+  <% if @identity && @identity.errors.any? %>
+    <div class="error_messages">
+      <h2><%= pluralize(@identity.errors.count, "error") %> prohibited this account from being saved:</h2>
+      <ul>
+      <% @identity.errors.full_messages.each do |msg| %>
+        <li><%= msg %></li>
+      <% end %>
+      </ul>
+    </div>
+  <% end %>
+  <div class="field">
+    <%= label_tag :name %><br>
+    <%= text_field_tag :name, @identity.try(:name) %>
+  </div>
+  <div class="field">
+    <%= label_tag :email %><br>
+    <%= text_field_tag :email, @identity.try(:email) %>
+  </div>
+  <div class="field">
+    <%= label_tag :password %><br>
+    <%= password_field_tag :password %>
+  </div>
+  <div class="field">
+    <%= label_tag :password_confirmation %><br>
+    <%= password_field_tag :password_confirmation %>
+  </div>
+  <div class="actions"><%= submit_tag "Register" %></div>
+<% end %>
+```
+
+<p>El formulario de esta plantilla env&iacute;a un POST a <code>/auth/identity/register</code>, en la parte superior del formulario mostramos los errores que hubiera; debajo est&aacute;n los mismos campos de formulario que tiene el formulario de OmniAuth.  Rellenaremos los campos de nombre y email si existen en el objeto <code>identity</code>.</p>
+<p>Tendremos que modificar el enlace a  &ldquo;Create an account&rdquo; de la p&aacute;gina de registro para que ahora apunte a nuestro formulario en vez de al de OmniAuth.</p>
+
+``` /app/views/sessions/new.html.erb
+<p>
+  <strong>Don&rsquo;t use these services?</strong>
+  <%= link_to "Create an account", new_identity_path %> or login below.
+</p>
+```
+
+<p>Cuando hagamos clic en este enlace iremos a nuestro formulario, en el que podemos registrar una nueva cuenta.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/880/original/E304I07.png" width="800" height="457" alt="Nuestro nuevo formulario de registro."/>
+</div>
+
+<p>Nuestro nuevo formulario funciona muy bien para crear cuentas nuevas pero si rellenamos mal los datos y enviamos el formulario volveremos al formulario de registro est&aacute;ndar de OmniAuth.  Para corregir esto debemos ir al inicializador de OmniAuth y modificar el proveedor <code>identity</code> que escribimos antes:</p>
+
+``` /config/initializers/omniauth.rb
+Rails.application.config.middleware.use OmniAuth::Builder do
+  provider :twitter, ENV['TWITTER_KEY'], ENV['TWITTER_SECRET']
+  provider :google_oauth2, ENV['GOOGLE_KEY'], ENV['GOOGLE_SECRET']
+  provider :facebook, ENV['FACEBOOK_ID'], ENV['FACEBOOK_SECRET']
+  provider :identity, on_failed_registration: lambda { |env|    
+    IdentitiesController.action(:new).call(env)
+  }
+end
+```
+
+<p>La opci&oacute;n que hemos a&ntilde;adido  (<code>on_failed_registration</code>) recibe como argumento una aplicaci&oacute;n Rack, que hemos configurado para que apunte a la acci&oacute;n <code>new</code> de <code>IdentitiesController</code> para que se muestre nuestro nuevo formulario.  Hay un problema al llamar a esta acci&oacute;n directamente: en modo de desarrollo la acci&oacute;n no se recargar&aacute; por lo que hemos envuelto el c&oacute;digo con un <code>lambda</code> para evitar que la acci&oacute;n quede cacheada.</p>
+
+<p>Tenemos que reiniciar el servidor Rails para que estos cambios surtan efecto, tras lo cual el formulario se comportar&aacute; como es de esperar si introducimos datos incorrectos.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/881/original/E304I08.png" width="800" height="457" alt="Nuestro formulario de registro muestra correctamente los errores de validación."/>
+</div>
+
+<p>Ya tenemos OmniAuth Identity funcionando correctamente.  Nos ha llevado m&aacute;s tiempo crear los formularios personalizados, pero se trata de una soluci&oacute;n muy buena si ya estamos usando OmniAuth y tan s&oacute;lo queremos a&ntilde;adir el registro de nuevas cuentas.</p>
+

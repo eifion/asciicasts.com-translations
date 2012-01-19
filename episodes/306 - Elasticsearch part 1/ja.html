@@ -1,0 +1,190 @@
+<p>下の画面は記事の一覧を表示するRailsアプリケーションのページです。このページに検索機能を追加したいのですが、これらの記事はテキスト主体なので、SQLクエリを使うのではなく全文検索エンジンを使用することにします。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/890/original/E306I01.png" width="800" height="476" alt="記事一覧のページ"/>
+</div>
+
+<p>このトピックは以前のエピソードでも扱いました。<a href="http://railscasts.com/episodes/120-thinking-sphinx">エピソード120</a>ではThinking Sphinxを使用し、<a href="http://railscasts.com/episodes/278-search-with-sunspot">エピソード278</a>ではSunspotをSolrと合わせて使用しました。今回のエピソードでは<a href="http://www.elasticsearch.org/">Elasticsearch</a>を使って全文検索機能をアプリケーションに追加します。</p> 
+
+<p>Elasticsearchはフル機能の全文検索エンジンで、Solrと同じようにApache Luceneの上で稼働します。REST APIを持ち、JSONを使って通信をおこないます。ElasticsearchはRuby固有ではないので、<a href="https://github.com/karmi/tire">Tire</a>というgemを介してRubyとデータのやり取りをおこないます。Tireは、どのようなRubyプロジェクトでも使用できますが、優れたモデル機能を利用して特にRails アプリケーションと簡単に統合することが可能です。さらには提供されているRails用テンプレートを使うことで、Elasticsearchを組み込んだ形で新規アプリケーションを作成できます。</p>
+
+``` terminal
+$ rails new searchapp -m https://raw.github.com/karmi/tire/master/examples/rails-application-template.rb
+```
+
+<p>これによって新しいRailsアプリケーションが作成され、ElasticsearchとTireが設定されます。テンプレートが、Elasticsearchが実行していることを検知できなかった場合、自動的にダウンロードとインストールをおこない、この新しいアプリケーション用に利用できる状態にしてくれます。コマンドの実行が終了して<code><a href="http://localhost:3000/">http://localhost:3000/</a></code>にアクセスすると、基本的なアプリケーションができていてElasticsearchを使っていくつかのレコードを検索できます。<a href="https://raw.github.com/karmi/tire/master/examples/rails-application-template.rb">テンプレートのソースコード</a>は、Railsアプリケーションのテンプレートで何ができるかを知るためのいい例ですので、一度見てみることをお勧めします。</p>
+
+<h3>アプリケーションにElasticsearchを追加する</h3>
+
+<p>サンプルアプリケーションは興味深いですが、自分のアプリケーションでElasticsearchを使うにはどうすればいいでしょうか? まず最初にインストールをおこないます。OS XでHomebrewを利用している場合、作業は簡単です。それ以外の場合は<a href="http://www.elasticsearch.org/download/">Elasticsearch</a>のウェブサイトにダウンロード方法の詳細があります。</p>
+
+``` terminal
+$ brew install elasticsearch
+```
+
+<p>Elasticsearchがインストールされると、起動方法についての指示が表示されるので、このコマンドで起動します。(使用しているElasticsearchのバージョンによってコマンドが違うので注意してください。)</p>
+
+``` terminal
+$ elasticsearch -f -D es.config=/usr/local/Cellar/elasticsearch/0.18.1/config/elasticsearch.yml
+```
+
+<p>このコマンドで9200番ポートでサーバが起動し、JSON REST APIを介してコマンドを使ってこのサーバと通信することができます。ですがここではTireを利用するので、次にそれをインストールします。いつものようにアプリケーションのgemfileにgemを追加して<code>bundle</code>コマンドを実行します。</p>
+
+``` /Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.1.3'
+
+# Bundle edge Rails instead:
+# gem 'rails',     :git => 'git://github.com/rails/rails.git'
+
+gem 'sqlite3'
+
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~> 3.1.4'
+  gem 'coffee-rails', '~> 3.1.1'
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+gem 'tire'
+```
+
+<p>検索をおこないたい対象のどのモデルにでも、2つのモジュールを加えることで、Tireを追加できます。記事を検索したいので、アプリケーションの<code>Article</code>モデルにそれらのモジュールを追加します。</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  belongs_to :author
+  has_many :comments
+  
+  include Tire::Model::Search
+  include Tire::Model::Callbacks
+  
+end
+```
+
+<p>一つ目のモジュールは検索や索引のためのメソッドを追加し、二つ目はコールバックを追加して記事が新規作成・更新・削除されたときに索引が自動的に更新されるようにします。</p>
+
+<p>アプリケーションのデータベースにはすでにいくつかの記事があり、これらは索引に含まれません。しかし、すべてのレコードはアプリケーションのseedsファイルで定義されているので、設定ファイルを再度実行するとレコードが読み込まれるときに自動的に索引が生成されます。</p>
+
+``` terminal
+$ rake db:setup
+```
+
+<h3>検索フォームを追加する</h3>
+
+<p>記事にインデックスを設定できたので、記事のページに検索のためのフォームを追加します。このページのテンプレートは以下のとおりです。</p>
+
+``` /app/views/articles/index.html.erb
+<h1>Articles</h1>
+
+<div id="articles">
+<% @articles.each do |article| %>
+  <h2>
+    <%= link_to article.name, article %>
+    <span class="comments">(<%= pluralize(article.comments.size, 'comment') %>)</span>
+  </h2>
+  <div class="info">
+    
+    by <%= article.author.name %>
+    on <%= article.published_at.strftime('%b %d, %Y') %>
+  </div>
+  <div class="content"><%= article.content %></div>
+<% end %>
+</div>
+```
+
+<p>この簡単なフォームをページのヘッダの下に追加します。このフォームは自分自身が含まれている同じ記事ページに送信され、GETを使用します。</p>
+
+``` /app/views/articles/index.html.erb
+<%= form_tag articles_path, method: :get do %>
+  <p>
+    <%= text_field_tag :query, params[:query] %>
+    <%= submit_tag "Search", name: nil %>
+  </p>
+<% end %>
+```
+
+<p>検索フォームが送信されると<code>ArticlesController</code>の<code>index</code>アクションが実行され、現状このアクションはすべての記事を返します。コードにチェックロジックを追加して、フォームからの送信データに<code>query</code>パラメータがあったらTireの<code>search</code>メソッドを代わりに呼び出すようにします。</p>
+
+``` /app/controllers/articles_controller.rb
+def index
+  if params[:query].present?
+    @articles = Article.search(params[:query])
+  else
+    @articles = Article.all
+  end
+end
+```
+
+<p>ページをリロードすると検索フォームが表示されます。しかし検索語を入力してフォームを送信するとエラーが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/891/original/E306I02.png" width="800" height="432" alt="検索をおこなうとエラーが表示される"/>
+</div>
+
+<p>エラーは、各記事に対するコメント数を表示するために<code>article.comments.size</code>を呼び出すことによって発生しています。どうもTireから返される記事に対して関連(association)が機能していないようです。</p> 
+
+<p>Tireはデータベースへのアクセスを最小限にしようとするので、<code>Article.search</code>を呼び出したときに返されるのは実際のActiveRecordモデルではなく、代わりに検索インデックスに保存されている属性に基づいてTireが検索した結果のセットです。インデックスはコメントの関連については知らないため、それをどう設定していいかわかりません。これを直すためには、<code>search</code>の呼び出しに<code>load</code>オプションを追加し、Tireに対してデータベースから実際のレコードを読み込むように指示します。</p>
+
+``` /app/controllers/articles_controller.rb
+def index
+  if params[:query].present?
+    @articles = Article.search(params[:query], load: true)
+  else
+    @articles = Article.all
+  end
+end
+```
+
+<p>ここで検索をおこなうと、ページが読み込まれ正しい結果が表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/892/original/E306I03.png" width="800" height="482" alt="検索ページが正しく動く"/>
+</div>
+
+<p>もし必要なすべてのデータが検索インデックスの中にあれば、<code>load: true</code>を使ってデータベースからレコードを取得する必要がないので、その方がいいでしょう。これは可能ですがここでは触れず、次回のエピソードで紹介します。次に紹介するのは、追加のオプションを指定して検索をさらにカスタマイズする方法です。このために<code>Article</code>の<code>search</code>モデルを再定義して、ユーザから渡されたparamsハッシュを受け付けるようにします。</p> 
+
+``` /app/models/article.rb
+def self.search(params)
+  tire.search(load: true) do
+    query { string params[:query]} if params[:query].present?
+  end
+end
+```
+
+<p>Tireの<code>search</code>メソッドをオーバーライドするので、<code>tire.search</code>を使ってオーバーライドされたメソッドを呼び出して、実際のモデルを取得するために<code>load: true</code>オプションを使用しました。このメソッドに直接検索パラメータを渡す代わりに、ブロックを使うことでさらにオプションを指定して検索クエリをカスタマイズできるようにしました。このブロックで<code>query</code>を呼び出して、別のブロックを渡しています。このブロックで、パラメータが存在する場合のみ、パラメータを<code>string</code>メソッドに渡します。</p>
+
+<p><code>ArticlesController</code>を単純化して、カスタムで作成した<code>search</code>メソッドを呼び出してparamsハッシュを渡すだけにします。</p>
+
+``` /app/controllers/articles_controller.rb
+def index
+  @articles = Article.search(params)
+end
+```
+
+<p>記事一覧のページをリロードすると以前と同じように動作し、検索ボックスをクリアして「Search」ボタンをクリックすると、すべての結果が返されます。</p> 
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/893/original/E306I04.png" width="800" height="387" alt="すべての検索結果のデータがインデックスから返される"/>
+</div>
+
+<p>結果の中には、意に反してそこに表示されてしまっている記事がありますが、それは未来の公開日が入力されているためです。検索条件を変更して、まだ公開されていない記事を表示しないようにします。このためにモデルの<code>search</code>ブロックにフィルターを設定します。</p>
+
+``` /app/models/article.rb
+def self.search(params)
+  tire.search(load: true) do
+    query { string params[:query]} if params[:query].present?
+    filter :range, published_at: {lte: Time.zone.now }
+  end
+end
+```
+
+<p>最初の引数はフィルターの種類で、今回の例では<code>range</code>フィルターです。次にフィルターとする属性のハッシュを渡します。今回の場合は<code>published_at</code>でフィルターをかけ、<code>published_at</code>の時間が現在の時間よりも小さいか同じもののみを含むようにします。</p>
+
+<p>他にどのようなオプションを渡して検索条件をカスタマイズできるか、興味があるところでしょう。このトピックについてのドキュメントがありますが、きれいにまとまってはいません。まず最初に<a href="https://github.com/karmi/tire/blob/master/README.markdown">TireのREADMEファイル</a>を読むことをお勧めします。ただし、ファイルの最初の部分ではインデックスとマッピングについて書かれているので混乱するかもしれませんが、動的マッピングをおこなう場合は関係ないので気にする必要はありません。Tireが提供する<a href="http://karmi.github.com/tire/">追加のドキュメント</a>があり、こちらも一読の価値があります。</p>
+
+<p>TireのオプションのほとんどはElasticsearchと1対1で対応するので、Elasticsearchの<a href="http://www.elasticsearch.org/guide/">ドキュメント</a>を見るのがいいでしょう。<a href="http://www.elasticsearch.org/guide/reference/query-dsl/">Query DSL</a>についてのページでは、一つのセクションを丸ごと割いてフィルターについて説明しており、先ほど使用した範囲フィルターと使用できるすべてのオプションも含まれています。サンプルのコードはJSON形式で記述されていますが、Tireで使用できるように簡単に変換できます。</p>

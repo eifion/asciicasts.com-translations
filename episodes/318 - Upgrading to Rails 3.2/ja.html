@@ -1,0 +1,229 @@
+<p>Rails 3.2がリリースされました。<a href="http://weblog.rubyonrails.org/2012/1/20/rails-3-2-0-faster-dev-mode-routing-explain-queries-tagged-logger-store">公式ブログ</a>に変更点のいくつかを説明した優れた記事が掲載されています。比較的重要な変更点として、開発モードで前回のリクエストから変更されたファイルのみをリロードするように変更されたことにより速度が向上しました。またJourneyというまったく新しいルーティングエンジンが採用され、より高速になりました。今回のエピソードでは、Rails 3.1のアプリケーションをRails 3.2にアップグレードする方法といくつかの新機能を紹介します。</p>
+
+<h3>アプリケーションのアップグレード</h3>
+
+<p>既存のRails 3.1のアプリケーションをRails 3.2にアップグレードするには、まずgemfileを修正します。</p> 
+
+``` /Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.2.0'
+
+gem 'sqlite3'
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails', "  ~> 3.2.3"
+  gem 'coffee-rails', "~> 3.2.1"
+  gem 'uglifier', '>=1.0.3'
+end
+
+gem 'jquery-rails'
+```
+
+<p>rails gemをversion <code>3.2.0</code>にアップグレードし、assets groupのgemのバージョン番号を修正して新規のRails 3.2アプリケーションで使用されているものと一致させます。すべてを最新バージョンにアップデートするために、<code>bundle update</code>を実行します。</p>
+
+<p>gemfileを修正するのに加えて、既存のアプリケーションを新規のRails 3.2アプリケーション相当に修正するために、いくつかの環境設定を変更します。開発モード用の設定ファイルに以下の行を追加します。</p>
+
+``` /config/environments/development.rb
+# Raise exception on mass assignment protection for Active Record models
+config.active_record.mass_assignment_sanitizer = :strict
+
+# Log the query plan for queries taking more than this (works
+# with SQLite, MySQL, and PostgreSQL)
+config.active_record.auto_explain_threshold_in_seconds = 0.5
+```
+
+<p>最初の行で<code>mass_assignment_sanitizer</code>を<code>:strict</code>に設定し、一括設定処理時に対象がそれを禁止している場合は例外を発生させます。2行目はauto-explainのしきい値を<code>0.5</code>に設定しています。これは、データベースへの問合せ処理に0.5秒以上かかる場合に、EXPLAINクエリが実行されてその結果がログに記録されます。<code>mass_assignment_sanitizer</code>オプションをテスト環境にもコピーして新規のRails 3.2アプリケーションに合わせ、またデフォルトで作成されなくなった以下の行を削除しておくのがいいでしょう。</p>
+
+``` /config/environments/test.rb
+# Allow pass debug_assets=true as a query parameter to load pages with unpackaged assets
+config.assets.allow_debugging = true
+```
+
+<h3>EXPLAINクエリ</h3>
+
+<p>アプリケーションがRails 3.2にアップグレードされたので、Railsコンソールで新機能のいくつかを紹介します。実行に時間がかかるデータベースクエリに対して自動的にEXPLAINクエリが実行されることはすでに説明しましたが、Active Recordクエリに対して<code>explain</code>を実行してコンソールから起動することもできます。</p>
+
+``` terminal
+1.9.2-p290 :001 > Product.order(:name).explain
+  Product Load (0.6ms)  SELECT "products".* FROM "products" ORDER BY name
+  EXPLAIN (0.1ms)  EXPLAIN QUERY PLAN SELECT "products".* FROM "products" ORDER BY name
+ => "EXPLAIN for: SELECT \"products\".* FROM \"products\"  ORDER BY name\n0|0|0|SCAN TABLE products (~1000000 rows)\n0|0|0|USE TEMP B-TREE FOR ORDER BY\n"
+``` 
+
+<p><code>puts _</code>を使って、結果をより見やすい形で出力することができます。</p>
+
+``` terminal
+1.9.2-p290 :002 > puts _
+EXPLAIN for: SELECT "products".* FROM "products"  ORDER BY name
+0|0|0|SCAN TABLE products (~1000000 rows)
+0|0|0|USE TEMP B-TREE FOR ORDER BY
+```
+
+<p>このEXPLAINクエリは簡単なクエリのためのものなのであまり面白くないですが、この機能は複雑なJOINクエリと共に利用されるときに非常に役に立ちます。アプリケーションの中で遅いデータベースクエリが実行される箇所がわかっていて、実行される度にEXPLAINクエリを生成させたくない場合は、そのクエリを以下のように<code>silence_auto_explain</code>ブロックでラップします。</p>
+
+``` terminal
+1.9.2-p290 :003 > ActiveRecord::Base.silence_auto_explain { Product.order(:name) }
+```
+
+<p>ブロック内のクエリはどれだけ実行に時間がかかってもEXPLAINクエリを生成しません。</p>
+
+<h3>新しいActiveRecordメソッド</h3>
+
+<p>Rails 3.2のもう一つの有用な新機能はpluckメソッドです。これを利用することで、列名を渡すとその列のすべての値が返されます。</p>
+
+``` terminal
+1.9.2-p290 :005 > Product.pluck(:name)
+   (0.2ms)  SELECT name FROM "products" 
+ => ["Settlers of Catan", "Flux Capacitor", "Technodrome", "Agricola", "Millennium Falcon", "Ryan's Cheesecake", "Answer to Everything"]
+``` 
+
+<p>これはどの列に対しても有効で、すべての値を適切なデータ型の配列として返します。</p>
+
+``` terminal
+1.9.2-p290 :007 > Product.pluck(:id)
+   (0.2ms)  SELECT id FROM "products" 
+ => [1, 2, 3, 4, 5, 6, 7]
+``` 
+
+<p>関連して、select節を用いて返される列を制限する場合は新たにuniqメソッドを利用できます。例えばこれを用いて、商品をユニークな名前ごとに一つずつ返すことができます。</p>
+
+``` terminal
+1.9.2-p290 :009 > Product.select(:name).uniq
+  Product Load (0.3ms)  SELECT DISTINCT name FROM "products" 
+ => [#<Product name: "Agricola">, #<Product name: "Answer to Everything">, #<Product name: "Flux Capacitor">, #<Product name: "Millennium Falcon">, #<Product name: "Ryan's Cheesecake">, #<Product name: "Settlers of Catan">, #<Product name: "Technodrome">]
+``` 
+
+<p>もう一つ関連した新機能であるfirst_or_createは<code>where</code>節と一緒に使われることを意図しています。</p>
+
+``` terminal
+1.9.2-p290 :010 > Product.where(name: "Foo").first_or_create!
+```
+
+<p>ここでは末尾に!をつけて、検証エラーがある場合には例外を発生させるようにしました。上のコードは<code>find_or_create_by_name</code>という記法で同じように動作します。初めて実行したときは(既存のレコードが存在しないと仮定して)その名前(<code>name</code>)で新規に<code>Product</code>を作成し、再度実行するとその条件に一致する商品を返します。この方法が優れているのは、次のように<code>create</code>の呼び出しに追加の属性を渡すことができるという点です。</p>
+
+``` terminal
+1.9.2-p290 :011 > Product.where(name: "Foo").first_or_create!(price: 5)
+```
+
+<p>新規に作成されたレコードはこれらの属性を継承しますが、<code>Product</code>を検索する場合にはその属性は考慮されません。</p>
+
+<p>最後に紹介する新しいメソッドは<code>safe_constantize</code>という名前で、文字列に対して呼び出せます。</p>
+
+``` terminal
+1.9.2-p290 :007 > "Product".safe_constantize
+ => Product(id: integer, name: string, price: decimal, description: text, discontinued: boolean, created_at: datetime, updated_at: datetime)
+``` 
+
+<p>これは一致する定数が存在する場合にそれを返します。これと通常の<code>constantize</code>メソッドとの違いは、一致する定数が見つからなかった場合に例外を発生させるのではなく<code>nil</code>を返すという点です。</p>
+
+<h3>マイグレーションの新機能</h3>
+
+<p>次にマイグレーションを生成するときに使うことができる新しいオプションを紹介します。例えば新規に<code>ProductVariation</code>モデルを作成するとしましょう。マイグレーションを次のように指定します。</p>
+
+``` terminal
+$ rails g model product_variation product_id:integer:index name 'price:decimal{7,2}'
+```
+
+<p>このマイグレーションは3つの新機能を使用しています。<code>ProductVariation</code>を<code>Product</code>に属する(belong to)よう定義したいので、列の一つを<code>product_id</code>と指定しました。Rails 3.2では3つ目の<code>index</code>オプションを指定すると、自動的に列に索引を付加します。</p>
+
+<p><code>ProductVariation</code>モデルに文字列の<code>name</code>という列を追加します。通常はこの場合マイグレーションで<code>name:string</code>と指定しますが、文字列(<code>string</code>)がデフォルトになったため列が文字列の場合はデータ型を指定する必要がなくなりました。最後に<code>decimal</code>(小数)フィールドを定義する場合、オプションを渡してそのデータ型の<code>precision</code>(数字全体の有効桁数)と<code>scale</code>(小数点以下の桁数)を指定できるようになりました。マイグレーションのこの部分は、シェルが修正しようと試みないように引用符で囲む必要があることに注意してください。</p>
+
+<p>生成されたマイグレーションは次のようになります。</p>
+
+``` /db/migrations/20120101000000_create_product_variations.rb
+class CreateProductVariations < ActiveRecord::Migration
+  def change
+    create_table :product_variations do |t|
+      t.integer :product_id
+      t.string :name
+	  t.decimal :price, :precision => 7, :scale => 2
+
+      t.timestamps
+    end
+    add_index :product_variations, :product_id
+  end
+end
+```
+
+<p>このマイグレーションには指定したproduct_variationsがあり、その中で<code>product_id</code>フィールドは索引が定義され、<code>name</code>フィールドはデフォルトで<code>string</code>(文字列)になり、<code>price</code>フィールドは<code>precision</code>と<code>scale</code>のオプションが指定されています。</p>
+
+<p>ジェネレーターに関連して、新規にRailsアプリケーションを作成するときに常に指定するオプションがあるかも知れません。例えば、特定のデータベースを指定したり、ユニットテストを除外したりなどです。これらのオプションを、ホームディレクトリの<code>.railsrc</code>ファイルに保存することで、デフォルトに設定することができます。</p>
+
+``` terminal
+$ echo -d postgresql -T > ~/.railsrc
+```
+
+<p>これによって、新規にRailsアプリケーションを作成するときにこれらのオプションが自動的に付加されます。</p>
+
+``` terminal
+$ rails new blog
+Using -d postgresql -T from /Users/eifion/.railsrc 
+```
+
+<h3>Key-Valueストア</h3>
+
+<p>ActiveRecordはモデルにおいて新しい方法でkey-valueストアを定義するようになりました。例えば<code>ProductVariation</code>モデルにおいて<code>colour</code>と<code>size</code>のような属性があるときに、それぞれに別々の列を作りたくないとします。その場合に新しい<code>store</code>メソッドを使ってこれらの値を一つの列に保存できます。</p>
+
+``` /app/models/product_variation.rb
+class ProductVariation < ActiveRecord::Base
+  store :properties, accessors: [:colour, :size]
+end
+```
+
+<p>ここで一つ目の引数は値が保存される列の名前で、二つ目では保存したい属性を定義しています。このデータベースの列を作成しなくてはいけないことには変わりがないので、マイグレーションが必要です。</p>
+
+``` terminal
+$ rails g migration add_properties_to_product_variations properties:text
+```
+
+<p>忘れずに<code>rake db:migrate</code>を実行してデータベースに列を追加します。</p>
+
+<p>これをコンソールで実際におこないます。新規に<code>ProductVariation</code>を作成し、通常の属性の場合と同じように<code>colour</code>と<code>size</code>の属性を設定します。</p>
+
+``` terminal
+Loading development environment (Rails 3.2.0)
+1.9.2-p290 :001 > p = ProductVariation.new(colour: 'blue', size: 3)
+ => #<ProductVariation id: nil, product_id: nil, name: nil, price: nil, created_at: nil, updated_at: nil, properties: {:colour=>"blue", :size=>3}>
+``` 
+
+<p>他の属性に対してと同じように、これらの属性にアクセスすることができます。</p>
+
+``` terminal
+1.9.2-p290 :003 > p.colour
+ => "blue"
+``` 
+
+<p><code>properties</code>ハッシュを介しても同じようにアクセスできます。</p>
+
+``` terminal
+1.9.2-p290 :004 > p.properties[:colour]
+ => "blue" 
+``` 
+
+<p>これらの属性は実際のデータベース列ではないので、それらに対して検索をおこなうことはできませんが、属性のハッシュにアクセスする便利な方法です。</p>
+
+<h3>タグ付きログ</h3>
+
+<p>もう一つ、タグ付きログという機能を紹介します。これは通常は本番稼働環境で利用されるものですが、デモのために開発環境に追加してみます。そのために<code>log_tags</code>の設定オプションを指定し、 それを属性の配列に設定します。ここで属性はリクエストに対して呼び出されるメソッド名です。</p>
+
+``` /config/environments/development.rb
+config.log_tags = [:uuid, :remote_ip]
+```
+
+<p>Rails 3.2の新しいメソッドであるuuidはユニークなリクエストidを返すので、ログがどのリクエストからのものであるかを特定することができます。もう一つはリモートIPアドレスです。サーバを起動してリクエストを発行すると、ログの各行にはそれらの値がタグ付けされます。</p>
+
+``` log
+[ab939dfca5d57843ea4c695cab6f721d] [127.0.0.1] 
+
+Started GET "/" for 127.0.0.1 at 2012-01-27 21:52:58 +0000
+[ab939dfca5d57843ea4c695cab6f721d] [127.0.0.1] Processing by ProductsController#index as HTML
+[ab939dfca5d57843ea4c695cab6f721d] [127.0.0.1]   Product Load (0.3ms)  SELECT "products".* FROM "products" 
+[ab939dfca5d57843ea4c695cab6f721d] [127.0.0.1]   Rendered products/index.html.erb within layouts/application (22.0ms)
+[ab939dfca5d57843ea4c695cab6f721d] [127.0.0.1] Completed 200 OK in 81ms (Views: 73.1ms | ActiveRecord: 0.3ms)
+[98eec5f8976586c1165b981797086b6a] [127.0.0.1] 
+```
+
+<p>これは、本番環境で複数のRailsインスタンスがログファイルに書き込んでいる場合にとても便利です。これによって特定のリクエストに関連づけられたログのエントリーを識別できるようになります。</p> 

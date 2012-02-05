@@ -1,0 +1,206 @@
+<p>If you look at the gemfile for a Rails 3.2 application you&rsquo;ll see a see a gem mentioned in the comments that wasn&rsquo;t there in earlier versions called <a href="https://github.com/rails/jbuilder">JBuilder</a>.</p>
+
+``` /Gemfile
+# To use Jbuilder templates for JSON
+# gem 'jbuilder'
+```
+
+<p>JBuilder is a template engine for rendering a JSON response. It was created recently by David Heinemeier Hannson but instead of including it in Rails 3.2 he decided to release it as a separate gem. This approach means that it can also be used with earlier versions of Rails. JBuilder provides a nice DSL for generating JSON similar to XML Builder and we&rsquo;ll show you how to use it in this episode.</p>
+
+<h3>Adding JSON Responses to an Application</h3>
+
+<p>To demonstrate JBuilder we&rsquo;ll use a simple blogging application. This app has many articles and we&rsquo;d like to add a JSON representation for each article that we can fetch by appending <code>.json</code> to the article&rsquo;s URL. If we try this now we&rsquo;ll see an error message as we haven&rsquo;t yet added this feature.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/958/original/E320I01.png" width="800" height="280" alt="The JSON representation won&rsquo;t work out of the box."/>
+</div>
+
+<p>We could add this without using JBuilder by adding  a <code>respond_to</code> block to the <code>ArticlesController</code>&rsquo;s <code>show</code> action.</p>
+
+``` /app/controllers/articles_controller.rb
+def show
+  @article = Article.find(params[:id])
+  respond_to do |format|
+    format.html
+    format.json { render json: @article }
+  end
+end
+```
+
+<p>When we reload the page now we&rsquo;ll see the JSON representation of the article.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/959/original/E320I02.png" width="800" height="280" alt="The JSON representation now works."/>
+</div>
+
+<h3>Customizing The Response</h3>
+
+<p>The JSON returned includes all of the article&rsquo;s attributes but what if we want to customize it? This is where things can start to get ugly. We can call <code>as_json</code> on the article and customize what&rsquo;s returned. Let&rsquo;s say that we want the <code>id</code>, <code>name</code> and <code>content</code> fields from the article along with its author and the same three fields from the article&rsquo;s comments.</p>
+
+```/app/controllers/articles_controller.rb
+def show
+  @article = Article.find(params[:id])
+  respond_to do |format|
+    format.html
+    format.json { render json: @article.as_json(only: [:id, :name, :content], include: [:author, {comments: {only:[:id, :name, :content]}}]) }
+  end
+end
+```
+
+<p>We can try this by reloading the page again. When we do we see the customized JSON response including the associated <code>Author</code> and <code>Comment</code> records.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/960/original/E320I03.png" width="800" height="280" alt="The JSON representation now includes the related author and comment information."/>
+</div>
+
+<h3>Using JBuilder</h3>
+
+<p>This works, but the code we&rsquo;ve used isn&rsquo;t very pretty. We could override <code>as_json</code> in the model but this wouldn&rsquo;t be much prettier. This is where JBuilder comes in. To install it we uncomment the relevant line in the gemfile and run <code>bundle</code>.</p>
+
+```/Gemfile
+# To use Jbuilder templates for JSON
+gem 'jbuilder'
+```
+
+<p>Back in the controller we can remove the <code>respond_to</code> call and revert to the default behaviour which is to look for a template for the requested format.</p> 
+
+```/app/controllers/articles_controller.rb
+def show
+  @article = Article.find(params[:id])
+end
+```
+
+<p>Next we&rsquo;ll create a JSON template in the <code>/app/views/articles</code> directory. In it we can use Ruby code to define the JSON output. We have access to a <code>json</code> object that we can define attributes on like this:</p>
+
+``` /app/views/articles/show.json.jbuilder
+json.id @article.id
+json.name @article.name
+```
+
+<p>We&rsquo;ll need to restart the server after we&rsquo;ve installed the gem but once we have and we reload the page again we&rsquo;ll see our custom output.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/961/original/E320I04.png" width="800" height="280" alt="Our custom response."/>
+</div>
+
+<p>It can be a pain to have to list out each attribute separately like this. Instead we can call <code>extract!</code> on the JSON object and pass in the object and a list of the methods or attributes we want to call against it.</p>
+
+``` /app/views/articles/show.json.jbuilder
+json.extract! @article, :id, :name, :published_at
+```
+
+<p>There&rsquo;s an alternative syntax for this as well.</p>
+
+``` /app/views/articles/show.json.jbuilder
+json.(@article, :id, :name, :published_at)
+```
+
+<p>This works only in Ruby 1.9 as it calls <code>call</code> on the object in the background which will call the <code>extract!</code> method as before. One nice thing about rendering JSON in a view template like this is that we have access to all of the helper methods. This is especially useful for rendering URLs. If we want to include the edit article URL in the JSON but only if the current user is an admin. We have access to the <code>current_user</code> method too if the authentication solution we&rsquo;re using offers this as a helper method.</p>
+
+``` /app/views/articles/show.json.jbuilder
+json.(@article, :id, :name, :published_at)
+json.edit_url edit_article_url(@article) if current_user.admin?
+```
+
+<p>Our current user is an admin and so the link is included in the JSON.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/962/original/E320I05.png" width="800" height="280" alt="Including an edit link in the response."/>
+</div>
+
+<h3>Nesting</h3>
+
+<p>In our application an <code>Article</code> belongs to an <code>Author</code>. If we want to include the author&rsquo;s attributes one way we can do so is like this:</p>
+
+``` /app/views/articles/show.json.jbuilder
+json.(@article, :id, :name, :published_at)
+json.edit_url edit_article_url(@article) if current_user.admin?
+
+json.author @article.author, :id, :name
+```
+
+<p>This will nest the <code>Author</code> attributes just like we want.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/963/original/E320I06.png" width="800" height="280" alt="The nested author attributes are now included."/>
+</div>
+
+<p>If we need to do something more complex than listing the author&rsquo;s attributes, let&rsquo;s say that we want to assign a URL to the author, we can pass a block to the <code>author</code> call like this:</p>
+
+``` /app/views/articles/show.json.jbuilder
+json.(@article, :id, :name, :published_at)
+json.edit_url edit_article_url(@article) if current_user.admin?
+
+json.author do |json|
+  json.(@article.author, :id, :name)
+  json.url author_url(@article.author)
+end
+```
+
+<p>Now when we reload the page we&rsquo;ll see the nested author attributes including the URL.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/964/original/E320I07.png" width="800" height="280" alt="The response now includes the author's URL."/>
+</div>
+
+<p>We can do the same thing for a <code>has_many</code> association as well. For example an article has many comments and we can add them in directly and list the attributes we want to be displayed.</p>
+
+``` /app/views/articles/show.json.jbuilder
+json.(@article, :id, :name, :published_at)
+json.edit_url edit_article_url(@article) if current_user.admin?
+
+json.author do |json|
+  json.(@article.author, :id, :name)
+  json.url author_url(@article.author)
+end
+
+json.comments @article.comments, :id, :name, :content
+```
+
+<p>Now the comments are included too.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/965/original/E320I08.png" width="800" height="280" alt="The comments are now also included."/>
+</div>
+
+<p>If we need to use the block syntax with this approach it&rsquo;s a little different because we have an array of comments and we need to iterate through each element of the array. What we do is pass in the json and comment objects into the block which gives us access to it and we can do what we like with it in there.</p> 
+
+``` /app/views/articles/show.json.jbuilder
+json.(@article, :id, :name, :published_at)
+json.edit_url edit_article_url(@article) if current_user.admin?
+
+json.author do |json|
+  json.(@article.author, :id, :name)
+  json.url author_url(@article.author)
+end
+
+json.comments @article.comments do |json, comment|
+  json.(comment , :id, :name, :content)
+end
+```
+
+<p>This will do basically the same thing as the previous code.</p>
+
+<h3>Partials</h3>
+
+<p>If we find ourselves filling up the comment block with a lot of detail and we need to duplicate this functionality elsewhere we can use a partial. These work in a similar way to view template partials. To use on we need to call <code>partial!</code> on the <code>json</code> object and pass in the path to a partial or just an object, in this case a comment.</p>
+
+``` /app/views/articles/show.json.jbuilder
+json.comments @article.comments do |json, comment|
+  json.partial! comment
+end
+```
+
+<p>This will look for a partial under the <code>app/views/comments</code> directory called <code>_comment.json.jbuilder</code>.  In this partial we have access to the same <code>json</code> object and we can do the same thing we&rsquo;d do in the comment block. We also have access to the comment object here as we passed that in in the <code>partial!</code> call.</p>
+
+``` /app/views/comments/_comment.json.jbuilder
+json.(comment, :id, :name, :content)
+```
+
+<p>This will now display the same JSON we had before.</p>
+
+<h3>Alternatives</h3>
+
+<p>JBuilder isn&rsquo;t the only gem that does this kind of thing. At the bottom of the project&rsquo;s <a href="https://github.com/rails/jbuilder/blob/master/README.md">README</a> file is a list of alternatives that are worth considering. <a href="https://github.com/nesquena/rabl">RABL</a> is the most popular of these and it&rsquo;s something we might cover in a future episode.</p>
+

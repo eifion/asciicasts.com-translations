@@ -1,0 +1,205 @@
+<p>Rails 3.2アプリケーションのgemfileを見ると、コメントの中に<a href="https://github.com/rails/jbuilder">Jbuilder</a>という以前のバージョンには含まれていなかったgemがあるのに気づくでしょう。</p>
+
+``` /Gemfile
+# To use Jbuilder templates for JSON
+# gem 'jbuilder'
+```
+
+<p>JbuilderはJSONレスポンスを出力するテンプレートエンジンです。David Heinemeier Hanssonが最近作成したものですが、Rails 3.2には含まれずに独立したgemとしてリリースされました。このアプローチをとることによって、以前のバージョンのRailsでも利用可能になっています。JbuilderはJSONを生成するための、XML Builderに似た便利なDSLを提供します。今回のエピソードでその使い方を紹介します。</p>
+
+<h3>アプリケーションにJSONレスポンスを追加する</h3>
+
+<p>Jbuilderの機能を実際に見ていくために、簡単なブログアプリケーションを使用します。このアプリケーションには複数の記事がありますが、これに各記事のJSON版を追加して、記事のURLの後ろに<code>.json</code>を付けることで取得できるようにします。これを今試してみると、この機能をまだ追加していないのでエラーメッセージが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/958/original/E320I01.png" width="800" height="280" alt="何も手を加えない状態ではJSON形式は機能しません。"/>
+</div>
+
+<p><code>ArticlesController</code>の<code>show</code>アクションに<code>respond_to</code>ブロックを追加することで、Jbuilderを使わずにこれを追加することができます。</p>
+
+``` /app/controllers/articles_controller.rb
+def show
+  @article = Article.find(params[:id])
+  respond_to do |format|
+    format.html
+    format.json { render json: @article }
+  end
+end
+```
+
+<p>ページをリロードすると、記事がJSON形式で出力されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/959/original/E320I02.png" width="800" height="280" alt="JSON形式で正しく出力された。"/>
+</div>
+
+<h3>レスポンスをカスタマイズする</h3>
+
+<p>返されたJSONには記事の属性がすべて含まれますが、それをカスタマイズしたい場合はどうすればいいでしょうか? この辺りから話がややこしくなってきます。記事に対して<code>as_json</code>を呼び出すことで、返された値をカスタマイズできます。例えば記事の著者と一緒に<code>id</code>、<code>name</code>、<code>content</code>の各フィールドと、その記事へのコメントのこれもまた同じ3つのフィールドが欲しいとします。</p>
+
+```/app/controllers/articles_controller.rb
+def show
+  @article = Article.find(params[:id])
+  respond_to do |format|
+    format.html
+    format.json { render json: @article.as_json(only: [:id, :name, :content], include: [:author, {comments: {only:[:id, :name, :content]}}]) }
+  end
+end
+```
+
+<p>これを試すためにページをリロードします。するとカスタマイズされたJSONレスポンスが、関連する<code>Author</code>と<code>Comment</code>レコードと一緒に出力されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/960/original/E320I03.png" width="800" height="280" alt="JSON形式の出力に、関連する著者とコメントの情報が含まれる"/>
+</div>
+
+<h3>Jbuilderを使う</h3>
+
+<p>これはうまくいきますが、使用したコードはあまりきれいではありません。モデル内の<code>as_json</code>をオーバーライドすることもできますが、それでもあまりきれいにはなりません。そこでJBuilderを利用します。インストールするにはgemfileの該当する行を非コメント化して<code>bundle</code>コマンドを実行します。</p>
+
+```/Gemfile
+# To use Jbuilder templates for JSON
+gem 'jbuilder'
+```
+
+<p>コントローラに戻って<code>respond_to</code>の呼び出しを削除して、リクエストされた形式のテンプレートを探すというデフォルトの振る舞いに戻します。</p> 
+
+```/app/controllers/articles_controller.rb
+def show
+  @article = Article.find(params[:id])
+end
+```
+
+<p>次に<code>/app/views/articles</code>ディレクトリにJSONテンプレートを作成します。そこでRubyコードを使ってJSONの出力を定義します。<code>json</code>オブジェクトにアクセスし、次のように属性を定義できます。</p>
+
+``` /app/views/articles/show.json.jbuilder
+json.id @article.id
+json.name @article.name
+```
+
+<p>gemをインストールした後にサーバを再起動した上でページをリロードするとカスタム形式の出力が表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/961/original/E320I04.png" width="800" height="280" alt="カスタム形式のレスポンス"/>
+</div>
+
+<p>このように一つずつ属性を抽出するのが手間な場合もあります。そこでJSONオブジェクトに対して<code>extract!</code>を呼び出して、オブジェクトと、それに対して呼び出したいメソッドか属性のリストを渡します。</p>
+
+``` /app/views/articles/show.json.jbuilder
+json.extract! @article, :id, :name, :published_at
+```
+
+<p>これにももう一つ別の記法があります。</p>
+
+``` /app/views/articles/show.json.jbuilder
+json.(@article, :id, :name, :published_at)
+```
+
+<p>これはRuby 1.9でのみ有効です。というのも、オブジェクトに対してバックグラウンドで<code>call</code>を呼び出し、前と同じように<code>extract!</code>メソッドを呼び出すからです。このようにビューテンプレートでJSONを出力する方法の利点は、すべてのヘルパーメソッドにアクセスできるという点です。これはURLを出力するのに特に便利です。現在のユーザがadminの場合のみJSONに記事の編集用のURLを含めたいとします。もし使用している認証機能がヘルパーメソッドとして<code>current_user</code>メソッドを提供している場合は、それにもアクセスできます。</p>
+
+``` /app/views/articles/show.json.jbuilder
+json.(@article, :id, :name, :published_at)
+json.edit_url edit_article_url(@article) if current_user.admin?
+```
+
+<p>現在のユーザはadminなので、JSONにリンクが含まれています。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/962/original/E320I05.png" width="800" height="280" alt="レスポンスに編集用リンクを含む"/>
+</div>
+
+<h3>ネスティング</h3>
+
+<p>今回のアプリケーションでは、<code>Article</code>は<code>Author</code>に属し(belongs to)ます。著者の属性を含めたい場合、ひとつの方法は次の通りです。</p>
+
+``` /app/views/articles/show.json.jbuilder
+json.(@article, :id, :name, :published_at)
+json.edit_url edit_article_url(@article) if current_user.admin?
+
+json.author @article.author, :id, :name
+```
+
+<p>これは<code>Author</code>の属性を希望通りにネストします。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/963/original/E320I06.png" width="800" height="280" alt="ネストされた著者の属性が含まれた"/>
+</div>
+
+<p>著者の属性をリスト表示するよりも複雑な操作をする場合、例えば著者へのURLを設定したいのであれば、次のように<code>author</code>の呼び出しに対してブロックを渡すことができます。</p>
+
+``` /app/views/articles/show.json.jbuilder
+json.(@article, :id, :name, :published_at)
+json.edit_url edit_article_url(@article) if current_user.admin?
+
+json.author do |json|
+  json.(@article.author, :id, :name)
+  json.url author_url(@article.author)
+end
+```
+
+<p>ページをリロードすると、ネストされた著者の属性が出力され、そこにはURLも含まれます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/964/original/E320I07.png" width="800" height="280" alt="レスポンスに著者のURLが含まれる"/>
+</div>
+
+<p><code>has_many</code>の関連についても同じような処理が可能です。例えば記事が複数のコメントを持っていたら、それらを直接追加して表示したい属性を並べます。</p>
+
+``` /app/views/articles/show.json.jbuilder
+json.(@article, :id, :name, :published_at)
+json.edit_url edit_article_url(@article) if current_user.admin?
+
+json.author do |json|
+  json.(@article.author, :id, :name)
+  json.url author_url(@article.author)
+end
+
+json.comments @article.comments, :id, :name, :content
+```
+
+<p>これでコメントも含まれます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/965/original/E320I08.png" width="800" height="280" alt="コメントも含まれる"/>
+</div>
+
+<p>この方法と合わせてブロック記法を使用する場合、コメントの配列の各要素間を繰り返し処理しなくてはいけないので、書き方は少し変わります。jsonとcommentオブジェクトをブロックに渡すと、それらにアクセスしてそこで自由に操作できるようになります。</p> 
+
+``` /app/views/articles/show.json.jbuilder
+json.(@article, :id, :name, :published_at)
+json.edit_url edit_article_url(@article) if current_user.admin?
+
+json.author do |json|
+  json.(@article.author, :id, :name)
+  json.url author_url(@article.author)
+end
+
+json.comments @article.comments do |json, comment|
+  json.(comment , :id, :name, :content)
+end
+```
+
+<p>これは、基本的には一つ前のコードと同じことをおこないます。</p>
+
+<h3>部分テンプレート</h3>
+
+<p>気がついてみたらcommentブロック内の詳細情報が多くなりこの機能を他の場所でも重複して持たなくてはいけないという場合、部分テンプレート(Partial)を使うことができます。これはビューの部分テンプレートと同じように機能します。これを使うには<code>json</code>オブジェクトに対して<code>partial!</code>を呼び出して、部分テンプレートへのパスかあるいは単にオブジェクト(今回の場合はcomment)を渡します。</p>
+
+``` /app/views/articles/show.json.jbuilder
+json.comments @article.comments do |json, comment|
+  json.partial! comment
+end
+```
+
+<p>これは<code>app/views/comments</code>ディレクトリの下で<code>_comment.json.jbuilder</code>という部分テンプレートを探します。この部分テンプレートで同じ<code>json</code>オブジェクトにアクセスでき、commentブロックでおこなったのと同じことができます。また<code>partial!</code>の呼び出しで渡しているので、commentオブジェクトにもアクセスできます。</p>
+
+``` /app/views/comments/_comment.json.jbuilder
+json.(comment, :id, :name, :content)
+```
+
+<p>これによって、前と同じJSONが出力されます。</p>
+
+<h3>代替ツール</h3>
+
+<p>このような機能を持ったgemはJbuilderだけではありません。プロジェクトの<a href="https://github.com/rails/jbuilder/blob/master/README.md">README</a>ファイルの最後に、導入を検討するに値する代替ツールのリストがあります。これらの中では<a href="https://github.com/nesquena/rabl">RABL</a>がもっとも人気があり、これも将来のエピソードで取り上げたいと思います。</p>
+

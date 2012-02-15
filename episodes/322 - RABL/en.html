@@ -1,0 +1,202 @@
+<p>If we want to return custom JSON data from a Rails application based on model data we can do this in a number of ways. We could override the <code>as_json</code> method in the model or use the <a href="https://github.com/rails/jbuilder">Jbuilder</a> gem as we did in <a href="http://railscasts.com/episodes/320-jbuilder">episode 320</a>. Another popular solution is the <a href="https://github.com/nesquena/rabl">RABL gem</a>. RABL stands for Ruby API Builder Language and is a little more feature-complete that some of the other solutions. </p>
+
+<p>We&rsquo;ll show you how RABL works in this episode, using the same example app we used in the Jbuilder episode to give you an idea of the differences between the two libraries. This app is a blogging application that has a number of articles and we want to able to view a single article&rsquo;s data as JSON by appending <code>.json</code> to the article&rsquo;s URL. If we try this now we&rsquo;ll just get a an error message as the application doesn&rsquo;t know how to respond to JSON requests.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/976/original/E322I01.png" width="800" height="393" alt="Our blogging application."/>
+</div>
+
+<h3>Getting Started With RABL</h3>
+
+<p>To do this we could modify the <code>ArticlesController</code>, make sure that the show action responds to JSON requests and then return a JSON representation of the selected article, but instead we&rsquo;re going to use RABL. This comes as a gem and is installed in the usual way, by adding it to the gemfile and running <code>bundle</code>.</p>
+
+``` /Gemfile
+gem 'rabl'
+```
+
+<p>Like Jbuilder, RABL includes a template handler so that we can define the JSON response in the view layer. We&rsquo;ll create one of these now for creating a JSON representation of an article. We can use Ruby code to do this using RABL&rsquo;s DSL.</p> 
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+```
+
+<p>The first thing in a RABL template is usually a call to <code>object</code> and we pass this the object we want to work with. We can then call <code>attributes</code> to define the attributes of the object that we want to return. If we visit the article&rsquo;s JSON URL now we&rsquo;ll see the JSON we defined in the template returned.</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z"}}
+```
+
+<p>If we want to specify something that isn&rsquo;t a simple attribute we can use the <code>node</code> method and pass it a name and a block. Whatever the block returns will be used as the value.</p>
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+node(:edit_url) { "..." }
+```
+
+<p>This will add an edit_url attribute to the JSON.</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"..."}}
+```
+
+<p>We have access to helper methods in RABL templates so we can use <code>edit_article_url</code> to get the article&rsquo;s edit URL and <code>current_user</code> so that the URL is only shown if the current user is an admin (assuming that the authentication solution we&rsquo;re using has a <code>current_user</code> helper method).</p>
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+if current_user.admin?
+  node(:edit_url) { edit_article_url(@article) }
+end
+```
+
+<p>There&rsquo;s an issue with this, though. We&rsquo;re using the article instance variable in <code>edit_article_url</code> which isn&rsquo;t a good practice. We should instead use the article object that&rsquo;s passed to the block.</p>
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+if current_user.admin?
+  node(:edit_url) { |article| edit_article_url(article) }
+end
+```
+
+<p>The object that is passed to the block is the same object that&rsquo;s passed to the <code>object</code> method but there&rsquo;s a good reason why we should use the object passed to the block instead and we&rsquo;ll explain why later in this episode. If we look at the article&rsquo;s JSON now we&rsquo;ll see the <code>edit_url</code> attribute with the correct value.</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit"}}
+```
+
+<h3>Associated Records</h3>
+
+<p>If we want to include data from associated records it&rsquo;s each to do so. In our application an <code>Article</code> belongs to an <code>Author</code> and has many <code>Comments</code>. We can use RABL&rsquo;s <code>child</code> method to include information from these associated models.</p>
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+if current_user.admin?
+  node(:edit_url) { |article| edit_article_url(article) }
+end
+
+child :author do
+  attributes :id, :name
+  node(:url) { |author| author_url(author) }
+end
+```
+
+<p>The code to generate JSON for the associated author is very similar to the code for generating the article&rsquo;s JSON. The only difference is that an author is passed to node&rsquo;s block instead of an article. When we view the JSON now we&rsquo;ll see the article&rsquo;s author&rsquo;s details just like we expect.</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"}}}
+```
+
+<p>The same can be done for the <code>Comments</code> association, though as we&rsquo;re dealing with a <code>has_many</code> association we use the plural name.</p>
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+if current_user.admin?
+  node(:edit_url) { |article| edit_article_url(article) }
+end
+
+child :author do
+  attributes :id, :name
+  node(:url) { |author| author_url(author) }
+end
+
+child :comments do
+  attributes :id, :name, :content
+end
+```
+
+<p>In the JSON response the comments will be nested in an array, not just displayed in a single record as the author was.</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"},"comments":[{"comment":{"id":1,"name":"Lois Lane","content":"Does anyone know where I can find Superman?"}},{"comment":{"id":2,"name":"Lex Luthor","content":"I have some Kryptonite for you Superman!"}}]}}
+```
+
+<h3>Reusing Templates</h3>
+
+<p>Our JSON data is nicely defined for an article but what if we want to use this output elsewhere in our application? We might want the <cide>ArticlesController</cide>&rsquo;s <cide>index</cide> action to display the same JSON but for all the articles. This is where RABL shines; all we have to do is create a new RABL template for the index action.</p>
+
+``` /app/views/articles/index.json.rabl
+collection @articles
+
+extends "articles/show"
+```
+
+<p>As we&rsquo;re working with multiple articles we use <code>collection</code> instead of <code>object</code> here. We could define the attributes we want to use here like we did in the show template but as we want the same JSON for each article that we can reuse that template here by calling <code>extends</code> and passing in its name. If we look at <code>articles.json</code> now we&rsquo;ll see the JSON data for all the articles.</p>
+
+``` terminal
+$ curl http://localhost:3000/articles.json
+[{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"},"comments":[{"comment":{"id":1,"name":"Lois Lane","content":"Does anyone know where I can find Superman?"}},{"comment":{"id":2,"name":"Lex Luthor","content":"I have some Kryptonite for you Superman!"}}]}},{"article":{"id":2,"name":"Krypton","published_at":"2012-01-05T18:38:50Z","edit_url":"http://localhost:3000/articles/2/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"},"":[]}},{"article":{"id":3,"name":"Batman & Robin","published_at":"2012-01-26T18:38:50Z","edit_url":"http://localhost:3000/articles/3/edit","author":{"id":1,"name":"Bruce Wayne","url":"http://localhost:3000/authors/1"},"comments":[{"comment":{"id":3,"name":"The Joker","content":"Haha, Batman, you will see your bat signal tonight!"}},{"comment":{"id":4,"name":"Robin","content":"Enough with the games Joker."}},{"comment":{"id":5,"name":"Riddler","content":"Did someone say games?"}}]}}]
+```
+
+<p>The ability to reuse templates like this is the reason why we should minimize the use of instance variables in RABL templates. As we only use the <code>@article</code> variable in the show template when we define the object it&rsquo;s easier to reuse this template in the index template as we&rsquo;re using the article that&rsquo;s passed into the block in the call to node instead of the instance variable.</p>
+
+<h3>Root Nodes</h3>
+
+<p>One thing you might notice about the JSON that RABL outputs is that it includes the model name as the root node. </p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"},"comments":[{"comment":{"id":1,"name":"Lois Lane","content":"Does anyone know where I can find Superman?"}},{"comment":{"id":2,"name":"Lex Luthor","content":"I have some Kryptonite for you Superman!"}}]}}
+```
+
+<p>Sometimes we want this but sometimes we don&rsquo;t. In Rails 3.1 the default JSON output didn&rsquo;t include the root element and if we want RABL to match this we&rsquo;ll need to configure it. We can do this in a new file in the <code>/config/initializers</code> directory, setting <code>include_json_root</code> to false. </p>
+
+``` /config/initializers/rabl_config.rb
+Rabl.configure do |config|
+  config.include_json_root = false
+end
+```
+
+<p>As we&rsquo;ve created an initializer we&rsquo;ll need to restart the app for these changes to be picked up. After we have the first article&rsquo;s JSON will no longer include that root node.</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"},"comments":[{"id":1,"name":"Lois Lane","content":"Does anyone know where I can find Superman?"},{"id":2,"name":"Lex Luthor","content":"I have some Kryptonite for you Superman!"}]}
+```
+
+<p>There are details of the configuration options that can be set in the Configuration section of RABL&rsquo;s <a href="https://github.com/nesquena/rabl/blob/master/README.md">README file</a>. There are other features that we haven&rsquo;t covered here. Other serialization options are covered such as XML and <a href="http://msgpack.org/">Message Pack</a>.</p>
+
+<h3>Embedding JSON in a Web Page</h3>
+
+<p>Sometimes we need to embed JSON data in an HTML document instead of calling a separate controller action. How do we do this with something like RABL? The HTML template for the index action looks like this:</p>
+
+``` /app/views/articles/index.html.erb
+<h1>Articles</h1>
+
+<div id="articles">
+<% @articles.each do |article| %>
+  <h2>
+    <%= link_to article.name, article %>
+    <span class="comments">(<%= pluralize(article.comments.size, 'comment') %>)</span>
+  </h2>
+  <div class="info">
+    by <%= article.author.name %>
+    on <%= article.published_at.strftime('%b %d, %Y') %>
+  </div>
+  <div class="content"><%= article.content %></div>
+<% end %>
+</div>
+```
+
+<p>We&rsquo;ll add the JSON for the articles in a <code>data-</code> attribute in the wrapper <code>div</code>. We could just call <code>@articles.to_json</code> but this won&rsquo;t use the RABL template. Instead we can call <code>render(:template)</code> and pass the template&rsquo;s name.</p>
+
+``` /app/views/articles/index.html.erb
+<div id="articles" data-articles="<%= render(template: "articles/index.json.rabl") %>" >
+```
+
+<p>If we reload the page and view the source now we&rsquo;ll see that embedded JSON.</p>
+
+``` html
+<div id="articles" data-articles="[{&quot;id&quot;:1,&quot;name&quot;:&quot;Superman&quot;,&quot;published_at&quot;:&quot;2012-01-19T18:38:50Z&quot;,&quot;edit_url&quot;:&quot;http://localhost:3000/articles/1/edit&quot;,&quot;author&quot;:{&quot;id&quot;:2,&quot;name&quot;:&quot;Clark Kent&quot;,&quot;url&quot;:&quot;http://localhost:3000/authors/2&quot;},&quot;comments&quot;:[{&quot;id&quot;:1,&quot;name&quot;:&quot;Lois Lane&quot;,&quot;content&quot;:&quot;Does anyone know where I can find Superman?&quot;},{&quot;id&quot;:2,&quot;name&quot;:&quot;Lex Luthor&quot;,&quot;content&quot;:&quot;I have some Kryptonite for you Superman!&quot;}]},{&quot;id&quot;:2,&quot;name&quot;:&quot;Krypton&quot;,&quot;published_at&quot;:&quot;2012-01-05T18:38:50Z&quot;,&quot;edit_url&quot;:&quot;http://localhost:3000/articles/2/edit&quot;,&quot;author&quot;:{&quot;id&quot;:2,&quot;name&quot;:&quot;Clark Kent&quot;,&quot;url&quot;:&quot;http://localhost:3000/authors/2&quot;},&quot;&quot;:[]},{&quot;id&quot;:3,&quot;name&quot;:&quot;Batman &amp; Robin&quot;,&quot;published_at&quot;:&quot;2012-01-26T18:38:50Z&quot;,&quot;edit_url&quot;:&quot;http://localhost:3000/articles/3/edit&quot;,&quot;author&quot;:{&quot;id&quot;:1,&quot;name&quot;:&quot;Bruce Wayne&quot;,&quot;url&quot;:&quot;http://localhost:3000/authors/1&quot;},&quot;comments&quot;:[{&quot;id&quot;:3,&quot;name&quot;:&quot;The Joker&quot;,&quot;content&quot;:&quot;Haha, Batman, you will see your bat signal tonight!&quot;},{&quot;id&quot;:4,&quot;name&quot;:&quot;Robin&quot;,&quot;content&quot;:&quot;Enough with the games Joker.&quot;},{&quot;id&quot;:5,&quot;name&quot;:&quot;Riddler&quot;,&quot;content&quot;:&quot;Did someone say games?&quot;}]}]" >
+```
+
+<p>If we do use this technique it&rsquo;s important that any instance variables use inside the rendered template are set in the controller&rsquo;s action.</p>

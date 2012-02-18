@@ -1,0 +1,202 @@
+<p>Railsアプリケーションで、モデルデータに基づいてカスタムのJSONデータを返したい場合、これを行う方法はいくつかあります。モデルの<code>as_json</code>メソッドをオーバーライドするか、<a href="http://railscasts.com/episodes/320-jbuilder">エピソード320</a>でおこなったように<a href="https://github.com/rails/jbuilder">Jbuilder</a> gemを使用することができます。もう一つよく使われるのが、<a href="https://github.com/nesquena/rabl">RABL gem</a>を用いる方法です。RABLはRuby API Builder Languageの略で、その他のツールと比べると若干機能が豊富です。 </p>
+
+<p>今回のエピソードではRABLの機能を紹介しますが、Jbuilderのエピソードで使用したのと同じサンプルアプリケーションを使うことによって、これら2つのライブラリの違いを理解する視点を提供します。このアプリケーションは複数の記事を持つブログアプリケーションで、記事のURLに<code>.json</code>を加えることで個別の記事のデータをJSONとして表示させたいとします。これを今試してみると、アプリケーションがJSONリクエストにどう応答すればわからないのでエラーメッセージが表示されるだけです。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/976/original/E322I01.png" width="800" height="393" alt="ブログアプリケーション"/>
+</div>
+
+<h3>RABLを使う</h3>
+
+<p>これをおこなうために<code>ArticlesController</code>を修正し、showアクションがJSONリクエストに応答することを確認し、選択された記事のJSON形式のデータを返すこともできますが、その代わりに今回はRABLを使用します。これはgemとして提供されているので、インストールは通常の方法で、gemfileに追加して<code>bundle</code>コマンドを実行します。</p>
+
+``` /Gemfile
+gem 'rabl'
+```
+
+<p>Jbuilderと同じようにRABLにはテンプレートハンドラが含まれるのでビュー層でJSONレスポンスを定義できます。記事をJSON形式で出力するために、ここでそれを一つ作成します。RABLのDSLを利用してRubyコードを使ってそれをおこないます。</p> 
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+```
+
+<p>通常RABLテンプレートの最初に来るのは<code>object</code>の呼び出しで、これに対して作業の対象とするオブジェクトを渡します。続いて<code>attributes</code>を呼び出して返したいオブジェクトの属性を定義します。ここで記事のJSONのURLにアクセスすると、テンプレートで定義したJSONが表示されます。</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z"}}
+```
+
+<p>単純な属性ではないものを指定したい場合は、<code>node</code>メソッドを使用してそれに名前とブロックを渡します。ブロックが返すものが値として使用されます。</p>
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+node(:edit_url) { "..." }
+```
+
+<p>これはJSONにedit_url属性を追加します。</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"..."}}
+```
+
+<p>RABLテンプレートのヘルパーメソッドにアクセスできるので、<code>edit_article_url</code>を使って記事の編集用URLと<code>current_user</code>を取得して、(使用している認証のしくみが<code>current_user</code>ヘルパーメソッドを持っていると仮定して)現在のユーザがadminの場合のみURLが表示されるようにします。</p>
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+if current_user.admin?
+  node(:edit_url) { edit_article_url(@article) }
+end
+```
+
+<p>しかしこれには問題があります。<code>edit_article_url</code>でarticleインスタンス変数を使用していますが、これはいい方法ではありません。その代わりに、ブロックに渡されるarticleオブジェクトを使うべきです。</p>
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+if current_user.admin?
+  node(:edit_url) { |article| edit_article_url(article) }
+end
+```
+
+<p>ブロックに渡されるオブジェクトは<code>object</code>メソッドに渡されるのと同じオブジェクトですが、ブロックに渡される方のオブジェクトを使うべきであるということには明白な理由があり、それについては後ほど説明します。ここで記事のJSONを見てみると、<code>edit_url</code>属性が、正しい値と共に表示されています。</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit"}}
+```
+
+<h3>関連レコード</h3>
+
+<p>関連レコードのデータを含めたい場合も簡単です。今回のアプリケーションでは<code>Article</code>は<code>Author</code>に属し(belongs to)、複数の<code>Comment</code>を持ち(has many)ます。RABLの<code>child</code>メソッドを使用して、これらの関連するモデルから情報を含めることが可能です。</p>
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+if current_user.admin?
+  node(:edit_url) { |article| edit_article_url(article) }
+end
+
+child :author do
+  attributes :id, :name
+  node(:url) { |author| author_url(author) }
+end
+```
+
+<p>関連する著者のJSONを生成するコードは、記事のJSONを生成するコードに非常に似ています。唯一の違いは、著者は記事にではなくノードのブロックに渡されるという点です。ここでJSONを見てみると、希望通りに記事の著者の詳細情報が表示されています。</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"}}}
+```
+
+<p><code>Comment</code>の関連についても同じように処理できますが、<code>has_many</code>の関連を扱うので複数形を使用します。</p>
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+if current_user.admin?
+  node(:edit_url) { |article| edit_article_url(article) }
+end
+
+child :author do
+  attributes :id, :name
+  node(:url) { |author| author_url(author) }
+end
+
+child :comments do
+  attributes :id, :name, :content
+end
+```
+
+<p>JSONレスポンスでコメントは、著者のように一つのレコードとして表示されるのではなく、配列としてネストされます。</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"},"comments":[{"comment":{"id":1,"name":"Lois Lane","content":"Does anyone know where I can find Superman?"}},{"comment":{"id":2,"name":"Lex Luthor","content":"I have some Kryptonite for you Superman!"}}]}}
+```
+
+<h3>テンプレートの再利用</h3>
+
+<p>記事のJSONデータをきれいに定義できましたが、この出力をアプリケーションの別のところで利用したい場合はどうすればいいでしょうか? <cide>ArticlesController</cide>の<cide>index</cide>アクションで同じJSONを今度はすべての記事について表示したいとします。このような場合にRABLは威力を発揮します。必要なのはindexアクション用に新規のRABLテンプレートを作成することだけです。</p>
+
+``` /app/views/articles/index.json.rabl
+collection @articles
+
+extends "articles/show"
+```
+
+<p>複数の記事を対象にしているので、ここでは<code>object</code>ではなく<code>collection</code>を使用します。showテンプレートのときにおこなったのと同じように、ここで使用したい属性を定義することもできますが、個別の記事のときと同じJSONが欲しいので、ここではそのテンプレートを再利用するために<code>extends</code>を呼び出してその名前を渡します。<code>articles.json</code>を見てみると、すべての記事のJSONデータが表示されます。</p>
+
+``` terminal
+$ curl http://localhost:3000/articles.json
+[{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"},"comments":[{"comment":{"id":1,"name":"Lois Lane","content":"Does anyone know where I can find Superman?"}},{"comment":{"id":2,"name":"Lex Luthor","content":"I have some Kryptonite for you Superman!"}}]}},{"article":{"id":2,"name":"Krypton","published_at":"2012-01-05T18:38:50Z","edit_url":"http://localhost:3000/articles/2/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"},"":[]}},{"article":{"id":3,"name":"Batman &amp; Robin","published_at":"2012-01-26T18:38:50Z","edit_url":"http://localhost:3000/articles/3/edit","author":{"id":1,"name":"Bruce Wayne","url":"http://localhost:3000/authors/1"},"comments":[{"comment":{"id":3,"name":"The Joker","content":"Haha, Batman, you will see your bat signal tonight!"}},{"comment":{"id":4,"name":"Robin","content":"Enough with the games Joker."}},{"comment":{"id":5,"name":"Riddler","content":"Did someone say games?"}}]}}]
+```
+
+<p>このようにテンプレートを再利用できる機能こそが、RABLテンプレートでインスタンス変数の使用を最小限にするべき理由です。オブジェクトを定義するときにshowテンプレートの<code>@article</code>変数を使用しているだけなので、indexテンプレートの中でこのテンプレートを再利用する方がより簡単です。これは、インスタンス変数ではなくノードの呼び出しのブロックに渡される記事を使用しているからです。</p>
+
+<h3>ルートノード</h3>
+
+<p>RABLが出力するJSONの特徴として、ルートノードにモデル名が含まれている点に気づいた方もいるでしょう。 </p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"},"comments":[{"comment":{"id":1,"name":"Lois Lane","content":"Does anyone know where I can find Superman?"}},{"comment":{"id":2,"name":"Lex Luthor","content":"I have some Kryptonite for you Superman!"}}]}}
+```
+
+<p>これでいい場合もあれば、都合が悪い場合もあります。Rails 3.1ではデフォルトのJSON出力にはルート要素は含まれず、RABLをこれに合わせるには設定が必要です。これをおこなうには<code>/config/initializers</code>ディレクトリに新規ファイルを作成し、<code>include_json_root</code>をfalseに設定します。 </p>
+
+``` /config/initializers/rabl_config.rb
+Rabl.configure do |config|
+  config.include_json_root = false
+end
+```
+
+<p>初期化ファイルを作成したので、この変更を有効化させるためにアプリケーションを再起動します。すると最初の記事のJSONにはルートノードが含まれていません。</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"},"comments":[{"id":1,"name":"Lois Lane","content":"Does anyone know where I can find Superman?"},{"id":2,"name":"Lex Luthor","content":"I have some Kryptonite for you Superman!"}]}
+```
+
+<p>RABLの<a href="https://github.com/nesquena/rabl/blob/master/README.md">READMEファイル</a>のConfigurationセクションに、指定できる設定オプションの詳細が記載されています。ここで触れることができなかった機能が他にもあります。XMLや<a href="http://msgpack.org/">Message Pack</a>などその他のserialization(直列化)のオプションについても触れられています。</p>
+
+<h3>WebページにJSONを埋め込む</h3>
+
+<p>別のコントローラアクションを呼び出すのではなく、JSONデータをHTMLドキュメントに埋め込まなくてはいけない場合があります。RABLなどを利用する場合、これはどうすればいいでしょうか? indexアクションのHTMLテンプレートは次のようになります。</p>
+
+``` /app/views/articles/index.html.erb
+<h1>Articles</h1>
+
+<div id="articles">
+<% @articles.each do |article| %>
+  <h2>
+    <%= link_to article.name, article %>
+    <span class="comments">(<%= pluralize(article.comments.size, 'comment') %>)</span>
+  </h2>
+  <div class="info">
+    by <%= article.author.name %>
+    on <%= article.published_at.strftime('%b %d, %Y') %>
+  </div>
+  <div class="content"><%= article.content %></div>
+<% end %>
+</div>
+```
+
+<p>ラッパーの<code>div</code>の<code>data-</code>属性に記事のJSONを追加します。単に<code>@articles.to_json</code>を呼び出す方法もありますが、これはRABLテンプレートを使用しません。代わりに<code>render(:template)</code>を呼び出してテンプレート名を渡すことができます。</p>
+
+``` /app/views/articles/index.html.erb
+<div id="articles" data-articles="<%= render(template: "articles/index.json.rabl") %>" >
+```
+
+<p>ページをリロードしてソースを表示させると埋め込まれたJSONを見ることができます。</p>
+
+``` html
+<div id="articles" data-articles="[{&quot;id&quot;:1,&quot;name&quot;:&quot;Superman&quot;,&quot;published_at&quot;:&quot;2012-01-19T18:38:50Z&quot;,&quot;edit_url&quot;:&quot;http://localhost:3000/articles/1/edit&quot;,&quot;author&quot;:{&quot;id&quot;:2,&quot;name&quot;:&quot;Clark Kent&quot;,&quot;url&quot;:&quot;http://localhost:3000/authors/2&quot;},&quot;comments&quot;:[{&quot;id&quot;:1,&quot;name&quot;:&quot;Lois Lane&quot;,&quot;content&quot;:&quot;Does anyone know where I can find Superman?&quot;},{&quot;id&quot;:2,&quot;name&quot;:&quot;Lex Luthor&quot;,&quot;content&quot;:&quot;I have some Kryptonite for you Superman!&quot;}]},{&quot;id&quot;:2,&quot;name&quot;:&quot;Krypton&quot;,&quot;published_at&quot;:&quot;2012-01-05T18:38:50Z&quot;,&quot;edit_url&quot;:&quot;http://localhost:3000/articles/2/edit&quot;,&quot;author&quot;:{&quot;id&quot;:2,&quot;name&quot;:&quot;Clark Kent&quot;,&quot;url&quot;:&quot;http://localhost:3000/authors/2&quot;},&quot;&quot;:[]},{&quot;id&quot;:3,&quot;name&quot;:&quot;Batman &amp; Robin&quot;,&quot;published_at&quot;:&quot;2012-01-26T18:38:50Z&quot;,&quot;edit_url&quot;:&quot;http://localhost:3000/articles/3/edit&quot;,&quot;author&quot;:{&quot;id&quot;:1,&quot;name&quot;:&quot;Bruce Wayne&quot;,&quot;url&quot;:&quot;http://localhost:3000/authors/1&quot;},&quot;comments&quot;:[{&quot;id&quot;:3,&quot;name&quot;:&quot;The Joker&quot;,&quot;content&quot;:&quot;Haha, Batman, you will see your bat signal tonight!&quot;},{&quot;id&quot;:4,&quot;name&quot;:&quot;Robin&quot;,&quot;content&quot;:&quot;Enough with the games Joker.&quot;},{&quot;id&quot;:5,&quot;name&quot;:&quot;Riddler&quot;,&quot;content&quot;:&quot;Did someone say games?&quot;}]}]" >
+```
+
+<p>このテクニックを使用する場合は、出力されるテンプレートで使われるインスタンス変数はコントローラのアクションで設定されるので注意してください。</p>

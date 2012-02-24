@@ -1,0 +1,155 @@
+<p><a href="https://github.com/">Github</a> vous permet très facilement de contribuer à un projet Open Source. Dans cet épisode, nous allons vous montrer comment faire en soumettant un pull request au <a href="https://github.com/myronmarston/vcr">projet VCR</a>. Nous avons déjà parlé du projet VCR dans l'<a href="http://railscasts.com/episodes/291-testing-with-vcr">épisode 291</a> ; ce gem permet d'enregistrer les intéractions HTTP et de les lancer en arrière plan afin d'accélérer les tests. Myron Marston, l'auteur du gem VCR, est très réactif concernant les contributions extérieures.</p>
+
+<p>Imaginez que nous ayons trouvé un problème avec ce gem et qu'on aimerait contribuer en proposant un patch. La première chose à faire est de regarder la partie 'issues' (sur github) afin de s'assurer qu'il n'a pas déjà été abordé. Si le projet possède une mailing-list, il est conseillé de chercher si des éléments existe à propos de ce problème. Pour les gros changements, il est préférable d'en discuter afin de voir si le changement est nécessaire.</p>
+
+<h3><a href="http://www.youtube.com/watch?feature=player_detailpage&amp;v=nHLzj_6HCjU#t=270s">Fork It!</a></h3>
+
+<p>Une fois que nous sommes prêt à travailler sur ce patch, la première chose à faire est de fork le projet. Pour ce faire, nous devons nous rendre sur sa page github et de cliquer sur le bouton "Fork". Cela nous fournit une copie du dépôt en quelques secondes. Une fois terminé, nous pouvons visiter notre nouveau fork, obtenir son URL et donc le cloner.</p>
+
+``` terminal
+$ git clone git@github.com:eifion/vcr.git
+$ cd vcr
+```
+
+<p>Comme nous vennons de cloné le dépôt, nous pouvons voir les branches qu'il possède</p>
+
+``` terminal
+$ git branch -r
+  origin/1-x-stable
+  origin/HEAD -> origin/master
+  origin/jruby_nailgun
+  origin/master
+``` 
+
+<p>Nous pouvons donc remarquer qu'il y a une branche pour la version stable de la version 1, qui est la version courante du gem. La branche master correspond à la version 2 qui est actuellement en pre-release. Une chose importante à garder en tête : la version du gem que vous utilisez est souvent différente de celle sur laquelle vous travaillé.</p>
+
+<p>Lors de la mise en place de votre environnement de développement pour un projet précis, il est conseillé de se référer à sa documentation. Dans notre cas, il y a une section "development" dans le <a href="https://github.com/eifion/vcr/blob/master/README.md">fichier README</a> qui nous dit que les ``pull request`` sont les bienvenus mais que tous les changements doivent être totalement couverts par des tests. Le README ne contient pas d'instructions sur le lancement de la suite de test mais il est encourageant de voir que Travis CI affirme que les tests sont <a href="http://travis-ci.org/#!/myronmarston/vcr">actuellement tous passés</a>.</p>
+
+<p>Le projet possède un Gemfile, il utilise donc Bundler pour gérer ses dépendances. Nous devrions être capable de les installer en exécutant <code>bundle install</code> mais une erreur se produit lorsque nous essayons. C'était à prévoir puisque tous les environnements de développement sont différents.</p>
+
+<p>L'erreur que nous pouvons apercevoir est liée au gem <code>rb-fsevent</code>. Une petite recherche sur Internet nous confirme que cela vient de notre installation. Nous utilisons actuellement <a href="https://github.com/kennethreitz/osx-gcc-installer">GCC Installer</a> à la place de l'installation complète de Xcode et c'est ce qui pose problème. Le problème a été résolu dans <a href="https://github.com/kennethreitz/osx-gcc-installer"><code>rb-fsevent</code></a> mais n'est pas encore disponible dans la version stable. Nous allons donc résoudre ce problème en utilisant une version particulière de <code>rb-fsevent</code> dans notre Gemfile, nous utiliserons la version pre-release.</p>
+
+
+```/Gemfile
+# Additional gems that are useful, but not required for development.
+group :extras do
+  gem 'guard-rspec'
+  gem 'growl'
+  gem 'relish', '~> 0.5.0'
+  gem 'fuubar'
+  gem 'fuubar-cucumber'
+
+  platforms :mri do
+    gem 'rcov'
+    gem 'rb-fsevent', '0.9.0.pre4'
+  end
+
+  platforms :mri_18, :jruby do
+    gem 'ruby-debug'
+  end
+
+  platforms :mri_19 do
+    gem 'ruby-debug19'
+  end unless RUBY_VERSION == '1.9.3'
+end
+```
+
+<p>Maintenant, lorsque nous lançons ``bundle`` tout semble être correct.</p>
+
+<h3>Lancer les tests</h3>
+
+<p>Ensuite, nous allons essayer d'exécuter les tests du gem. Ils sont souvent définis comme tâche Rake par défaut, nous pouvons donc lancer les tests en exécutant <code>rake</code>. Cependant, il vaut mieux utiliser <code>bundle exec rake</code>.</p>
+
+``` terminal
+$ bundle exec rake
+  1504/1504:   100% |==========================================| ETA:  00:00:00
+```  
+
+<p>Les tests passent malgré quelques problèmes en suspens. Après que les tests ont été lancés, c'est au tour des scénarios Cucumber d'être exécutés. Nous obtenons une erreur avec un long message d'erreur, l'essentiel du message est "<code>no such file to load -- spec</code>". Il semble que nous ayons oublié une dépendances que Bundle n'a pas géré.</p>
+
+<p>After some investigation it turns out that this project uses <a href="http://book.git-scm.com/5_submodules.html">Git submodules</a> so to get it working we need to run these two commands.</p>
+
+<p>Après quelques recherches, il s'avère que ce projet utilise des <a href="http://book.git-scm.com/5_submodules.html">Sous-modules de Git</a>. Il faut donc les installer en utilisant les deux commandes suivantes :</p>
+
+``` terminal
+$ git submodule init
+$ git submodule update
+```
+
+<p>Ceux-ci seront copiés pour nous dans le dépôt des sous-modules. Nous pouvons alors relancer les tests et vérifier qu'ils passent. Cette fois oui :)</p>
+
+<h3>Apporter des changements</h3>
+
+<p>Nous avons eu quelques soucis pour faire passer les tests mais nous avons réussis. Encore une fois, ceci vient du fait que chacun possède son propre environnement de développement. On aurait pu gagner du temps si la documentation avait été meilleure concernant la mise en place du projet.</p> 
+
+<p>Notre premier pull request sera donc d'embellir cette documentation afin de mettre en place un environnement de développement fonctionnel. Cette documentation se trouve dans le README.<br />
+Il s'avère qu'il existe déjà une page Wiki destinée à la contribution au projet VCR mais elle contient seulement les bases de sa mise en place. Nous allons donc éditer cette page pour y ajouter des informations baséee sur les problèmes que nous avons rencontrés. Une fois ces changements effectués nous pouvons alors proposer notre pull request qui ajoute un lien dans le README vers ce guide.</p>
+
+<p>Avant de faire des changements, nous allons nous assurer que notre répertoire de travail est propre.</p> 
+
+``` terminal
+$ git status
+# On branch master
+# Changes not staged for commit:
+#   (use "git add <file>..." to update what will be committed)
+#   (use "git checkout -- <file>..." to discard changes in working directory)
+#
+# modified:   Gemfile
+#
+no changes added to commit (use "git add" and/or "git commit -a")
+```
+
+<p>Nous avons modifé le Gemfile, donc nous devons revenir sur ce changement avant d'aller plus loin.</p>
+
+``` terminal
+$ git checkout .
+noonoo:vcr eifion$ git status
+# On branch master
+nothing to commit (working directory clean)
+```
+
+<p>It&rsquo;s a good idea to setup a separate Git branch for each pull request we want to make so we&rsquo;ll do that now.</p>
+
+``` terminal
+$ git checkout -b readme-contributing-link
+```
+
+<p>Maintenant, nous pouvons faire nos changements. Dans la section "development" du <code>README.md</code> nous allons y ajouter un lien vers la page Wiki que nous avons changée.</p>
+
+``` /README.md
+## Development
+
+* Source hosted on [GitHub](http://github.com/myronmarston/vcr).
+* Direct questions and discussions to the [mailing list](http://groups.google.com/group/vcr-ruby).
+* Report issues on [GitHub Issues](http://github.com/myronmarston/vcr/issues).
+* Pull requests are very welcome! Please include spec and/or feature coverage for every patch,
+  and create a topic branch for every separate change you make.
+* See the [Contributing](https://github.com/myronmarston/vcr/blob/master/CONTRIBUTING.md)
+  guide for instructions on running the specs and features.
+```  
+  
+<p>Une fois que cela est fait, nous pouvons lancer git diff afin de visualiser les changements que nous venons d'appliquer. Si cela nous convient, nous pouvons commit les changements :</p>
+
+``` terminal
+$ git commit -a -m "adding contributing link to readme."Next we need to push our branch to our remote repository.
+$ git push origin readme-contributing-link
+Counting objects: 5, done.
+Delta compression using up to 2 threads.
+Compressing objects: 100% (3/3), done.
+Writing objects: 100% (3/3), 328 bytes, done.
+Total 3 (delta 2), reused 0 (delta 0)
+To git@github.com:eifion/vcr.git
+ * [new branch]      readme-contributing-link -> readme-contributing-link
+```
+ 
+<p>Lorsque nous visitons notre dépôt (qui est, je vous rappel, un fork) nous pouvons changer la branche actuelle par celle que nous venons d'ajouter.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/851/original/E300I01.png" width="944" height="563" alt="Selecting the correct branch on Github."/>
+</div>
+
+<p>Maintenant cliquez sur "Pull Request" pour proposer nos changements au propriétaire du dépôt. Github nous renvoit sur un formulaire permettant d'expliquer les changements apportés puis de l'envoyer</p>
+
+<p>Voilà, c'est tout ce que nous avons besoin de faire pour proposer un pull request à un projet open source hébergé sur Github. Si il est accepté cela sera plus facile pour les personnes suivantes voulant contribuer au projet.
+<br />
+Maintenant, c'est votre tour !</p>

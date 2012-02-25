@@ -1,0 +1,167 @@
+<p>Back in <a href="http://railscasts.com/episodes/219-active-model">episode 219</a> we used ActiveModel to create a model that isn&rsquo;t backed by a database table but which still has some ActiveRecord features, such as validations. ActiveModel is great but isn&rsquo;t very convenient to use directly like this. For example it takes quite a bit of code just to make a simple model that has some validation support.</p>
+
+``` /app/models/message.rb
+class Message
+  include ActiveModel::Validations
+  include ActiveModel::Conversion
+  extend ActiveModel::Naming
+
+  attr_accessor :name, :email, :content
+
+  validates_presence_of :name
+  validates_format_of :email, :with => /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+  validates_length_of :content, :maximum => 500
+
+  def initialize(attributes = {})
+    attributes.each do |name, value|
+      send("#{name}=", value)
+    end
+  end
+
+  def persisted?
+    false
+  end
+end
+```
+
+<p>There is a gem called <a href="https://github.com/cgriego/active_attr">ActiveAttr</a> that can help with this. It&rsquo;s described by its author Chris Greigo as &ldquo;what ActiveModel left out&rdquo; which is a fair description of what it does. Using it makes it much easier to create a table-less model that behaves similarly to ActiveRecord and we&rsquo;ll show you how it works in this episode.</p>
+
+<h3>Using ActiveAttr With a Contact Form</h3>
+
+<p>We&rsquo;ll be working with an application which has a &ldquo;Contact Us&rdquo; form. When the form is filled in and submitted we want to send an email but not save the message to the database. We don&rsquo;t want to use ActiveRecord at all here but we do want to use some of its features, such as validations, so that if the user fails to fill the form in correctly they see some error messages explaining what they&rsquo;ve done wrong.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1011/original/E326I01.png" width="800" height="464" alt="The contact form."/>
+</div>
+
+<p>We&rsquo;ve already created the controller and view for this and they work very similarly to what we&rsquo;d have if we used Rails&rsquo; scaffolding. We&rsquo;ll walk through it quickly now. The <code>MessagesController</code> has <code>new</code> and <code>create</code> actions. When the new action is triggered it will create a new instance of <code>Message</code> and render out a template.</p>
+
+``` /app/views/messages/new.html.erb
+<h1>Contact Us</h1>
+
+<%= form_for @message do |f| %>
+  <% if @message.errors.any? %>
+    <div class="error_messages">
+      <h2><%= pluralize(@message.errors.count, "error") %> prohibited this message from being saved:</h2>
+      <ul>
+      <% @message.errors.full_messages.each do |msg| %>
+        <li><%= msg %></li>
+      <% end %>
+      </ul>
+    </div>
+  <% end %>
+  <div class="field">
+    <%= f.label :name %><br />
+    <%= f.text_field :name %>
+  </div>
+  <div class="field">
+    <%= f.label :email %><br />
+    <%= f.text_field :email %>
+  </div>
+  <div class="field">
+    <%= f.label :content, "Message" %><br />
+    <%= f.text_area :content, :rows => 5 %>
+  </div>
+  <div class="actions"><%= f.submit "Send Message" %></div>
+<% end %>
+```
+
+<p>This view holds the code for the form. Note that we&rsquo;re using <code>form_for</code> to define the form and passing it the message model instance from the controller. We display error messages just as we would with scaffold-generated code so from the view template this looks just like code to handle an ActiveRecord model. When the form is submitted it triggers the controller&rsquo;s <code>create</code> action.</p>
+
+``` /app/controllers/messages_controller.rb
+class MessagesController < ApplicationController
+  def new
+    @message = Message.new
+  end
+
+  def create
+    @message = Message.new(params[:message])
+    if @message.valid?
+      # TODO send message here
+      redirect_to root_url, notice: "Message sent! Thank you for contacting us."
+    else
+      render "new"
+    end
+  end
+end
+```
+
+<p>This action makes a new <code>Message</code> instance base based on the parameters from the form then checks that the new message is valid. If so it will email the message and redirect back to the home page. If it&rsquo;s invalid it will render the form again. We need this message model to behave just like ActiveRecord, except that we&rsquo;re just validating it not saving it to a database table.</p>
+
+<p>The <code>Message</code> model currently uses ActiveModel to handle this behaviour and you can see its code at the top of the this episode. We don&rsquo;t want to use this approach here, though. Instead we&rsquo;re going to use ActiveAttr. To do this we&rsquo;ll need to add the gem to the gemfile and run <code>bundle</code> to install it.</p>
+
+``` /Gemfile
+gem 'active_attr'
+```
+
+<p>We can now use ActiveAttr in our model.</p>
+
+``` /app/models/message.rb
+class Message
+  include ActiveAttr::Model
+end
+```
+
+<p>Note that <code>Message</code> doesn&rsquo;t inherit from another class, it&rsquo;s just a simple Ruby class. By including <code>ActiveAttr::Model</code> we&rsquo;ll add some functionality that builds on ActiveModel to make this class behave more like an ActiveRecord model. We can define attributes for the model by using <code>attribute</code> and we can add validations in the same way we would for an ActiveRecord-derived class.</p>
+
+``` /app/models/message.rb
+class Message
+  include ActiveAttr::Model
+  
+  attribute :name
+  attribute :email
+  attribute :content
+  
+  validates_presence_of :name
+  validates_format_of :email, :with => /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+  validates_length_of :content, :maximum => 500
+end
+```
+
+<p>We now have a fully-functional model that behaves like an ActiveRecord model. If we try visiting the form again and submit it without filling in any of the fields we&rsquo;ll see validation errors just like we expect but the model code is quite a bit simpler.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1012/original/E326I02.png" width="800" height="561" alt="If the form is filled in incorrectly the validation errors will be displayed."/>
+</div>
+
+<h3>Mass Assignment Protection</h3>
+
+<p>ActiveAttr also provides mass assignment protection. Let&rsquo;s say that we have a priority attribute on the Message model and that we don&rsquo;t want it to be settable through form values. We can use <code>attr_accessible</code> to define the attributes that should be accessible just like we would with an ActiveRecord model.</p>
+
+``` /app/models/message.rb
+class Message
+  include ActiveAttr::Model
+  
+  attribute :name
+  attribute :email
+  attribute :content
+  attribute :priority
+  
+  attr_accessible :name, :email, :content
+
+  validates_presence_of :name
+  validates_format_of :email, :with => /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+  validates_length_of :content, :maximum => 500
+end
+```
+
+<p>We can test this behaviour in the console. If we create a new <code>Message</code> and try to set its <code>priority</code> this will fail, although we can set <code>priority</code> directly.</p>
+
+``` console
+1.9.3p0 :001 > m = Message.new(priority: 1)
+ => #<Message content: nil, email: nil, name: nil, priority: nil> 
+1.9.3p0 :002 > m.priority
+ => nil 
+1.9.3p0 :003 > m.priority = 1
+ => 1
+``` 
+ 
+<p>ActiveAttr also allows us to call an attribute with a question mark to force its value to be boolean just like ActiveRecord does. Future versions of ActiveAttr will also allow us to pass additional options to <code>attribute</code> so that we can specify the attribute&rsquo;s type and also a default value.</p>
+
+``` /app/models/message.rb
+ attribute :priority, type: Integer, default: 0
+``` 
+
+<p>These options aren&rsquo;t yet available but they should be coming soon so it&rsquo;s worth checking ActiveAttr&rsquo;s Github page so see if these features have been released.</p>
+
+<p>That&rsquo;s it for this episode on ActiveAttr. It&rsquo;s a great way to make table-less models. The documentation has further details of what you can do with it. We&rsquo;ve used the <code>ActiveAttr::Model</code> module which includes everything but there are separate modules for its different features which can be used if you only need part of ActiveAttr&rsquo;s functionality.</p>

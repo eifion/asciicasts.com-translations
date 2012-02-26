@@ -1,0 +1,167 @@
+<p>かつて<a href="http://railscasts.com/episodes/219-active-model">エピソード219</a>で、ActiveModelを用いて、データベーステーブルを裏に持たないながらデータ検証などのActiveRecordの機能を持ったモデルを作成しました。ActiveModelが優れているのは確かですが、このように直接利用するにはあまり使いやすいとは言えません。例えば入力データの検証機能を持ったモデルを作るとなるとシンプルなものでもかなりの量のコードを書くことになります。</p>
+
+``` /app/models/message.rb
+class Message
+  include ActiveModel::Validations
+  include ActiveModel::Conversion
+  extend ActiveModel::Naming
+
+  attr_accessor :name, :email, :content
+
+  validates_presence_of :name
+  validates_format_of :email, :with => /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+  validates_length_of :content, :maximum => 500
+
+  def initialize(attributes = {})
+    attributes.each do |name, value|
+      send("#{name}=", value)
+    end
+  end
+
+  def persisted?
+    false
+  end
+end
+```
+
+<p>このような場合に役に立つ<a href="https://github.com/cgriego/active_attr">ActiveAttr</a>というgemがあります。作者のChris Greigoがそれを“ActiveModelの足りない部分”と説明していますが、その機能をうまく表現しています。これを使うことによって、ActiveRecordと同じように振る舞う、テーブル無しのモデルを簡単に作れるようになります。その方法を今回のエピソードで紹介します。</p>
+
+<h3>コンタクトフォームでActiveAttrを利用する</h3>
+
+<p>“Contact Us”のフォームを持ったアプリケーションに対して作業をおこないます。フォームに必要事項が記入されて送信されたら、メールが送信されて、なおかつメッセージはデータベースに保存されないようにしたいとします。ここでActiveRecordはまったく使用しないことにしますが、データ検証などの機能は欲しいところです。それによって、ユーザが正しくフォームに記入しなかった場合にエラーメッセージを表示して、どこを間違ったかを示します。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1011/original/E326I01.png" width="800" height="464" alt="コンタクトフォーム"/>
+</div>
+
+<p>すでにコントローラとビューを作成済みで、それらはRailsのscaffold機能を使って作成した場合と非常に似た機能を持っています。それらを簡単にここで見てみましょう。<code>MessagesController</code>には<code>new</code>と<code>create</code>のアクションがあります。newアクションが起動されると<code>Message</code>の新規インスタンスを生成しテンプレートを出力します。</p>
+
+``` /app/views/messages/new.html.erb
+<h1>Contact Us</h1>
+
+<%= form_for @message do |f| %>
+  <% if @message.errors.any? %>
+    <div class="error_messages">
+      <h2><%= pluralize(@message.errors.count, "error") %>  prohibited this message from being saved:</h2>
+      <ul>
+      <% @message.errors.full_messages.each do |msg| %>
+        <li><%= msg %></li>
+      <% end %>
+      </ul>
+    </div>
+  <% end %>
+  <div class="field">
+    <%= f.label :name %><br />
+    <%= f.text_field :name %>
+  </div>
+  <div class="field">
+    <%= f.label :email %><br />
+    <%= f.text_field :email %>
+  </div>
+  <div class="field">
+    <%= f.label :content, "Message" %><br />
+    <%= f.text_area :content, :rows => 5 %>
+  </div>
+  <div class="actions"><%= f.submit "Send Message" %></div>
+<% end %>
+```
+
+<p>このビューにフォーム用のコードがあります。ここでは<code>form_for</code>を使ってフォームを定義していて、コントローラからmessageモデルのインスタンスを渡していることに注目してください。scaffoldで生成されたコードの場合と同じようにエラーメッセージを表示させるので、ビューテンプレートからはActiveRecordモデルを処理するコードと同じように見えます。フォームが送信されると、コントローラの<code>create</code>アクションが起動されます。</p>
+
+``` /app/controllers/messages_controller.rb
+class MessagesController < ApplicationController
+  def new
+    @message = Message.new
+  end
+
+  def create
+    @message = Message.new(params[:message])
+    if @message.valid?
+      # TODO send message here
+      redirect_to root_url, notice: "Message sent! Thank you for contacting us."
+    else
+      render "new"
+    end
+  end
+end
+```
+
+<p>このアクションがフォームから入力されたパラメータに基づいて新規の<code>Message</code>インスタンスを生成し、新規のメッセージが有効かどうかをチェックします。有効な場合はメッセージをメール送信し、トップページにリダイレクトします。無効な場合はフォームを再度出力します。このmessageモデルはActiveRecordと同じように振る舞ってほしいのですが、ただ検証だけをおこないデータベーステーブルには保存しません。</p>
+
+<p><code>Message</code>モデルは現状ではActiveModelを使用してこの振る舞いを処理していて、エピソードの最初の部分でそのコードを紹介しました。今回このアプローチは使わないことにして、その代わりにActiveAttrを利用します。そのためにはgemfileにgemを追加し、<code>bundle</code>コマンドを実行してインストールします。</p>
+
+``` /Gemfile
+gem 'active_attr'
+```
+
+<p>これでモデルでActiveAttrを利用できるようになりました。</p>
+
+``` /app/models/message.rb
+class Message
+  include ActiveAttr::Model
+end
+```
+
+<p><code>Message</code>が他のクラスを継承していないことに注目してください。それは単なるRubyクラスです。<code>ActiveAttr::Model</code>をincludeすることによって、ActiveModelをベースにした機能を追加して、このクラスがActiveRecordモデルに似た振る舞いをするようにしています。モデルの属性は<code>attribute</code>を使って定義でき、検証についてもActiveRecordから派生したクラスと同じ方法で追加することができます。</p>
+
+``` /app/models/message.rb
+class Message
+  include ActiveAttr::Model
+  
+  attribute :name
+  attribute :email
+  attribute :content
+  
+  validates_presence_of :name
+  validates_format_of :email, :with => /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+  validates_length_of :content, :maximum => 500
+end
+```
+
+<p>これで、ActiveRecordモデルと同じように振る舞う、フル機能のモデルができました。再度フォームを開いてフィールドに何も入力せずに送信すると、想定通りに検証エラーが表示されますが、モデルのコードはずっとシンプルになりました。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1012/original/E326I02.png" width="800" height="561" alt="フォームが正しく記入されなかった場合、検証エラーが表示される"/>
+</div>
+
+<h3>一括設定の防止</h3>
+
+<p>ActiveAttrには一括設定を防止する機能もあります。例えば、Messageモデルに優先度という属性があり、それをフォームの値から設定したくないとします。ActiveRecordモデルの場合と同じように、<code>attr_accessible</code>を使ってアクセスできる属性を定義できます。</p>
+
+``` /app/models/message.rb
+class Message
+  include ActiveAttr::Model
+  
+  attribute :name
+  attribute :email
+  attribute :content
+  attribute :priority
+  
+  attr_accessible :name, :email, :content
+
+  validates_presence_of :name
+  validates_format_of :email, :with => /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+  validates_length_of :content, :maximum => 500
+end
+```
+
+<p>この振る舞いをコンソールでテストできます。新規の<code>Message</code>の作成時に<code>priority</code>を設定しようとすると失敗しますが、直接<code>priority</code>を設定することは可能です。</p>
+
+``` console
+1.9.3p0 :001 > m = Message.new(priority: 1)
+ => #<Message content: nil, email: nil, name: nil, priority: nil> 
+1.9.3p0 :002 > m.priority
+ => nil 
+1.9.3p0 :003 > m.priority = 1
+ => 1
+``` 
+
+<p>ActiveAttrは、ActiveRecordと同じように、属性にクエスチョンマークをつけて呼び出すことでその値をブール値に限定することもできます。ActiveAttrの今後のバージョンでは<code>attribute</code>に追加のオプションを渡すことで属性の型やデフォルト値を指定することが可能になる予定です。</p>
+
+``` /app/models/message.rb
+ attribute :priority, type: Integer, default: 0
+``` 
+
+<p>これらのオプションはまだ利用できませんが、間もなく公開されるはずなので、ActiveAttrのGithubページをチェックしてみるのがいいでしょう。</p>
+
+<p>ActiveAttrについての今回のエピソードは以上です。これはテーブル無しのモデルを作成する優れた方法です。ドキュメントにはそれを使ってできることについてさらに詳しい情報があります。今回はすべての機能が入った<code>ActiveAttr::Model</code>モジュールを使用しましたが、一部の機能しか利用しない場合には機能ごとの個別のモジュールがあるので、それらを使うこともできます。</p>

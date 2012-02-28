@@ -1,0 +1,208 @@
+<p>RailsアプリケーションでJavaScriptが大きな部分を占める場合、サーバ上のアプリケーションからクライアントで使用されるためにデータをJavaScriptに渡さなくてはいけないときがあります。今回のエピソードでは、それをおこなうためのテクニックを探っていきます。下の画面はシンプルなRailsアプリケーションのシンプルなページです。ここでおこないたいのは、JavaScriptの機能を使って商品データを取得して表示する処理です。そのためにはアプリケーションからクライアントで実行されているJavaScriptに情報を渡す必要があります。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/992/original/E324I01.png" width="800" height="280" alt="商品ページ"/>
+</div>
+
+<p>このページのビューテンプレートは、ページを見てもわかるとおりシンプルです。</p>
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<div id="products">
+  Loading products...
+</div>
+```
+
+<p>例えば、商品のリストを取得するために、アプリケーションのJavaScriptが呼び出すURLを知らなくてはいけないとします。これをJavaScriptコードに直接記述したくはないので、Railsアプリケーションで動的に生成します。これを実現する一つの方法はビューで<code>javascript_tag</code>を使用する方法です。</p>
+
+``` /app/views/products/index.html.erb
+<%= javascript_tag do %>
+  window.productsURL = '<%= j products_url %>';
+<% end %>
+```
+
+<p>Railsの<code>j</code>メソッドを使ってJavaScriptに埋め込むURLが安全にエスケープされるようにしている点に注目してください。このページが参照するJavaScriptやCoffeeScriptファイルでこの変数を使用することができます。</p>
+
+``` /app/assets/javascripts/products.js.coffee
+jQuery ->
+  alert productsURL
+```  
+
+<p>商品の最初のひとかたまりが入ったページを、別のリクエストで取得するのではなくあらかじめ読み込んでおきたいという場合、例えば最初の10件の商品をJSONとして取得してJavaScriptでそのまま表示させる方法があります。これをおこなうためには次のように記述します。</p>
+
+``` /app/views/products/index.html.erb
+<%= javascript_tag do %>
+  window.productsURL = '<%= j products_url %>';
+  window.products = <%= raw Product.limit(10).to_json %>
+<% end %>
+```
+
+<p>Railsが自動的に商品リストをHTMLエスケープしようとするので、返されるJSONに対してrawを呼び出します。</p>
+
+<p>このアプローチはすぐに行き詰まる可能性が高く、HTMLに対してデータ属性を使用する方がよりよい選択肢である場合の方が多いでしょう。次のように商品リストのURLを渡します。</p>
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<div id="products" data-url="<%= products_url %>">
+  Loading products...
+</div>
+``` 
+
+<p>jQueryコードを使って、この情報を簡単に取得することができます。</p>
+
+``` /app/assets/javascripts/products.js.coffee
+jQuery ->
+  alert $('#products').data('url') 
+```  
+
+<p>このテクニックは同じ効果がありますが、HTML属性の中でErbタブをネストしなくてはいけないことを除いては、多少きれいに感じます。HTMLタグに動的なデータを挿入するためには、一般的には<code>content_tag</code>を用いるのがよりよいアプローチだと言えます。</p>
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<%= content_tag "div", id: "products", data: {url: products_url} do %>
+  Loading products...
+<% end %>
+```
+
+<p>Rails 3.1以降は<code>data</code>ハッシュを使ってデータ属性を定義することができるので、このアプローチを選ぶ意味がさらに高まります。Rubyオブジェクトをこのハッシュに渡すと、<code>to_json</code>が呼び出されて渡されたオブジェクトは自動的にJSON形式に変換されます。</p>
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<%= content_tag "div", id: "products", data: {url: Product.limit(10) } do %>
+  Loading products...
+<% end %>
+```
+
+<p>このデータを取得すると、自動的に解析されてJavaScriptオブジェクトに変換されます。 </p>
+
+``` /app/assets/javascripts/products.js.coffee
+jQuery ->
+  console.log $('#products').data('url')
+```  
+
+<p>ここでページをリロードすると、コンソールに商品がリスト表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/993/original/E324I02.png" width="801" height="400" alt="商品のJSON表記がコンソールに表示される"/>
+</div>
+
+<h3>Gon</h3>
+
+<p>JavaScriptに渡すデータが多い場合、この方法はかなり煩雑になってしまいます。幸いなことに利用できるもう一つのツールとして、<a href="https://github.com/gazay/gon">Gon gem</a>があります。これを使うとコントローラ内で変数を設定して、JavaScriptからそれにアクセスできるようになります。Gonは通常の方法でインストールできるので、gemfileに追加して<code>bundle</code>コマンドを実行します。</p>
+
+``` /Gemfile
+source 'https://rubygems.org'
+
+gem 'rails', '3.2.1'
+gem 'sqlite3'
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~> 3.2.3'
+  gem 'coffee-rails', '~> 3.2.1'
+
+  # See https://github.com/sstephenson/execjs#readme for more supported runtimes
+  # gem 'therubyracer'
+
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+gem 'gon'
+```
+
+<p>次にアプリケーションのレイアウトファイルを更新するために、<code>head</code>セクションの適当な場所に<code>include_gon</code>を追加します。</p>
+
+``` /app/views/layouts/application.html.erb
+<head>
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <title>Store</title>
+  <%= include_gon %>
+  <%= stylesheet_link_tag    "application", media: "all" %>
+  <%= javascript_include_tag "application" %>
+  <%= csrf_meta_tag %>
+</head>
+```
+
+<p>その他のJavaScriptファイルを読み込む前にこれをおこなえば、DOM全体がロードされるのを待つことなく、Gonを介して設定した変数にアクセスすることができます。</p>
+
+<p>コントローラアクションの<code>gon</code>オブジェクトに変数を設定します。</p>
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    gon.products = Product.limit(10)
+  end
+end
+```
+
+<p>この商品リストは自動的にJSONに変換されて、アプリケーションのJavaScriptからアクセス可能になります。この商品リストに次のようにアクセスします。</p>
+
+``` /app/assets/javascripts/products.js.coffee
+console.log gon.products
+```
+
+<p>DOMがロードし終わるのを待つことなくこのデータにアクセスできることに注目してください。ページをリロードすると、コンソールに再度商品リストが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/994/original/E324I03.png" width="801" height="400" alt="コンソールにGonからの商品リストのJSON表現が表示される。"/>
+</div>
+
+<p>ページのソースを見るとしくみがわかります。</p>
+
+``` html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Store</title>
+	<script>window.gon = {};gon.products=[{"created_at":"2012-02-18T20:24:45Z","id":1,"name":"Settlers of Catan","price":"29.95","updated_at":"2012-02-18T20:24:45Z"},{"created_at":"2012-02-18T20:24:45Z","id":2,"name":"DVD Player","price":"79.98999999999999","updated_at":"2012-02-18T20:24:45Z"},{"created_at":"2012-02-18T20:24:45Z","id":3,"name":"Red Shirt","price":"12.49","updated_at":"2012-02-18T20:24:45Z"}];</script>
+    
+    // Other products omitted.
+    
+    <link href="/assets/application.css?body=1" media="all" rel="stylesheet" type="text/css" />
+<link href="/assets/products.css?body=1" media="all" rel="stylesheet" type="text/css" />
+    <script src="/assets/jquery.js?body=1" type="text/javascript"></script>
+<script src="/assets/jquery_ujs.js?body=1" type="text/javascript"></script>
+<script src="/assets/products.js?body=1" type="text/javascript"></script>
+<script src="/assets/application.js?body=1" type="text/javascript"></script>
+    <meta content="authenticity_token" name="csrf-param" />
+<meta content="KktOQAWKvaRho+IdWOiaBud0W7Vuv31rdn0LF38hBag=" name="csrf-token" />
+  </head>
+  <body><!-- Body omitted -->
+    
+  </body>
+</html>
+```
+
+<p>Gonは単に<code>script</code>タグを作成し、<code>gon</code>変数にコントローラで設定したデータを設定します。クライアントに返されるJSONをカスタマイズするときのために、GonはRABLとJbuilderの両方のテンプレートをサポートしており、それぞれ最近のエピソードで紹介しました。商品リストから返されるデータをカスタマイズするには、<code>index.json.rabl</code>ファイルを作成して、その中で返したい属性を定義します。</p>
+
+``` /app/views/products/index.json.rabl
+collection Product.limit(10)
+
+attributes :id, :name, :price
+```
+
+<p><code>gon.rabl</code>を使ってGonに対してこのテンプレートを使用するように指示します。 </p>
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    gon.rabl "app/views/products/index.json.rabl", as: "products"
+  end
+end
+```
+
+<p>これはテンプレートからのレスポンスを<code>products</code>変数に保存します。ページをリロードすると同じ商品リストが表示されますが、属性はRABLテンプレートで定義されたものです。</p>
+
+<p>Gonを使う場合に気をつけなくてはいけない点が一つあります。コントローラアクションで<code>gon</code>変数を定義せずにJavaScriptから<code>gon</code>を呼び出そうとすると、<code>gon</code>オブジェクトが設定されていないためにエラーが発生します。このオブジェクトに対して何かを呼び出す前には、常にまずそれが存在することを確認するのがいいでしょう。</p>
+
+``` /app/assets/javascripts/products.js.coffee
+console.log gon.products if gon
+```
+
+<p><a href="https://github.com/gazay/gon/blob/master/README.md">ドキュメント</a>にGonについての追加の情報があり、自分のRailsアプリケーションでの利用を検討している方には一読の価値があるでしょう。</p>

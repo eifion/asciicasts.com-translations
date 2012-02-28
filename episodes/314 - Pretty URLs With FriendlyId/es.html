@@ -1,0 +1,194 @@
+<p>Supongamos que tenemos una sencilla aplicación de blog en Rails.   La página principal muestra un listado con los artículos más recientes así como un enlace a cada uno.  Si hacemos clic en uno de estos enlaces iremos a la página de dicho artículo pero la URL que aparece no resulta muy descriptiva del contenido que ofrece.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/926/original/E314I01.png" width="800" height="379" alt="El identificador de uno de nuestros artículos aparece en la URL."/>
+</div>
+
+<p>El artículo queda descrito en la URL sólo por su <code>id</code> interno, que es el comportamiento por defecto en Rails.  Las URLs de nuestra aplicación quedarían más descriptivas si de alguna manera se incluyese el nombre del artículo.</p>
+
+<p>La forma más fácil de hacer esto en Rails es sobreescribiendo el método <code>to_param</code> en el modelo correspondiente a las URLs que queremos cambiar, en este caso <code>Article</code>.  Se trata de un método interno que Rails usa para convertir un objeto en un parámetro de URL.</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  def to_param
+    "#{id} #{name}".parameterize
+  end
+end
+```
+
+<p>Hemos sobreescrito el método para que devuelva también el nombre del artículo.  Tenemos que llamar a <code>parameterize</code> sobre la cadena para convertirla a un valor que se pueda mostrar en la URL.  Con esto la URL de nuestro artículo pasará a ser así:</ActiveRecord::Base>
+
+```
+http://localhost:3000/articles/1-superman
+```
+
+<p>Es importante tener en cuenta que el <code>id</code> del objeto está al principio de la URL de forma que el método <code>find</code> de ActiveRecord sigue funcionando.  Si no queremos incluir el <code>id</code> numérico del objeto la cosa se complica un poco más.</p>
+
+<h3>Introducción a FriendlyId</h3>
+
+<p>Aquí es donde aparece <a href="https://github.com/norman/friendly_id">FriendlyId</a>.  Se trata de un <em>plugin</em> que facilita el uso del nombre del modelo en la URL sin tener que poner el <code>id</code> como prefijo.  La gema ofrece varias posibilidades pero antes de repasarlas veremos qué es lo que hay que hacer para añadirla a nuestra aplicación.  Como siempre lo primero que hay que hacer es añadirlo al <code>Gemfile</code> de nuestra aplicación y luego ejecutar <code>bundle</code> para la instalación.</p>
+
+``` /Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.1.3'
+
+# Bundle edge Rails instead:
+# gem 'rails',     :git => 'git://github.com/rails/rails.git'
+
+gem 'sqlite3'
+
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~> 3.1.4'
+  gem 'coffee-rails', '~> 3.1.1'
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+gem 'friendly_id'
+```
+
+<p>Ahora en lugar de redefinir el método <code>to_param</code> extendemos el modelo con el módulo <code>FriendlyId</code> y definimos el atributo que queremos utilizar en la URL.</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  extend FriendlyId
+  friendly_id :name
+end
+```
+
+<p>Nuestro artículo ahora aparecerá con una URL que incluye el atributo <code>name</code> pero no el <code>id</code>.</ActiveRecord::Base>
+	
+```
+http://localhost:3000/articles/Superman
+```
+
+<p>Sin embargo este enfoque no resulta particularmente atractivo para artículos que tienen nombres más complicados; un artículo llamado  &ldquo;Batman &amp; Robin&rdquo; acabará con la siguiente URL:</p>
+
+```
+http://localhost:3000/articles/Batman%20&%20Robin
+```
+
+<h3>Uso de <em>slugs</em></h3>
+
+<p>La URL se genera a partir del nombre completo del artículo incluyendo espacios y puntos.  Esto no es un problema si el parámetro que se pasa a FriendlyId ya es susceptible de aparecer en una URL, pero no es este el caso con los nombres de nuestros artículos por lo que tendremos que utilizar un nuevo atributo para el <a href="http://en.wikipedia.org/wiki/Slug_(web_publishing)">slug</a>, lo que podremos hacer utilizando la opción <code>use</code> del método <code>friendly_id</code>.</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  extend FriendlyId
+  friendly_id :name, use: :slugged
+end
+```
+
+<p>Este método buscará una columna <code>slug</code> en la tabla de <code>articles</code> en la base de datos por lo que tendremos que crearla con una migración.</p>
+
+``` terminal
+$ rails g migration add_slug_to_articles slug:string
+```
+
+<p>Siempre es buena idea añadir un índice para este atributo porque será el que usaremos para encontrar registros.</p>
+
+``` /db/migrate/20120101000000_add_slug_to_articles.rb
+class AddSlugToArticles < ActiveRecord::Migration
+  def change
+    add_column :articles, :slug, :string
+    add_index :articles, :slug
+  end
+end
+```
+
+<p>Ya podemos lanzar <code>rake db:migrate</code> para añadir la columna y su índice a la base de datos.  Tenemos que hacer una cosa más: ya tenemos algunos artículos y su columna <code>slug</code> estará vacía por lo que tenemos que rellenarla.  Para corregir esto podemos abrir la consola Rails y volver a guardar cada registro.</p>
+
+``` irb
+1.9.2-p290 :001 > Article.find_each(&:save)
+```
+
+<p>Nuestro artículo &ldquo;Batman &amp; Robin&rdquo; tendrá ahora una URL mucho mejor basada en su <em>slug</em>:</p>
+
+```
+http://localhost:3000/articles/batman-robin
+```
+
+<h3>Cómo gestionar los cambios de nombre</h3>
+
+<p>Si editamos un artículo y modificamos su nombre, el <em>slug</em> también cambiará.  Por ejemplo si cambiamos nuestro artículo llamado &ldquo;Batman &amp; Robin&rdquo; para que se llame &ldquo;Batman &amp; Robin 2&rdquo; esto hará que cambie su <em>slug</em> a  <code>batman-robin-2</code> y por tanto la URL también lo hará.  Si visitamos la URL antigua del artículo veremos un mensaje de error.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/927/original/E314I02.png" width="800" height="379" alt="La URL antigua devuelve un error."/>
+</div>
+
+<p>Hay varias soluciones para este problema.  Una es hacer que FriendlyId no actualice el <em>slug</em> cuando se modifique el nombre del artículo, lo que podemos hacer modificando el método <code>should_generate_new_friendly_id?</code>.</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  extend FriendlyId
+  friendly_id :name, use: :slugged
+  
+  def should_generate_new_friendly_id?
+    new_record?
+  end
+end
+```
+
+<p>Con este código el <em>slug</em> sólo se generará cuando se cree un nuevo <code>Article</code>.  Si actualizamos el artículo  &ldquo;Batman &amp; Robin 2&rdquo; y le ponemos &ldquo;Batman &amp; Robin 3&rdquo; el <em>slug</em> seguirá siendo <code>batman-robin-2</code>.</p>
+
+<p>Pero ¿y si queremos lo mejor de ambos mundos, de forma que se actualice el <em>slug</em> cuando cambie el nombre pero las URLs antiguas sigan funcionando?  Podemos hacerlo utilizando la opción <code>history</code> de FriendlyId.  Tendremos que eliminar el método  <code>should_generate_new_friendly_id?</code> que hemos redefinido antes y añadir la opción  <code>history</code> que mantiene un registro de los <em>slugs</em> anteriores.</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  extend FriendlyId
+  friendly_id :name, use: [:slugged, :history]
+end
+```
+
+<p>Por supuesto hay que guardar este historial en algún sitio por lo que necesitamos una nueva tabla en la base de datos.  Con FriendlyId se incluye un generador que lo hará por nosotros.</p>
+
+``` terminal
+$ rails g friendly_id
+      create  db/migrate/20120101000001_create_friendly_id_slugs.rb
+```	  
+
+<p>Cuando ejecutemos <code>rake db:migrate</code> esta orden creará una nueva tabla <code>friendly_id_slugs</code> .</p>
+
+<p>Pero hay una trampa contra la que tenemos que estar prevenidos: la funcionalidad de historial sólo funcionará con los registros nuevos, si tenemos registros anteriores tendremos que regenerarlos para que adquieran su historial.  Crearemos un nuevo artículo llamado  &ldquo;Hello World&rdquo;  para poder hacer la prueba.  El artículo tendrá la siguiente URL:</p>
+
+```
+http://localhost:3000/articles/hello-world
+```
+
+<p>Si editamos el artículo y ponemos el nombre a &ldquo;Hello World 2&rdquo; el <em>slug</em> cambiará a <code>hello-world-2</code> pero la URL original seguirá funcionando.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/928/original/E314I03.png" width="800" height="379" alt="La URl original sigue funcionando."/>
+</div>
+
+<p>Sería mejor que nos devolviesen una redirección a la URL más moderna cuando visitemos una URL antigua, para lo que tenemos que hacer algunos cambios al controlador.  El controlador <code>ArticlesController</code> es un controlador RESTful normal con las siete acciones habituales.  Tendremos que cambiar la acción <code>show</code> que es la que muestra un artículo.  Este es el aspecto que tiene ahora mismo:</p>
+
+``` /app/controllers/articles_controller.rb
+def show
+  @article = Article.find(params[:id])
+end
+```
+
+<p>Queremos que la acción nos redirija a la URL actual del artículo si la URL por la que hemos llegado no es la más reciente.  Podemos hacer esto si la ruta que se ha utilizado para acceder la página no es igual que la ruta actual del artículo: si es este el caso, es que estamos usando un <em>slug</em> antiguo o el <code>id</code> del artículo.  En cualquier caso, debemos hacer una redirección.</p>
+
+```/app/controllers/articles_controller.rb
+def show
+  @article = Article.find(params[:id])
+  if request.path != article_path(@article)
+    redirect_to @article, status: :moved_permanently
+  end
+end
+```
+
+<p>Si visitamos http://localhost:3000/articles/hello-world iremos a la URL actual del artículo.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/929/original/E314I04.png" width="800" height="379" alt="La URL antigua nos redirige a la nueva."/>
+</div>
+
+<p>Con esto ya hemos visto varias de las funcionalidades de FriendlyId, pero conviene leer la <a href="http://rubydoc.info/github/norman/friendly_id/master/frames">documentación</a> para ver el resto.  Por ejemplo el módulo Reserved permite reservar ciertas palabras de forma que no puedan usar (por ejemplo 'new' y 'edit'). El módulo Scoped permite restringir el ámbito de los <em>slugs</em> dentro de una asociación y el módulo SimpleI18n añade soporte para múltiples idiomas.</p>

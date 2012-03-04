@@ -1,0 +1,203 @@
+<p>Nuestras aplicaciones pueden devolver datos JSON de nuestros modelos de varias maneras.  Se puede redefinir el m&eacute;todo <code>as_json</code> del modelo o utilizar la  gema <a href="https://github.com/rails/jbuilder">Jbuilder</a> tal y como vimos en el <a href="http://railscasts.com/episodes/320-jbuilder">episodio 320</a>.  Otra soluci&oacute;n muy popular es la gema <a href="https://github.com/nesquena/rabl">RABL</a>. RABL significa Ruby API Builder Language y su funcionalidad algo m&aacute;s completa que el resto de soluciones.</p>
+
+<p>En este episodio veremos c&oacute;mo funciona RABL, utilizando la misma aplicaci&oacute;n de ejemplo del episodio dedicado a Jbuilder, y as&iacute; podremos ver mejor las diferencias entre ambas librer&iacute;as.  La aplicaci&oacute;n es una aplicaci&oacute;n de <em>blog</em> que tiene varios art&iacute;culos y queremos ver los datos de cada art&iacute;culo en formato JSON a&ntilde;adiendo <code>.json</code> a la URL de dicho art&iacute;culo.  Si ahora mismo hacemos esto veremos un mensaje de error porque la aplicaci&oacute;n no sabe c&oacute;mo responder a peticiones JSON.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/976/original/E322I01.png" width="800" height="393" alt="Nuestra aplicación de blog."/>
+</div>
+
+<h3>En marcha con RABL</h3>
+
+<p>Para hacer esto podr&iacute;amos modificar <code>ArticlesController</code>, asegur&aacute;ndonos de que la acci&oacute;n <code>show</code> responde a las peticiones JSON y luego devolver una representaci&oacute;n en JSON del art&iacute;culo, pero en lugar de esto en este episodio vamos a usar RABL.  Se trata de una gema que se instala de la forma habitual, a&ntilde;adi&eacute;ndola al <code>Gemfile</code> y ejecutando <code>bundle</code>.</p>
+
+``` /Gemfile
+gem 'rabl'
+```
+
+<p>De forma an&aacute;loga a Jbuilder RABL incluye un gestor de plantillas por lo que podemos definir la respuesta en JSON en la capa de la vista.  Creemos una plantilla para la representaci&oacute;n en JSON de un art&iacute;culo.  Podemos hacerlo con c&oacute;digo Ruby utilizando el DSL de RABL.</p>
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+```
+
+<p>Lo primero que aparece en una plantilla RABL por lo general es una llamada a <code>object</code>,  a la que se la pasa el objeto sobre el que queremos trabajar.  Luego llamamos a <code>attributes</code> para definir qu&eacute; atributos queremos devolver.  Ya podemos visitar la URL del art&iacute;culo en JSON y podemos ver que se devuelve el JSON que hemos definido en la plantilla.</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z"}}
+```
+
+<p>Si se quieren especificar atributos m&aacute;s complejos podemos utilizar el m&eacute;todo <code>node</code> y pasarle un nombre y un bloque, de forma que se usar&aacute; como valor lo que devuelva el bloque.</p>
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+node(:edit_url) { "..." }
+```
+
+<p>Con esto a&ntilde;adiremos un atributo llamado <code>edit_url</code> al JSON.</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"..."}}
+```
+
+<p>En las plantillas de RABL tenemos acceso a los m&eacute;todos <em>helper</em> por lo que podemos usar <code>edit_article_url</code> para obtener la URl para editar un art&iacute;culo y <code>current_user</code> de forma que s&oacute;lo mostremos esta URL si el usuario dispone de privilegios de  administraci&oacute;n (asumiendo que la soluci&oacute;n de autenticaci&oacute;n que usamos dispone de un m&eacute;todo llamado <code>current_user</code>)</p>
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+if current_user.admin?
+  node(:edit_url) { edit_article_url(@article) }
+end
+```
+
+<p>Pero esto tiene un problema, no es buena pr&aacute;ctica  usar la variable de instancia del art&iacute;culo en <code>edit_article_url</code>, deber&iacute;amos utilizar el objeto de art&iacute;culo que se pasa al bloque.</p>
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+if current_user.admin?
+  node(:edit_url) { |article| edit_article_url(article) }
+end
+```
+
+<p>El objeto que se le pasa al bloque es el mismo objeto que se le pasa al m&eacute;todo <code>object</code>.  Hay una raz&oacute;n importante que veremos m&aacute;s adelante  por la que es mejor usar el objeto pasado al bloque.  Si vemos el JSON del art&iacute;culo veremos el atributo <code>edit_url</code> con el valor correcto.</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit"}}
+```
+
+<h3>Registros asociados</h3>
+
+<p>Es f&aacute;cil incluir datos de los registros asociados, si queremos hacerlo.  En nuestra aplicaci&oacute;n un <code>Article</code> pertenece a un <code>Author</code> y tiene muchos <code>Comments</code>.  Podemos utilizar el m&eacute;todo <code>child</code> de RABL para incluir la informaci&oacute;n correspondiente a estos modelos asociados.</p>
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+if current_user.admin?
+  node(:edit_url) { |article| edit_article_url(article) }
+end
+
+child :author do
+  attributes :id, :name
+  node(:url) { |author| author_url(author) }
+end
+```
+
+<p>El c&oacute;digo para generar el JSON del autor asociado es muy similar al c&oacute;digo necesario para generar el JSON del art&iacute;culo.  La &uacute;nica diferencia es que al bloque del nodo se le pasa un autor en lugar de un art&iacute;culo.  Si ahora abrimos el JSON veremos, como es de esperar, los detalles del autor del art&iacute;culo.</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"}}}
+```
+
+<p>Podemos hacer lo mismo con la asociaci&oacute;n <code>Comments</code> aunque como estamos tratando con una relaci&oacute;n <code>has_many</code> tenemos que usar el nombre en plural.</p>
+
+``` /app/views/articles/show.json.rabl
+object @article
+attributes :id, :name, :published_at
+if current_user.admin?
+  node(:edit_url) { |article| edit_article_url(article) }
+end
+
+child :author do
+  attributes :id, :name
+  node(:url) { |author| author_url(author) }
+end
+
+child :comments do
+  attributes :id, :name, :content
+end
+```
+
+<p>En la respuesta JSON los comentarios aparecer&aacute;n anidados en un <em>array</em>, no como un registro sencillo como el autor.</p>
+
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"},"comments":[{"comment":{"id":1,"name":"Lois Lane","content":"Does anyone know where I can find Superman?"}},{"comment":{"id":2,"name":"Lex Luthor","content":"I have some Kryptonite for you Superman!"}}]}}
+```
+
+<h3>Reutilizaci&oacute;n de plantillas</h3>
+
+<p>Hemos adaptado los datos JSON que generamos a nuestro art&iacute;culo pero, &iquest;y si queremos generar la misma salida en alg&uacute;n otro sitio de nuestra aplicaci&oacute;n?  Podr&iacute;amos querer que la acci&oacute;n <code>index</code> de <code>ArticlesController</code> mostrase la misma salida en JSON pero para todos los art&iacute;culos.  Aqu&iacute; es donde RABL resulta m&aacute;s brillante; lo &uacute;nico que tenemos que hacer es generar una plantilla RABL para la acci&oacute;n <code>index</code>.</p>
+
+``` /app/views/articles/index.json.rabl
+collection @articles
+
+extends "articles/show"
+```
+
+<p>Al trabajar con m&uacute;ltiples art&iacute;culos utilizaremos <code>collection</code> en lugar de <code>object</code>.  Podr&iacute;amos definir los atributos que queramos igual que en la plantilla anterior, pero como queremos generar el mismo JSON vamos a reutilizar la misma plantilla llamando a <code>extends</code> y pas&aacute;ndole el nombre.  Si ahora abrimos <code>articles.json</code> veremos los datos en JSON de todos los art&iacute;culos.</p>
+
+``` terminal
+$ curl http://localhost:3000/articles.json
+[{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"},"comments":[{"comment":{"id":1,"name":"Lois Lane","content":"Does anyone know where I can find Superman?"}},{"comment":{"id":2,"name":"Lex Luthor","content":"I have some Kryptonite for you Superman!"}}]}},{"article":{"id":2,"name":"Krypton","published_at":"2012-01-05T18:38:50Z","edit_url":"http://localhost:3000/articles/2/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"},"":[]}},{"article":{"id":3,"name":"Batman & Robin","published_at":"2012-01-26T18:38:50Z","edit_url":"http://localhost:3000/articles/3/edit","author":{"id":1,"name":"Bruce Wayne","url":"http://localhost:3000/authors/1"},"comments":[{"comment":{"id":3,"name":"The Joker","content":"Haha, Batman, you will see your bat signal tonight!"}},{"comment":{"id":4,"name":"Robin","content":"Enough with the games Joker."}},{"comment":{"id":5,"name":"Riddler","content":"Did someone say games?"}}]}}]
+```
+
+<p>La posibilidad de reutilizar plantillas de esta manera es la raz&oacute;n por la que debemos minimizar el uso de variables de instancia en nuestras plantillas RABL.  Como s&oacute;lo usamos la variable <code>@article</code> en la plantilla <code>show</code> cuando definimos el objeto, resulta m&aacute;s f&aacute;cil reutilizar esta plantilla porque en la llamada a <code>node</code> estamos usando el art&iacute;culo en lugar de la variable de instancia.</p>
+
+<h3>Nodos ra&iacute;z</h3>
+
+<p>Puede comprobarse que el JSON generado por RABL incluye el nombre del modelo como nodo ra&iacute;z.</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"article":{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"},"comments":[{"comment":{"id":1,"name":"Lois Lane","content":"Does anyone know where I can find Superman?"}},{"comment":{"id":2,"name":"Lex Luthor","content":"I have some Kryptonite for you Superman!"}}]}}
+```
+
+<p>Esto a veces puede no interesar.  En Rails 3.1 la salida por defecto en JSON no incluye el elemento ra&iacute;z, y si queremos que RABL haga lo mismo tenemos que hacerlo por configuraci&oacute;n.  Podemos hacerlo en un nuevo fichero en el directorio <code>config/initializers</code>, asignando a <code>include_json_root</code> el valor <code>false</code>.</p>
+
+``` /config/initializers/rabl_config.rb
+Rabl.configure do |config|
+  config.include_json_root = false
+end
+```
+
+<p>Como se ha modificado un inicializador tendremos que reiniciar la aplicaci&oacute;n para que estos cambios tengan efecto.  Tras esto, veremos que el JSON del primer art&iacute;culo ya no incluir&aacute; el nodo ra&iacute;z.</p>
+
+``` terminal
+$ curl http://localhost:3000/articles/1.json
+{"id":1,"name":"Superman","published_at":"2012-01-19T18:38:50Z","edit_url":"http://localhost:3000/articles/1/edit","author":{"id":2,"name":"Clark Kent","url":"http://localhost:3000/authors/2"},"comments":[{"id":1,"name":"Lois Lane","content":"Does anyone know where I can find Superman?"},{"id":2,"name":"Lex Luthor","content":"I have some Kryptonite for you Superman!"}]}
+```
+
+<p>Se dan m&aacute;s detalles sobre las opciones de configuraci&oacute;n en la secci&oacute;n &quot;Configuration&quot; del <a href="https://github.com/nesquena/rabl/blob/master/README.md">README de RABL</a>. Hay otras funcionalidades que no hemos visto, como por ejemplo la serializaci&oacute;n a XML y <a href="http://msgpack.org/">Message Pack</a>.</p>
+
+<h3>C&oacute;mo embeber JSON en una p&aacute;gina web</h3>
+
+<p>A veces en lugar de llamar a una acci&oacute;n separada queremos incluir JSON directamente en un documento HTML.  &iquest;C&oacute;mo podemos hacerlo con RABL?  La plantilla HTML de la accion <code>index</code> tiene el siguiente aspecto:</p>
+
+``` /app/views/articles/index.html.erb
+<h1>Articles</h1>
+
+<div id="articles">
+<% @articles.each do |article| %>
+  <h2>
+    <%= link_to article.name, article %>
+    <span class="comments">(<%= pluralize(article.comments.size, 'comment') %>)</span>
+  </h2>
+  <div class="info">
+    by <%= article.author.name %>
+    on <%= article.published_at.strftime('%b %d, %Y') %>
+  </div>
+  <div class="content"><%= article.content %></div>
+<% end %>
+</div>
+```
+
+<p>A&ntilde;adiremos el JSON de los art&iacute;culos en un atributo <code>data-</code> del <code>div</code> contenedor.  Podr&iacute;amos tambi&eacute;n invocar a <code>@articles.to_json</code> pero no estar&iacute;amos usando la plantilla RABL.  En vez de esto podemos llamar a <code>render(:template)</code> y pasar el nombre de la plantilla.</p>
+
+``` /app/views/articles/index.html.erb
+<div id="articles" data-articles="<%= render(template: "articles/index.json.rabl") %>" >
+```
+
+<p>Si recargamos la p&aacute;gina y vemos el c&oacute;digo fuente veremos el JSON embebido.</p>
+
+``` html
+<div id="articles" data-articles="[{&quot;id&quot;:1,&quot;name&quot;:&quot;Superman&quot;,&quot;published_at&quot;:&quot;2012-01-19T18:38:50Z&quot;,&quot;edit_url&quot;:&quot;http://localhost:3000/articles/1/edit&quot;,&quot;author&quot;:{&quot;id&quot;:2,&quot;name&quot;:&quot;Clark Kent&quot;,&quot;url&quot;:&quot;http://localhost:3000/authors/2&quot;},&quot;comments&quot;:[{&quot;id&quot;:1,&quot;name&quot;:&quot;Lois Lane&quot;,&quot;content&quot;:&quot;Does anyone know where I can find Superman?&quot;},{&quot;id&quot;:2,&quot;name&quot;:&quot;Lex Luthor&quot;,&quot;content&quot;:&quot;I have some Kryptonite for you Superman!&quot;}]},{&quot;id&quot;:2,&quot;name&quot;:&quot;Krypton&quot;,&quot;published_at&quot;:&quot;2012-01-05T18:38:50Z&quot;,&quot;edit_url&quot;:&quot;http://localhost:3000/articles/2/edit&quot;,&quot;author&quot;:{&quot;id&quot;:2,&quot;name&quot;:&quot;Clark Kent&quot;,&quot;url&quot;:&quot;http://localhost:3000/authors/2&quot;},&quot;&quot;:[]},{&quot;id&quot;:3,&quot;name&quot;:&quot;Batman &amp; Robin&quot;,&quot;published_at&quot;:&quot;2012-01-26T18:38:50Z&quot;,&quot;edit_url&quot;:&quot;http://localhost:3000/articles/3/edit&quot;,&quot;author&quot;:{&quot;id&quot;:1,&quot;name&quot;:&quot;Bruce Wayne&quot;,&quot;url&quot;:&quot;http://localhost:3000/authors/1&quot;},&quot;comments&quot;:[{&quot;id&quot;:3,&quot;name&quot;:&quot;The Joker&quot;,&quot;content&quot;:&quot;Haha, Batman, you will see your bat signal tonight!&quot;},{&quot;id&quot;:4,&quot;name&quot;:&quot;Robin&quot;,&quot;content&quot;:&quot;Enough with the games Joker.&quot;},{&quot;id&quot;:5,&quot;name&quot;:&quot;Riddler&quot;,&quot;content&quot;:&quot;Did someone say games?&quot;}]}]" >
+```
+
+<p>Debemos tener en cuenta si utilizamos esta t&eacute;cnica que las variables de instancia que se utilicen en la plantilla deben ser establecidas desde la acci&oacute;n del controlador.</p>

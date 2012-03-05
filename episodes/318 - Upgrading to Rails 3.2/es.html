@@ -1,0 +1,231 @@
+<p>Rails 3.2 est&aacute; reci&eacute;n salido y hay una anotaci&oacute;n muy interesante  <a href="http://weblog.rubyonrails.org/2012/1/20/rails-3-2-0-faster-dev-mode-routing-explain-queries-tagged-logger-store">en el blog oficial</a> que explica algunas de las novedades.  Lo m&aacute;s importante de todo es que el entorno de desarrollo carga con mayor velocidad porque s&oacute;lo recarga los archivos que han cambiado desde la &uacute;ltima petici&oacute;n.  Tambi&eacute;n hay un nuevo motor de rutas llamado Journey que tambi&eacute;n es m&aacute;s r&aacute;pido.   En este episodio veremos c&oacute;mo actualizar una aplicaci&oacute;n de Rails 3.1 a Rails 3.2, as&iacute; como algunas de las nuevas funcionalidades.</p>
+
+<h3>Actualizaci&oacute;n de una aplicaci&oacute;n ya existente</h3>
+
+<p>Para actualizar una aplicaci&oacute;n Rails 3.1 a 3.2 lo primero que tenemos que hacer es modificar el <code>Gemfile</code>.</p>
+
+``` /Gemfile
+source 'http://rubygems.org'
+
+gem 'rails', '3.2.0'
+
+gem 'sqlite3'
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails', "  ~> 3.2.3"
+  gem 'coffee-rails', "~> 3.2.1"
+  gem 'uglifier', '>=1.0.3'
+end
+
+gem 'jquery-rails'
+```
+
+<p>Hemos actualizado la versi&oacute;n de la gema a <code>3.2.0</code> y tambi&eacute;n hemos cambiado la gema del grupo de est&aacute;ticos para que los n&uacute;meros de versi&oacute;n coincidan con los que aparecer&iacute;an en una aplicaci&oacute;n Rails 3.2 nueva.  Para actualizar todo a la &uacute;ltima versi&oacute;n tenemos que ejecutar <code>bundle update</code>.</p>
+
+<p>Adem&aacute;s de modificar el fichero de gemas hay otra configuraci&oacute;n de entorno extra que nos queda por hacer hasta configurar nuestra aplicaci&oacute;n igual que una nueva en 3.2.  En el fichero de configuraci&oacute;n tenemos que a&ntilde;adir estas dos l&iacute;neas.</p>
+
+``` /config/environments/development.rb
+# Raise exception on mass assignment protection for Active Record models
+config.active_record.mass_assignment_sanitizer = :strict
+
+# Log the query plan for queries taking more than this (works
+# with SQLite, MySQL, and PostgreSQL)
+config.active_record.auto_explain_threshold_in_seconds = 0.5
+```
+
+<p>La primera de estas configuraciones establece <code>mass_assignment_sanitizer</code> a <code>:strict</code>.   Esto elevar&aacute; una excepci&oacute;n si hay una asignaci&oacute;n masiva de atributos protegidos.  La segunda l&iacute;nea establece el umbral de auto-explicaci&oacute;n de consultas a <code>0.5</code>.  Esto quiere decir que se ejecutar&aacute; una consulta EXPLAIN contra cualquier consulta a base de datos que supere el medio segundo de tiempo, quedando la informaci&oacute;n guardada en trazas.  Es buena idea copiar la opci&oacute;n <code>mass_assignment_sanitizer</code> al entorno de pruebas y tambi&eacute;n eliminar la siguiente l&iacute;nea que ya no se genera por defecto.</p>
+
+``` /config/environments/test.rb
+# Allow pass debug_assets=true as a query parameter to load pages with unpackaged assets
+config.assets.allow_debugging = true
+```
+
+<h3>Consultas EXPLAIN</h3>
+
+<p>Con la aplicaci&oacute;n ya actualizada a Rails 3.2 veremos algunas de las nuevas funcionalidades en la consola de Rails.  Ya hemos mencionado que a las consultas que tarden demasiado se les aplicar&aacute; una consulta adicional EXPLAIN, pero podemos activar este comportamiento desde la consola ejecutando <code>explain</code> contra una consulta ActiveRecord.</p>
+
+``` terminal
+1.9.2-p290 :001 > Product.order(:name).explain
+  Product Load (0.6ms)  SELECT "products".* FROM "products" ORDER BY name
+  EXPLAIN (0.1ms)  EXPLAIN QUERY PLAN SELECT "products".* FROM "products" ORDER BY name
+ => "EXPLAIN for: SELECT \"products\".* FROM \"products\"  ORDER BY name\n0|0|0|SCAN TABLE products (~1000000 rows)\n0|0|0|USE TEMP B-TREE FOR ORDER BY\n"
+``` 
+
+<p>Podemos imprimir la salida de forma m&aacute;s limpia con <code>puts _</code>.</p>
+
+``` terminal
+1.9.2-p290 :002 > puts _
+EXPLAIN for: SELECT "products".* FROM "products"  ORDER BY name
+0|0|0|SCAN TABLE products (~1000000 rows)
+0|0|0|USE TEMP B-TREE FOR ORDER BY
+```
+
+<p>En este caso la consulta EXPLAIN no es muy interesante porque se trata de una consulta muy sencilla pero esta funcionalidad es mucho m&aacute;s &uacute;til con consultas JOIN complicadas.  Si hay alg&uacute;n punto en nuestra aplicaci&oacute;n que sabemos que lanza una consulta lenta y no queremos que se haga un EXPLAIN autom&aacute;ticamente podemos rodear la consulta en un bloque <code>silence_auto_explain</code> de la siguiente manera:</p>
+
+``` terminal
+1.9.2-p290 :003 > ActiveRecord::Base.silence_auto_explain { Product.order(:name) }
+```
+
+<p>La consulta dentro del bloque no generar&aacute; un EXPLAIN, independientemente de lo que tarde en ejecutarse.</p>
+
+<h3>Nuevos m&eacute;todos ActiveRecord</h3>
+
+<p>Otra funcionalidad muy &uacute;til de Rails 3.2 es el m&eacute;todo <code>pluck</code>, que nos permite pasar un nombre de columna y devolver&aacute; los valores de dicha columna.</p>
+
+``` terminal
+1.9.2-p290 :005 > Product.pluck(:name)
+   (0.2ms)  SELECT name FROM "products" 
+ => ["Settlers of Catan", "Flux Capacitor", "Technodrome", "Agricola", "Millennium Falcon", "Ryan's Cheesecake", "Answer to Everything"]
+``` 
+
+<p>Podemos hacerlo con cualquier columna para recuperar todos los valores en un <em>array</em> con el tipo de datos apropiado.</p>
+
+``` terminal
+1.9.2-p290 :007 > Product.pluck(:id)
+   (0.2ms)  SELECT id FROM "products" 
+ => [1, 2, 3, 4, 5, 6, 7]
+``` 
+
+<p>De forma similar si utilizamos la cl&aacute;usula <code>select</code> para restringir qu&eacute; columnas hay que recuperar, ahora existe un nuevo m&eacute;todo <code>uniq</code> que podemos usar por ejemplo para devolver un producto para cada nombre &uacute;nico.</p>
+
+``` terminal
+1.9.2-p290 :009 > Product.select(:name).uniq
+  Product Load (0.3ms)  SELECT DISTINCT name FROM "products" 
+ => [#<Product name: "Agricola">, #<Product name: "Answer to Everything">, #<Product name: "Flux Capacitor">, #<Product name: "Millennium Falcon">, #<Product name: "Ryan's Cheesecake">, #<Product name: "Settlers of Catan">, #<Product name: "Technodrome">]
+``` 
+ 
+<p>Otra nueva funcionalidad, <code>first_or_create</code> est&aacute; pensada para funcionar con la cl&aacute;usula <code>where</code>.</p>
+
+``` terminal
+1.9.2-p290 :010 > Product.where(name: "Foo").first_or_create!
+```
+
+<p>En este caso hemos usado el m&eacute;todo en su versi&oacute;n con admiraci&oacute;n para que se eleve una excepci&oacute;n si existe alg&uacute;n error de validaci&oacute;n.  El c&oacute;digo anterior funciona de forma similar a <code>find_or_create_by_name</code>.  La primera vez que se ejecute crear&aacute; un nuevo <code>Product</code> con el <code>name</code> correspondiente (asumiendo que no existe ya uno); cuando volvamos a ejecutarlo devolver&aacute; el producto correspondiente.  Lo interesante de este enfoque es que se pueden pasar atributos adicionales a la llamada <code>create</code>, de la siguiente manera:</p>
+
+``` terminal
+1.9.2-p290 :011 > Product.where(name: "Foo").first_or_create!(price: 5)
+```
+
+<p>Los registros que se creen tendr&aacute;n estos atributos, pero dichos atributos no ser&aacute;n tenidos en cuenta cuando se busca el <code>Product</code>.</p>
+
+<p>El &uacute;ltimo m&eacute;todo nuevo que veremos se llama <code>safe_constantize</code>, que es un m&eacute;todo implementado sobre las cadenas.</p>
+
+``` terminal
+1.9.2-p290 :007 > "Product".safe_constantize
+ => Product(id: integer, name: string, price: decimal, description: text, discontinued: boolean, created_at: datetime, updated_at: datetime)
+``` 
+
+<p>El m&eacute;todo devuelve la constante correspondiente si es que existe.  La diferencia de este m&eacute;todo y el <code>constantize</code> normal es que devuelve <code>nil</code> si no se encuentra la constante en lugar de lanzar una excepci&oacute;n.</p>
+
+<h3>Nuevas funcionalidades en las migraciones</h3>
+
+<p>Veamos ahora algunas nuevas opciones que podemos usar cuando generamos migraciones.  Supongamos que vamos a generar la migraci&oacute;n de un nuevo modelo <code>ProductVariation</code>.  He aqu&iacute; nuestra migraci&oacute;n.</p>
+
+``` terminal
+$ rails g model product_variation product_id:integer:index name 'price:decimal{7,2}'
+```
+
+<p>La migraci&oacute;n utiliza tres nuevas funcionalidades.  Queremos que una <code>ProductVariation</code> pertenezca a un <code>Product</code> por lo que hemos especificado <code>product_id</code> como una de las columnas.  En Rails 3.2 podemos a&ntilde;adir una nueva opci&oacute;n <code>index</code> para generar autom&aacute;ticamente un &iacute;ndice sobre esta columna.</p>
+
+<p>Queremos que la <code>ProductVariation</code> disponga de una columna <code>name</code> de tipo cadena.  Por lo general utilizar&iacute;amos <code>name:string</code> en nuestra migraci&oacute;n pero ahora <code>string</code> es el tipo por defecto por lo que no tenemos que hacerlo.  Por &uacute;ltimo si estamos definiendo un campo <code>decimal</code> podemos pasar opciones para especificar la precisi&oacute;n y la escala de dicho tipo.  N&oacute;tese que es necesario entrecomillar esta parte de la migraci&oacute;n para que la <em>shell</em> no intente modificarla.</p>
+
+<p>He aqu&iacute; el aspecto que tiene la migraci&oacute;n generada.</p>
+
+``` /db/migrations/20120101000000_create_product_variations.rb
+class CreateProductVariations < ActiveRecord::Migration
+  def change
+    create_table :product_variations do |t|
+      t.integer :product_id
+      t.string :name
+      t.decimal :price, :precision => 7, :scale => 2
+
+      t.timestamps
+    end
+    add_index :product_variations, :product_id
+  end
+end
+```
+
+<p>En la migraci&oacute;n puede verse que existe un &iacute;ndice definido sobre <code>product_id</code>, que el campo <code>name</code> ha sido asignado por defecto como cadena y que el campo <code>price</code> tiene definida su precisi&oacute;n y escala.</p>
+
+<p>Hablando de generadores puede ser que tengamos algunas opciones favoritas a la hora de generar una aplicaci&oacute;n Rails.  Por ejemplo podemos escoger siempre la misma base de datos o excluir los tests de unidad.  Se puede hacer que estas sean las opciones por defecto guard&aacute;ndolas en un fichero <code>.railsrc</code> en nuestro directorio.</p>
+
+``` terminal
+$ echo -d postgresql -T > ~/.railsrc
+```
+
+<p>Cuando creemos una nueva aplicaci&oacute;n Rails estas opciones se a&ntilde;adir&aacute;n autom&aacute;ticamente.</p>
+
+``` terminal
+$ rails new blog
+Using -d postgresql -T from /Users/eifion/.railsrc 
+```
+
+<h3>Almacenamiento clave-valor</h3>
+
+<p>ActiveRecord viene con una nueva manera de definir almacenamiento de pares clave-valor en los modelos.  Supongamos que en nuestro modelo <code>ProductVariation</code> tenemos algunos atributos como <code>colour</code> y <code>size</code> y no queremos columnas separadas de base de datos para cada uno de ellos.  Podemos utilizar el nuevo m&eacute;todo <code>store</code> para guardar dichos valores en una &uacute;nica columna. </p>
+
+``` /app/models/product_variation.rb
+class ProductVariation < ActiveRecord::Base
+  store :properties, accessors: [:colour, :size]
+end
+```
+
+<p>El primer argumento que se pasa contiene el nombre de la columna sobre la que se almacenar&aacute;n los valores y en el segundo se definen las propiedades que queremos guardar.  Tenemos que crear la columna en base de datos por lo que nos har&aacute; falta una migraci&oacute;n.</p>
+
+	
+``` terminal
+$ rails g migration add_properties_to_product_variations properties:text
+```
+
+<p>No debemos olvidarnos de ejecutar <code>rake db:migrate</code> para a&ntilde;adir la columna a la base de datos.</p>
+
+<p>Veamos una demostraci&oacute;n de esto en la consola.  Podemos crear una nueva <code>ProductVariation</code> y darle los atributos <code>colour</code> y <code>size</code> igual que har&iacute;amos con los atributos normales.</p>
+
+``` terminal
+Loading development environment (Rails 3.2.0)
+1.9.2-p290 :001 > p = ProductVariation.new(colour: 'blue', size: 3)
+ => #<ProductVariation id: nil, product_id: nil, name: nil, price: nil, created_at: nil, updated_at: nil, properties: {:colour=>"blue", :size=>3}>
+``` 
+
+<p>Podemos acceder a estos atributos igual que al resto.</p>
+
+
+``` terminal
+1.9.2-p290 :003 > p.colour
+ => "blue"
+``` 
+
+<p>Tambi&eacute;n podemos acceder a ellos mediante el <em>hash</em> <code>properties</code>.</p>
+
+``` terminal
+1.9.2-p290 :004 > p.properties[:colour]
+ => "blue" 
+``` 
+
+<p>No podremos hacer b&uacute;squedas sobre estos atributos porque no mapean directamente sobre columnas de la base de datos pero se trata de una forma muy conveniente de acceder a un conjunto de atributos.</p>
+
+<h3>Etiquetado de trazas</h3>
+
+<p>Todav&iacute;a nos queda una &uacute;ltima funcionalidad por ver: las trazas etiquetadas.  Se trata de algo que normalmente s&oacute;lo se hace en modo de producci&oacute;n pero para la demostraci&oacute;n lo vamos a incorporar a nuestro entorno de desarrollo.   Esto se hace con la opci&oacute;n de configuraci&oacute;n <code>log_tags</code> a la que le establecemos un <em>array</em> de atributos que son los nombres de los m&eacute;todos que se invocar&aacute;n sobre la petici&oacute;n.</p>
+
+``` /config/environments/development.rb
+config.log_tags = [:uuid, :remote_ip]
+```
+
+<p>Hemos usado <code>uuid</code> que es un nuevo m&eacute;todo en Rails 3.2 que devuelve un identificador &uacute;nico de petici&oacute;n y que nos sirve para determinar la petici&oacute;n a partir de la que se origin&oacute; la traza.  La otra es la direcci&oacute;n IP remota.  Si ahora arrancamos el servidor de nuevo y lanzamos una petici&oacute;n las l&iacute;neas de la traza aparecer&aacute;n etiquetada con estos valores.</p>
+
+``` log
+[ab939dfca5d57843ea4c695cab6f721d] [127.0.0.1] 
+
+Started GET "/" for 127.0.0.1 at 2012-01-27 21:52:58 +0000
+[ab939dfca5d57843ea4c695cab6f721d] [127.0.0.1] Processing by ProductsController#index as HTML
+[ab939dfca5d57843ea4c695cab6f721d] [127.0.0.1]   Product Load (0.3ms)  SELECT "products".* FROM "products" 
+[ab939dfca5d57843ea4c695cab6f721d] [127.0.0.1]   Rendered products/index.html.erb within layouts/application (22.0ms)
+[ab939dfca5d57843ea4c695cab6f721d] [127.0.0.1] Completed 200 OK in 81ms (Views: 73.1ms | ActiveRecord: 0.3ms)
+[98eec5f8976586c1165b981797086b6a] [127.0.0.1] 
+```
+
+<p>Esto resulta &uacute;til en producci&oacute;n cuando hay varias instancias de Rails escribiendo sobre los archivos de traza, ahora podremos separar las entradas del <em>log</em> que han sido generadas por diferentes peticiones concretas.</p>

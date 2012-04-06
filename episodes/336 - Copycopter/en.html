@@ -1,0 +1,111 @@
+<p>As developers writing copy isn&rsquo;t always our cup of tea. For example take the text at the top of the page below. Should it say &ldquo;Browse Our Products&rdquo;, &ldquo;Product Listing&rdquo; or maybe even &ldquo;Products&rdquo; instead of &ldquo;Browse Products&rdquo; as it does now?</p> 
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1094/original/E336I01.png" width="800" height="381" alt="The home page of our store application."/>
+</div>
+
+<p>A client may want text changes made to this heading or to the description below it and this text isn&rsquo;t that easy to change. It&rsquo;s hard-coded into the view template and anyone who wants to change it will need to have access to the source code so that they can edit the template and then redeploy the application, just to change some text. It would be much easier if there was a simple admin interface where the client could go in and edit text like this and <a href="https://copycopter.com/">Copycopter</a> does just this, providing an interface where clients can edit a Rails application&rsquo;s text. Copycopter also comes with a Ruby gem which makes it easy to integrate into an application. This used to be a paid service but Thoughtbot have recently open-sourced it and made it free to use and in this episode we&rsquo;ll use it to make our headline and description editable.</p>
+
+<h3>Setting up a Copycopter Server</h3>
+
+<p>First we&rsquo;ll need to set up the <a href="https://github.com/copycopter/copycopter-server">Copycopter server</a>. This is a complete Rails application that provides the interface for editing copy. This isn&rsquo;t a mountable engine and it needs to be deployed and hosted separately from our Rails application. <a href="http://www.heroku.com/">Heroku</a> is a perfect fit for this and Copycopter will work on one dyno so we can host it for free here. If you don&rsquo;t have a Heroku account it&rsquo;s free to sign up. Once we&rsquo;ve done so we&rsquo;ll need to install the <a href="https://toolbelt.heroku.com/">Heroku Toolbelt</a> which provides a command-line interface for managing our apps. Once we&rsquo;ve downloaded and installed this we&rsquo;ll have access to a new heroku command in any terminal windows we open. We&rsquo;ll use this command now to log in to our Heroku account.</p>
+
+``` terminal
+$ heroku login
+Enter your Heroku credentials.
+Email: eifion@asciicasts.com
+Password: 
+Authentication successful.
+```
+
+<p>Now that we&rsquo;re authenticated we can deploy Copycopter Server to Heroku. The Github documentation has some instructions for going this and we&rsquo;ll follow these. First we need to clone the project to our local machine.</p> 
+
+``` terminal
+$ git clone git://github.com/copycopter/copycopter-server.git
+```
+
+<p>We&rsquo;ll then move into its directory and begin to deploy it to Heroku. First we&rsquo;ll create a new Heroku application.</p>
+
+``` terminal
+$ cd copycopter-server/
+$ heroku create --stack cedar
+```
+
+<p>Depending on your setup you may see an error when you run this command. We can fix this by running <code>bundle install</code>. It&rsquo;s best to run this without the test environment to reduce the number of test dependencies.</p>
+
+``` terminal
+$ bundle install --without=test
+```
+
+<p>After doing this we should be able to run <code>heroku create</code> without any errors. We deploy to Heroku by using Git and we can deploy our app by running <code>git push</code>.</p>
+
+``` terminal
+$ git push heroku master
+```
+
+<p>We can run database migrations on the server by running this command.</p>
+
+``` terminal
+$ heroku run rake db:migrate
+```
+
+<p>When this finished we need to run <code>heroku restart</code>. We can now create a Copycopter project by running this command. (Obviously you&rsquo;ll need to change the values for the <code>NAME</code>, <code>USERNAME</code> and <code>PASSWORD</code> options for your own application.)</p>
+
+``` terminal
+$ heroku run rake copycopter:project NAME=Store USERNAME=eifion PASSWORD=secret
+```
+
+<p>We can take a look at the site we&rsquo;ve just created by running <code>heroku open</code> which will open the app in a browser.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1095/original/E336I02.png" width="800" height="610" alt="Our Copycopter server."/>
+</div>
+
+<p>If we click on the &ldquo;Store&rdquo; link we&rsquo;ll be prompted for the username and password we used when we created the Copycopter project. After we&rsquo;ve entered these we&rsquo;ll be taken to the project&rsquo;s page and told that we don&rsquo;t have a Rails application for this project. The page gives us instructions for doing this: we just need to add a gem to our application&rsquo;s gemfile and add an initializer to configure the Copycopter client.</p>
+
+<h3>Configuring Our Rails Application to use Copycopter</h3>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1096/original/E336I03.png" width="800" height="374" alt="The instructions for adding Copycopter to our application."/>
+</div>
+
+<p>We&rsquo;ll use these instructions to add Copycopter to our Store application. First we&rsquo;ll add the gem to the gemflle then run <code>bundle</code> to install it.</p>
+
+``` /Gemfile
+gem 'copycopter_client', '2.0.0'
+```
+
+<p>Next we&rsquo;ll create the initializer. This contains the configuration code that will hook up our application to the Copycopter server that we deployed.</p>
+
+``` /config/initializers/copycopter.rb
+CopycopterClient.configure do |config|
+  config.api_key = 'f5a22cf0acffc7010db99951be3c5d0d'
+  config.host = 'sharp-window-4901.herokuapp.com'
+end
+```
+
+<p>Now we can make the headline and description on our application&rsquo;s home page editable through Copycopter. To do this we need to go the page&rsquo;s template and replace each piece of text with a call to the t method and pass in a unique key to identify it, along with a default value for each item to act as a fallback in case it isn&rsquo;t defined in Copycopter.</p>
+
+``` /app/views/products/index.html.erb
+<h1><%= t "products.headline", default: "Browse Products" %></h1>
+
+<em><%= t ".tagline", default: "We have what you need at a great low price." %></em>
+```
+
+<p>The <code>t</code> method here is Rails&rsquo; built-in internationalization method which means that we can also use Copycopter to internationalize a website. Note that for the tagline the identifier starts with a full stop. This makes it a relative key and so it will be prefixed with the path to the template which will make it unique to this template.</p>
+
+<p>We&rsquo;ll need to restart our application&rsquo;s server to load Copycopter. When we reload the page afterwards it should look exactly the same as each call to <code>t</code> uses the default values. When we visit our Copycopter server now, however, we&rsquo;ll see a search dialog that allows us to search for keys. If we search for &ldquo;headline&rdquo; we&rsquo;ll see the <code>products.headine</code> key listed. Clicking on this will take us to a page where we can edit the key&rsquo;d text. We&rsquo;ll change &ldquo;Browse Products&rdquo; to &ldquo;Browse Our Products&rdquo;</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1097/original/E336I04.png" width="800" height="602" alt="Editing text with Copycopter."/>
+</div>
+
+<p>We have the option to make the change a draft or publish it to the production environment. We&rsquo;ll keep it at &ldquo;Draft&rdquo; and save our changes. When we reload our application&rsquo;s page now the text has changed.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1098/original/E336I05.png" width="800" height="280" alt="The text in our application has now changed."/>
+</div>
+
+<p>We can change the tagline in the same way. This will have a key of <code>products.index.tagline</code> as we gave it a relative key in our app. We can add styling to the editable text through the editor and also set the text for different locales if we want to translate our app&rsquo;s text into other languages. </p>
+
+<p>Finally it&rsquo;s worth noting that one Copycopter server can manage multiple projects so if we have another site we can run <code>heroku run rake copycopter:project</code> again with a different project name.</p> 

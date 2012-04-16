@@ -1,0 +1,124 @@
+<p>Below is a page from a blogging application that shows a number of <code>Article</code> records. This application supports internationalization and allows the user to change the language that&rsquo;s displayed via links at the top of the page.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1107/original/E338I01.png" width="800" height="500" alt="Our blogging application with the localizable text displayed in Wookieespeak."/>
+</div>
+
+<p>Clicking the &ldquo;Wookieespeak&rdquo; link changes the title at the top of the page but each article&rsquo;s content is still displayed in English. How do we change the content from the database so that&rsquo;s it&rsquo;s displayed in the user&rsquo;s preferred language?</p>
+
+<p>Internationalization in Rails applications is usually done with YAML files. Under the /config/locales directory are one or more files that contain the translated texts for each language that the application supports. This approach was covered in detail in <a href="http://railscasts.com/episodes/138-i18n">episode 138</a> and while it works well for static text it won&rsquo;t help us display text from the database in different languages. To do this we need to store each translation in a database table and the <a href="https://github.com/svenfuchs/globalize3">Globalize3</a> gem makes doing this much easier. Globalize3 creates a separate table to store translations for each model that we use it with and it will switch to the proper translation depending on the user&rsquo;s selected locale. To use this gem in our application we&rsquo;ll need to add it to the gemfile and then run <code>bundle</code> to install it.</p>
+
+``` /Gemfile
+gem 'globalize3'
+```
+
+<p>Now we can go to the model we want to translate and use the <code>translates</code> method to specify the names of the columns we want to be available in multiple languages, in our case the name and content columns in <code>Article</code>.</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  translates :name, :content
+end
+```
+
+<p>We need to create a database table to store the translations. The gem&rsquo;s <a href="https://github.com/svenfuchs/globalize3/blob/master/README.textile">README file</a> says that we can use <code>create_translation_table!</code> inside the same migration where we create the table for the model but as we already have a <code>articles</code> table with data in it we&rsquo;ll use an alternative approach that uses a separate migration and which allows us to migrate the existing data. First we&rsquo;ll create a migration called <code>create_article_translations</code> in our application.</p>
+
+``` terminal
+$ rails g migration create_article_translations
+```
+
+<p>We&rsquo;ll modify this migration based on what the README file tells us. We need to call <code>create_translations_table!</code> on the model we want to add translations to and pass in the names of the columns that we want to be translatable.</p>
+
+``` /db/migrations/291204100000_create_article_translations.rb
+class CreateArticleTranslations < ActiveRecord::Migration
+  def up
+    Article.create_translation_table!({
+      name: :string,
+      content: :text
+    }, {
+      migrate_data: true
+    })
+  end
+
+  def down
+    Article.drop_translation_table! migrate_data: true
+  end
+end
+```
+
+<p>The data from these two columns will now be stored not in the <code>articles</code> table but instead in a new <code>article_translations</code> table. We&rsquo;ll need to migrate the database for these changes to take effect.</p>
+
+``` terminal
+$ rake db:migrate
+```
+
+<p>We can demonstrate how this works in the Rails console. If we check the current locale we&rsquo;ll see that it&rsquo;s at its default of English. Getting the first article&rsquo;s name will fetch it from our new <code>article_translations</code> table.</p>
+
+``` terminal
+1.9.3-p125 :001 > I18n.locale
+ => :en 
+1.9.3-p125 :002 > Article.first.name
+  Article Load (0.2ms)  SELECT "articles".* FROM "articles" LIMIT 1
+  Article::Translation Load (0.2ms)  SELECT "article_translations".* FROM "article_translations" WHERE "article_translations"."article_id" = 1
+ => "Superman"
+``` 
+
+<p>If we change the locale to Wookieespeak and try to fetch the first article&rsquo;s name we&rsquo;ll get nil as the translated text doesn&rsquo;t exist.</p>
+
+``` terminal
+1.9.3-p125 :003 > I18n.locale = :wk
+ => :wk 
+1.9.3-p125 :004 > Article.first.name
+  Article Load (0.3ms)  SELECT "articles".* FROM "articles" LIMIT 1
+  Article::Translation Load (0.2ms)  SELECT "article_translations".* FROM "article_translations" WHERE "article_translations"."article_id" = 1
+  Article::Translation Load (0.3ms)  SELECT "article_translations".* FROM "article_translations" WHERE "article_translations"."article_id" = 1 AND "article_translations"."locale" = 'wk' LIMIT 1
+ => nil
+``` 
+ 
+<p>Globalize3 overrides both the getter and setter behaviour for the columns and scopes it to the current language. If we update the first article&rsquo;s name while our locale is set to <code>wk</code> it will insert a record into the <code>article_translations</code> table for that locale and when we fetch the name again we&rsquo;ll see the value we entered.</p>
+
+``` terminal
+1.9.3-p125 :005 > Article.first.update_attribute(:name, "Ahhyya")
+1.9.3-p125 :006 > Article.first.name
+  Article Load (0.3ms)  SELECT "articles".* FROM "articles" LIMIT 1
+  Article::Translation Load (0.2ms)  SELECT "article_translations".* FROM "article_translations" WHERE "article_translations"."article_id" = 1
+ => "Ahhyya"
+``` 
+
+<p>Changing the locale back to English will show the English name again.</p>
+
+``` terminal
+1.9.3-p125 :007 > I18n.locale = :en
+ => :en 
+1.9.3-p125 :008 > Article.first.name
+  Article Load (0.2ms)  SELECT "articles".* FROM "articles" LIMIT 1
+  Article::Translation Load (0.2ms)  SELECT "article_translations".* FROM "article_translations" WHERE "article_translations"."article_id" = 1
+ => "Superman"
+``` 
+ 
+<p>Now we can see this in action on our site. We&rsquo;ll need to restart the server for the changes to be picked up but after we do the English version of the page should look the same as that data has been migrated over. If we look the page in Wookieespeak, though, the page will be almost blank.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1108/original/E338I02.png" width="800" height="413" alt="The titles and descriptions for most of the article are missing as translations for them don&rsquo;t exist."/>
+</div>
+
+<p>The first article here has the name that we set in the console but all the other attributes that we set up to be translatable will be blank. We can, however, now edit one of these articles and set the translated text.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1109/original/E338I03.png" width="800" height="518" alt="Articles can now be edited in both supported languages."/>
+</div>
+
+<p>This article is now available in two languages and when we switch between them we&rsquo;ll see it displayed in the selected language. If we go back to the edit form the text fields will show the text for the selected language and we can click the links and swap between them to update the article in either language. If we change an attribute which isn&rsquo;t set up for translation such as the author name it will be updated for all all languages as its value will still be stored in the <code>articles</code> table, not the <code>article_translations</code> table.</p> 
+
+<h3>Using a Fallback Language</h3>
+
+<p>Translating all the database records into both languages can be quite a task. As we saw before <code>nil</code> values will be returned for those attributes that haven&rsquo;t been translated into the current language but we can provide a fallback language that will be shown when a translation doesn&rsquo;t exist in the current language. To do this we just need to modify our application&rsquo;s config file and add an <code>i18n.fallbacks</code> option.</p>
+
+``` /config/application.rb
+config.i18n.fallbacks = true
+```
+
+<p>With this in place any translations that aren&rsquo;t specified in the current language will fall back to the default locale, in this case English. We&rsquo;ll need to restart our application for this change to be picked up but when we reload the page the translations that are missing in Wookieespeak are shown in English instead.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1110/original/E338I04.png" width="800" height="518" alt="Articles without a Wookieespeak translation now fallback to being displayed in English."/>
+</div>

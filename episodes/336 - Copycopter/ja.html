@@ -1,0 +1,111 @@
+<p>開発者の中にはコピーを書くのが苦手という人は多いでしょう。例として下のページの最初にあるテキストを見てみましょう。今の“Browse Products”という表示は、“Browse Our Products”や“Product Listing”の方がいいのか、それとも単に“Products” とすべきでしょうか? </p> 
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1094/original/E336I01.png" width="800" height="381" alt="ストアアプリケーションのトップページ"/>
+</div>
+
+<p>クライアントがこのタイトルやその下の記述のテキストを変更したいと思った場合、その作業は思ったほど簡単ではありません。このテキストはビューテンプレートに直に書かれているため、変更する場合は、ソースコードにアクセスしてテンプレートを編集し、アプリケーションをデプロイしなおす必要があります。もしシンプルな管理用画面があって、そこにクライアントがアクセスしてこのようなテキストを編集できれば作業はずっと簡単になるでしょう。<a href="https://copycopter.com/">Copycopter</a>はこのような用途のためにあり、Railsアプリケーションのテキストをクライアントが編集できるインターフェースを提供します。CopycopterはRuby gemの形でも提供されているので、アプリケーションへの統合も簡単です。これはかつては有料サービスでしたが、Thoughtbotが最近オープンソース化し無料で使用できるようになりました。そこで今回のエピソードではこれを使って、既存のアプリケーションのヘッドラインと説明文を編集できるようにします。</p>
+
+<h3>Copycopter Serverを設定する</h3>
+
+<p>まず最初に<a href="https://github.com/copycopter/copycopter-server">Copycopter Server</a>を設定します。これは、コピーを編集するためのインターフェースを提供する完全なRailsアプリケーションです。これはmountable engineではなく、自身のRailsアプリケーションとは別のホストマシンにデプロイされている必要があります。<a href="http://www.heroku.com/">Heroku</a>がこの用途に最適であり、Copycopterは1 dynoで動作するのでここでは無料でホストすることが可能です。もしHerokuのアカウントを持っていなければ、無料で登録可能です。登録が終わったら、アプリケーションを管理するためのコマンドラインインターフェースを提供する<a href="https://toolbelt.heroku.com/">Heroku Toolbelt</a>をインストールします。ダウンロードとインストールを終えたら、どのターミナルウィンドウからでもherokuコマンドにアクセスできます。それでは次のコマンドでHerokuアカウントにログインします。</p>
+
+``` terminal
+$ heroku login
+Enter your Heroku credentials.
+Email: eifion@asciicasts.com
+Password: 
+Authentication successful.
+```
+
+<p>認証が成功したので、HerokuにCopycopter Serverをデプロイできます。Githubのドキュメントにこのための手順があるのでそれに従います。まずプロジェクトをローカルマシンにcloneします。</p> 
+
+``` terminal
+$ git clone git://github.com/copycopter/copycopter-server.git
+```
+
+<p>次にディレクトリを移動して、Herokuへのデプロイを開始します。最初に新規のHerokuアプリケーションを作成します。</p>
+
+``` terminal
+$ cd copycopter-server/
+$ heroku create --stack cedar
+```
+
+<p>設定によっては、このコマンドの実行時にエラーが発生する場合があります。これを修復するために、<code>bundle install</code>コマンドを実行します。テストの依存数をできるだけ少なくするために、テスト環境を除外して実行する方がいいでしょう。</p>
+
+``` terminal
+$ bundle install --without=test
+```
+
+<p>これの実行後は、<code>heroku create</code>を実行してもエラーが発生することはないでしょう。HerokuへのデプロイにはGitを使うので、<code>git push</code>コマンドを実行します。</p>
+
+``` terminal
+$ git push heroku master
+```
+
+<p>次のコマンドを実行して、サーバ上でデータベースのmigrationをおこないます。</p>
+
+``` terminal
+$ heroku run rake db:migrate
+```
+
+<p>migrationが終了したら<code>heroku restart</code>コマンドを実行します。これでCopycopterプロジェクトを作成できるので、次のコマンドを実行します。(言うまでもありませんが、<code>NAME</code>, <code>USERNAME</code>, <code>PASSWORD</code>の各オプションの値を自分のアプリケーションに合わせて変更してください。)</p>
+
+``` terminal
+$ heroku run rake copycopter:project NAME=Store USERNAME=eifion PASSWORD=secret
+```
+
+<p>作成したサイトを見るために<code>heroku open</code>を実行すると、ブラウザでRailsアプリケーションが開きます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1095/original/E336I02.png" width="800" height="610" alt="Copycopter Server"/>
+</div>
+
+<p>“Store”のリンクをクリックすると、Copycopterプロジェクトを作成したときに使用したユーザ名とパスワードを求められます。それらを入力するとプロジェクトページが表示され、このプロジェクト用のRailsアプリケーションがないというメッセージが表示されます。そのページにあるRailsアプリケーションを設定するための手順によると、必要な作業は、アプリケーションのgemfileにgemを追加し、Copycopterクライアントを設定するための初期化ファイルを追加することです。</p>
+
+<h3>Copycopterを使うようにRailsアプリケーションを設定する</h3>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1096/original/E336I03.png" width="800" height="374" alt="アプリケーションにCopycopterを追加するための手順"/>
+</div>
+
+<p>この手順に従ってストアアプリケーションにCopycopterを追加します。まずgemflleにgemを追加し、<code>bundle</code>コマンドを実行してインストールします。</p>
+
+``` /Gemfile
+gem 'copycopter_client', '2.0.0'
+```
+
+<p>次に初期化ファイルを作成します。ここにはデプロイしたCopycopter Serverに自分のアプリケーションをフックするための設定をおこなうコードが含まれます。</p>
+
+``` /config/initializers/copycopter.rb
+CopycopterClient.configure do |config|
+  config.api_key = 'f5a22cf0acffc7010db99951be3c5d0d'
+  config.host = 'sharp-window-4901.herokuapp.com'
+end
+```
+
+<p>これでアプリケーションのトップページのヘッドラインと説明文をCopycopterを介して編集できるようになります。そのためにはページのテンプレートを開いて、各テキストをtメソッドの呼び出しに置き換え、識別のためのユニークキーと、Copycopterに値が定義されていない場合のための各項目のデフォルト値を渡します。</p>
+
+``` /app/views/products/index.html.erb
+<h1><%= t "products.headline", default: "Browse Products" %></h1>
+
+<em><%= t ".tagline", default: "We have what you need at a great low price." %></em>
+```
+
+<p>ここで<code>t</code>メソッドはRailsであらかじめ用意されている国際化メソッドであり、そのためにCopycopterはWebサイトの国際化対応のために使用することもできます。キャッチフレーズの識別子がピリオドで始まっていることに注意してください。これによって相対キーとなるので、テンプレートへのパスが前について、このテンプレートに対しては固有の値となります。</p>
+
+<p>Copycopterをロードするためにアプリケーションのサーバを再起動します。その後でページをリロードすると、<code>t</code>の呼び出しがすべてデフォルト値を使用するため、以前とまったく同じ表示になります。Copycopter Serverにアクセスすると、キーを探すための検索ダイアログが出ています。“headline”を検索すると、<code>products.headline</code>キーが表示されます。これをクリックすると、キーがついたテキストを編集できるページが開きます。“Browse Products”を“Browse Our Products”に変更してみます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1097/original/E336I04.png" width="800" height="602" alt="Copycopterでテキストを編集する"/>
+</div>
+
+<p>変更をドラフトとして保存しておくか本番環境に公開するかを選択することができます。ここではドラフトとして変更を保存しておきます。アプリケーションのページをリロードするとテキストが変わっています。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1098/original/E336I05.png" width="800" height="280" alt="アプリケーションのテキストが変わった"/>
+</div>
+
+<p>同じようにキャッチフレーズも変更します。アプリケーションで相対キーを与えたので、これは<code>products.index.tagline</code>というキーを持ちます。編集対象のテキストにはエディタを介してスタイルを追加できます。またアプリケーションのテキストを違う言語に翻訳したい場合は、別のロケールのテキストを設定することもできます。 </p>
+
+<p>最後に、一つのCopycopter Serverは複数のプロジェクトを管理することができるので、もし他にもサイトを持っていたら、再度<code>heroku run rake copycopter:project</code>を別のプロジェクト名とともに実行できます。</p> 

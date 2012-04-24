@@ -1,0 +1,124 @@
+<p>下の画面は、複数の<code>Article</code>レコードを表示するブログアプリケーションです。このアプリケーションは国際化に対応しており、ユーザがページのトップのリンクで表示言語を選択できます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1107/original/E338I01.png" width="800" height="500" alt="ローカライズ可能なテキストがWookieespeakで表示されたブログアプリケーション"/>
+</div>
+
+<p>“Wookieespeak”のリンクをクリックすると、ページ上部のタイトルが変わりますが、記事の内容は英語のままです。データベースからの内容を、ユーザが希望する言語で表示させるためには、どのように修正すればいいのでしょうか?</p>
+
+<p>Railsアプリケーションの国際化は通常YAMLファイルを使っておこなわれます。/config/localesディレクトリの下に、アプリケーションがサポートする言語ごとの翻訳されたテキストを含んだ複数のファイルがあります。このアプローチについては<a href="http://railscasts.com/episodes/138-i18n">エピソード138</a>で詳しく説明しました。静的なテキストであればこの方法でうまくいきますが、データベースからのテキストを別の言語で表示させる場合には対応していません。それをおこなうには、各翻訳文をデータベースのテーブルに格納する必要がありますが、<a href="https://github.com/svenfuchs/globalize3">Globalize3</a> gemを利用すればこれをとても簡単におこなうことができます。Globalize3は各モデルごとに翻訳を保存するために使用する別のテーブルを作成し、ユーザが選択したロケールにしたがって対応する翻訳に切り替えます。アプリケーションでこのgemを利用するにはgemfileにそれを追加して<code>bundle</code>コマンドを実行してインストールをおこないます。</p>
+
+``` /Gemfile
+gem 'globalize3'
+```
+
+<p>次に翻訳したいモデルに対して、<code>translates</code>メソッドを使って多言語化したいカラムの名前を指定します。今回の場合は<code>Article</code>の中のnameとcontentの各カラムです。</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  translates :name, :content
+end
+```
+
+<p>翻訳を保存するためのデータベーステーブルを作成します。gemの<a href="https://github.com/svenfuchs/globalize3/blob/master/README.textile">READMEファイル</a>を見ると、モデル用のテーブルを作成するためのmigrationの中で同時に<code>create_translation_table!</code>を使用できるとありますが、ここではすでに<code>articles</code>テーブルが存在しデータが入っている状態なので、もう一つのアプローチとして別途migrationを作成して既存のデータを移行させます。まず<code>create_article_translations</code>という名前のmigrationを作成します。</p>
+
+``` terminal
+$ rails g migration create_article_translations
+```
+
+<p>READMEファイルに従ってこのmigrationを修正します。翻訳を追加したいモデルに対して<code>create_translations_table!</code>を呼び出し、翻訳できるようにするカラムの名前を渡します。</p>
+
+``` /db/migrations/291204100000_create_article_translations.rb
+class CreateArticleTranslations < ActiveRecord::Migration
+  def up
+    Article.create_translation_table!({
+      name: :string,
+      content: :text
+    }, {
+      migrate_data: true
+    })
+  end
+
+  def down
+    Article.drop_translation_table! migrate_data: true
+  end
+end
+```
+
+<p>この2つのカラムのデータは<code>articles</code>テーブルには保存されず、新しい<code>article_translations</code>テーブルに保存されます。これらの変更を反映させるためにデータベースのマイグレーションを実行します。</p>
+
+``` terminal
+$ rake db:migrate
+```
+
+<p>Railsコンソールで、このしくみが動作するところを確認できます。現在のロケールを確認すると、デフォルトの英語になっています。最初の記事の名称を取得しようとすると、新しい<code>article_translations</code>テーブルから値を取り出します。</p>
+
+``` terminal
+1.9.3-p125 :001 > I18n.locale
+ => :en 
+1.9.3-p125 :002 > Article.first.name
+  Article Load (0.2ms)  SELECT "articles".* FROM "articles" LIMIT 1
+  Article::Translation Load (0.2ms)  SELECT "article_translations".* FROM "article_translations" WHERE "article_translations"."article_id" = 1
+ => "Superman"
+``` 
+
+<p>ロケールをWookieespeakに変更し最初の記事の名称を取得しようすると、翻訳されたテキストが存在しないのでnilが返されます。</p>
+
+``` terminal
+1.9.3-p125 :003 > I18n.locale = :wk
+ => :wk 
+1.9.3-p125 :004 > Article.first.name
+  Article Load (0.3ms)  SELECT "articles".* FROM "articles" LIMIT 1
+  Article::Translation Load (0.2ms)  SELECT "article_translations".* FROM "article_translations" WHERE "article_translations"."article_id" = 1
+  Article::Translation Load (0.3ms)  SELECT "article_translations".* FROM "article_translations" WHERE "article_translations"."article_id" = 1 AND "article_translations"."locale" = 'wk' LIMIT 1
+ => nil
+``` 
+ 
+<p>Globalize3は、カラムに対するgetterとsetterの振る舞いをオーバーライドして、現在の言語にスコープを限定します。ロケールが<code>wk</code>に設定されているときに最初の記事の名称を更新すると、<code>article_translations</code>テーブルにそのロケール用のレコードが挿入され、再度名称を取得しようとすると入力した値が表示されます。</p>
+
+``` terminal
+1.9.3-p125 :005 > Article.first.update_attribute(:name, "Ahhyya")
+1.9.3-p125 :006 > Article.first.name
+  Article Load (0.3ms)  SELECT "articles".* FROM "articles" LIMIT 1
+  Article::Translation Load (0.2ms)  SELECT "article_translations".* FROM "article_translations" WHERE "article_translations"."article_id" = 1
+ => "Ahhyya"
+``` 
+
+<p>ロケールを再度英語に変更すると、英語の名称が再度表示されます。</p>
+
+``` terminal
+1.9.3-p125 :007 > I18n.locale = :en
+ => :en 
+1.9.3-p125 :008 > Article.first.name
+  Article Load (0.2ms)  SELECT "articles".* FROM "articles" LIMIT 1
+  Article::Translation Load (0.2ms)  SELECT "article_translations".* FROM "article_translations" WHERE "article_translations"."article_id" = 1
+ => "Superman"
+``` 
+
+<p>ではサイトで実際に動作する様子を見てみます。変更を反映するためにサーバを再起動すると、英語版ページは以前のデータがそのまま移行されたので見え方は変わりません。一方Wookieespeakでページを見てみると、ページはほとんど空白です。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1108/original/E338I02.png" width="800" height="413" alt="翻訳が存在しないため、ほとんどの記事の名称と記述が表示されない"/>
+</div>
+
+<p>この最初の記事にはコンソールから設定した名称がありますが、翻訳できるように設定した他のすべての属性は空欄です。しかし、これらの記事を編集して翻訳テキストを設定できるようになりました。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1109/original/E338I03.png" width="800" height="518" alt="記事はサポートされている2言語で編集可能になった"/>
+</div>
+
+<p>この記事は2言語で読めるようになり、言語を切り替えると選択した言語で表示されます。編集フォームに戻ると、テキストフィールドには選択した言語のテキストが表示され、リンクをクリックすることでそれらを入れ替えることで、いずれの言語も更新することが可能です。翻訳できるように設定していない属性(例えば著者名)を変更すると、それらは<code>article_translations</code>テーブルではなく<code>articles</code>テーブルに保存されるため、全言語で更新されます。</p> 
+
+<h3>フォールバック言語を使用する</h3>
+
+<p>データベースのすべてのレコードを2言語に翻訳するのは手間のかかる作業です。前に見たように、現在の言語に翻訳されていない属性には<code>nil</code>の値が返されますが、フォールバック言語を設定することで、現在の言語で翻訳が存在しない場合にそれを表示させることが可能です。これをおこなうにはアプリケーションの設定ファイルを修正して、<code>i18n.fallbacks</code>オプションを追加します。</p>
+
+``` /config/application.rb
+config.i18n.fallbacks = true
+```
+
+<p>これによって、現在の言語で設定されていない翻訳はデフォルトのロケール(今回の場合は英語)にフォールバックします。この変更を反映するためにアプリケーションを再起動するしてページをリロードすると、Wookieespeakに翻訳テキストがない部分は代わりに英語で表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1110/original/E338I04.png" width="800" height="518" alt="Wookieespeakの翻訳がない記事は、フォールバックして英語で表示される"/>
+</div>

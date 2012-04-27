@@ -1,0 +1,286 @@
+<p><a href="http://datatables.net/">DataTables</a>은 평범한 HTML 테이블을 페이징이 가능하고 소팅, 검색기능까지 갖춘 기능성 테이블로 쉽게 만들어 주며,이 모든 것이 자바스크립트를 통해서 가능합니다. 이번 연제에서는 DataTables을 셋업하는 방법과 레일스 어플리케이션으로부터 데이터를 가져오는 방법을 소개하겠습니다. 아래에 있는 웹페이지는 Product 레코드들을 간단한 형태의 테이블로 보여 줍니다. DataTables를 추가해서 이 테이블의 기능을 향상시켜 보겠습니다.</p> 
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1115/original/E340I01.png" width="800" height="500" alt="The plain table of products."/>
+</div>
+
+<h3>어플리케이션에 DataTables을 추가하기</h3>
+
+<p><a href="http://datatables.net/">소스코드</a>를 다운로드만하면 레일스 어플리케이션에서 사용할 수 있지만 이것은 상대경로를 이용해서 이미지를 참조하는 코드를 포함하고 있기 때문에 그냥 asset pipeline에 추가하면 약간의 어려운 문제에 당면하게 됩니다. 그래서 이 상대경로를 제대로 수정해 주어야 합니다. 운이 좋게도 이러한 문제를 훨씬 쉽게 해 주는 <a href="https://github.com/rweng/jquery-datatables-rails"><code>jquery-datatables-rails</code> 젬</a>이 있어서 gemfile의 <code>assets</code> 그룹에 추가할 것입니다. 이 젬은 꽤나 자주 업데이트되어 가장 최근 버전을 사용하고자 하기 때문에 <code>github</code> 옵션을 이용해서 해당 프로젝트의 경로를 넘겨 줄 것입니다.   
+</p>
+
+``` /Gemfile
+group :assets do
+  gem 'sass-rails',   '~> 3.2.3'
+  gem 'coffee-rails', '~> 3.2.1'
+
+  # See https://github.com/sstephenson/execjs#readme for more supported runtimes
+  # gem 'therubyracer', :platform => :ruby
+
+  gem 'uglifier', '>= 1.0.3'
+  gem 'jquery-datatables-rails', github: 'rweng/jquery-datatables-rails'
+end
+```
+
+<p>이 <code>github</code> 옵션은 Bundler 1.1 에서 새로 추가되었습니다. 이전 버전을 사용할 때는 대신에 git 전체경로를 넘겨 줄 필요가 있습니다. 젬을 추가한 후에는 늘 그렇듯이 <code>bundle</code> 명령을 실행하여 젬을 설치해 주어야 합니다. 이제 asset pipeline을 이용해서 DataTables을 셋업할 수 있습니다. 먼저, <code>application.js</code> 파일로 가서 목록에 <code>dataTables/jquery.dataTables</code> 호출을 추가할 것입니다. 
+
+``` /app/assets/javascripts/application.js
+//= require jquery
+//= require jquery_ujs
+//= require dataTables/jquery.dataTables
+//= require_tree .
+```
+
+<p>또한, CSS를 포함할 필요가 있기 때문에 <code>application.css</code> 파일에서 무언가를 추가할 필요가 있습니다.</p>  
+
+``` /app/assets/stylesheets/application.css
+/*
+ * This is a manifest file that'll automatically include all the stylesheets available in this directory
+ * and any sub-directories. You're free to add application-wide styles to this file and they'll appear at
+ * the top of the compiled file, but it's generally better to create a new file per style scope.
+ *= require_self
+ *= require dataTables/jquery.dataTables
+ *= require_tree . 
+*/
+```
+
+<h3>테이블에 DataTables을 추가하기</h3>
+
+<p>이제 어플리케이션에 DataTables을 설치했기 때문에 이것을 이용해서 products 테이블의 기능을 향상시킬 수 있게 되었습니다. 이 테이블의 뷰 코드가 아래에 있는데 이해하기가 매우 쉽습니다. 우리가 해야할 것은 기껏해야 각 product를 루프를 돌면서 테이블에 렌더링하는 것입니다.<p>
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<table>
+  <tr>
+    <th>Product Name</th>
+    <th>Category</th>
+    <th>Release Date</th>
+    <th>Price</th>
+  </tr>
+<% @products.each do |product| %>
+  <tr>
+    <td><%= link_to(product.name, product) %></td>
+    <td><%= product.category %></td>
+    <td><%= product.released_on.strftime("%B %e, %Y") %></td>
+    <td><%= number_to_currency(product.price) %></td>
+  </tr>
+<% end %>
+</table>
+```
+
+<p>DataTables를 이용하기 위해서 이 테이블에 준비작업을 해야 하는데, 테이블 헤더부분을 <code>thead</code> 엘리먼트로, body 섹션을 <code>tbody</code> 엘리먼드로 감싸줘야 합니다. 또한 자바스크립트에서 이 테이블을 참조하기 위해 <code>id</code>도 지정해 줄 필요가 있습니다.</p>
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<table id="products">
+  <thead>
+    <tr>
+      <th>Product Name</th>
+      <th>Category</th>
+      <th>Release Date</th>
+      <th>Price</th>
+  </tr>
+</thead>
+<tbody>
+  <% @products.each do |product| %>
+    <tr>
+      <td><%= link_to(product.name, product) %></td>
+      <td><%= product.category %></td>
+      <td><%= product.released_on.strftime("%B %e, %Y") %></td>
+      <td><%= number_to_currency(product.price) %></td>
+    </tr>
+  <% end %>
+  <tbody>
+</table>
+```
+
+<p>이제 Coffeescript 코드를 작성하여 DataTables를 이 테이블에 추가합니다. <code>products.js</code> 파일에서 이 코드작업을 할 것입니다. 우리가 해야할 일은 DOM 객체가 로드된 후 테이블에 <code>dataTable</code>을 호출하는 것입니다.</p>   
+
+``` /app/assets/javascripts/products.js
+jQuery ->
+	$('#products').dataTable()
+```	
+
+<p>페이지를 다시 로드하면 이제 테이블이 매우 다르게 보일 것입니다. 이제 페이징, 소팅, 검색이 가능한 DataTable을 가지게 된 것입니다.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1116/original/E340I02.png" width="800" height="531" alt="Our table is now a DataTable."/>
+</div>
+
+<h3>DataTable 옵션사용하기</h3>
+
+<p>테이블의 모양과 동작을 변경하기 위해 dataTable호출시 사용할 수 있는 많은 옵션들이 있습니다. 예를 들어, <code>sPaginationType</code>은 페이징을 변경하는데, <code>full_numbers</code>으로 지정하면 각각 페이지에 대해서 링크를 보여줄 것입니다. DataTables 웹사이트의 <a href="http://datatables.net/usage/options">사용법 섹션</a>에 가면 DataTable에 사용할 수 있는 옵션에 대한 전체목록을 볼 수 있습니다.</p>
+
+``` /app/assets/javascripts/products.js.coffee
+jQuery ->
+	$('#products').dataTable
+	  sPaginationType: "full_numbers"
+```	  
+	  
+<p>페이지를 다시 로드하면 이제 새로운 페이징 스타일을 볼 수 있을 것입니다.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1117/original/E340I03.png" width="800" height="531" alt="The pagination now has links to each page."/>
+</div>
+
+<h3>DataTables 스타일 향상시키기</h3>
+
+<p>현재 테이블의 스타일이 완벽하지 않지만 변경할 수 있습니다. DataTables 홈페이지에는 멋진 스타일의 예제 테이블이 있는데, 이것을 현재 테이블에 사용할 수 있습니다. 예제 테이블은 jQuery UI를 사용하는데 이것은 gemfile에 있는 <code>jquery-rails</code> 젬에 포함되어 있습니다. 그러나 현재 테이블에 적용할 스타일링을 위한 CSS 파일은 포함되어 있지 않은데, <code>jquery-ui-rails</code>이라는 또다른 젬을 사용하면 이를 해결할 수 있습니다. 이를 위해서 gemfile에 이 젬을 포함하고 다시 <code>bundle</code> 명령을 실행합니다.</p>
+
+``` /Gemfile
+group :assets do
+  gem 'sass-rails',   '~> 3.2.3'
+  gem 'coffee-rails', '~> 3.2.1'
+
+  # See https://github.com/sstephenson/execjs#readme for more supported runtimes
+  # gem 'therubyracer', :platform => :ruby
+
+  gem 'uglifier', '>= 1.0.3'
+  gem 'jquery-datatables-rails', github: 'rweng/jquery-datatables-rails'
+  gem 'jquery-ui-rails'
+end
+```
+
+<p>어플리케이션에 해당 CSS를 추가하기 위해서는 application.css 파일에 <code>jquery.ui.core</code>와 <code>jquery.ui.theme</code>을 추가해 줍니다. 이것은 Smoothness 테마를 포함할 것입니다. 또한 DataTables CSS 파일을 jQuery UI용으로 디자인된 것으로 바꿀 필요가 있는데 <code>demo_table_jui</code>이라는 것이 <code>src</code> 디렉토리에서 제공됩니다. <code>jQuery.dataTables</code> CSS를 이것으로 바꿀 것입니다.</p>
+
+``` /app/assets/stylesheets/application.css
+/*
+ * This is a manifest file that'll automatically include all the stylesheets available in this directory
+ * and any sub-directories. You're free to add application-wide styles to this file and they'll appear at
+ * the top of the compiled file, but it's generally better to create a new file per style scope.
+ *= require_self
+ *= require jquery.ui.core
+ *= require jquery.ui.theme
+ *= require dataTables/src/demo_table_jui
+ *= require_tree . 
+*/
+```
+
+<p>이제 <code>dataTable</code> 호출시 <code>bJQueryUI</code> 옵션을 추가합니다.</p>
+
+``` /app/assets/javascripts/products.js.coffee
+jQuery ->
+	$('#products').dataTable
+	  sPaginationType: "full_numbers"
+	  bJQueryUI: true
+```	  
+
+<p>마지막으로, 테이블에 <code>display</code>라는 <code>class</code>를 지정해 줄 것입니다.</p>
+
+``` /app/views/products/index.html.erb
+<table id="products" class="display">
+```
+
+<p>페이지를 다시 로드하면 테이블이 이제 훨씬 더 좋게 보일 것입니다.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1118/original/E340I04.png" width="800" height="549" alt="The table now looks much better."/>
+</div>
+
+<h3>서버에서 데이터를 불러와 테이블 업데이트하기</h3>
+
+<p>현재 테이블은 페이징, 소팅, 검색기능을 가지고 있지만 모두가 클라이언트 측에서 작동합니다. 이 HTML 페이지는 데이터베이스로부터 모든 products 레코드를 포함하고 있으며 DataTable이 현재 지정된 페이지, 소트 순서, 검색 단어를 근거로 보여줄 레코드를 선택하는 일을 담당하게 됩니다. 한 200개 정도의 레코드에 대해서는 제대로 동작하지만 레코드 갯수가 수천 수백만개에 달하면 이 모든 레코드를 클라이언트로 보내서 처리하기를 원하진 않을 것입니다. 이러한 경우에는 반드시 필요한 레코드만 클라이언트로 보내서 페이지, 소팅 순서, 검색 단어가 변경될 때 DataTable이 서버와 통신을 하도록 하는 것이 더 좋을 것입니다. 문서의 서버단 <a href="http://datatables.net/usage/server-side">처리과정 페이지</a>를 보면 서버로 보낼 매개변수와 JSON형태로 응답하는 것에 대해 알 수 있습니다. 레일스 어플리케이션이 이러한 일을 처리할 수 있도록 셋업을 해야 하며 서버단에서 페이징하는 방법이 필요하기 때문에 gemfile에 <code>will_paginate</code> 젬을 추가하고 <code>bundle</code> 명령을 실행하여 설치해 줍니다.</p>
+
+``` /Gemfile
+gem 'will_paginate'
+```
+
+<p>이제 더 이상 뷰 테블릿 파일에 모든 products 레코드를 보여 줄 필요가 없어졌습니다. 왜냐하면, 이 레코드들은 서버로부터 가져올 것이기 때문입니다. 이제 관련 레코드셋을 가져올 URL을 정의해 주어 <code>table</code> 태그상의 데이터 속성으로 넘겨 줄 것입니다. 여기서는 <code>products_url</code>을 사용하여 데이터형식을 JSON으로 지정해 줍니다.</p>
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<table id="products" class="display" data-source="<%= products_url(format: "json") %>">
+  <thead>
+    <tr>
+      <th>Product Name</th>
+      <th>Category</th>
+      <th>Release Date</th>
+      <th>Price</th>
+    </tr>
+  </thead>
+  <tbody>
+  <tbody>
+</table>
+```
+
+<p>Coffeescript 파일에서는 dataTable 호출시 좀 더 많은 옵션을 추가해서 서버로부터 데이터를 가져오도록 알려주어야 합니다.</p>
+
+``` /app/assets/javascripts/products.js.coffee
+jQuery ->
+	$('#products').dataTable
+	  sPaginationType: "full_numbers"
+	  bJQueryUI: true
+	  bProcessing: true
+	  bServerSide: true
+	  sAjaxSource: $('#products').data('source')
+```	  
+
+<p><code>bProcessing</code> 옵션은 서버로부터 데이터를 가져오는 동안 &ldquo;Processing&rdquo; 메시지가 보이도록 설정해 줍니다. <code>bServerSide</code> 옵션을 true로 지정하면 데이터를 서버로부터 가져오도록 해줍니다. 마지막으로 <code>sAjaxSource</code> 옵션에는 데이터를 가져오게 될 URL로 설정해 주며, 테이블에서 정의했던 <code>data-source</code> 속성값으로 지정해 줍니다. 이제 DataTable은 <code>ProductsController</code>&rsquo;의 <code>index</code> 액션을 호출해서 JSON 응답이 오기를 기다릴 것입니다. <code>respond_to</code> 블럭에서 이 작업을 해 줄 것입니다. 여기서 적절한 JSON으로 응답하게 될 것입니다. 이 때 한가지 옵션으로 JBuilder나 RABL과 같은 것을 이용하는 것입니다. 그러나 이러한 방법은 정확한 응답을 보내기 위해서 필요로하는 로직이 너무 복잡해서 금방 혼란스러워질 수 있습니다.</p>
+
+<p>레일스의 MVC 구조에 한계를 느끼고, 하고자 하는 일에 맞지 않을 경우에는, 코드를 더 간결하게 만들어 준다면 새로운 클래스를 생성한다해서 잘 못된 것은 하나도 없습니다. 이것이 우리가 여기서 취할 접근법입니다. <code>ProductsDatatable</code>라는 새로운 클래스를 생성하여 JSON 데이터형태를 만들도록 하고 해당 클래스의 생성자가 뷰 조건값을 취하여 헬퍼 메소드에 대한 접근권한을 가지도록 해 줄 것입니다. 이렇게 하여 마치 JSON 응답을 만들어 주는 mini-presenter 처럼 동작하게 됩니다. 이를 위해 app 디렉토리 아래 <code>datatables</code> 디렉토리에 이 클래스를 만들 것입니다. 여기서 보여 주기에는 이 클래스의 코드량이 너무 많지만, <a href="https://github.com/ryanb/railscasts-episodes/blob/master/episode-340/store-after/app/datatables/products_datatable.rb">Github</a>에 가면 전체 코드를 다 볼 수 있습니다. 빠르게 훓어 보고 가장 중요한 부분만 보여 주도록 하겠습니다.</p>
+
+<p><code>initializer</code>는 뷰 조건값을 취해서 인스턴스 변수에 할당합니다. 몇가지 헬퍼 메소드를 이 뷰로 위임하면 이후부터 편리하게 그 메소드들을 호출할 수 있게 됩니다. </p>
+
+``` /app/datatables/products_datatable.rb
+delegate :params, :h, :link_to, :number_to_currency, to: :@view
+
+def initialize(view)
+  @view = view
+end
+```
+
+<p>해당 컨트롤러에서 <code>render_json</code>이 호출될 때 <code>as_json</code> 메소드가 뒤에서 트리거됩니다. 이것은 데이터베이스로부터 가져오는 모든 연관 레코드를 포함해서 DataTables가 기대하는 모든 데이터를 반환해 줍니다. 이 데이터는 <code>data</code> 메소드로부터 오게 되고 또 이 메소드는 products 각 레코드에 대해서 루프를 돌면서 테이블상의 각 셀에 대한 정보를 포함하는 2차원 배열을 만들어 반환해 줍니다. </p>
+
+``` /app/datatables/products_datatable.rb
+def as_json(options = {})
+  {
+    sEcho: params[:sEcho].to_i,
+    iTotalRecords: Product.count,
+    iTotalDisplayRecords: products.total_entries,
+    aaData: data
+  }
+end
+
+private
+def data
+  products.map do |product|
+    [
+      link_to(product.name, product),
+      h(product.category),
+      h(product.released_on.strftime("%B %e, %Y")),
+      number_to_currency(product.price)
+    ]
+  end
+end
+```
+
+<p><code>fetch_products</code> 메소드에서 products 레코드들을 가져오게 됩니다. 이것은 해당 페이지가 있다면 검색어로 검색된 데이터의 정확한 페이지를 정확한 순서에 따라 가져오게 됩니다. 검색쿼리 그 자체는 간단하지만 예를 들면, Sphinx나 Solr와 같은 full-text 검색엔진을 이용하여 확장할 수 있습니다.</p>
+
+``` /app/datatables/products_datatable.rb
+def fetch_products
+  products = Product.order("#{sort_column} #{sort_direction}")
+  products = products.page(page).per_page(per_page)
+  if params[:sSearch].present?
+    products = products.where("name like :search or category like :search", search: "%#{params[:sSearch]}%")
+  end
+  products
+end
+```
+
+<p>이 클래스의 나머지는 데이터 소팅과 페이징을 도와주는 메소드들로 이루어져 있습니다. 이제 이 클래스를 가지게 되었으니 컨트롤러 액션에서 사용할 수 있게 되었습니다. </p>
+
+``` /app/controllers/products_controller.rb
+def index
+  respond_to do |format|
+    format.html
+    format.json { render json: ProductsDatatable.new(view_context) }
+  end
+end
+```
+
+<p>웹페이지를 이제 다시 로드하게 되면(먼저 서버를 재시작해야할 경우도 있습니다), 모든 것이 이전보다 더 많은 기능을 하게 됩니다. 동일 페이징, 소팅, 검색기능들을 여전히 사용할 수 있지만, 이제 데이터는 한번에 모두 클라이언트로 로드되지 않고 레일스 어플리케이션에서 알아서 공급하게 될 것입니다.</p>
+
+<p>DataTables에 대한 연제는 여기까지 입니다. 서버단의 처리가 필요한 경우에는 약간의 노력이 필요하지만 최종결과는 그 만한 가치가 있습니다. 만약 우리가 처음부터 비슷한 것을 만든 것이 있는데 관심있다면 <a href="http://railscasts.com/episodes/240-search-sort-paginate-with-ajax">240번 연제</a>를 보기 바랍니다.</p>

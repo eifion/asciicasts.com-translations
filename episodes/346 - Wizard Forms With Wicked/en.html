@@ -1,0 +1,303 @@
+<p>Below is a long user sign-up form with a large number of fields. Forms like this can be quite intimidating to a potential user and might scare them away.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1146/original/E346I01.png" width="800" height="700" alt="Our long signup form."/>
+</div>
+
+<p>One option when faced with a complex form is to turn it into a multi-step form, also known as a wizard. The easiest way to do this is to use JavaScript; this way we can keep everything on the client and we don&rsquo;t need to make any changes to our Rails application. This isn&rsquo;t always the best option, however. We might want the data to be more persistent and to be able to store each step&rsquo;s data in the database or we might want the form to be dynamic so the steps change depending on the Rails app. We&rsquo;ll probably want to add validations to some of the fields in each step, too.</p>
+
+<h3>Introducing Wicked</h3>
+
+<p>If want to manage a wizard through a Rails app we should consider using <a href="https://github.com/schneems/wicked">Richard Schneeman&rsquo;s Wicked gem</a>. This adds behaviour to a Rails controller to to turn it into a multi-step form and we&rsquo;ll show you how it works in this episode. The first step is to strip our long form down to as few fields as possible - a good rule of thumb is to only require the information necessary for the user to be able to access the record later. In the case of a signup form we can cut the form down to the fields related to authentication, i.e. the username and password fields. Everything else can go into separate steps in out wizard so we&rsquo;ll reduce our form to just these fields.</p>
+
+``` /app/views/users/new.html.erb
+<h1>Sign Up</h1>
+
+<%= form_for @user do |f| %>
+  <% if @user.errors.any? %>
+    <div class="error_messages">
+      <h2><%= pluralize(@user.errors.count, "error") %> prohibited this user from being saved:</h2>
+      <ul>
+      <% @user.errors.full_messages.each do |msg| %>
+        <li><%= msg %></li>
+      <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="field">
+    <%= f.label :email %><br />
+    <%= f.text_field :email %>
+  </div>
+  <div class="field">
+    <%= f.label :password %><br />
+    <%= f.password_field :password %>
+  </div>
+  <div class="field">
+    <%= f.label :password_confirmation %><br />
+    <%= f.password_field :password_confirmation %>
+  </div>
+
+  <div class="actions">
+    <%= f.submit "Sign Up" %>
+  </div>  
+<% end %>
+```
+
+<p>When we reload the form now we&rsquo;ll see just those fields. This will become the first step of our wizard.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1147/original/E346I02.png" width="800" height="400" alt="The first step of our new wizard."/>
+</div>
+
+<p>At this point it&rsquo;s a good idea to ask yourself if you really need a wizard. We could just have a separate &ldquo;edit profile&rdquo; page and have those fields there but we&rsquo;ll assume that a wizard is the best approach here and carry on so we&rsquo;ll add the Wicked gem to the gemfile and then run bundle to install it.</p>
+
+``` /Gemfile
+gem 'wicked'
+```
+
+<p>Next we&rsquo;ll generate a new controller called <code>user_steps</code>. This will give us a controller dedicated to managing the wizard&rsquo;s steps. We can call this controller anything we like as Wicked won&rsquo;t care.</p>
+
+``` terminal
+$ rails g controller user_steps
+```
+
+<p>We&rsquo;ll need to add a new <code>user_steps</code> resource to our routes file for that controller.</p>
+
+``` /config/routes.rb
+Signup::Application.routes.draw do
+  resources :users
+  resources :user_steps
+  root to: 'users#index'
+end
+```
+
+<p>Now in our new controller we need to include the <code>Wicked::Wizard</code> module. This gives us a <code>steps</code> method that we can use to define the steps in our wizard after the user is created. We&rsquo;ll add two steps to our form, one for personal information and another related to the social networks the user is a member of. This controller is expected to respond to the <code>show</code> action and this action should render out a given step of the wizard. We have access to a <code>render_wizard</code> method that will look for a form view template for each step.</p> 
+
+``` /app/controllers/user_steps_controller.rb
+class UserStepsController < ApplicationController
+  include Wicked::Wizard
+  steps :personal, :social
+  
+  def show
+    render_wizard
+  end
+end
+```
+
+<p>We&rsquo;ll need to create these views under the <code>/app/views/user_steps</code> directory. We&rsquo;ll create files here call <code>personal.html.erb</code> and <code>social.html.erb</code>. For now we&rsquo;ll just add the words &ldquo;personal&rdquo; and &ldquo;social&rdquo; to these files so that we can distinguish the steps. We should now be able to access each step at <code>/user_steps/&lt;step_name&gt;</code>.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1148/original/E346I03.png" width="800" height="400" alt="The new Personal step of our wizard."/>
+</div>
+
+<p>This is how <code>render_wizard</code> works. It renders out a template whose name is passed in through the URL. If we visit the <code>UserStepsController</code>&rsquo;s <code>index</code> action this will redirect us to the first step in the process, in this case the <code>personal</code> step. We need to have the <code>/users/new</code> action redirect us to the first step of the wizard when we submit that form. Submitting the form triggers the <code>UsersController</code>&rsquo;s <code>create</code> action.</p>
+
+``` /app/controllers/users_controller.rb
+def create
+  @user = User.new(params[:user])
+  if @user.save
+    session[:user_id] = @user.id
+    redirect_to users_path, notice: "Thank you for signing up."
+  else
+    render :new
+  end
+end
+```
+
+<p>The action saves the new user then logs them in by saving their <code>id</code> in a session variable. When this happens we want to redirect the user to the first step of the wizard instead of the user instead of the page they&rsquo;re currently redirected to.</p>
+
+``` /app/controllers/users_controller.rb
+def create
+  @user = User.new(params[:user])
+  if @user.save
+    session[:user_id] = @user.id
+    redirect_to user_steps_path
+  else
+    render :new
+  end
+end
+```
+
+<p>This works. When we sign up now we&rsquo;re redirected to the &ldquo;personal&rdquo; step of our new wizard. Now we need to add a form to that page that we&rsquo;ll redirect to the second page of the wizard when it&rsquo;s submitted. If we want a form for editing user details on each <code>render_wizard</code> step we&rsquo;ll need to fetch the current user in the <code>UserStepsController</code>&rsquo;s show action. We already have a <code>current_user</code> method in our application and if you have some kind of authentication solution in your application you&rsquo;ll generally have a method to fetch the current user. If you don&rsquo;t you can pass in the user&rsquo;s <code>id</code> when you redirect to the <code>UserStepsController</code>.</p>
+
+``` /app/controllers/user_steps_controller.rb
+def show
+  @user = current_user
+  render_wizard
+end
+```
+
+<p>We can now replace the placeholder text in the personal template with a form with the relevant fields.</p>
+
+``` /app/views/user_steps/personal.html.erb
+<%= form_for @user, url: wizard_path do |f| %>
+  <h2>Tell us a little about yourself</h2>
+  <div class="field">
+    <%= f.label :name %><br />
+    <%= f.text_field :name %>
+  </div>
+  <div class="field">
+    <%= f.label :date_of_birth %><br />
+    <%= f.date_select :date_of_birth, start_year: 1900, end_year: Date.today.year %>
+  </div>
+  <div class="field">
+    <%= f.label :bio %><br />
+    <%= f.text_area :bio, rows: 5 %>
+  </div>
+  <div class="actions">
+	<%= f.submit "Continue" %>
+  </div>
+<% end %>
+```
+
+<p>We&rsquo;ve had to pass in a <code>url</code> to this form. Normally it will be submitted to the <code>UsersController</code> but we want it to go to the <code>UserStepsController</code>. We can use the <code>wizard_path</code> helper method here which will POST the form to the correct action. The form basically contains the first three fields that we removed from the original form along with a submit button. When we reload the page now we&rsquo;ll see that new form.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1149/original/E346I04.png" width="800" height="449" alt="The completed Personal step."/>
+</div>
+
+<p>Clicking &ldquo;Continue&rdquo; will trigger the <code>update</code> action but we haven&rsquo;t created that yet. The will be similar to the <code>show</code> action but will update some of the current user&rsquo;s attributes based on the values from the form.</p>
+
+``` /app/controllers/user_steps_controller.rb
+def update
+  @user = current_user
+  @user.attributes = params[:user]
+  render_wizard @user
+end
+```
+
+<p>Note that we pass the current user to <code>render_wizard</code> here. When we pass in a resource like this it will attempt to call <code>save</code> on it and if this succeeds it will go on the next step. If saving the resource fails we&rsquo;ll see the current step again.</p>
+
+<p>We can add the form to the <code>social</code> template now.</p>
+
+``` /app/views/user_steps/social.html.erb
+<%= form_for current_user, url: wizard_path do |f| %>
+  <h2>Where can we find you?</h2>
+  <div class="field">
+    <%= f.label :twitter_username %><br />
+    <%= f.text_field :twitter_username %>
+  </div>
+  <div class="field">
+    <%= f.label :github_username %><br />
+    <%= f.text_field :github_username %>
+  </div>
+  <div class="field">
+    <%= f.label :website %><br />
+    <%= f.text_field :website %>
+  </div>
+  <div class="actions">
+	  <%= f.submit "Continue" %>
+  </div>
+<% end %>
+```
+
+<p>Submitting this form will trigger the <code>update</code> action again but as there aren&rsquo;t any further steps it will then redirect back to the application&rsquo;s root page. If we want to change this behaviour we can override a <code>redirect_to_finish_wizard</code> method in the controller. We&rsquo;ll still redirect to the root URL but also show a message that thanks the user for signing up.</p>
+
+``` /app/controllers/user_steps_controller.rb
+private
+def redirect_to_finish_wizard
+  redirect_to root_url, notice: "Thanks for signing up."
+end
+```
+
+<h3>Skipping Steps</h3>
+
+The next thing we&rsquo;ll do is add a link next to the &ldquo;Continue&rdquo; button that allows the user to skip a step. If we look at the Quick Reference section2 of the README we&rsquo;ll find a list of the methods that Wicked provides and included in these is next_wizard_path which returns the URL of the next step. We can use this to make our &ldquo;skip&rdquo; link.
+
+/app/views/user_steps/personal.html.erb
+&lt;div class=&quot;actions&quot;&gt;
+  &lt;%= f.submit &quot;Continue&quot; %&gt;
+  or &lt;%= link_to &quot;skip this step&quot;, next_wizard_path %&gt;
+&lt;/div&gt;We&rsquo;ll do the same thing in the other step, too. Now we have a &ldquo;skip this step&rdquo; link on each of the wizard so that the user knows that the fields on that step are optional and can be skipped.
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1150/original/E346I05.png" width="800" height="390" alt="The Social step showing the skip link."/>
+</div>
+
+<h3>Validations</h3>
+
+<p>Next we&rsquo;ll look at validations. Let&rsquo;s say that we want to validate the format of the Twitter username on the &ldquo;Social&rdquo; step of the wizard. We&rsquo;re currently not displaying any error validation messages so we&rsquo;ll page in some code on each step to do so. If this application was going into production we&rsquo;d probably move this code into a helper method to reduce the duplication but here we&rsquo;ll let that slip.</p>
+
+``` /app/views/user_steps/social.html.erb
+<% if @user.errors.any? %>
+  <div class="error_messages">
+    <h2><%= pluralize(@user.errors.count, "error") %> prohibited this user from being saved:</h2>
+    <ul>
+    <% @user.errors.full_messages.each do |msg| %>
+      <li><%= msg %></li>
+    <% end %>
+    </ul>
+  </div>
+<% end %>
+```
+
+<p>Now we can add validation to our <code>User</code> model. We&rsquo;ll use <code>validates_format_of</code> and it&rsquo;s important to set its <code>allow_blank</code> option to true to make this an optional parameter so that the validation isn&rsquo;t triggered when we save the user&rsquo;s other details on a different step.</p>
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  attr_accessible :bio, :date_of_birth, :email, :github_username, :name, :password, :password_confirmation, :twitter_username, :website
+  has_secure_password
+  
+  validates_format_of :twitter_username, :without => /\W/, :allow_blank => true
+end
+```
+
+<p>What, though, if we do want to make sure that a Twitter username has been supplied? This is where things can get a little tricky as the user is saved when the first step is completed. It&rsquo;s easy to validate the presence of the username and password fields on the first step but if we try to validate fields from later steps the new <code>User</code> record will be invalid and won&rsquo;t save on the first. To get around this we can make the validation conditional so that the Twitter username field is only validated on the &ldquo;Social&rdquo; step.</p>
+
+``` /app/models/user.rb
+validates_presence_of :twitter_username, if: :on_social_step?
+```
+
+<p>Now we need to write the <code>on_social_step?</code> method which will check to see which step we&rsquo;re on and make the validation conditional on its return value. We won&rsquo;t write that method here, though. If you need to do something like this it&rsquo;s worth taking a look at the Partial Validation of <a href="https://github.com/schneems/wicked/wiki/Partial-Validation-of-Active-Record-Objects">Active Record Objects</a> page of the Wicked wiki which explains exactly this situation. For an alternative solution take a look at <a href="https://github.com/schneems/wicked/wiki/Partial-Validation-of-Active-Record-Objects">episode 217</a> which shows how to build a multi-step form from scratch.</p>
+
+<h3>Removing Duplication</h3>
+
+<p>Our wizard form is now almost complete but there&rsquo;s a lot of duplication in the different steps of the code. Apart from the headline and field names the two steps are almost identical which makes this a perfect case for a partial layout. We can move the headline to the top of the page, outside the form, and then move the error messages and submit button in to a new <code>form</code> partial. Instead of rendering the partial as partial, however, we&rsquo;ll render it as a layout and pass the form builder to it.</p>
+
+``` /app/views/user_steps/personal.html.erb
+<h2>Tell us a little about yourself</h2>
+
+<%= render :layout => 'form' do |f| %>  
+  <div class="field">
+    <%= f.label :name %><br />
+    <%= f.text_field :name %>
+  </div>
+  <div class="field">
+    <%= f.label :date_of_birth %><br />
+    <%= f.date_select :date_of_birth, start_year: 1900, end_year: Date.today.year %>
+  </div>
+  <div class="field">
+    <%= f.label :bio %><br />
+    <%= f.text_area :bio, rows: 5 %>
+  </div>
+<% end %>
+```
+
+<p>The new partial form will look like this. Note that we call <code>yield</code> between the error messages and the button so that the form fields are rendered there.</p>
+
+``` /app/views/user_steps/_form.html.erb
+<%= form_for @user, url: wizard_path do |f| %>
+  
+<% if @user.errors.any? %>
+  <div class="error_messages">
+    <h2><%= pluralize(@user.errors.count, "error") %> prohibited this user from being saved:</h2>
+    <ul>
+      <% @user.errors.full_messages.each do |msg| %>
+      <li><%= msg %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+  
+<%= yield f %>
+  
+<div class="actions">
+  <%= f.submit "Continue" %>
+or <%= link_to "skip this step", next_wizard_path %>
+</div>
+<% end %>
+```
+
+<p>We can now do the same thing inside the &ldquo;Social&rdquo; template to clean that template up, too. Our form will work just as it did before but now there&rsquo;s no duplication across the different steps.</p>

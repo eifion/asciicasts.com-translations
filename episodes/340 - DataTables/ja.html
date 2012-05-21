@@ -1,0 +1,285 @@
+<p><a href="http://datatables.net/">DataTable</a>を使えば通常のHTMLテーブルに、ページ区切り、ソート、検索の各機能を付加することができ、それらすべてをJavaScriptで実装します。今回のエピソードではその設定方法と、Railsアプリケーションからデータを供給する方法を紹介します。下に示したページにはProductのレコードで構成された通常のテーブルが表示されています。これにDataTableを追加して機能を改善します。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1115/original/E340I01.png" width="800" height="500" alt="商品を示す通常のテーブル"/>
+</div>
+
+<h3>アプリケーションにDataTableを追加する</h3>
+
+<p><a href="http://datatables.net/">ソースコード</a>をダウンロードしてRailsアプリケーションで使用することもできますが、画像ファイルへの相対パスによる参照がコードに含まれていて、asset pipelineに追加するためにはそれを修正する必要があり、これは少し難しい作業になります。幸いにも<a href="https://github.com/rweng/jquery-datatables-rails"><code>jquery-datatables-rails</code>というgem</a>があり、これを利用することでその作業をずっと簡単なものにしてくれます。gemfileでこれを<code>assets</code>グループに追加します。このgemはかなり頻繁に更新されていて、なるべく最新版を使用したいので、<code>github</code>オプションを使用してプロジェクトのパスを渡します。</p>
+
+``` /Gemfile
+group :assets do
+  gem 'sass-rails',   '~> 3.2.3'
+  gem 'coffee-rails', '~> 3.2.1'
+
+  # See https://github.com/sstephenson/execjs#readme for more supported runtimes
+  # gem 'therubyracer', :platform => :ruby
+
+  gem 'uglifier', '>= 1.0.3'
+  gem 'jquery-datatables-rails', github: 'rweng/jquery-datatables-rails'
+end
+```
+
+<p><code>github</code>オプションはBundler 1.1で導入された新機能です。このバージョンを持っていない場合は、代わりにgitのフルパスを渡す必要があります。いつもと同じようにgemを追加するときは<code>bundle</code>コマンドを実行してインストールをおこないます。次にDataTableをasset pipelineと一緒に動作するように設定します。まず<code>application.js</code>ファイルを開いて、manifestで<code>dataTables/jquery.dataTables</code>の呼び出しを追加します。</p>
+
+``` /app/assets/javascripts/application.js
+//= require jquery
+//= require jquery_ujs
+//= require dataTables/jquery.dataTables
+//= require_tree .
+```
+
+<p>インクルードするのためのCSSもついているので、<code>application.css</code>にも何らか追加する必要があります。</p>
+
+``` /app/assets/stylesheets/application.css
+/*
+ * This is a manifest file that'll automatically include all the stylesheets available in this directory
+ * and any sub-directories. You're free to add application-wide styles to this file and they'll appear at
+ * the top of the compiled file, but it's generally better to create a new file per style scope.
+ *= require_self
+ *= require dataTables/jquery.dataTables
+ *= require_tree . 
+*/
+```
+
+<h3>テーブルにDataTableを追加する</h3>
+
+<p>アプリケーションにDataTableをインストールできたので、これを使って商品テーブルを改善します。このテーブル用のビューのコードを下に示しますが、中身はごく簡単です。おこなっていることは各商品の間をループしてテーブルに出力しているだけです。</p>
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<table>
+  <tr>
+    <th>Product Name</th>
+    <th>Category</th>
+    <th>Release Date</th>
+    <th>Price</th>
+  </tr>
+<% @products.each do |product| %>
+  <tr>
+    <td><%= link_to(product.name, product) %></td>
+    <td><%= product.category %></td>
+    <td><%= product.released_on.strftime("%B %e, %Y") %></td>
+    <td><%= number_to_currency(product.price) %></td>
+  </tr>
+<% end %>
+</table>
+```
+
+<p>このテーブルでDataTableを利用できるようにするためには、ヘッダ行を<code>thead</code>要素で、ボディセクションを<code>tbody</code>要素でラップします。またJavaScriptからこのテーブルを参照できるように<code>id</code>を付けます。</p>
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<table id="products">
+  <thead>
+    <tr>
+      <th>Product Name</th>
+      <th>Category</th>
+      <th>Release Date</th>
+      <th>Price</th>
+  </tr>
+</thead>
+<tbody>
+  <% @products.each do |product| %>
+    <tr>
+      <td><%= link_to(product.name, product) %></td>
+      <td><%= product.category %></td>
+      <td><%= product.released_on.strftime("%B %e, %Y") %></td>
+      <td><%= number_to_currency(product.price) %></td>
+    </tr>
+  <% end %>
+  <tbody>
+</table>
+```
+
+<p>これでCoffeeScriptコードを使ってテーブルにDataTableを追加することができます。これを<code>products.js</code>ファイルに記述します。必要な内容は、DOMがロードされたことを確認した後にテーブルに対して<code>dataTable</code>を呼び出すことだけです。</p>
+
+``` /app/assets/javascripts/products.js
+jQuery ->
+	$('#products').dataTable()
+```	
+
+<p>ページをリロードするとテーブルの外観はかなり変わりました。DataTableによって改ページ、ソート、検索の機能が付加されました。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1116/original/E340I02.png" width="800" height="531" alt="テーブルがDataTableになった"/>
+</div>
+
+<h3>DataTableのカスタマイズ</h3>
+
+<p>dataTableに対して指定できるオプションは多くの種類があり、それらを使ってテーブルの見え方や振る舞いを変更することができます。例えば<code>sPaginationType</code>を設定すると改ページの振る舞いが変わります。これを<code>full_numbers</code>と指定すると各ページへのリンクが表示されます。DataTableのサイトの<a href="http://datatables.net/usage/options">利用方法のセクション</a>には、DataTableのカスタマイズに利用できる全オプションのリストがあります。</p>
+
+``` /app/assets/javascripts/products.js.coffee
+jQuery ->
+	$('#products').dataTable
+	  sPaginationType: "full_numbers"
+```	  
+	  
+<p>ページをリロードすると新規の改ページのスタイルが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1117/original/E340I03.png" width="800" height="531" alt="改ページで、すべてのページのリンクが表示される"/>
+</div>
+
+<h3>スタイルを改善する</h3>
+
+<p>テーブルのスタイルは完璧ではないですが、これに変更を加えることができます。DataTableのサイトにはきれいにスタイル設定されたサンプルのテーブルがあるので、これを今回のテーブルに使用します。サンプルテーブルはjQuery UIを使用していますが、これはgemfileに含まれている<code>jquery-rails</code> gemに入っています。しかし我々のテーブルに必要なCSSスタイル設定は含まれていません。そこで<code>jquery-ui-rails</code>というもう一つのgemを利用します。これを使えるようにするには、gemfileに追加して再度<code>bundle</code>コマンドを実行します。</p>
+
+``` /Gemfile
+group :assets do
+  gem 'sass-rails',   '~> 3.2.3'
+  gem 'coffee-rails', '~> 3.2.1'
+
+  # See https://github.com/sstephenson/execjs#readme for more supported runtimes
+  # gem 'therubyracer', :platform => :ruby
+
+  gem 'uglifier', '>= 1.0.3'
+  gem 'jquery-datatables-rails', github: 'rweng/jquery-datatables-rails'
+  gem 'jquery-ui-rails'
+end
+```
+
+<p>アプリケーションにCSSを追加するには、application.cssファイルに<code>jquery.ui.core</code>と<code>jquery.ui.theme</code>を追加します。これによってSmoothnessテーマがインクルードされます。また、DataTableのCSSファイルもjQuery UI用に設計されたものに置き換えます。<code>src</code>ディレクトリの下に<code>demo_table_jui</code>というファイルが準備されています。<code>jQuery.dataTables</code>のCSSをこのファイルで置き換えます。</p>
+
+``` /app/assets/stylesheets/application.css
+/*
+ * This is a manifest file that'll automatically include all the stylesheets available in this directory
+ * and any sub-directories. You're free to add application-wide styles to this file and they'll appear at
+ * the top of the compiled file, but it's generally better to create a new file per style scope.
+ *= require_self
+ *= require jquery.ui.core
+ *= require jquery.ui.theme
+ *= require dataTables/src/demo_table_jui
+ *= require_tree . 
+*/
+```
+
+<p><code>dataTable</code>の呼び出しに<code>bJQueryUI</code>オプションを追加します。</p>
+
+``` /app/assets/javascripts/products.js.coffee
+jQuery ->
+	$('#products').dataTable
+	  sPaginationType: "full_numbers"
+	  bJQueryUI: true
+```	  
+
+<p>最後にテーブルに<code>display</code>という<code>class</code>を設定します。</p>
+
+``` /app/views/products/index.html.erb
+<table id="products" class="display">
+```
+
+<p>ここでページをリロードすると、ずっときれいなテーブルが表示されました。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1118/original/E340I04.png" width="800" height="549" alt="テーブルがずっときれいになった"/>
+</div>
+
+<h3>サーバからのデータでテーブルを更新する</h3>
+
+<p>テーブルに改ページ、ソート、検索の機能が付きましたが、これらは現状すべてクライアント側で発生しています。HTMLページにはデータベースにあるすべての商品が含まれており、DataTableがページ、ソート順、検索語に基づいて表示されるべきものを選択します。これはレコードが少ない場合(200件以下程度)はうまく動作しますが、もしレコードが千や万の単位だった場合にはすべてをクライアントに送信して処理させる方法はとりたくありません。このような場合には必要なレコードのみをクライアントに送信し、選択されたページやソートフィールドや検索語が変わったときに、DataTableにサーバと通信させるようにします。ドキュメントの<a href="http://datatables.net/usage/server-side">サーバサイド処理に関するページ</a>を見ると、サーバに送信されるパラメータとJSONによるレスポンスについての説明があります。Railsアプリケーションをこれに対応した形にしてサーバ側で改ページ処理をしたいので、gemfileに<code>will_paginate</code>を追加し、再度bundleコマンドを実行してインストールします。</p>
+
+``` /Gemfile
+gem 'will_paginate'
+```
+
+<p>サーバから必要な分だけを取得できるようになり、テンプレートですべての商品を表示する必要がなくなりました。関連する商品のデータセットを取得するためのURLを定義し、<code>table</code>の開始タグのデータ属性にこれを置きます。<code>products_url</code>を使用して、JSONフォーマットを使用するよう指定します。</p>
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<table id="products" class="display" data-source="<%= products_url(format: "json") %>">
+  <thead>
+    <tr>
+      <th>Product Name</th>
+      <th>Category</th>
+      <th>Release Date</th>
+      <th>Price</th>
+    </tr>
+  </thead>
+  <tbody>
+  <tbody>
+</table>
+```
+
+<p>CoffeescriptファイルでdataTableの呼び出しにいくつかのオプションを追加して、サーバからデータを取得するよう指示します。</p>
+
+``` /app/assets/javascripts/products.js.coffee
+jQuery ->
+	$('#products').dataTable
+	  sPaginationType: "full_numbers"
+	  bJQueryUI: true
+	  bProcessing: true
+	  bServerSide: true
+	  sAjaxSource: $('#products').data('source')
+```	  
+
+<p><code>bProcessing</code>オプションはサーバからデータを取得する間“Processing(処理中)”のメッセージを表示します。<code>bServerSide</code>をtrueに設定することによって、データはサーバから取得されるようになります。最後に<code>sAjaxSource</code>はデータを取得するためのURLを設定し、これをテーブル内で定義した<code>data-source</code>属性の値に設定します。DataTableが<code>ProductsController</code>の<code>index</code>アクションを起動し、JSONレスポンスを受け付けます。これをおこなうために<code>respond_to</code>ブロックを使用します。難しいのは、どうやって正しい形式のJSONを返すかという部分です。一つの方法は、JbuilderやRABLなどを使用するやり方ですが、これらを使った場合、正しいレスポンスを生成するためには複雑なロジックが必要になるので、すぐにコードがわかりにくくなってしまいます。</p>
+
+<p>もし、RailsのMVC構造には限界があってここでやろうとしていることには合わないと感じているのなら、コードをシンプルにするために新規にクラスを作ることも悪くありません。今回はこのアプローチをとることにします。JSONを生成するために新たに<code>ProductsDatatable</code>クラスを作成し、ヘルパーメソッドにアクセスできるようにコンストラクタにビューコンテキストを持たせます。これによって、JSONレスポンス用のミニプレゼンターの役目を果たします。このクラスをappディレクトリ下に新規に作成した<code>datatables</code>ディレクトリに作成します。コード量が多いのでここですべてを示すことはできませんが、<a href="https://github.com/ryanb/railscasts-episodes/blob/master/episode-340/store-after/app/datatables/products_datatable.rb">Github</a>で全体を見ることができます。ここでは全体は簡単に流して重要な部分のみを見ていきます。</p>
+
+<p><code>initializer</code>はビューコンテキストを引数にとり、それをインスタンス変数に割り当てます。ここから簡単に呼び出せるようにいくつかのヘルパーメソッドをこのビューに委譲します。</p> 
+
+``` /app/datatables/products_datatable.rb
+delegate :params, :h, :link_to, :number_to_currency, to: :@view
+
+def initialize(view)
+  @view = view
+end
+```
+
+<p><code>as_json</code>メソッドは、コントローラの<code>render_json</code>の呼び出しによって裏で起動されます。これによって、DataTableが必要とする、データベースからの関連する行を含んだすべてのデータが返されます。このデータは<code>data</code>メソッドから生成されますが、このメソッドは各商品の間をループしてテーブルの各セル用の情報を含んだ二次元の配列を返します。</p>
+
+``` /app/datatables/products_datatable.rb
+def as_json(options = {})
+  {
+    sEcho: params[:sEcho].to_i,
+    iTotalRecords: Product.count,
+    iTotalDisplayRecords: products.total_entries,
+    aaData: data
+  }
+end
+
+private
+def data
+  products.map do |product|
+    [
+      link_to(product.name, product),
+      h(product.category),
+      h(product.released_on.strftime("%B %e, %Y")),
+      number_to_currency(product.price)
+    ]
+  end
+end
+```
+
+<p>商品は、<code>fetch_products</code>メソッドで取得されます。これはデータの正しいページを正しい並びで取得し、検索語がある場合にはそれによってフィルタがかけられます。検索クエリ自体は単純ですが、SphinxやSolrなどの全文検索エンジンを使うなどして機能を拡張することも可能です。</p> 
+
+``` /app/datatables/products_datatable.rb
+def fetch_products
+  products = Product.order("#{sort_column} #{sort_direction}")
+  products = products.page(page).per_page(per_page)
+  if params[:sSearch].present?
+    products = products.where("name like :search or category like :search", search: "%#{params[:sSearch]}%")
+  end
+  products
+end
+```
+
+<p>クラスの定義の残りの部分は並び替えと改ページ用のヘルパーメソッドで構成されています。完成したこのクラスをコントローラアクションで利用してみます。</p>
+
+``` /app/controllers/products_controller.rb
+def index
+  respond_to do |format|
+    format.html
+    format.json { render json: ProductsDatatable.new(view_context) }
+  end
+end
+```
+
+<p>サーバを再起動してページをリロードすると、前とまったく同じように動作します。改ページやソート、検索の振る舞いは前のままですが、データはクライアント側に一度で読み込んだものではなく、Railsアプリケーションから供給されています。 </p>
+
+<p>DataTableに関する今回のエピソードは以上です。サーバサイドでの処理が必要な場合は多少の手間がかかりますが、得られる成果を考えればその価値は十分あるでしょう。これに似たものをゼロから作成する別の方法に興味があれば、<a href="http://railscasts.com/episodes/240-search-sort-paginate-with-ajax">エピソード240</a>を参照してください。</p>

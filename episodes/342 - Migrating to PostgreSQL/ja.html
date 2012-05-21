@@ -1,0 +1,255 @@
+<p>PostgreSQLは最近Railsデベロッパーの間で人気のデータベースですが、選ばれるのには理由があります。多様な機能を提供しており、以前はMySQLを利用していた多くの開発者がPostgresに移行しました。これについてはこのエピソードの最後で触れますが、その前にRailsアプリケーションでPostgresを設定する方法を紹介します。まずPostgresをインストールします。PostgreSQLサイトの<a href="http://www.postgresql.org/download/">ダウンロードページ</a>には多種のOSに対応したいくつかのパッケージがあります。Mac OS X Lionには最初からPostgresが含まれていて、<code>psql</code>コマンドを実行することでバージョンを確認することができます。</p>
+
+``` terminal
+$ psql --version
+psql (PostgreSQL) 9.0.5
+```
+
+<p>もともとインストールされているバージョンはあるのですが、Homebrewからインストールし直して最新バージョンと開発用のファイルを入手してみましょう。次のコマンドを実行することでPostgresが自動的にダウンロードされコンパイルされます。</p>
+
+``` terminal
+$ brew install postgresql
+```
+
+<p>少し時間がかかりますが、これが終わると設定のための指示が表示されます。次のコマンドを実行して、データベースの作成を完了させます。</p>
+
+``` terminal
+$ initdb /usr/local/var/postgres
+```
+
+<p>次にサーバを起動します。起動方法のひとつは、エージェントを設定するやり方です。</p>
+
+``` terminal
+$ mkdir -p ~/Library/LaunchAgents
+$ cp /usr/local/Cellar/postgresql/9.1.3/homebrew.mxcl.postgresql.plist ~/Library/LaunchAgents
+$ launchctl load -w ~/Library/LaunchAgents/homebrew.mxcl.postgresql.plist
+```
+
+<p>あるいは次のコマンドでサーバを手動で起動することもできます。</p>
+
+``` terminal
+$ pg_ctl -D /usr/local/var/postgres -l /usr/local/var/postgres/server.log start
+```
+
+<p>最新版のPostgresを実行しているはずなので、念のため<code>which psql</code>を実行してみて、システムに最初から入っているバージョンではなく<code>/usr/local/bin</code>ディレクトリの下にあるバージョンを使用していることを確認してください。</p>
+
+``` terminal
+$ psql --version
+psql (PostgreSQL) 9.1.3
+$ which psql
+/usr/local/bin/psql
+```
+
+<h3>Postgresを使用してRailsアプリケーションを作成する</h3>
+
+<p>インストールができたので、Postgresを使用したRailsアプリケーションを作成します。<code>-d</code>オプションで使用するデータベースを指定します。</p>
+
+``` terminal
+$ rails new blog -d postgresql
+```
+
+<p>アプリケーションが作成されるときにBundlerが<code>pg</code> gemをインストールします。コンパイル中にエラーメッセージが出るようであれば、Postgresが正しく設定されていない可能性があります。gemがすでにインストールされている場合は、一度アンインストールしてから再インストールして、正しいバージョンのPostgresが使用されるようにします。</p>
+
+<p>アプリケーションの<code>database.yml</code>ファイルを見ると、すでにPostgresを使用するように設定されています。</p>
+
+``` /config/database.yml
+development:
+  adapter: postgresql
+  encoding: unicode
+  database: blog_development
+  pool: 5
+  username: blog
+  password:
+```  
+
+<p>このファイルのユーザ名はデフォルトでアプリケーション名になっています。これはアプリケーションごとに別のユーザを持つため本番環境では都合がいいですが、開発環境ではシステムのユーザを使用してすべてのユーザを共通化しておいた方が便利でしょう。このユーザはHomebrewによるインストール時に自動的に作成されるされるものですが、他の方法でインストールした場合は自分で作成する必要があります。このアプリケーションは開発時とテストデータベースでのみ使用して本番で使用することはないので、本番環境用の設定は削除します。</p>
+
+``` /config/database.yml
+development:
+  adapter: postgresql
+  encoding: unicode
+  database: blog_development
+  pool: 5
+  username: eifion
+  password:
+
+test:
+  adapter: postgresql
+  encoding: unicode
+  database: blog_test
+  pool: 5
+  username: eifion
+  password:
+```  
+
+<p><code>database.yml</code>ファイルが正しく設定されたら、次にアプリケーションのデータベースを作成します。これを自動的に行なうRakeコマンドがあります。</p>
+
+``` terminal
+$ rake db:create:all
+```
+
+<p>次にアプリケーションを試すために<code>article</code>のscaffoldを生成して、データベースのマイグレーションを実行します。</p>
+
+``` terminal
+$ rails g scaffold article name content:text
+$ rake db:migrate
+==  CreateArticles: migrating =================================================
+-- create_table(:articles)
+NOTICE:  CREATE TABLE will create implicit sequence "articles_id_seq" for serial column "articles.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "articles_pkey" for table "articles"
+   -> 0.0114s
+==  CreateArticles: migrated (0.0116s) ========================================
+```
+
+<p>Postgresを使用する場合の特徴として、シーケンスとインデックスが作成されたという通知が表示されます。ここでサーバを起動すると、アプリケーション中の記事をブラウズしたり、作成、編集、削除することができます。これはSQLiteデータベースを使用している場合とまったく同じです。</p>
+
+<h3>データベースを直接操作する</h3>
+
+<p>データベースを直接操作したい場合は、<code>psql</code>コマンドの後ろにデータベース名をつけて実行します。あるいは<code>rails db</code>を実行すると、同じ意味になります。</p>
+
+``` terminal
+$ rails db
+psql (9.1.3)
+Type "help" for help.
+
+blog_development=#
+```
+
+<p>ここでデータベースに対してSQLクエリをタイプするか、Postgres専用のコマンドを実行します。例えば、<code>\d</code>で現在のデータベースのテーブル一覧が表示されます。</p>
+
+``` terminal
+blog_development=# \d
+               List of relations
+ Schema |       Name        |   Type   | Owner  
+--------+-------------------+----------+--------
+ public | articles          | table    | eifion
+ public | articles_id_seq   | sequence | eifion
+ public | schema_migrations | table    | eifion
+``` 
+
+<p>同じコマンドにテーブル名をつけて実行すると、そのテーブルの情報が表示されます。</p>
+
+``` terminal
+blog_development=# \d articles
+                                     Table "public.articles"
+   Column   |            Type             |                       Modifiers                       
+------------+-----------------------------+-------------------------------------------------------
+ id         | integer                     | not null default nextval('articles_id_seq'::regclass)
+ name       | character varying(255)      | 
+ content    | text                        | 
+ created_at | timestamp without time zone | not null
+ updated_at | timestamp without time zone | not null
+Indexes:
+    "articles_pkey" PRIMARY KEY, btree (id)
+```	
+
+<p><code>\?</code>でPostgresのコマンド一覧が表示されます。<code>\h</code>でSQLコマンドの一覧が表示され、コマンド名を後ろにつけるとそのコマンドのドキュメントが表示されます。Postgresコンソールを終了する場合は<code>\q</code>を実行します。データベースとSQLはよくわからないという方は、ぜひこの機会に学習を始めてください。Postgresのサイトには<a href="http://www.postgresql.org/docs/9.1/interactive/tutorial.html">チュートリアル</a>があり、Postgresコンソールを使ってSQLコマンドを実行することでその動作を試すことができます。</p>
+
+<h3>既存のアプリケーションを移行する</h3>
+
+<p>新規のRailsアプリケーションをPostgresで動作するように設定する方法はわかりましたが、既存のアプリケーションがすでにあって別のデータベース(例えばSQLiteやMySQL)で動作している場合はどうすればいいでしょうか? 下の画面は商品一覧を表示するアプリケーションのページです。このアプリケーションのデータは現在SQLiteデータベースに保存されていますが、それをPostgresに変更して中のデータも移行しようと思います。</p> 
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1124/original/E342I01.png" width="800" height="500" alt="SQLiteで動作しているストアアプリケーション"/>
+</div>
+
+<p>アプリケーションの<code>database.yml</code>ファイルの内容は次のようになっています。</p>
+
+``` /config/database.yml
+# SQLite version 3.x
+#   gem install sqlite3
+#
+#   Ensure the SQLite 3 gem is defined in your Gemfile
+#   gem 'sqlite3'
+development:
+  adapter: sqlite3
+  database: db/development.sqlite3
+  pool: 5
+  timeout: 5000
+
+# Warning: The database defined as "test" will be erased and
+# re-generated from your development database when you run "rake".
+# Do not set this db to the same as development or production.
+test:
+  adapter: sqlite3
+  database: db/test.sqlite3
+  pool: 5
+  timeout: 5000
+
+production:
+  adapter: sqlite3
+  database: db/production.sqlite3
+  pool: 5
+  timeout: 5000
+```
+
+<p>これをPostgres用の設定に置き換えます。</p>
+
+``` /config/database.yml
+development:
+  adapter: postgresql
+  encoding: unicode
+  database: store_development
+  pool: 5
+  username: eifion
+  password:
+
+test:
+  adapter: postgresql
+  encoding: unicode
+  database: store_test
+  pool: 5
+  username: eifion
+  password:
+```  
+
+<p>次にgemfileを修正して<code>sqlite3</code> gemを<code>pg</code> gemに置き換え、bundleコマンドを実行してインストールします。</p>
+
+``` /Gemfile
+gem 'pg'
+```
+
+<p>2つの新規のデータベースを作成する必要がありますが、これを前に実行したのと同じようにRakeコマンドでおこないます。</p>
+
+``` terminal
+$ rake db:create:all
+```
+
+<p>ここでマイグレーションを実行することもできますが、データベースの構造と一緒にテーブルの内容も移行したいので、違う方法を試します。幸いこの作業を簡単におこなえる<a href="https://github.com/ricardochimal/taps">Taps</a>というRuby gemがあります。これを使えば、Sinatraサーバを利用して一つのデータベースのデータをエクスポートして別のデータベースにインポートすることができます。そのためにまずtaps gemとその依存関係をインストールします。</p>
+
+``` terminal
+$ gem install taps
+```
+
+<p>このgemに含まれる<code>taps</code>コマンドを使うことで、データベースサーバを立ち上げ、そこから別のデータベースへデータを引き出すことができるようになります。ではこれを使ってSQLiteデータベースをホストします。データベースへのパスを指定して、データベースをプロテクトするためにユーザ名とパスワードを設定します。</p>
+
+``` terminal
+$ taps server sqlite://db/development.sqlite3 eifion secret
+```
+
+<p>これによってSinatraサーバでポート5000でデータベースがホストされます。別のターミナルを開いて、このデータベースから移行先のPostgresデータベースにデータを引き出します。このときにデータのインポート先であるPostgresデータベースのユーザ名とデータベース名を指定し、合わせてSinatraサーバのURLと、サーバ起動時に設定したユーザ名とパスワードも指定します。</p>
+
+``` terminal
+$ taps pull postgres://eifion@localhost/store_development http://eifion:secret@localhost:5000
+Receiving schema
+Schema:          0% |                                          | ETA:  --:--:--
+Schema:         50% |=====================                     | ETA:  00:00:00
+Schema:        100% |==========================================| Time: 00:00:01
+Receiving data
+2 tables, 400 records
+products:      100% |==========================================| Time: 00:00:00
+schema_migrat: 100% |==========================================| Time: 00:00:00
+Receiving indexes
+schema_migrat:   0% |                                          | ETA:  --:--:--
+schema_migrat: 100% |==========================================| Time: 00:00:00
+```
+
+<p>SQLiteデータベースからすべてのデータが吸い上げられ、新しいPostgresデータベースに投入されます。Railsアプリケーションを新しいデータベースで実行してみます。</p>
+
+<p>結果はうまく行っているようです。ページは同じように表示されましたが、データはPostgresデータベースからのものです。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1125/original/E342I02.png" width="800" height="500" alt="ページは同じように表示されたがPostgreSQLで動作している"/>
+</div>
+
+<p>Postgresへの切り替えがうまく行ったので、全文検索をはじめとして多様な機能を利用できるようになります。全文検索の設定をおこなうには、<a href="http://tenderlove.github.com/texticle/">Texticle</a> gemか<a href="https://github.com/Casecommons/pg_search">PGSearch</a> gemを参照してください。Postgresをワーカーキューとして利用することも可能です。その場合は<a href="https://github.com/ryandotsmith/queue_classic">queue_classic</a> gemを利用できます。NoSQLデータベースを利用したい場合にもPostgresならHStoreが使えます。具体的な方法がこの<a href="http://schneems.com/post/19298469372/you-got-nosql-in-my-postgres-using-hstore-in-rails">ブログ記事</a>で説明されています。</p>

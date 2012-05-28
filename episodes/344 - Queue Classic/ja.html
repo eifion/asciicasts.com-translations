@@ -1,0 +1,169 @@
+<p><a href="http://railscasts.com/episodes/342-migrating-to-postgresql">エピソード342</a>では、PostgreSQLをデータベースとして使用したRailsアプリケーションの設定方法を紹介しました。Postgresの優れている点の一つとして、ジョブキューの管理のようにバックグラウンドプロセスを必要とするようなものまでその役目を担うことができます。下の画面は、Postgresを使用したニュースレターを配信するRailsアプリケーションです。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1138/original/E344I01.png" width="800" height="450" alt="ニュースレターアプリケーション"/>
+</div>
+
+<p>“Deliver Newsletter”のリンクをクリックしてニュースレターを配信することができます。この処理が終わるまでには時間がかかり、それまでRailsインスタンスはその他のリクエストを処理することができず、レスポンスを待つ間ブラウザは反応が止まってしまったように見えます。このため、処理に時間がかかるタスクはできるだけバックグラウンドプロセスに変える方がいいでしょう。ニュースレターがようやく配信されるとページ上部にメッセージが表示され、ステータスがリストに表示されます。</p>
+
+<h3>Queue Classicを導入する</h3>
+
+<p>この課題を解決するために<a href="https://github.com/ryandotsmith/queue_classic">queue_classic gem</a>を利用します。このgemを使うと、時間がかかるタスクをバックグラウンドプロセスに変えて、Postgresで管理できるようになります。今回はこのgemのバージョン2を使いますが、これは現在はまだリリース候補の段階です。<a href="https://github.com/ryandotsmith/queue_classic/blob/master/readme.md">README</a>にRailsアプリケーションにqueue_classicを設定する手順があるので、これに従います。いつものようにまずgemをgemfileに追加してから、<code>bundle</code>コマンドを実行します。プレリリース版をインストールするので、バージョン番号を指定する必要があります。</p>
+
+``` /Gemfile
+gem 'queue_classic', '2.0.0rc14'
+```
+
+<p>つぎにqueue_classicのRakeタスクをロードするために、<code>/lib/tasks</code>の下に<code>queue_classic.rake</code>ファイルを作成して、READMEから次の2行を貼付けます。</p>
+
+``` /lib/tasks/queue_classic.rake
+require "queue_classic"
+require "queue_classic/tasks"
+```
+
+<p>合わせて<code>queue_classic</code>初期化ファイルを作成します。ここでは、環境変数を用いて設定情報を指定します。これによってHerokuとの互換性が確保されます。ただ一点、ここではデータベースへの接続情報を含む<code>DATABASE_URL</code>変数を追加しなくてはいけません。データベースがローカルに存在するので、ここではユーザ名とパスワードを指定する必要はありません。</p>
+
+``` /config/initializers/queue_classic.rb
+ENV["DATABASE_URL"] = "postgres://localhost/mailer_development"
+```
+
+<p>次にデータベースを設定するための<code>add_queue_classic</code>というmigrationを準備します。 </p>
+
+``` terminal
+$ rails g migration add_queue_classic
+      invoke  active_record
+      create    db/migrate/20120502000000_add_queue_classic.rb
+```	  
+
+<p>このmigrationに<code>queue_classic</code>関数をロードするコードを追加します。</p>
+
+``` db/migrate/20120502000000_add_queue_classic.rb
+class SetupQueueClassic < ActiveRecord::Migration
+  def up
+    QC::Setup.create
+  end
+
+  def down
+    QC::Setup.drop
+  end
+end
+```
+
+<p><code>rake db:migrate</code>コマンドでmigrationを実行します。次に以下のコマンドを実行してバックグラウンドワーカープロセスを起動します。</p>
+
+``` terminal
+$ rake qc:work
+```
+
+<p>もしすべてうまくいったら、このコマンドからは何も出力はありません。では新規のターミナルウィンドウのRailsコンソールでqueue_classicを試してみましょう。キューにジョブを追加するには、<code>QC.enqueue</code>を呼び出して、起動したいメソッドとそのメソッドに渡す引数を指定します。</p>
+
+``` console
+1.9.3p125 :001 > QC.enqueue "puts", "hello world"
+lib=queue_classic action=insert_job elapsed=13
+ => nil
+``` 
+
+<p><code>rake qc:work</code>を実行中のタブを見ると、“hello world”が表示されています。<cide>enqueue</cide>を呼び出すと、引数はJSONでシリアライズされ、ワーカーで処理されるためにキューテーブルに渡されます。JSONのシリアライゼーションは動作条件が厳しいので、渡す引数はできるかぎりシンプルにすることが重要です。シンボルも受け付けないので、このようなハッシュを渡すと例外が発生します。</p>
+
+``` console
+1.9.3p125 :002 > QC.enqueue "puts", msg:"hello world"
+lib=queue_classic level=error error="QC::OkJson::Error" message="Hash key is not a string: :msg" action=insert_job
+QC::OkJson::Error: Hash key is not a string: :msg
+```
+
+<p>ハッシュを渡す場合は、次のように代わりに文字列を使用します。</p>
+
+``` console
+1.9.3p125 :003 >   QC.enqueue "puts", "msg" => "hello world"
+```
+
+<p>これは正しく実行されてハッシュが出力されます。</p>
+
+<h3>Queue Classicでニュースレターを配信する</h3>
+
+<p>それではアプリケーションを修正して、“deliver newsletter”リンクをクリックすると時間のかかるニュースレター配信処理がバックグラウンドで実行されるようにします。リンクがクリックされると、<code>NewslettersController</code>の<code>deliver</code>アクションが起動されます。このアクションはニュースレターを取得し、時間がかかるプロセスをシミュレーションするために10秒間スリープした後に、ニュースレターの配信時刻フィールドを更新します。</p>
+
+``` /app/controllers/newsletters_controller.rb
+def deliver
+  newsletter = Newsletter.find(params[:id])
+  sleep 10 # simulate long newsletter delivery
+  newsletter.update_attribute(:delivered_at, Time.zone.now)
+  redirect_to newsletters_url, notice: "Delivered newsletter."
+end
+```
+
+<p>コントローラに実行に時間がかかるプロセスがある場合はいつでも、インターフェースをなるべくシンプルにするために、そのプロセスをモデルのクラスメソッドに移動させるのがいいでしょう。<code>deliver</code>メソッドを<code>Newsletter</code>モデル内に作成することにして、コントローラからこれを呼び出します。</p>
+
+``` /app/controllers/newsletters_controller.rb
+def deliver
+  Newsletter.deliver(params[:id])
+  redirect_to newsletters_url, notice: "Delivered newsletter."
+end
+```
+
+<p>次にそのメソッドをモデル内に作成します。</p>
+
+``` /app/models/newsletter.rb
+class Newsletter < ActiveRecord::Base
+  attr_accessible :delivered_at, :subject
+  
+  def self.deliver(id)
+    newsletter = find(id)
+    sleep 10 # simulate long newsletter delivery
+    newsletter.update_attribute(:delivered_at, Time.zone.now)
+  end
+end
+```
+
+<p>後は配信処理をバックグラウンドプロセスに移動させるのは簡単でしょう。そしてフラッシュメッセージを“Delivered newsletter.(配信しました)”ではなく“Delivering newsletter.(配信中)”に変更します。</p>
+
+``` /app/controllers/newsletters_controller.rb
+def deliver
+  QC.enqueue "Newsletter.deliver", params[:id]
+  redirect_to newsletters_url, notice: "Delivering newsletter."
+end
+```
+
+<p>ではこれを試してみます。“Deliver newsletter”リンクをクリックすると、レスポンスはすぐに表示されますが、ニュースレターはバックグラウンドで処理中のためまだ配信されず、リストにも配信されたとは表示されません。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1139/original/E344I02.png" width="800" height="467" alt="ブラウザはニュースレターを配信中である旨をすぐに表示する"/>
+</div>
+
+<p>10秒待った後にページをリロードすると、ニュースレターが配信されたと表示されています。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1140/original/E344I03.png" width="800" height="443" alt="10秒後にページを更新するとニュースレターが配信された旨が表示される"/>
+</div>
+
+<h3>失敗したジョブの処理</h3>
+
+<p>ジョブが失敗し、処理中に例外が発生した場合にはどうなるでしょうか? 例外を発生させて結果を見てみましょう。</p>
+
+``` /app/models/newsletter.rb
+def self.deliver(id)
+  newsletter = find(id)
+  raise "Oops"
+  sleep 10 # simulate long newsletter delivery
+  newsletter.update_attribute(:delivered_at, Time.zone.now)
+end
+```
+
+<p>“Deliver newsletter”をクリックすると、ニュースレターが配信中というメッセージが表示されますが、バックグラウンドでジョブの処理中に例外が発生します。ワーカープロセスからの出力を見ると、failureの記録があります。(本番稼働のアプリケーションではこの出力をログに記録するべきです。) デフォルトではqueue_classicはジョブを自動的に再試行はしません。<a href="https://github.com/ryandotsmith/queue_classic/blob/master/lib/queue_classic/worker.rb">Workerクラスのソースコード</a>を見ると、<code>handle_failure</code>というメソッドでエラー出力をプリントしています。</p>
+
+``` worker.rb
+#override this method to do whatever you want
+def handle_failure(job,e)
+  puts "!"
+  puts "! \t FAIL"
+  puts "! \t \t #{job.inspect}"
+  puts "! \t \t #{e.inspect}"
+  puts "!"
+end
+```
+
+<p>失敗したジョブを違う方法で処理したい場合は、このメソッドをオーバーライドします。<code>Worker</code>クラスをサブクラス化することでこれを実現する例がREADMEで示されています。このREADMEファイルには他にも有用な情報がたくさん記載されていて、その一つがRakeタスクを使用する代わりに<code>worker</code>実行ファイルを設定する方法の例です。この方法の利点は、何がロードされるかを完全にコントロールできるので、ワーカーのために完全なRailsアプリケーション全体をロードする必要がない場合はそれをスキップしてメモリを節約することができます。</p>
+
+<p>もう一つの便利な機能はジョブの通知を監視する機能です。この方法でキューにジョブが追加された瞬間にワーカーに通知されるので、データベースのポーリングを待つことなく、すぐに処理を開始します。これだけでも、キューイングのツールとしてqueue_classicを選択する理由になりえるでしょう。 </p>
+
+<p>最後に、その他の多くのキューイング用ツールと比較した場合のqueue_classicの位置付けを説明します。同じくデータベースをバックエンドに持つDelayed Jobにもっとも近いですが、queue_classicはPostgresの機能を利用できることとActiveRecordを必要としないことでワーカープロセスを最小限にすることができます。その他の選択肢であるResque、RabbitMQ、Beanstalk’dはキューを処理するために別の独立したデーモンプロセスを必要とします。サーバ構成をシンプルにしたいのであれば、queue_classicは優れた選択肢となるでしょう。一つ足りないものがあるとすると、Resqueが提供するようなWebインターフェースがないという点です。</p>

@@ -1,0 +1,304 @@
+<p>商品管理用のアプリケーションがあります。扱っている商品の一覧や個別の商品の詳細情報を見ることができ、また商品情報の新規作成・編集・削除も可能です。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1175/original/E350I01.png" width="800" height="500" alt="商品管理のアプリケーション"/>
+</div>
+
+<p>それに加えて、HTMLインターフェース以外でも商品を管理できるようにREST APIも提供したいと思います。アプリケーションの<code>ProductsController</code>はすでにRESTfulなスタイルに従っているので、これを利用して以下のように各アクションに<code>respond_to</code>ブロックを追加するだけでJSONリクエストに対応できます。</p>
+
+``` /app/controllers/products_controller.rb
+def index
+  @products = Product.all
+  respond_to do |format|
+    format.html
+    format.json { render json: @products }
+  end
+end
+```
+
+<p><code>/products.json</code>にアクセスすると、商品のリストがJSON形式で取得できます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1176/original/E350I02.png" width="800" height="500" alt="JSONで出力された商品情報"/>
+</div>
+
+<p>これでJSON APIは完成でしょうか? 実はこの方法には大きな問題があります。それはバージョン管理に関する問題です。APIは一貫性がとても重要です。例えば各商品には<code>released_on</code>という属性があり、商品の発売日を返します。もしここで時間も返したいのでカラム名を<code>released_at</code>に変えるという場合、このAPIを利用しているアプリケーションは、特にその<code>released_on</code>属性を使用している場合に、動作しなくなります。</p> 
+
+<p>JSON APIをHTMLインターフェースと連動させるのは、一貫性のあるAPIを作るという観点から言うと、最善の方法とは言えない場合が多く、この問題を解決するためのgemがいくつかあります。<a href="https://github.com/bploetz/versionist">Versionist</a>はアプリケーションのルーティングによってバージョン管理されたAPIを簡単に扱うことができ、いくつかのジェネレータを提供します。<a href="https://github.com/filtersquad/rocket_pants">RocketPants</a>はREST APIを簡単に作成できるようにするgemの一つです。このgemにはバージョン管理以外にも多くの機能があります。もし使用を検討している場合は、<a href="https://github.com/filtersquad/rocket_pants/blob/master/README.md">README</a>を一読することをお勧めします。</p>
+
+<p>今回のエピソードではgemは使わずゼロからAPIを書くことによって、RailsのroutesのしくみとそれがAPIのバージョン管理にどう適用できるかについてより理解を深めていきます。このアプリケーションの現状のroutesファイルは以下の通りです。</p>
+
+``` /config/routes.rb
+Store::Application.routes.draw do
+  resources :products
+  root to: 'products#index'
+end
+```
+
+<p>API用にルートをいくつか追加して、これらのルートをHTMLインターフェース用のルートとは別にします。そのために<code>api</code>という名前空間を使用するので、そこで定義されたルートにはパスに<code>/api</code>が付きます。この<code>api</code>名前空間の代わりにサブドメイン制約を加えることもできるのですが、今回の目的には名前空間を利用する方法の方がより合っているでしょう。バージョン管理をどういう方法で行なうかも考えなくてはいけません。一つの方法はバージョンをURLの一部として保持するやり方で、これも<code>namespace</code>を呼び出すことで対応可能です。この名前空間で定義されたコントローラやルートはすべて一つの名前空間内にあるものとして扱われます。とりあえず<code>products</code>リソースをここに置いて、商品情報をRESTfulスタイルで設定します。</p>
+
+``` /config/routes.rb
+Store::Application.routes.draw do
+  namespace :api do
+    namespace :v1 do
+      resources :products
+    end
+  end
+  
+  resources :products
+  root to: 'products#index'
+end
+```
+
+<p><code>/app/controllers</code>ディレクトリに<code>api</code>ディレクトリを、さらにその下に<code>v1</code>サブディレクトリを作成します。このディレクトリに<code>ProductsController</code>を作成します。</p> 
+
+``` /app/controllers/api/v1/products_controller.rb
+module Api
+  module V1
+    class ProductsController < ApplicationController
+      
+    end
+  end
+end
+```
+
+<p>このクラスは<code>ApplicationController</code>を継承していますが、もしアプリケーションのすべてのAPIコントローラとふるまいを共有させたい場合は<code>Api::BaseController</code>を継承させるという方法もあります。コントローラができたのでアクションを追加します。</p>
+
+``` /app/controllers/api/v1/products_controller.rb
+module Api
+  module V1
+    class ProductsController < ApplicationController
+      respond_to :json
+      
+      def index
+        respond_with Product.all
+      end
+      
+      def show
+        respond_with Product.find(params[:id])
+      end
+      
+      def create
+        respond_with Product.create(params[:product])
+      end
+      
+      def update
+        respond_with Product.update(params[:id], params[:products])
+      end
+      
+      def destroy
+        respond_with Product.destroy(params[:id])
+      end
+    end
+  end
+end
+```
+
+<p>各アクションを、JSON形式で応答できるよう<code>respond_with</code>の呼び出しを使って定義しました。これは単純化されたやり方で、実際には必要なJSON APIのためにさらに設定が必要になるでしょう。<code>/api/v1/products.json</code>にアクセスするとAPIを確認できます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1177/original/E350I03.png" width="800" height="500" alt="APIのバージョン1"/>
+</div>
+
+<p>このURLではJSON形式を指定する必要があり、<code>.json</code>拡張子を付けないと何も応答がありません。JSONをデフォルト形式にするのであれば、routesで次のように<code>defaults</code>オプションを使用します。</p>
+
+``` /config/routes.rb
+Store::Application.routes.draw do
+  namespace :api, defaults: {format: 'json'} do
+    namespace :v1 do
+      resources :products
+    end
+  end
+  
+  resources :products
+  root to: 'products#index'
+end
+```
+
+<p><code>http://localhost:3000/api/v1/products</code>にアクセスしてもJSONが返されるようになりました。</p> 
+
+<h2>APIの新バージョンを作成する</h2>
+
+<p>これまでのところはうまくいっていますが、APIの仕様を変更しなければならない場合はどうすればいいでしょうか? 例えば<code>released_on</code>列を<code>released_at</code>に名称変更したいとしましょう。これを実際に試すために、この列の名称と型を変更するmigrationを生成します。</p>
+
+``` terminal
+$ rails g migration change_products_released_on
+```
+
+<p>migrationのコードは以下のとおりです。</p>
+
+``` /config/db/migrations/201205230000_change_products_released_on.rb
+class ChangeProductsReleasedOn < ActiveRecord::Migration
+  def up
+    rename_column :products, :released_on, :released_at
+    change_column :products, :released_at, :datetime
+  end
+
+  def down
+    change_column :products, :released_at, :date
+    rename_column :products, :released_at, :released_on
+  end
+end
+```
+
+<p><code>rake db:migrate</code>を実行するとデータベースに変更が加えられます。ブラウザでAPIのページをリロードすると<code>released_on</code>列が<code>released_at</code>に置き換わってタイムスタンプが入っています。これは後方互換の変更ではありません。</p> 
+
+<p>このようなAPIの一貫性を壊すような変更が自動的にわかるようにするしくみを持つべきなので、APIの新しいバージョンを作成する前に現状のものを修正します。コントローラで<code>respond_with</code>を使用しているため、これは少し複雑になります。もっとも簡単な方法は、<a href="http://railscasts.com/episodes/322-rabl">エピソード322</a>で行なったRABLなどを使うやり方です。この方法ではJSONレスポンスで返される属性をより自由にカスタマイズできます。</p> 
+
+<p>今回のシンプルなAPIに対しては、とりあえず動くようにするために手早く直に手を加える方法をとります。APIがよくテストされている場合であれば、これは現実的なアプローチだと言えるでしょう。今回行なうことは、既存の<code>Product</code>モデルクラスを継承した新規の<code>Product</code>クラスを<code>ProductsController</code>の中に作成し、それに対して変更を加えます。これによって、コントローラ内でのProductへの参照はすべてオリジナルではなく新規に作成したサブクラスに対して行なわれます。この新規クラスでメソッドをオーバーライドすることで、APIのこのバージョンだけで違うふるまいをさせることができます。ここで<code>to_json</code>を上書きして、JSONの出力に<code>released_on</code>属性を追加することができます。</p>
+
+``` /app/controllers/api/v1/products_controller.rb
+module Api
+  module V1
+    class ProductsController < ApplicationController
+      class Product < ::Product
+        def as_json(options={})
+          super.merge(released_on: released_at.to_date)
+        end
+      end
+      
+     respond_to :json
+	# Actions omitted
+    end
+  end
+end
+```
+
+<p>バージョン1のAPIページをリロードすると、再度機能するようになり<code>released_on</code>属性が元に戻りました。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1178/original/E350I04.png" width="800" height="500" alt="released_on属性が元に戻った"/>
+</div>
+
+<p>もしアプリケーションにテストがあったら、ここで再度成功に戻るはずです。各商品について<code>released_at</code>属性が返されるようになりましたが、これは古いAPIを利用しているユーザの移行を簡単にするという理由で利点であると捉えることができます。厳密に言うとこの時点でAPIの新しいバージョンを公開する必要はありませんが、せっかくここまでやったので公開しないわけにはいかないでしょう。</p>
+
+<p>新しいバージョンを公開するには、<code>app/controllers/api/v1</code>のコードを新しい<code>v2</code>ディレクトリにコピーするだけです。</p>
+
+``` terminal
+$ cp -R app/controllers/api/v1 app/controllers/api/v2
+```
+
+<p>routesファイルで<code>v1</code>名前空間のroutesを新しい<code>v2</code>名前空間にコピーします。 </p>
+
+``` /config/routes.rb
+Store::Application.routes.draw do
+  namespace :api, defaults: {format: 'json'} do
+    namespace :v1 do
+      resources :products
+    end
+    namespace :v2 do
+      resources :products
+    end
+  end
+  
+  resources :products
+  root to: 'products#index'
+end
+```
+
+<p>routesファイル内に重複部分が増えてきたら、lambdaを作成して各バージョンのlambdaブロックを渡すこともできますが、これはバージョン間でroutesファイルが同じである場合のみ可能です。新しい<code>v2</code> <code>ProductsController</code>で、<code>v1</code>に加えた変更部分を削除してモジュール名を変更します。</p>
+
+``` /app/controllers/api/v2/products_controller.rb
+module Api
+  module V2
+    class ProductsController < ApplicationController      
+      respond_to :json
+      
+      def index
+        respond_with Product.all
+      end
+      
+      def show
+        respond_with Product.find(params[:id])
+      end
+      
+      def create
+        respond_with Product.create(params[:product])
+      end
+      
+      def update
+        respond_with Product.update(params[:id], params[:products])
+      end
+      
+      def destroy
+        respond_with Product.destroy(params[:id])
+      end
+    end
+  end
+end
+```
+
+<p>APIのバージョン2にアクセスすると、deprecated(廃止予定)の<code>released_on</code>属性がない、よりきれいな出力が得られます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1179/original/E350I05.png" width="800" height="500" alt="APIのバージョン2"/>
+</div>
+
+<p>この方法でバージョン管理を行なうと、コードの重複が増えるように見えるかも知れません。バージョン2の<code>ProductsController</code>はバージョン1とほとんど同じように見えます。しかしこれはDRYの原則を破っている訳ではありません。あるバージョンのコードを変更するときに、別のバージョンも変更する必要があるかどうかを常に意識することは重要です。しかしそれはここでは当てはまりません。古いバージョンに新バージョンの機能を追加するというニーズはほとんどないからです。それよりも、古いバージョンにはそれ専用のコードを持っておいて後方互換性を確保するべきでしょう。また、いつかのタイミングで古いバージョンを削除することも考えられるので、ここでこれ以上のリファクタリングを行なうのはあまり意味がありません。それでも必要だと考えるのであれば、APIの両方のバージョンが使用する共有のふるまいを定義したスーパークラスを別に作成することもできます。</p>
+
+<h3>バージョン番号</h3>
+
+<p>続いてはバージョン番号を指定する方法についてです。現状のURLパスに含む方法はシンプルで直接的ですが、最善の方法ではないという意見もあります。例えばGithubは、バージョン番号をURLに含むのではなく<code>Accept</code>ヘッダで渡されるように仕様を変更しました。今回のアプリケーションで同じことを行なうにはどうすればいいでしょうか? </p> 
+
+<p>まず最初にroutesの名前空間を<code>scope</code>の呼び出しに置き換えます。これによって、使用するモジュールと制約を指定することができます。制約のロジックは複雑なので別のクラスに移すことにします。</p>
+
+``` /config/routes.rb
+Store::Application.routes.draw do
+  namespace :api, defaults: {format: 'json'} do
+    scope module: :v1, constraints: ApiConstraints.new(version: 1) do
+      resources :products
+    end
+    scope module: :v2, constraints: ApiConstraints.new(version: 2, default: :true) do
+      resources :products
+    end
+  end
+  
+  resources :products
+  root to: 'products#index'
+end
+```
+
+<p><code>v2</code>の制約に特別なオプションを追加して、これがデフォルトのバージョンであることを指定していることに注意してください。routesファイルで使用する<code>ApiConstraints</code>クラスは今まで通り定義する必要があり、これを<code>/lib</code>ディレクトリで定義します。</p>
+
+``` /lib/api_constraints.rb
+class ApiConstraints
+  def initialize(options)
+    @version = options[:version]
+    @default = options[:default]
+  end
+    
+  def matches?(req)
+    @default || req.headers['Accept'].include?("application/vnd.example.v#{@version}")
+  end
+end
+```
+
+<p>このクラスはとてもシンプルです。<code>initialize</code>でオプションをインスタンス変数に抽出します。またrouterが制約のために起動する<code>matches?</code>メソッドも定義します。ここで、デフォルトバージョンが求められているのか、あるいはリクエストの<code>Accept</code>ヘッダと与えられたバージョン文字列が一致するかをチェックします。この文字列はヘッダの中で一致させたいどんな文字列でもかまいません。</p>
+
+<p>利便性をよくするためにroutesファイルの最初でこのクラスをrequireします。</p>
+
+``` /config/routes.rb
+require 'api_constraints'
+
+Store::Application.routes.draw do
+  namespace :api, defaults: {format: 'json'} do
+    scope module: :v1, constraints: ApiConstraints.new(version: 1) do
+      resources :products
+    end
+    scope module: :v2, constraints: ApiConstraints.new(version: 2, default: :true) do
+      resources :products
+    end
+  end
+  
+  resources :products
+  root to: 'products#index'
+end
+```
+
+<p>サーバの再起動後に<code>/api/products</code>パスにアクセスすると、APIのデフォルトバージョンであるバージョン2を取得できます。ターミナルで<code>curl</code>を使って<code>Accept</code>ヘッダを指定すれば別のバージョンも取得できます。</p>
+
+``` terminal
+$ curl -H 'Accept: application/vnd.example.v1' http://localhost:3000/api/products
+```
+
+<p>これによって、APIのバージョン1に一致する、<code>released_on</code>属性を含んだ商品リストが返されます。</p>

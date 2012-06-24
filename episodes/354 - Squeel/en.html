@@ -1,0 +1,141 @@
+We have a page that displays a list of products. This page also has a search field that will search the products based on their name.
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1204/original/E354I01.png" width="800" height="500" alt="Our products page."/>
+</div>
+
+<p>The search code seems like a fairly simple thing to write but the query in the <code>Product</code> model is quite complicated. We need to search only the products that have been released, that aren&rsquo;t discontinued, that are in stock and which have a name that matches the search term.</p>
+
+``` /app/models/product.rb
+class Product < ActiveRecord::Base
+  belongs_to :category
+  attr_accessible :name, :price, :category_id, :released_at, :discontinued_at, :stock
+
+  def self.search(query)
+    where("released_at <= ? and (discontinued_at is null or discontinued_at > ?) and stock >= ? and name like ?", Time.zone.now, Time.zone.now, 2, "%#{query}%")
+  end
+end
+```
+
+<p>A fairly long SQL query is being performed here and which has a number of variables appended at the end and these need to correctly line up with the parameters in the query. There are a variety of ways that we could improve this query and the biggest improvement we could make would be to move parts of the query into named scopes and search using those. If we did this we&rsquo;d still be using SQL so we&rsquo;d still need to worry about database differences such as in the <code>LIKE</code> clause in our query. In most databases this will perform a case-insensitive query so if we were to switch the application&rsquo;s database to Postgres we&rsquo;d need to change this to <code>ILIKE</code>. It would be nice if there was some consistency here and if we could abstract these database queries out. We could use Arel to do this but trying to work with Arel directly can get quite complicated.</p>
+
+<p>If we don&rsquo;t want to mix SQL in with our Ruby code we can use the <a href="https://github.com/ernie/squeel">Squeel gem</a>. This is written by Ernie Miller who also wrote the Metawhere gem that was covered in <a href="http://railscasts.com/episodes/251-metawhere-metasearch">episode 251</a>. Squeel provides a DSL that allows us to write our queries in Ruby without falling back to SQL and we&rsquo;ll try it out by using it in our application. To use it we&rsquo;ll need to add it to our gemfile then run bundle to install it. </p>
+
+``` /Gemfile
+gem 'squeel'
+```
+
+<p>We&rsquo;ll start by experimenting with Squeel in the console. Squeel allows us to pass a block to a <code>where</code> call and we can use the Squeel DSL inside this block. We can call any column as a method inside this block, like this:</p>
+
+``` console
+> Product.where{released_at <= 3.months.ago}
+  Product Load (0.3ms)  SELECT "products".* FROM "products" WHERE "products"."released_at" <= '2012-03-08 20:58:21.852780'
+ => [#<Product id: 1, name: "Settlers of Catan", category_id: 2, price: #<BigDecimal:7fdbf9b90aa0,'0.3495E2',18(45)>, released_at: "2012-03-01 00:00:00", discontinued_at: nil, stock: 5, created_at: "2012-06-08 20:09:13", updated_at: "2012-06-08 20:58:13">] 
+``` 
+ 
+<p>This is translated into an SQL query for us and the products matching the query are returned. Note that there are no spaces around the braces in the query as the convention for the Squeel DSL seems to be not to use them and we&rsquo;ll stick to that here. The object that&rsquo;s returned from this call is an <code>ActiveRecord::Relation</code> object and we can use it alongside any other scopes that we use in Rails. Squeel uses more than <code>ActiveRecord::Relation</code>, though. It&rsquo;s build on Arel and uses that to convert queries into SQL. We can see this if we look at <a href="https://github.com/ernie/squeel#squeel--">the Squeel README</a> which has a table showing a list of the operators that Arel supports along with the equivalent SQL operator. So, instead of using the <code>&lt;</code> operator that Squeel provides we can use Arel&rsquo;s <code>lt</code> method directly to make the same query.</p>
+
+``` console
+> Product.where{released_at.lt 3.months.ago}
+  Product Load (0.3ms)  SELECT "products".* FROM "products" WHERE "products"."released_at" < '2012-03-08 21:29:36.133638'
+ => [#<Product id: 1, name: "Settlers of Catan", category_id: 2, price: #<BigDecimal:7fdbf96d3940,'0.3495E2',18(45)>, released_at: "2012-03-01 00:00:00", discontinued_at: nil, stock: 5, created_at: "2012-06-08 20:09:13", updated_at: "2012-06-08 20:58:13">]
+``` 
+ 
+<p>Another useful feature that Squeel provides is AND and OR operators for combining multiple conditions. If we want to change our search so that it only finds items with a that cost more that 20 dollars we can do this:</p>
+
+``` console
+> Product.where{released_at.lt(3.months.ago) & price.gt(20)}
+  Product Load (0.6ms)  SELECT "products".* FROM "products" WHERE (("products"."released_at" < '2012-03-09 08:41:15.786451' AND "products"."price" > 20))
+ => [#<Product id: 1, name: "Settlers of Catan", category_id: 2, price: #<BigDecimal:7fe0aa2d5a40,'0.3495E2',18(45)>, released_at: "2012-03-01 00:00:00", discontinued_at: nil, stock: 5, created_at: "2012-06-08 20:09:13", updated_at: "2012-06-08 20:58:13">]
+``` 
+ 
+<p>Note that when we use multiple search terms like this it&rsquo;s important to wrap the search terms in parentheses so that Ruby understands the correct precedence. The great thing about this is that it makes using an OR operator much easier. This can be tricky to do in ActiveRecord but with Squeel it&rsquo;s straightforward.</p>
+
+``` console
+> Product.where{released_at.lt(3.months.ago) | price.gt(20)}
+  Product Load (0.4ms)  SELECT "products".* FROM "products" WHERE (("products"."released_at" < '2012-03-09 08:44:05.427791' OR "products"."price" > 20)
+# Large number of products omitted.
+```
+
+<h3>Using Squeel in our Application</h3>
+
+<p>Now we have enough information to translate the search query in our application into Squeel. Here&rsquo;s what it looks like now.</p>
+
+``` /app/models/product.rb
+def self.search(query)
+  where("released_at <= ? and (discontinued_at is null or discontinued_at > ?) and stock >= ? and name like ?", Time.zone.now, Time.zone.now, 2, "%#{query}%")
+end
+```
+
+<p>Translated into Squeel code it becomes this:</p>
+
+```  /app/models/product.rb
+def self.search(query)
+  where do
+    (released_at <= Time.zone.now) & 
+    ((discontinued_at == nil) | (discontinued_at > Time.zone.now)) & 
+    (stock >= 2) & (name =~ "%#{query}%")
+  end
+end
+```
+
+<p>Note that for the LIKE clause we use <code>=~</code>, similar to the regular expression operator, and this will perform a case-insensitive search no matter what database is being used. Also to compare against NULL we use <code>== nil</code> instead of <code>is null</code>.</p>
+
+<p>It&rsquo;s arguable as to whether this code is cleaner than what we had before but one definite improvement is that the values are inline in the query instead of being tagged on at the end. Also as we&rsquo;re now using Ruby code we can use a multiple-line block to spread the query out to make it easier to read. When we try the search field out in the browser now it brings back the same results as our SQL query did.</p>
+
+<h3>Keeping Things In Context</h3>
+
+<p>It&rsquo;s important to remember that Squeel uses <code>instance_eval</code> when it calls the block. This means that the current context in our block will not be the <code>Product</code> class but a Squeel DSL instance instead. If we want to call a class method inside the block we can&rsquo;t call it directly as Squeel will interpret the method call as a column name. To get around this we need to call <code>my</code> and pass in a block. Anything inside the block will then be evaluated in the original context. To demonstrate this we&rsquo;ll add a <code>low_stock</code> method to our class and use it in our search.</p>
+
+``` /app/models/product.rb
+class Product < ActiveRecord::Base
+  belongs_to :category
+  attr_accessible :name, :price, :category_id, :released_at, :discontinued_at, :stock
+
+  def self.search(query)
+    where do
+      (released_at <= Time.zone.now) & 
+      ((discontinued_at == nil) | (discontinued_at > Time.zone.now)) & 
+      (stock >= my{low_stock}) & (name =~ "%#{query}%")
+    end
+  end
+  
+  def self.low_stock
+    2
+  end
+end
+```
+
+<p>This will perform the same search that we had previously.</p>
+
+<h3>Customizing Squeel</h3>
+
+<p>If we want to customize some of Squeel&rsquo;s behaviour there&rsquo;s a generator provided that will create an initializer for doing so.</p>
+
+``` terminal
+$ rails g squeel:initializer
+      create  config/initializers/squeel.rb
+```      
+
+<p>This creates a config file which contains comments explaining the various settings we can change. For example uncommenting the line shown below will add methods to the Hash and Symbol classes to simulate the Metawhere functionality which is useful if you&rsquo;re transitioning an application from Metawhere to Squeel.</p>
+
+``` /config/initializers/squeel.rb
+# To load both hash and symbol extensions:
+#
+# config.load_core_extensions :hash, :symbol
+```
+
+<p>In this file we can also add aliases so that if, say, we wanted to be able to call <code>less_than</code> instead of <code>lt</code> we could.</p>
+
+``` /config/initializers/squeel.rb
+# Alias an existing predicate to a new name. Use the non-grouped
+# name -- the any/all variants will also be created. For example,
+# to alias the standard "lt" predicate to "less_than", and gain
+# "less_than_any" and "less_than_all" as well:
+#
+# config.alias_predicate :less_than, :lt
+```
+
+<p>That&rsquo;s it for our look at Squeel. There&rsquo;s much more to it than we&rsquo;ve covered here and if you think you might use it in your applications there much more information in the documentation.</p>
+
+<p>Squeel is a really nice project. If you&rsquo;re comfortable with SQL then the query improvements may not be worth the extra weight but if you&rsquo;d rather work with Ruby than SQL it&rsquo;s well worth taking a look at.</p>

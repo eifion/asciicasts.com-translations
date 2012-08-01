@@ -1,0 +1,242 @@
+<p>There are many solutions available in Rails for moving long-running jobs into a background process. Each of these has its own advantages and <a href="http://mperham.github.com/sidekiq/">Sidekiq</a> is no exception. Sidekiq is similar to Resque, which was covered in <a href="http://railscasts.com/episodes/271-resque">episode 271</a>; its primary difference is that it handles multiple jobs concurrently using threads instead of processes and this can save on memory usage.</p>
+
+<h3>Our Snippets Application</h3>
+
+<p>Sidekiq&rsquo;s interface is similar to other solutions so we&rsquo;ll cover this quickly then focus on what makes it unique. The example app we&rsquo;ll be working with is shown below. It is fairly simple and has a form with a dropdown containing a list of languages and a text area where we can paste in a code snippet. When we submit this form the snippet will be displayed with syntax highlighting.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1262/original/E366I01.png" width="800" height="500" alt="Our Snippets application."/>
+</div>
+
+<p>If we look at the <code>SnippetsController</code>&rsquo;s <code>create</code> action we can see how the highlighting is being done.</p> 
+
+``` /app/controllers/snippets_controller.rb
+def create
+  @snippet = Snippet.new(params[:snippet])
+  if @snippet.save
+    uri = URI.parse("http://pygments.appspot.com/")
+    request = Net::HTTP.post_form(uri, lang: @snippet.language, code: @snippet.plain_code)
+    @snippet.update_attribute(:highlighted_code, request.body)
+    redirect_to @snippet
+  else
+    render :new
+  end
+end
+```
+
+<p>After a snippet is saved a request is made to an external web service that uses Pygments to highlight the code. If we make a POST request to this service and include the language and the plain code the response will contain the highlighted code. It&rsquo;s always a good idea to move calls to external services into a background process so that if the service is down or just slow to respond the user won&rsquo;t be directly affected. We&rsquo;ll use Sidekiq to do this here.</p>
+
+<h3>Adding Sidekiq To Our Application</h3>
+
+<p>Like Resque, Sidekiq uses Redis to manage its job queue so we&rsquo;ll need to install this first. If you&rsquo;re running OS X the easiest way to do this to use Homebrew to install it by running this command:</p>
+
+``` terminal
+$ brew install redis
+```
+
+<p>Once it has installed we can start the Redis server up with this command:</p>
+
+``` terminal
+$ redis-server /usr/local/etc/redis.conf
+```
+
+<p>Next we&rsquo;ll add the Sidekiq gem to the gemfile and run <code>bundle</code> to install it.</p>
+
+``` /Gemfile
+gem 'sidekiq'
+```
+
+<p>There are several interfaces that Sidekiq supports. The most common way to use it is to create a separate worker class and we&rsquo;ll do this, creating a class in a new <code>app/workers</code> directory. Putting it here ensures that it&rsquo;s auto-loaded by the application.</p> 
+
+``` /app/workers/pygments_worker.rb
+class PygmentsWorker
+  include Sidekiq::Worker
+  
+  def perform
+    
+  end
+end
+```
+
+<p>This class needs to include the <code>Sidekiq::Worker</code> module, which we&rsquo;ll discuss later, and have a <code>perform</code> method which contains the code that we want to run in the background. We&rsquo;ll move the syntax-highlighting code from the controller into this method. To do this we call <code>PygmentsWorker.perform_async</code> which will add the job to Redis and then call <code>perform</code> asynchronously. The <code>perform</code> method needs to have access to the current snippet and while we could pass this directly to <code>perform_async</code> as an argument this isn&rsquo;t the best way to do this as the object will need to be serialized to go into Redis. It&rsquo;s better to serialize simpler objects like strings or integers than ActiveRecord models so we&rsquo;ll pass in the snippet&rsquo;s <code>id</code> instead and fetch the record from the database in our background process.</p>
+
+``` /app/controllers/snippets_controller.rb
+def create
+  @snippet = Snippet.new(params[:snippet])
+  if @snippet.save
+    PygmentsWorker.perform_async(@snippet.id)
+    redirect_to @snippet
+  else
+    render :new
+  end
+end
+```
+
+<p>Now in the worker class we can paste in the code we removed from the controller and modify it so that it fetches the snippet by its <code>id</code>.</p>
+
+``` /app/workers/pygments_worker.rb
+class PygmentsWorker
+  include Sidekiq::Worker
+  
+  def perform(snippet_id)
+    snippet = Snippet.find(snippet_id)
+    uri = URI.parse("http://pygments.appspot.com/")
+    request = Net::HTTP.post_form(uri, lang: snippet.language, code: snippet.plain_code)
+    snippet.update_attribute(:highlighted_code, request.body)
+  end
+end
+```
+
+<p>The last step is to start up the background process by running the <code>sidekiq</code> command from our application&rsquo;s directory. Note that you might need to prefix this with <code>bundle exec</code> for it to work correctly.</p>
+
+``` terminal
+$ bundle exec sidekiq
+```
+
+<p>Now Sidekiq will be listening for new jobs and once we&rsquo;ve restarted our web server so that the new worker class is picked up we can try this out.</p> 
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1263/original/E366I02.png" width="800" height="500" alt="The highlighting isn&rsquo;t shown straightaway as this is now done in the background."/>
+</div>
+
+<p>When we post a snippet now the syntax-highlighting isn&rsquo;t shown as the background process is still running. If we wait a second or two and reload the page we should see the highlighting applied.</p> 
+
+<h3>Things To Consider</h3>
+
+<p>There are some things that we&rsquo;ll need to keep in mind when we use Sidekiq. If a job fails due to an error Sidekiq will retry that job. This means that if an exception is raised at any point in the perform method we need to be sure that there are no unwanted side-effects to the code being run again. This is especially important when working with emails as we don&rsquo;t want to send a user the same email more than once. To disable this feature we can use the <code>sidekiq_options</code> method like this:</p>
+
+``` /app/workers/pygments_worker.rb
+class PygmentsWorker
+  include Sidekiq::Worker
+  sidekiq_options retry: false
+  
+   # Rest of class omitted.
+end
+```
+
+<p>We&rsquo;ll keep this feature enabled for now as there are no reasons not to retry these jobs if they fail.</p> 
+
+<p>Another issue to bear in mind is that all code used by a worker should be thread-safe. Thread-safety was covered in <a href="http://railscasts.com/episodes/365-thread-safety">episode 365</a>, but in general we should avoid sharing data that is mutable between instances. In Ruby this often means data at the class level and we should avoid doing this. Not only does our code need to be thread-safe but any libraries that our worker uses need to be thread-safe too.</p> 
+
+<p>We should also be aware of the pool size limit in the database config file. This defaults to <code>5</code> which means that only five threads can be connected to our database at once. It&rsquo;s a good idea to increase this limit. By default Sidekiq will run up to 25 jobs at once so setting the <code>pool</code> option to the same value is a good idea, although the optimal value may change depending on your setup.</p> 
+
+<h3>Sidekiq&rsquo;s Features</h3>
+
+<p>Now that we know how to set up Sidekiq we&rsquo;ll take a look at some of its features and many of these are documented on the <a href="https://github.com/mperham/sidekiq/wiki">Sidekiq wiki</a>. One thing that Sidekiq makes easy is scheduling a job to run at a future time. Instead of calling <code>perform_async</code> on a worker we can call <code>perform_in</code> and provide a duration. A job will not then start to be processed until that time has elapsed.</p>
+
+``` /app/controllers/snippets_controller.rb
+PygmentsWorker.perform_in(1.hour, @snippet.id)
+```
+
+<p>Doing this doesn&rsquo;t make much sense in our application but it can be very useful for, say, clearing caches. Another nice feature is the ability to prioritize queues. Let&rsquo;s say that our application has multiple workers and we want certain ones to be processed first. To do this we&rsquo;ll need to assign a worker to a specific queue and we can do this by setting the <code>queue</code> option, like this:</p>
+
+``` /app/workers/pygments_worker.rb
+class PygmentsWorker
+  include Sidekiq::Worker
+  sidekiq_options queue: "high"
+  
+   # Rest of class omitted.
+end
+```
+
+<p>If we don&rsquo;t specify the name of a queue the worker will default to a queue called <code>default</code>. When we run the <code>sidekiq</code> command now we can specify the queues that we want to be processed with the <code>-q</code> option and give each one a relative weight.</p>
+
+``` terminal
+$ bundle exec sidekiq -q height,5 default,1
+```
+
+<p>Now the high queue will take priority.</p>
+
+<p>When it comes to deployment Sidekiq includes a <a href="https://github.com/mperham/sidekiq/wiki/Deployment">Capistrano recipe</a> that we can use. If we have custom options that we need to pass in to the <code>sidekiq</code> command such as the <code>-q</code> option we showed above we can put these into a <code>sidekiq.yml</code> file in our <code>config</code> directory. This file could look like this:</p>
+
+``` config.yml
+# Sample configuration file for Sidekiq.
+# Options here can still be overridden by cmd line args.
+#   sidekiq -C config.yml
+---
+:verbose: false
+:concurrency:  25
+:queues:
+  - [often, 7]
+  - [default, 5]
+  - [seldom, 3]
+```  
+  
+<h3>Monitoring Sidekiq</h3>
+
+<p>Next we&rsquo;ll talk about monitoring the workers. Sidekiq includes a web interface, much like Resque, which is a Sinatra app that we can mount inside our Rails app in the routes file.</p> 
+
+``` /config/routes.rb
+require 'sidekiq/web'
+
+Example::Application.routes.draw do
+  resources :snippets
+  root to: "snippets#new"
+  mount Sidekiq::Web, at: "/sidekiq"
+end
+```
+
+<p>Note that we need to require <code>sidekiq/web</code> as it isn&rsquo;t included by default. If we&rsquo;re going to use the web interface there are a couple of gems that we need to add to the gemfile too. We&rsquo;ll need to run <code>bundle</code> again and restart our server for these changes to be picked up.</p>
+
+``` /Gemfile
+gem 'sinatra', require: false
+gem 'slim'
+```
+
+<p>If we visit the <code>/sidekiq</code> path now we&rsquo;ll see the web interface which tells us how many jobs have been processed, the number of failures, the currently-active workers and what queues we have.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1264/original/E366I03.png" width="800" height="626" alt="Sidekiq&rsquo;s Web interface."/>
+</div>
+
+<p>When our app is in production we should password-protect this and the Sidekiq wiki has information on how to do this.</p> 
+
+<h3>Looking At Sidekiq&rsquo;s Source</h3>
+
+<p>We&rsquo;ll finish off this episode with a look at some of Sidekiq&rsquo;s source code as there&rsquo;s always a lot to be learned from doing this. We&rsquo;ll start by looking at the <code>Sidekiq::Worker</code> module that we included in our <code>PygmentsWorker</code> class. This module is quite simple and has several class methods including the <code>perform_async</code> and <code>perform_in</code> methods that we&rsquo;ve already used. These methods add a hash of details to Redis.</p>
+
+``` /lib/sidekiq/worker.rb
+def perform_async(*args)
+  client_push('class' => self, 'args' => args)
+ end
+
+def perform_in(interval, *args)
+  int = interval.to_f
+  ts = (int < 1_000_000_000 ? Time.now.to_f + int : int)
+  client_push('class' => self, 'args' => args, 'at' => ts)
+end
+alias_method :perform_at, :perform_in
+
+def get_sidekiq_options # :nodoc:
+  self.sidekiq_options_hash ||= DEFAULT_OPTIONS
+end
+```
+
+<p>This module also includes the <code>sidekiq_options</code> method that we used earlier in our worker and there is documentation for the options that we can pass in.</p>
+
+``` /lib/sidekiq/worker.rb
+##
+# Allows customization for this type of Worker.
+# Legal options:
+#
+#   :queue - use a named queue for this Worker, default 'default'
+#   :retry - enable the RetryJobs middleware for this Worker, default *true*
+#   :timeout - timeout the perform method after N seconds, default *nil*
+#   :backtrace - whether to save any error backtrace in the retry payload to display in web UI,
+#      can be true, false or an integer number of lines to save, default *false*
+
+def sidekiq_options(opts={})
+  self.sidekiq_options_hash = get_sidekiq_options.merge(stringify_keys(opts || {}))
+end
+
+DEFAULT_OPTIONS = { 'retry' => true, 'queue' => 'default' }
+
+def get_sidekiq_options # :nodoc:
+  self.sidekiq_options_hash ||= DEFAULT_OPTIONS
+end
+```
+
+<p>Another part of Sidekiq that&rsquo;s worth looking at is middleware. This shouldn&rsquo;t be confused with Rack middleware; this is behaviour that happens around the processing  of a job. Sidekiq has client-side middleware which runs before a job is inserted into Redis and server-side which runs before the job is processed. This middleware retrying jobs, logging them and handling exceptions.  The <a href="https://github.com/mperham/sidekiq/blob/master/lib/sidekiq/middleware/server/exception_handler.rb">last of these</a> taps into a variety of exception handlers such as Airbrake, Exceptional or ExceptionNotifier. We can configure these and there&rsquo;s information about how to set these up in the wiki. This is a nice example of how simple Sidekiq middleware can be and we can write our own if we want to extend Sidekiq&rsquo;s behaviour.</p> 
+
+<p>One more thing worth looking at is Sidekiq&rsquo;s <a href="https://github.com/mperham/sidekiq/blob/master/lib/sidekiq/processor.rb">processor class</a>. This handles the processing of the jobs after they&rsquo;re pulled from Redis. This class lists the middleware that&rsquo;s added by default. When a job is processed each piece of middleware is invoked and perform is called on the worker. This class also includes <a href="http://celluloid.io/">Celluloid</a> and this is the key to Sidekiq&rsquo;s multi-threaded behaviour. Celluloid is a great project that can really help to deal with concurrency in Ruby. We won&rsquo;t be covering it in detail here but it&rsquo;s certainly worth looking into.</p>

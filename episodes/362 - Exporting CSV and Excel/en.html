@@ -1,0 +1,190 @@
+<p>It&rsquo;s common to want to export data from a Web application in CSV or Excel format and in this episode we&rsquo;ll show how to do that in a Rails application. Below is a page that shows a list of products and we&rsquo;d like to add some links to allow this list to be downloaded as a CSV or Excel file.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1238/original/E362I01.png" width="800" height="400" alt="The list of products."/>
+</div>
+
+<p>There are many gems that can help us to do this but we won&rsquo;t be using any of them here and this is quite easy to write from scratch.</p>
+
+<h3>Exporting to CSV</h3>
+
+<p>Ruby 1.9 comes with an excellent <a href="http://ruby-doc.org/stdlib-1.9.3/libdoc/csv/rdoc/CSV.html">CSV library</a> that was formerly known as Faster CSV in Ruby 1.8. We&rsquo;ll use this library to generate our CSV data. As it&rsquo;s part of the standard library all we have to do is require it and we&rsquo;ll do this in our application&rsquo;s config file.</p>
+
+``` /config/application.rb
+require File.expand_path('../boot', __FILE__)
+
+require 'csv'
+require 'rails/all'
+```
+
+<p>We can now use this library to generate comma-separated data when the user visits the <code>/products.csv</code> path. This currently won&rsquo;t work as the action doesn&rsquo;t respond to that format yet but this is easy to fix by adding a <code>respond_to</code> block to our <code>ProductsController</code>&rsquo;s index action. We now have a choice: we can generate a view template for this format or we can render the data inline in the controller. We&rsquo;ll take the latter option as it&rsquo;s slightly simpler for our needs, although both approaches work just as well.</p>
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    @products = Product.order(:name)
+    respond_to do |format|
+      format.html
+      format.csv { render text: @products.to_csv }
+    end
+  end
+end
+```
+
+<p>We&rsquo;ll generate the CSV data in the Product model in a new <code>to_csv</code> method whose name fits in nicely with the existing <code>to_json</code> and <code>to_xml</code> methods.</p> 
+
+``` /app/models/product.rb
+class Product < ActiveRecord::Base
+  attr_accessible :name, :price, :released_on
+  
+  def self.to_csv
+    CSV.generate do |csv|
+      csv << column_names
+      all.each do |product|
+        csv << product.attributes.values_at(*column_names)
+      end
+    end
+  end
+end
+```
+
+<p>To create the data we append an array of values to the <code>csv</code> object that&rsquo;s passed to the block. The first row is a header row and we&rsquo;ve set it to <code>column_names</code>, which returns an array of all of the model&rsquo;s attributes. If we wanted to return a subset of the columns we&rsquo;d have to list them out here instead. We then loop through all the products and add a row to the CSV file for each one and add the values that match the column names. This ensures that the right fields are returned and in the correct order. Once we&rsquo;ve restarted the server so that it picks up the <code>csv</code> library we should be able to view our CSV data.</p>
+
+<div class="imageWrapper">
+  ABBR src="http://asciicasts.com/system/photos/1239/original/E362I02.png" width="800" height="400" alt="The CSV data rendered in the browser."/>
+</div>
+
+<p>If we want this data to be downloaded rather than rendered inline in the browser we can use <code>send_data</code> instead of <code>render :text</code> in the controller. When we reload the page now the CSV file should be downloaded.</p>
+
+<h3>Exporting to Excel</h3>
+
+<p>What about Excel? The easiest solution would be for the user to open a CSV file in Excel, but it&rsquo;s better to provide an <code>xls</code> file that will open in Excel by default. To do this we&rsquo;ll need to add a new MIME type for <code>xls</code> files and we do this in the <code>mime_types</code> initializer file.</p>
+
+``` /config/initializers/mime_types.rb
+Mime::Type.register "application/xls", :xls
+```
+
+<p>We&rsquo;ll need to modify our controller now so that it responds to this type. The data needs to be tab-separated to open up properly in Excel; fortunately the csv library supports a column separator option that we can pass a tab character to to do this.</p>
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    @products = Product.order(:name)
+    respond_to do |format|
+      format.html
+      format.csv { send_data @products.to_csv }
+      format.xls { send_data @products.to_csv(col_sep: "\t") }
+    end
+  end
+end
+```
+
+<p>We&rsquo;ll need to change the <code>Product</code> model&rsquo;s <code>to_csv</code> method to accept a hash of options that we can pass to <code>CSV.generate</code>.</p>
+
+``` /app/models/product.rb
+class Product < ActiveRecord::Base
+  attr_accessible :name, :price, :released_on
+  
+  def self.to_csv(options = {})
+    CSV.generate(options) do |csv|
+      csv << column_names
+      all.each do |product|
+        csv << product.attributes.values_at(*column_names)
+      end
+    end
+  end
+end
+```
+
+<p>If we visit the <code>/products.xls</code> path now a file is downloaded that we can open in Excel. For the most part this works well; the file opens and the columns are separated correctly but there are some problems. For example the file isn&rsquo;t encoded properly so that some characters such as the degree symbol appear incorrectly in the file. There are work-arounds for this issue but there are other problems with this approach as well, one of which is that cells can&rsquo;t contain a newline character.</p>
+
+<p>Instead of rendering the data in the controller we&rsquo;ll create a template file for rendering the <code>xls</code> file. First we&rsquo;ll remove the block from the <code>xls</code>&rsquo;s format in the controller.</p>
+
+``` app/controllers/products.rb
+class ProductsController < ApplicationController
+  def index
+    @products = Product.order(:name)
+    respond_to do |format|
+      format.html
+      format.csv { send_data @products.to_csv }
+      format.xls
+    end
+  end
+end
+```
+
+<p>Next we&rsquo;ll create our new template.</p>
+
+``` /app/views/products/index.xls.erb
+<table border="1">
+  <tr>
+    <th>ID</th>
+    <th>Name</th>
+    <th>Release Date</th>
+    <th>Price</th>
+  </tr>
+  <% @products.each do |product| %>
+  <tr>
+    <td><%= product.id %></td>
+    <td><%= product.name %></td>
+    <td><%= product.released_on %></td>
+    <td><%= product.price %></td>
+  </tr>
+  <% end %>
+</table>
+```
+
+<p>We can use an HTML table that contains the data we want to export as Excel has no problem displaying these. When we open this up in Excel we&rsquo;ll see that the encoding problem has disappeared and data containing newlines is handled correctly, too. The spreadsheet looks a little different, though, as the HTML formatting adds a border to the cells and centre-aligns the header cells. We can customize this in the HTML document if we want any formatting we add will be shown in Excel. If we want to generate a file that feels more like a native Excel document we can change our template to look like this:</p>
+
+``` /app/views/products/index.xls.erb
+<?xml version="1.0"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:o="urn:schemas-microsoft-com:office:office"
+  xmlns:x="urn:schemas-microsoft-com:office:excel"
+  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:html="http://www.w3.org/TR/REC-html40">
+  <Worksheet ss:Name="Sheet1">
+    <Table>
+      <Row>
+        <Cell><Data ss:Type="String">ID</Data></Cell>
+        <Cell><Data ss:Type="String">Name</Data></Cell>
+        <Cell><Data ss:Type="String">Release Date</Data></Cell>
+        <Cell><Data ss:Type="String">Price</Data></Cell>
+      </Row>
+    <% @products.each do |product| %>
+      <Row>
+        <Cell><Data ss:Type="Number"><%= product.id %></Data></Cell>
+        <Cell><Data ss:Type="String"><%= product.name %></Data></Cell>
+        <Cell><Data ss:Type="String"><%= product.released_on %></Data></Cell>
+        <Cell><Data ss:Type="Number"><%= product.price %></Data></Cell>
+      </Row>
+    <% end %>
+    </Table>
+  </Worksheet>
+</Workbook>
+```
+
+<p>Our data is now rendered as XML in a format that Excel understands and using this gives us much more flexibility over what we can do. For example we can generate multiple worksheets and specify the format of each column. When we reload this file now to generate another spreadsheet we get a warning when the file downloads (on OS X at least) as a file in this format could contain potentially dangerous things, such as macros.</p>
+
+<p>The file we get this time is still encoded properly and feels more like a true Excel document. The best source of documentation for this format is the &ldquo;<a href="http://msdn.microsoft.com/en-us/library/aa140066(v=office.10).aspx">XML Spreadsheet Reference</a>&rdquo; on the MSDN web site. This has a list of all the tags we can use in our Excel documents. If a spreadsheet has a feature that we want to use we can reverse engineer it by saving it as an XML file and looking at it in a text editor.</p>
+
+<h3>Adding Links</h3>
+
+<p>Now that we can generate both formats we&rsquo;ll add the links to our products that will allow the user to download the relevant files. We&rsquo;ll add these at the top of the page.</p>
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<p>
+  Download:
+  <%= link_to "CSV", products_path(format: "csv") %> |
+  <%= link_to "Excel", products_path(format: "xls") %>
+</p>
+<!-- Rest of file omitted -->
+```
+
+<p>Now when we reload the page we&rsquo;ll see the download links and clicking one of them will download the relevant file.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1240/original/E362I03.png" width="800" height="400" alt="The page now has links to download the data in both formats."/>
+</div>

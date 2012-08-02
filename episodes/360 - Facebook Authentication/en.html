@@ -1,0 +1,185 @@
+<p>In the example application shown below we have a list of films that the app&rsquo;s users can write reviews for. We want to add a little more social interaction by integrating Facebook into our app so that users will be able to share their reviews with their friends and in this episode we&rsquo;ll show you how to do this.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1225/original/E360I01.png" width="800" height="500" alt="Our application."/>
+</div>
+
+<h3>Registering an App With Facebook</h3>
+
+<p>One of the easiest ways to add Facebook to an application is to use their <a href="https://developers.facebook.com/docs/plugins/">social plugins</a> and with these we can add a &ldquo;Like&rdquo; button, a comments section and more. If we want something that&rsquo;s a little more integrated into the core functionality of our site these won&rsquo;t really work for us so instead we&rsquo;ll register our app on the <a href="https://developers.facebook.com/apps">Facebook developers site</a>. Doing this will allow us to communicate with Facebook&rsquo;s Graph API and their Open Graph platform. To register our app we just need to click the &ldquo;Create New App&rdquo; button on the developers page and give our app a name and a namespace. We&rsquo;ll choose &ldquo;Cinematron&rdquo; for both of these but it&rsquo;s important that the namespace is unique across all Facebook apps so you might need to try a few variations on your application&rsquo;s name to find an unused one. Facebook has partnered up with Heroku for hosting web applications and if we check the box at the bottom of the form this will be set up for us, although we can use any host we want.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1226/original/E360I02.png" width="960" height="600" alt="Registering our app with Facebook."/>
+</div>
+
+<p>When we submit this form we&rsquo;ll need to fill in a captcha. Once we&rsquo;ve done that we&rsquo;ll be taken to a page that displays some information about our page. This page contains an App ID and an App Secret and we&rsquo;ll need these to communicate with Facebook&rsquo;s API. There are a number of options we can specify on this page to further customize our app. One that we&rsquo;ll need to enable is called &ldquo;Website with Facebook Login&rdquo;as this will enable our app&rsquo;s users to authenticate through Facebook. If we enable this option we&rsquo;ll need to specify a site URL for security purposes. While our app is in development we can set this to <code>http://localhost:3000/</code> but when we deploy to production we&rsquo;ll need to change this domain name to match. If we need to test our app locally after it&rsquo;s gone into production we can change our machine&rsquo;s HOSTS file so that it points the production domain name to our local system.</p> 
+
+<p>Next we&rsquo;ll need to customize the &ldquo;Auth Dialog&rdquo;. This is what Facebook shows to the user when they authenticate. We&rsquo;ll fill the form in with details about our application.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1227/original/E360I03.png" width="960" height="600" alt=""/>
+</div>
+
+<p>Note that we haven&rsquo;t provided Privacy Policy or Terms of Service URLs. Facebook requires these unless our app is in sandbox mode. Once we&rsquo;ve saved the changes here we can preview the dialog to see what the user sees when they authenticate. Next we&rsquo;ll modify the advanced settings. It&rsquo;s here that we can enable Sandbox Mode, which is disabled by default.  This is the only change we&rsquo;ll need to make here.</p> 
+
+<h3>Integrating Facebook With Our Application</h3>
+
+<p>We&rsquo;re ready now to integrate our application into Facebook. The user needs a way to authenticate through Facebook so we&rsquo;ll add a &ldquo;Sign in through Facebook&rdquo; link to our application. We&rsquo;ll use the <a href="https://github.com/mkdynamic/omniauth-facebook">OmniAuth Facebook gem</a> to handle authentication. This gem is useful as it supports authentication both on the server and on the client through JavaScript. <a href="https://github.com/mkdynamic/omniauth-facebook#omniauth-facebook-%C2%A0">Its README</a> is worth reading as it goes into a lot of detail on how to handle Facebook authentication. We&rsquo;ll start, as ever, by adding the gem to our application&rsquo;s gemfile and then running bundle to install it.</p>
+
+``` /Gemfile
+gem 'omniauth-facebook'
+```
+
+<p>Next we&rsquo;ll create a new initializer file where we&rsquo;ll put the OmniAuth configuration.</p>
+
+``` /config/initializers/omniauth.rb
+OmniAuth.config.logger = Rails.logger
+
+Rails.application.config.middleware.use OmniAuth::Builder do
+  provider :facebook, ENV['FACEBOOK_APP_ID'], ENV['FACEBOOK_SECRET']
+end
+```
+
+<p>Here we set the OmniAuth logger to the Rails logger and add OmniAuth to the Rack middleware, setting the provider to Facebook and passing in the App Id and App Secret through environment variables. When we restart our app and visit <code>/auth/facebook</code> we should now be redirected to the Facebook sign-in page. If we get an error here we should double check your environment variables and make sure that your app and secret are being passed in correctly to OmniAuth.</p> 
+
+<p>When we click &lsquo;Go To App&rsquo; to sign in we&rsquo;ll be redirected back to our app. We&rsquo;ll get a routing error when we do this which is no surprise as our app doesn&rsquo;t yet handle the callback. Fixing this is done in a similar manner to what we did in <a href="http://railscasts.com/episodes/241-simple-omniauth">episode 241</a>. First we&rsquo;ll need to add some routes to handle the paths that OmniAuth uses.</p>
+
+``` /config/routes.rb 
+Cinema::Application.routes.draw do
+  match 'auth/:provider/callback', to: 'sessions#create'
+  match 'auth/failure', to: redirect('/')
+  match 'signout', to: 'sessions#destroy', as: 'signout'
+  
+  resources :movies do
+    resources :reviews
+  end
+  root to: 'movies#index'
+end
+```
+
+<p>When Facebook redirects back to our app now it will look for the <code>create</code> action in a <code>SessionsController</code>. Our app doesn&rsquo;t have this controller so we&rsquo;ll write it now.</p>
+
+``` /app/controllers/sessions_controller.rb
+class SessionsController < ApplicationController
+  def create
+    user = User.from_omniauth(env["omniauth.auth"])
+    session[:user_id] = user.id
+    redirect_to root_url
+  end
+end
+```
+
+<p>The code in this controller depends on a <code>User</code> model that we haven&rsquo;t written yet, but which will find or create a user based on the data passed in by the OmniAuth hash. We should ask ourselves if we need to persist the user&rsquo;s data in the database like this. If we don&rsquo;t have any associations to set up with a user we might be able to store the OmniAuth hash directly in the session instead of creating a User record. We will be creating a User model, though, so we&rsquo;ll do that next.</p>
+
+``` terminal
+$ rails g model user provider uid name oauth_token oauth_expires_at:datetime
+$ rake db:migrate
+```
+
+<p>In the <code>User</code> model we store the <code>provider</code> and <code>uid</code> credentials that OmniAuth provides along with the name, <code>oauth_token</code> and <code>oauth_expires_at</code> information. Facebook OAuth tokens don&rsquo;t last for ever so storing the expiry time is useful. If we look in the Facebook OmniAuth README we&rsquo;ll find <a href="https://github.com/mkdynamic/omniauth-facebook#auth-hash">an example hash</a> of the details that are provided. We might want to store some of these in the database, for example the image URL, so that we can display a user&rsquo;s profile image.</p>
+
+<p>Next we&rsquo;ll modify our new <code>User</code> model and write the code for the <code>from_omniauth</code> method that we call from the <code>SessionsController</code>.</p> 
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  def self.from_omniauth(auth)
+    where(auth.slice(:provider, :uid)).first_or_initialize.tap do |user|
+      user.provider = auth.provider
+      user.uid = auth.uid
+      user.name = auth.info.name
+      user.oauth_token = auth.credentials.token
+      user.oauth_expires_at = Time.at(auth.credentials.expires_at)
+      user.save!
+    end
+  end
+end
+```
+
+<p>This code is different from what we&rsquo;ve shown in the past. Here we try to find a user that matches the given <code>provider</code> and <code>uid</code> values from the hash and then we call <code>first_or_initialize</code> on the result of this. This is a new method provided in Rails 3.2 that will either return the first matching record or initialize a new record with the parameters that were passed in. We then call <code>tap</code> on this to pass that <code>User</code> instance to the block. Inside the block we set various attributes on the user based on values from the OmniAuth hash. Note, though, that we&rsquo;re calling the hash keys as methods here. This is because OmniAuth uses the Hashie gem which us to call keys as methods to access hash values. Finally we save the record and return it. Note that we&rsquo;re setting these attributes each time the user is requested, even for existing User records. This is important so that we get the latest authentication token but also so that if the user changes their name or any other of their credentials these changes are picked up.</p>
+
+<p>There are a couple of changes we still need to make. In the <code>ApplicationController</code> we&rsquo;ll add a method for fetching the current user.</p>
+
+``` /app/controllers/application_controller.rb
+class ApplicationController < ActionController::Base
+  protect_from_forgery
+  
+  private
+  def current_user
+    @current_user ||= User.find(session[:user_id]) if session[:user_id]
+  end
+  helper_method :current_user
+end
+```
+
+<p>In the application layout file we&rsquo;ll add some code to let users sign in and out.</p>
+
+``` /app/views/layouts/application.html.erb
+<div id="user_nav">
+  <% if current_user %>
+    Signed in as <strong><%= current_user.name %></strong>!
+    <%= link_to "Sign out", signout_path, id: "sign_out" %>
+  <% else %>
+    <%= link_to "Sign in with Facebook", "/auth/facebook", id: "sign_in" %>
+  <% end %>
+</div>
+```
+
+<p>We can try this out now. If we reload the application&rsquo;s home page we&rsquo;ll see the sign-in link and if we click it we&rsquo;ll be instantly signed in as we&rsquo;ve already authorized this application with Facebook.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1228/original/E360I04.png" width="960" height="600" alt="We can now sign in to our application through Facebook."/>
+</div>
+
+<h3>Authenticating on The Client</h3>
+
+<p>Facebook provides a JavaScript SDK that we can use to authenticate a user on the client-side so that it doesn&rsquo;t look to them like they&rsquo;ve left our application then returned. We&rsquo;ll add this to our application and have it gracefully degrade to the server-side solution. All it takes to do this is some JavaScript, or in our case some CoffeeScript. Under the <code>/app/assets/javascripts</code> directory we&rsquo;ll create a new <code>facebook.js.coffee.erb</code> file. The extra <code>.erb</code> extension is so that we can add some dynamic content.</p>
+
+``` /app/assets/javascripts/facebook.js.coffee.erb
+jQuery ->
+  $('body').prepend('<div id="fb-root"></div>')
+
+  $.ajax
+    url: "#{window.location.protocol}//connect.facebook.net/en_US/all.js"
+    dataType: 'script'
+    cache: true
+
+
+window.fbAsyncInit = ->
+  FB.init(appId: '<%= ENV["FACEBOOK_APP_ID"] %>', cookie: true)
+
+  $('#sign_in').click (e) ->
+    e.preventDefault()
+    FB.login (response) ->
+      window.location = '/auth/facebook/callback' if response.authResponse
+
+  $('#sign_out').click (e) ->
+    FB.getLoginStatus (response) ->
+      FB.logout() if response.authResponse
+    true
+```    
+
+<p>After the DOM has loaded we insert a <code>div</code> element with an <code>id</code> of <code>fb-root</code> at the top of the document&rsquo;s body as Facebook expects this element to be here. We then make an AJAX request to Facebook&rsquo;s JavaScript SDKs. This call will load this code asynchronously and interpret what&rsquo;s returned as a script. After the script loads it triggers the <code>fbAsyncInit</code> function on the window. When this fires the SDK is fully-loaded and ready to use so we initialize it with some custom settings, including the app id which we set using the same environment variable we used earlier (this is where the erb comes in handy). We also enable cookies so that the user&rsquo;s credentials are stored in a cookie  which means that we can access them on the server-side.</p>
+
+<p>Once this has all initialized we&rsquo;ll listen to the <code>click</code> event on the sign-in link. Instead of the link performing its default behaviour we&rsquo;ll trigger the <code>FB.login</code> function which will display a dialog to the user asking them to sign in and authenticate the app. Once they do this successfully they&rsquo;ll be directed to the <code>/auth/facebook/callback</code> path so that the authentication can finish and generate the User record (or whatever it needs to do) on the server. We could trigger this through AJAX instead of directing the user there if we want to keep everything on the same page.</p>
+
+<p>Lastly we have some code that runs when the sign out link is clicked. This checks to see if the user is currently signed-in and, if so, signs them out. This function returns true so that the link&rsquo;s default behaviour is triggered which will sign them out of our application as well.</p>
+
+<p>We can try this out now. We&rsquo;ve deauthorized our application so that we can see the effect of signing in. When we click the sign in link now we get a pop-up dialog this time that asks us to authorize our application. When we click &ldquo;Log in with Facebook&rdquo; we&rsquo;re signed in and a user record would be created if our application is designed to do that.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1229/original/E360I05.png" width="960" height="600" alt="We can now log in without leaving our site."/>
+</div>
+
+<p>If we click the &ldquo;Sign Out&rdquo; link we&rsquo;ll be logged out of both our application and Facebook so when we try to sign in again we&rsquo;ll need to sign in to Facebook first, though when we do we&rsquo;re automatically signed in to our app as well.</p>
+
+<p>There can be some odd issues with this JavaScript solution. For example if we look in the browser console we&rsquo;ll see a warning message. The JavaScript seems to work despite this but it would be nice to figure out how to stop this warning.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1230/original/E360I06.png" width="960" height="600" alt="The client-side solution can sometimes show JavaScript errors."/>
+</div>
+
+<p>Also there might be cases when the Facebook login cookie and our app&rsquo;s session cookie get out of sync with each other. This generally isn&rsquo;t a problem but it might cause some odd behaviour so it&rsquo;s worth keeping an eye out for this.</p> 
+
+<h3>Interacting With Facebook</h3>
+
+<p>After we&rsquo;ve successfully authenticated a user how do we interact with Facebook? We can do this through their JavaScript SDK or through Ruby with a gem called Koala7. This gem&rsquo;s README has a good explanation of how this gem&rsquo;s used to interact with the Facebook API and there&rsquo;s more information on this topic in this week&rsquo;s pro episode.</p>

@@ -1,0 +1,169 @@
+<p>En el  <a href="http://railscasts.com/episodes/219-active-model">episodio 219</a> usamos ActiveModel para crear un modelo sin persistencia en base de datos pero usando algunas funcionalidades de ActiveRecord tales como las validaciones.  Sin embargo aunque ActiveModel est&aacute; muy bien no resulta conveniente su uso directo de esta manera.  Por ejemplo hace falta bastante c&oacute;digo para escribir un modelo sencillo que tenga soporte de validaciones.</p>
+
+``` /app/models/message.rb
+class Message
+  include ActiveModel::Validations
+  include ActiveModel::Conversion
+  extend ActiveModel::Naming
+
+  attr_accessor :name, :email, :content
+
+  validates_presence_of :name
+  validates_format_of :email, :with => /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+  validates_length_of :content, :maximum => 500
+
+  def initialize(attributes = {})
+    attributes.each do |name, value|
+      send("#{name}=", value)
+    end
+  end
+
+  def persisted?
+    false
+  end
+end
+```
+
+<p>La gema <a href="https://github.com/cgriego/active_attr">ActiveAttr</a> nos ser&aacute; aqu&iacute; de ayuda.  Su autor Chris Greigo la describe como &ldquo;lo que se le pas&oacute; a ActiveModel&rdquo; que es una descripci&oacute;n bastante acertada de lo que hace.  Con ella es mucho m&aacute;s f&aacute;cil crear un modelo sin tablas que se comporta de forma similar a ActiveRecord, que es lo que veremos en este episodio.</p>
+
+<h3>Uso de ActiveAttr con un formulario de contacto</h3>
+
+<p>Vamos a trabajar con una aplicaci&oacute;n que tiene un formulario de contacto.  Al rellenar el formulario y enviarlo, queremos enviar el correo pero no queremos que se guarde el mensaje en la base de datos.  No deseamos utilizar ActiveRecord, pero s&iacute; que queremos usar algunas de las funcionalidades que ofrece, por ejemplo las validaciones, de forma que si el usuario no rellena correctamente el formulario deber&iacute;a ver un mensaje de error explicando qu&eacute; es lo que ha hecho mal.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1011/original/E326I01.png" width="800" height="464" alt="El formulario de contacto."/>
+</div>
+
+<p>Ya hemos creado el controlador y la vista que funcionan de una manera muy similar a como lo har&iacute;an si us&aacute;semos el andamiaje de Rails.  Vamos a darle un repaso r&aacute;pido.  El controlador <code>MessagesController</code> tiene un par de acciones llamadas <code>new</code> y <code>create</code>.  Cuando se active la acci&oacute;n <code>new</code> se crear&aacute; una nueva instancia de <code>Message</code> y se mostrar&aacute; la plantilla.</p>
+
+``` /app/views/messages/new.html.erb
+<h1>Contact Us</h1>
+
+<%= form_for @message do |f| %>
+  <% if @message.errors.any? %>
+    <div class="error_messages">
+      <h2><%= pluralize(@message.errors.count, "error") %> prohibited this message from being saved:</h2>
+      <ul>
+      <% @message.errors.full_messages.each do |msg| %>
+        <li><%= msg %></li>
+      <% end %>
+      </ul>
+    </div>
+  <% end %>
+  <div class="field">
+    <%= f.label :name %><br />
+    <%= f.text_field :name %>
+  </div>
+  <div class="field">
+    <%= f.label :email %><br />
+    <%= f.text_field :email %>
+  </div>
+  <div class="field">
+    <%= f.label :content, "Message" %><br />
+    <%= f.text_area :content, :rows => 5 %>
+  </div>
+  <div class="actions"><%= f.submit "Send Message" %></div>
+<% end %>
+```
+
+<p>En esta vista est&aacute; el c&oacute;digo del formulario.  N&oacute;tese que usamos <code>form_for</code> para definir el formulario y le pasamos la instancia del objeto mensaje creada por el controlador.  Los mensajes de error se muestran igual que con el c&oacute;digo normal que se generar&iacute;a con el generador de Rails, o lo que es lo mismo: esta plantilla de la vista tiene el mismo aspecto que si us&aacute;semos un modelo de ActiveRecord.  Al enviar el formulario se activa la acci&oacute;n <code>create</code> del controlador.</p>
+
+``` /app/controllers/messages_controller.rb
+class MessagesController < ApplicationController
+  def new
+    @message = Message.new
+  end
+
+  def create
+    @message = Message.new(params[:message])
+    if @message.valid?
+      # TODO send message here
+      redirect_to root_url, notice: "Message sent! Thank you for contacting us."
+    else
+      render "new"
+    end
+  end
+end
+```
+
+<p>La acci&oacute;n genera una nueva instancia de <code>Message</code> bas&aacute;ndose en los par&aacute;metros recibidos del formulario y luego comprueba que dicho mensaje es v&aacute;lido.  En tal caso, se emite el mensaje de correo y se redirige a la p&aacute;gina principal.  En caso de que el mensaje sea incorrecto se muestra otra vez el formulario.  Es necesario crear la instancia del modelo de mensaje para replicar el funcionamiento de un modelo de ActiveRecord, con la &uacute;nica diferencia de que estamos s&oacute;lo realizando validaciones y nunca lo vamos a guardar en una tabla de la base de datos.&lt;/ApplicationController&gt;
+	
+<p>El modelo <code>Message</code> utiliza ActiveModel para gestionar todo este comportamiento, y puede verse el c&oacute;digo al comienzo de este episodio.  No queremos utilizar aqu&iacute; este enfoque, sino que usaremos ActiveAttr.  Para ello tenemos que a&ntilde;adir la gema al <code>Gemfile</code> y ejecutar <code>bundle</code> para instalarlo.</p>
+
+``` /Gemfile
+gem 'active_attr'
+```
+
+<p>Ya podemos ejecutar ActiveAttr en nuestro modelo.</p>
+
+``` /app/models/message.rb
+class Message
+  include ActiveAttr::Model
+end
+```
+
+<p>N&oacute;tese que <code>Message</code> no hereda de otra clase, se trata de una simple clase en Ruby.  Al incluir <code>ActiveAttr::Modelo</code> a&ntilde;adimos cierta funcionalidad (basada en ActiveModel) que hace que la clase se comporte como un modelo de ActiveRecord.  Podemos definir atributos para el modelo utilizando <code>attribute</code> y podemos a&ntilde;adir validaciones igual que har&iacute;amos con una clase derivada de ActiveRecord.</p>
+
+``` /app/models/message.rb
+class Message
+  include ActiveAttr::Model
+  
+  attribute :name
+  attribute :email
+  attribute :content
+  
+  validates_presence_of :name
+  validates_format_of :email, :with => /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+  validates_length_of :content, :maximum => 500
+end
+```
+
+<p>Con esto ya tenemos un modelo totalmente funcional que se comporta igual que un modelo de ActiveRecord.  Si visitamos otra vez el formulario y dejamos sin rellenar los campos, veremos los errores de validaci&oacute;n igual que antes pero el c&oacute;digo del modelo es mucho m&aacute;s simple.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1012/original/E326I02.png" width="800" height="561" alt="Los errores de validación se muestran si se rellenan incorrectamente los campos del formulario."/>
+</div>
+
+<h3>Protecci&oacute;n contra asignaci&oacute;n masiva</h3>
+
+<p>Con ActiveAttr tambi&eacute;n tenemos protecci&oacute;n contra asignaciones masivas.  Supongamos que tenemos un atributo de prioridad en el modelo Message que no queremos establecer mediante valores del formulario.  Podemos usar <code>attr_accessible</code> para definir los atributos que deber&iacute;an ser accesibles igual que har&iacute;amos con un modelo ActiveRecord.</p>
+
+
+``` /app/models/message.rb
+class Message
+  include ActiveAttr::Model
+  
+  attribute :name
+  attribute :email
+  attribute :content
+  attribute :priority
+  
+  attr_accessible :name, :email, :content
+
+  validates_presence_of :name
+  validates_format_of :email, :with => /^[-a-z0-9_+\.]+\@([-a-z0-9]+\.)+[a-z0-9]{2,4}$/i
+  validates_length_of :content, :maximum => 500
+end
+```
+
+<p>Podemos probar este comportamiento en la consola.  Si creamos un nuevo <code>Message</code> e intentamos establecer su atributo <code>priority</code> veremos un error, si bien podemos establecer <code>priority</code> directamente.</p>
+
+``` console
+1.9.3p0 :001 > m = Message.new(priority: 1)
+ => #<Message content: nil, email: nil, name: nil, priority: nil> 
+1.9.3p0 :002 > m.priority
+ => nil 
+1.9.3p0 :003 > m.priority = 1
+ => 1
+``` 
+ 
+<p>ActiveAttr tambi&eacute;n nos permite invocar a un atributo seguido de una interrogaci&oacute;n para forzar su valor a booleano, igual que con modelos de ActiveRecord.  Las futuras versiones de ActiveAttr tambi&eacute;n nos permitir&aacute;n pasar opciones a <code>attribute</code> para poder especificar el tipo del atributo, as&iacute; como un valor por defecto.</p>
+
+
+``` /app/models/message.rb
+ attribute :priority, type: Integer, default: 0
+``` 
+
+<p>Estas opciones a&uacute;n no est&aacute;n disponibles pero deber&iacute;an salir pronto, as&iacute; que merece la pena ir comprobando la p&aacute;gina en Github de ActiveAttr.</p>
+
+<p>Con esto finalizamos nuestro episodio dedicado a ActiveAttr, que es una forma muy c&oacute;moda de generar modelos sin tablas.  La documentaci&oacute;n tiene m&aacute;s detalles de lo qu epodemos hacer.  Hemos utilizado el m&oacute;dulo <code>ActiveAttr::Model</code> que incluye todo pero quedan por ver otros m&oacute;dulos que ofrecen diferentes funcionalidades que podemos usar si nos hacen falta s&oacute;lo ciertas funcionalidades concretas de ActiveAttr.</p>

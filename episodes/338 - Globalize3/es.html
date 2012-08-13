@@ -1,0 +1,122 @@
+<p>A continuaci&oacute;n se muestra una p&aacute;gina de una aplicaci&oacute;n de <em>blog</em> que muestra varios registros <code>Article</code>.  La aplicaci&oacute;n soporta internacionalizaci&oacute;n, permitiendo al usuario cambiar el idioma usando los enlaces de la parte superior.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1107/original/E338I01.png" width="800" height="500" alt="Nuestra aplicación de blog con el texto traducido en la lenguae <em>wookie</em>."/>
+</div>
+
+<p>Al hacer clic en el enlace &ldquo;Wookieespeak&rdquo; cambia el t&iacute;tulo en la parte superior de la p&aacute;gina pero vemos que el contenido de los art&iacute;culos sigue saliendo en ingl&eacute;s.  &iquest;C&oacute;mo podemos cambiar el contenido de la base de datos de forma que se muestre en el idioma escogido por el usuario?</p>
+
+<p>La internacionalizaci&oacute;n en las aplicaciones Rails se realiza por lo general mediante ficheros YAML.  Colgando del directorio <code>/config/locales</code> hay uno o m&aacute;s archivos que contienen los textos traducidos en cada idioma soportado por la aplicaci&oacute;n.  Vimos con detalle este enfoque en  el <a href="http://railscasts.com/episodes/138-i18n">episodio 138</a> y si bien esto funciona para literales y textos est&aacute;ticos, no nos servir&aacute; para mostrar textos de la base de datos en diferentes idiomas.  Para hacer esto nos har&iacute;a falta almacenar cada traducci&oacute;n en una tabla de la base de datos, y esto es lo que precisamente facilita la gema  <a href="https://github.com/svenfuchs/globalize3">Globalize3</a>. Globalize3 crea una tabla separada donde se almacenan las traducciones de cada modelo y utilizar&aacute; la traducci&oacute;n correcta dependiendo del idioma escogido por el usuario.  Para utilizar esta gema en nuestra aplicaci&oacute;n tenemos que a&ntilde;adirla al <code>Gemfile</code> y luego ejecutar <code>bundle</code> para instalarla.</p>
+
+``` /Gemfile
+gem 'globalize3'
+```
+<p>Ahora ya podemos ir al modelo que queremos traducir y utilizar el m&eacute;todo <code>translates</code> para especificar los nombres de las columnas que queremos que est&eacute;n disponibles en m&uacute;ltiples idiomas, en nuestro caso las columnas con el t&iacute;tulo y el contenido de <code>Article</code>.</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  translates :name, :content
+end
+```
+<p>Tenemos que crear una tabla en la base de datos para guardar las traducciones.  El  <a href="https://github.com/svenfuchs/globalize3/blob/master/README.textile">fichero README</a> de la gema dice que podemos utilizar <code>create_translation_table!</code> dentro de la misma migraci&oacute;n en la que creamos la tabla para el modelo pero como ya tenemos una tabla <code>articles</code> con contenidos tendremos que usar una t&eacute;cnica alternativa que hace una migraci&oacute;n separada en la que podemos aprovechar para migrar los datos ya existentes.  Primero crearemos una migraci&oacute;n llamada  <code>create_article_translations</code> en nuestra aplicaci&oacute;n.</p>
+
+``` terminal
+$ rails g migration create_article_translations
+```
+
+<p>Luego modificaremos la migraci&oacute;n en base a lo que nos dice el fichero README.  Tenemos que llamar a <code>create_translations_table!</code> sobre el modelo al que le queremos a&ntilde;adir traducciones, pas&aacute;ndole los nombres de las columnas que queremos que sean traducibles.</p>
+
+``` /db/migrations/291204100000_create_article_translations.rb
+class CreateArticleTranslations < ActiveRecord::Migration
+  def up
+    Article.create_translation_table!({
+      name: :string,
+      content: :text
+    }, {
+      migrate_data: true
+    })
+  end
+
+  def down
+    Article.drop_translation_table! migrate_data: true
+  end
+end
+```
+
+<p>Los datos de estas dos columnas no quedar&aacute;n almacenados en la tabla <code>articles</code> sino en una nueva tabla llamada <code>article_translations</code>.  Lanzaremos la migraci&oacute;n de la base de datos para que los cambios surtan efecto.</p>
+
+``` terminal
+$ rake db:migrate
+```
+
+<p>Ya podemos demostrar el funcionamiento de Globalize en la consola.  Si comprobamos el idioma actual veremos que por defecto es el ingl&eacute;s.  Si recuperamos el nombre del primer art&iacute;culo, se extraer&aacute; el valor de la tabla <code>article_translations</code>.</p>
+
+``` terminal
+1.9.3-p125 :001 > I18n.locale
+ => :en 
+1.9.3-p125 :002 > Article.first.name
+  Article Load (0.2ms)  SELECT "articles".* FROM "articles" LIMIT 1
+  Article::Translation Load (0.2ms)  SELECT "article_translations".* FROM "article_translations" WHERE "article_translations"."article_id" = 1
+ => "Superman"
+``` 
+
+<p>Si ahora cambiamos el idioma a la lengua <em>wookie</em> y recuperamos el nombre del primer art&iacute;culo, el valor devuelto ser&aacute; <code>nil</code> porque el texto traducido a&uacute;n no existe.</p>
+
+``` terminal
+1.9.3-p125 :003 > I18n.locale = :wk
+ => :wk 
+1.9.3-p125 :004 > Article.first.name
+  Article Load (0.3ms)  SELECT "articles".* FROM "articles" LIMIT 1
+  Article::Translation Load (0.2ms)  SELECT "article_translations".* FROM "article_translations" WHERE "article_translations"."article_id" = 1
+  Article::Translation Load (0.3ms)  SELECT "article_translations".* FROM "article_translations" WHERE "article_translations"."article_id" = 1 AND "article_translations"."locale" = 'wk' LIMIT 1
+ => nil
+``` 
+ 
+<p>Globalize3 redefine el comportamiento de los m&eacute;todos de lectura y escritura para aquellas columnas que queremos traducir y les aplica el lenguaje en uso.  Si actualizamos el nombre del primer art&iacute;culo mientras tenemos el idioma establecido a <code>wk</code> se insertar&aacute; el registro en la tabla <code>article_translations</code> en ese idioma, valor que podremos recuperar si volvemos a pedir el nombre del art&iacute;culo.</p>
+
+``` terminal
+1.9.3-p125 :005 > Article.first.update_attribute(:name, "Ahhyya")
+1.9.3-p125 :006 > Article.first.name
+  Article Load (0.3ms)  SELECT "articles".* FROM "articles" LIMIT 1
+  Article::Translation Load (0.2ms)  SELECT "article_translations".* FROM "article_translations" WHERE "article_translations"."article_id" = 1
+ => "Ahhyya"
+``` 
+
+<p>Si ahora volvemos a cambiar el idioma al ingl&eacute;s veremos que vuelve a aparecer en ingl&eacute;s.</p>
+
+``` terminal
+1.9.3-p125 :007 > I18n.locale = :en
+ => :en 
+1.9.3-p125 :008 > Article.first.name
+  Article Load (0.2ms)  SELECT "articles".* FROM "articles" LIMIT 1
+  Article::Translation Load (0.2ms)  SELECT "article_translations".* FROM "article_translations" WHERE "article_translations"."article_id" = 1
+ => "Superman"
+``` 
+ 
+ <p>Ya podemos ver esto en acci&oacute;n en nuestro sitio.  Tendremos que reiniciar el servidor para que coja los cambios, pero tras hacerlo la versi&oacute;n en ingl&eacute;s de nuestra p&aacute;gina deber&iacute;a tener el mismo aspecto porque los contenidos de la tabla original de art&iacute;culos han sido migrados.  Si ahora vemos la p&aacute;gina en la lengua <em>wookie</em> veremos que aparece todo casi vac&iacute;o.</p>
+ 
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1108/original/E338I02.png" width="800" height="413" alt="Faltan los títulos y las traducciones porque todavía no existen sus traducciones."/>
+</div>
+
+<p>El primer art&iacute;culo tiene el mismo nombre que le pusimos por la consola pero el resto de atributos que tenemos que traducir siguen estando en blanco.  Sin embargo podemos editar uno de estos art&iacute;culos para establecer el texto traducido.</p>
+	
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1109/original/E338I03.png" width="800" height="518" alt="Ahora se pueden editar los artículos en los lenguajes soportados."/>
+</div>
+
+<p>El art&iacute;culo quedar&aacute; disponible en los idiomas, por lo que cuando cambiemos  idiomas veremos el art&iacute;culo en el idioma correcto.  Si volvemos al formulario de edici&oacute;n los campos de texto mostrar&aacute;n el texto en el lenguaje escogido y podemos hacer clic en los enlaces para poder cambiar estos campos en el idioma que queramos.  Si cambiamos un atributo que no est&aacute; configurado para ser traducible (como por ejemplo el nombre del autor) dicho atributo ser&aacute; actualizado para todos los lenguajes porque su valor se estar&aacute; guardando en la tabla original de <code>articles</code>, no en <code>article_translations</code>.</p>
+
+<h3>Lenguaje por defecto</h3>
+
+<p>Por supuesto traducir todos los registros de la base de datos en ambos lenguajes puede ser una tarea nada desde&ntilde;able.  Como vimos antes, se devuelve el valor <code>nil</code> cuando se solicita un atributo que todav&iacute;a no se ha traducido, pero podemos definir un lenguaje por defecto que ser&aacute; el que se muestre cuando no existe una traducci&oacute;n en el idioma correspondiente.  Para hacer esto s&oacute;lo tenemos quemodificar el fichero de configuraci&oacute;n de nuestra aplicaci&oacute;n y a&ntilde;adir la opci&oacute;n <code>i18n.fallbacks</code>.</p>
+
+``` /config/application.rb
+config.i18n.fallbacks = true
+```
+
+<p>Una vez que hayamos puesto esto las traducciones ausentes en cualquier lenguaje devolver&aacute;n el contenido cargado en el idioma por defecto, en este caso ingl&eacute;s.  Tendremos que reiniciar nuestra aplicaci&oacute;n para que el cambio tenga efecto, pero cuando recarguemos la p&aacute;gina veremos ahora que las traducciones que faltan en la lengua <em>wookie</em> se muestran en ingl&eacute;s.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1110/original/E338I04.png" width="800" height="518" alt="Los artículos que no han sido traducidos a la lengua <em>wookie</div> se muestran en inglés."/>
+</div>

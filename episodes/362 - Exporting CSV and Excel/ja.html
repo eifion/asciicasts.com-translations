@@ -1,0 +1,189 @@
+<p>WebアプリケーションからCSVやExcel形式でデータをエクスポートしたいというのはよくある話です。今回のエピソードではこれをRailsアプリケーションでおこなう方法を紹介します。下に示したページには、商品リストが表示されています。リンクを追加して、このリストをCSVかExcelファイルとしてダウンロードできるようにしたいと思います。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1238/original/E362I01.png" width="800" height="400" alt="商品リスト"/>
+</div>
+
+<p>これをおこなうためのgemはいくつかありますが、今回はそれらは使わないで実現してみます。実際ゼロから作るのはとても簡単です。</p>
+
+<h3>CSVにエクスポートする</h3>
+
+<p>Ruby 1.9には便利な<a href="http://ruby-doc.org/stdlib-1.9.3/libdoc/csv/rdoc/CSV.html">CSV library</a>が付いてきますが、これはRuby 1.8ではFaster CSVとして知れれていたものです。このライブラリを用いてCSVデータを生成することにします。これは標準ライブラリの一部なので、ただrequireするだけで利用できるようになります。これをアプリケーションの設定ファイルで行ないます。</p>
+
+``` /config/application.rb
+require File.expand_path('../boot', __FILE__)
+
+require 'csv'
+require 'rails/all'
+```
+
+<p>ユーザが<code>/products.csv</code>のパスにアクセスしたときに、このライブラリを使ってカンマ区切りのデータを生成することができます。現状では、アクションがこの形式に対応しないため、これは動作しません。しかし、<code>ProductsController</code>のindexアクションに<code>respond_to</code>ブロックを追加することで簡単に修正できます。このフォーマット用のビューテンプレートを生成するか、あるいはコントローラでインラインでデータを出力するかの、いずれかの方法から選択します。今回のニーズに対しては、よりシンプルである後者の方法をとることにしますが、いずれの方法でも同じ結果になります。</p>
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    @products = Product.order(:name)
+    respond_to do |format|
+      format.html
+      format.csv { render text: @products.to_csv }
+    end
+  end
+end
+```
+
+<p>Productモデル内に新たに作成する<code>to_csv</code>メソッドでCSVデータを生成することにします。メソッド名は既存の<code>to_json</code>と<code>to_xml</code>メソッドに合わせてわかりやすいよう設定しました。</p> 
+
+``` /app/models/product.rb
+class Product < ActiveRecord::Base
+  attr_accessible :name, :price, :released_on
+  
+  def self.to_csv
+    CSV.generate do |csv|
+      csv << column_names
+      all.each do |product|
+        csv << product.attributes.values_at(*column_names)
+      end
+    end
+  end
+end
+```
+
+<p>データを作成するために、ブロックに渡された<code>csv</code>オブジェクトに値の配列を追加します。1行目はヘッダ行で、<code>column_names</code>と設定してモデルのすべての属性を配列で返します。列のサブセットを返したい場合は、ここで列名を列挙する必要があります。次に全商品をループして、ひとつずつにCSVファイルに行を追加して列名に一致する値を設定していきます。これにより、正しいフィールドが正しい順番で返されます。<code>csv</code>ライブラリを読み込ませるためにサーバを再起動すると、CSVデータを表示できるようになりました。</p>
+
+<div class="imageWrapper">
+  ABBR src="http://asciicasts.com/system/photos/1239/original/E362I02.png" width="800" height="400" alt="The CSV data rendered in the browser."/>
+</div>
+
+<p>このデータをブラウザ内に表示するのではなくダウンロードさせたい場合は、コントローラで<code>render :text</code>ではなく<code>send_data</code>を使います。ページをリロードするとCSVファイルをダウンロードできるようになります。</p>
+
+<h3>Excel形式でエクスポートする</h3>
+
+<p>ではExcel形式はどうすればいいでしょうか?一番簡単なのはユーザにCSVファイルをExcelで開いてもらう方法ですが、できればデフォルトでExcelが起動する<code>xls</code>形式のファイルを提供する方がいいでしょう。そのためには<code>xls</code>ファイルのための新しいMIMEタイプを追加する必要があり、これを<code>mime_types</code>初期化ファイルで行います。</p>
+
+``` /config/initializers/mime_types.rb
+Mime::Type.register "application/xls", :xls
+```
+
+<p>このタイプのファイルに対応するようコントローラを修正します。Excelで正しく開くためにはデータがタブ区切りになっている必要があります。幸いcsvライブラリがカラム区切りオプションに対応しているので、これをおこなうためにタブ記号を渡します。</p>
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    @products = Product.order(:name)
+    respond_to do |format|
+      format.html
+      format.csv { send_data @products.to_csv }
+      format.xls { send_data @products.to_csv(col_sep: "\t") }
+    end
+  end
+end
+```
+
+<p><code>Product</code>モデルの<code>to_csv</code>メソッドを修正して、<code>CSV.generate</code>に渡すオプションのハッシュを受け付けるように変更します。</p>
+
+``` /app/models/product.rb
+class Product < ActiveRecord::Base
+  attr_accessible :name, :price, :released_on
+  
+  def self.to_csv(options = {})
+    CSV.generate(options) do |csv|
+      csv << column_names
+      all.each do |product|
+        csv << product.attributes.values_at(*column_names)
+      end
+    end
+  end
+end
+```
+
+<p><code>/products.xls</code>のパスにアクセスすると、ファイルがダウンロードされExcelで開くことができます。ほとんどの部分はこれでうまく行きました。ファイルは正常に開き、列は正しく区切られています。しかし少し問題があります。例えばファイルはエンコードが正しく処理されていないため、温度記号などの文字の表示がおかしくなっています。この問題を回避する方法はありますが、その場合に別の問題が発生します。その一つが、セル内に改行を入れることができないという問題です。</p>
+
+<p>コントローラでデータを出力する代わりに、<code>xls</code>ファイルを出力するためのテンプレートファイルを作成することにします。最初にコントローラの<code>xls</code>のフォーマットからブロックを削除します。</p>
+
+``` app/controllers/products.rb
+class ProductsController < ApplicationController
+  def index
+    @products = Product.order(:name)
+    respond_to do |format|
+      format.html
+      format.csv { send_data @products.to_csv }
+      format.xls
+    end
+  end
+end
+```
+
+<p>次に新規のテンプレートを作成します。</p>
+
+``` /app/views/products/index.xls.erb
+<table border="1">
+  <tr>
+    <th>ID</th>
+    <th>Name</th>
+    <th>Release Date</th>
+    <th>Price</th>
+  </tr>
+  <% @products.each do |product| %>
+  <tr>
+    <td><%= product.id %></td>
+    <td><%= product.name %></td>
+    <td><%= product.released_on %></td>
+    <td><%= product.price %></td>
+  </tr>
+  <% end %>
+</table>
+```
+
+<p>HTMLテーブルにエクスポートしたいデータを入れることで対応可能で、Excelはこれを問題なく表示できます。これをExcelで開くと、文字コードの問題はなくなり、改行記号を含むデータも正しく処理されています。ただし表の見た目が少し違っています。これはHTMLのフォーマットで、セルにborderを付け、ヘッダのセルを中央揃えしているからです。Excelでのフォーマットを制御したい場合は、HTMLドキュメントの中でカスタマイズすることもできます。よりExcel文書らしい見た目のファイルを作成したい場合は、テンプレートを次のように修正することで対応可能です。</p>
+
+``` /app/views/products/index.xls.erb
+<?xml version="1.0" encoding="UTF-8"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:o="urn:schemas-microsoft-com:office:office"
+  xmlns:x="urn:schemas-microsoft-com:office:excel"
+  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:html="http://www.w3.org/TR/REC-html40">
+  <Worksheet ss:Name="Sheet1">
+    <Table>
+      <Row>
+        <Cell><Data ss:Type="String">ID</Data></Cell>
+        <Cell><Data ss:Type="String">Name</Data></Cell>
+        <Cell><Data ss:Type="String">Release Date</Data></Cell>
+        <Cell><Data ss:Type="String">Price</Data></Cell>
+      </Row>
+    <% @products.each do |product| %>
+      <Row>
+        <Cell><Data ss:Type="Number"><%= product.id %></Data></Cell>
+        <Cell><Data ss:Type="String"><%= product.name %></Data></Cell>
+        <Cell><Data ss:Type="String"><%= product.released_on %></Data></Cell>
+        <Cell><Data ss:Type="Number"><%= product.price %></Data></Cell>
+      </Row>
+    <% end %>
+    </Table>
+  </Worksheet>
+</Workbook>
+```
+
+<p>今度はデータをExcelが解釈できるXML形式で出力します。この方法によってできることの自由度が高まります。例えば複数のシートを作成したり、各列のフォーマットを指定したりすることが可能です。このファイルをリロードして新規にスプレッドシートを生成すると、ファイルのダウンロード時に警告が表示されます(少なくともOS Xでは)。これはこのフォーマットのファイルが、マクロなどの危険性のある要素を含んでいる可能性があるからです。</p>
+
+<p>今回のファイルはエンコードが正しく処理され、本来のExcelドキュメントらしくなっています。この形式についての最良な情報源はMSDNのWebサイトにある“<a href="http://msdn.microsoft.com/en-us/library/aa140066(v=office.10).aspx">XML Spreadsheet Reference</a>”です。ここにはExcelドキュメントで使用できるすべてのタグの一覧が含まれています。使いたい機能がスプレッドシートに含まれていたら、それをXMLファイルとして保存してテキストエディタで開くことでリバースエンジニアリングすることが可能です。</p>
+
+<h3>リンクを追加する</h3>
+
+<p>両方のフォーマットを生成できるようになったので、商品一覧ページ上にユーザが対応するファイルをダウンロードするためのリンクを追加します。これをページの最上部に追加します。</p>
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<p>
+  Download:
+  <%= link_to "CSV", products_path(format: "csv") %> |
+  <%= link_to "Excel", products_path(format: "xls") %>
+</p><!-- Rest of file omitted -->
+```
+
+<p>これでページをリロードするとダウンロードリンクが表示され、いずれかをクリックすると対応するファイルをダウンロードすることができます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1240/original/E362I03.png" width="800" height="400" alt="ページにデータを両方のフォーマットでダウンロードするためのリンクができた"/>
+</div>

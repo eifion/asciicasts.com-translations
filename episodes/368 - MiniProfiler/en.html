@@ -1,0 +1,115 @@
+<p>Let&rsquo;s say that we&rsquo;re working on a Rails application that&rsquo;s starting to feel a little slow.  Obviously we want to optimize its performance but before we start to do so it&rsquo;s best to run a profiling tool so that we can find the bottlenecks. There are many profiling tools available but in this episode we&rsquo;ll look at <a href="http://miniprofiler.com/">MiniProfiler</a>. This was originally created for .Net development but has recently been ported to Ruby and is a great tool for profiling Rails applications. Adding MiniProfiler to an application is easy. All we need to do is add the gem to our gemfile and run <code>bundle</code> to install it.</p>
+
+``` /Gemfile
+gem 'rack-mini-profiler'
+```
+
+<p>After restarting our application and loading one of its pages we&rsquo;ll see that MiniProfiler is enabled by default in development mode. The time that the page took to load is displayed in the top left corner and clicking this will show us a more detailed breakdown of how much time was spent in each part of our application.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1274/original/E368I01.png" width="800" height="500" alt="MiniProfiler running in our application."/>
+</div>
+
+<p>Here we can see the time taken in the controller and that rendering this index action took most of the time, mostly likely because it had to execute 5 SQL queries due to lazy loading. If we click on the SQL link we&rsquo;ll be shown exactly which SQL queries were run along with a stack trace for each one.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1275/original/E368I02.png" width="800" height="500" alt="The SQL queries that our page ran."/>
+</div>
+
+<p>This shows us that a full SELECT query is being performed here to fetch all the contents for each task that belong to each project. One the page itself we only display the number of tasks that each project has so we&rsquo;re fetching more data from the database than we need to. If we look at the template that&rsquo;s being rendered we&rsquo;ll see the code that renders the number of tasks.</p>
+
+``` /app/views/projects/index.html.erb
+<%= pluralize project.tasks.length, "task" %>
+```
+
+<p>Calling <code>project.tasks.length</code> isn&rsquo;t an efficient way to get the count as it fetches all the task data from the database so we&rsquo;ll use <code>tasks.size</code> instead.</p>
+
+``` /app/views/projects/index.html.erb
+<%= pluralize project.tasks.size, "task" %>
+```
+
+<p>When we reload the page now MiniProfiler shows a smaller number as much less data is fetched from the database. Instead of getting all the data related to a project&rsquo;s tasks we&rsquo;re just getting a count which takes less time to run. That said we&rsquo;re still performing five SQL queries for this page and this number will only increase as we add more products. There is a way to reduce the number of queries to one but we&rsquo;ll have to write some SQL. We&rsquo;ll do this in the <code>ProjectsController</code>&rsquo;s <code>index</code> action but if this was a production app this code should go in the model.</p>
+
+``` /app/controllers/projects_controller.rb
+def index
+  @projects = Project.order(:created_at).select("projects.*, count(tasks.id) as tasks_count").joins("left outer join tasks on project_id = projects.id").group("projects.id")
+end
+```
+
+<p>We need to fetch more than projects columns here so we also fetch the count for the tasks. We&rsquo;ve called this column <code>tasks_count</code> and this name is important as tasks.size will use this value instead of having to perform a second query. We need to join the <code>tasks</code> association but using <code>joins(:tasks)</code> isn&rsquo;t the best way to do this as this will perform an inner join and therefore miss any projects without tasks. We&rsquo;ve written a SQL fragment to perform a left outer join instead. This query isn&rsquo;t the prettiest thing but our page loads more quickly now and MiniProfiler now shows that we&rsquo;re only running one SQL query to get the page&rsquo;s data.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1276/original/E368I03.png" width="800" height="500" alt="The profiler shows that only one SQL query is now run."/>
+</div>
+
+<p>The SQL query takes around a millisecond to run now but it takes some time for ActiveRecord to instantiate objects. MiniProfiler gives us a method for measuring how long a specific piece of code takes to run and we can use this in our controller. We can call <code>Rack::MiniProfiler.step</code> and pass it a description and a block. The time taken to process the block will show up in the report. The projects are lazy-loaded in this action and are actually loaded by the view so we&rsquo;ll call <code>@projects.all</code> in the block to load them.</p>
+
+``` /app/controllers/projects_controller.rb
+def index
+  @projects = Project.order(:created_at).select("projects.*, count(tasks.id) as tasks_count").joins("left outer join tasks on project_id = projects.id").group("projects.id")
+  Rack::MiniProfiler.step("fetch projects") do
+     @projects.all
+  end
+end
+```
+
+<p>If we reload the page now we&rsquo;ll see the time it took to load the projects.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1277/original/E368I04.png" width="800" height="500" alt="The time taken to fetch the projects is now shown."/>
+</div>
+
+<p>This approach is useful if we ever find ourselves needing to measure something specific. The next step in optimizing this query would be to add a counter cache column but we won&rsquo;t do that here. <a href="http://railscasts.com/episodes/23-counter-cache-column">Episode 23</a> covers doing this in detail.</p>
+
+<h3>Running Our App in Production Mode</h3>
+
+<p>So far we&rsquo;ve been profiling the development environment and this can lead to slower times that we&rsquo;d get for the same application in production. If we&rsquo;re performing extensive profiling of an application it&rsquo;s better to do it in the production environment. It can be a little tricky to run a Rails application in production on a development machine but we&rsquo;ll walk through the steps here. First we need to change the <code>serve_static_assets</code> option in our production config file to <code>true</code>.</p>
+
+``` /config/environments/production.rb
+# Disable Rails's static asset server (Apache or nginx will already do this)
+config.serve_static_assets = true
+```
+
+<p>Alternatively we could set up a separate staging environment like we did in <a href="http://railscasts.com/episodes/72-adding-an-environment">episode 72</a>. Next we&rsquo;ll need to generate our application&rsquo;s assets and set up the database for the production environment. We can then start up the server in production.</p>
+
+``` terminal
+$ rake assets:precompile
+$ rake db:setup RAILS_ENV=production
+$ rails s -e production
+```
+
+<p>When we reload the page now our app is running in the production environment. The MiniProfiler time will have disappeared, however, as it doesn&rsquo;t show by default in production. It&rsquo;s easy to restore it by adding a <code>before_filter</code> to our <code>ApplicationController</code>.</p>
+
+``` /app/controllers/application_controller.rb
+class ApplicationController < ActionController::Base
+  protect_from_forgery
+  
+  before_filter :miniprofiler
+  
+  private
+  def miniprofiler
+    Rack::MiniProfiler.authorize_request
+  end
+end
+```
+
+<p>One useful side-effect of this approach is that it allows us to change this behaviour depending on the current user so that the profiler only appears if the user is, say, an admin.</p>
+
+<p>We need to restart our application every time we make a change in production mode. Once we&rsquo;ve done this and we reload the page the profiler should appear again. When we deploy our application the profiler results will probably be different as the production hardware will be different from the machine we&rsquo;re developing the application on so for the most accurate results its best to profile as close a possible to the production environment. Even on the development machine it&rsquo;s best to focus on how much the load time for a page can be reduced instead of the absolute amount that a page takes to load. If we can improve a page in development then it will more than likely be improved in the production environment too.</p>
+
+<h3>More Features</h3>
+
+<p>We&rsquo;ll finish off this episode with a look at a few more of MiniProfiler&rsquo;s features. One useful one is the way that it handles redirects. If we edit a product then click &ldquo;update&rdquo; we&rsquo;ll get two profiler figures, one for the update action and one for show. This means that we can see results for actions that perform redirects. Another useful feature is the ability to customize MiniProfiler on a per-request basis by passing in a querystring parameter. Adding a <code>pp=help</code> parameter will give us a list of the options we can use here and these are listed below.</p>
+
+``` terminal
+Append the following to your query string:
+
+  pp=help : display this screen
+  pp=env : display the rack environment
+  pp=skip : skip mini profiler for this request
+  pp=no-backtrace : don&#x27;t collect stack traces from all the SQL executed
+  pp=full-backtrace : enable full backtrace for SQL executed
+  pp=sample : sample stack traces and return a report isolating heavy usage (requires the stacktrace gem)
+```  
+  
+<p>There are options here for viewing Rack environment variables, configuring the backtrace for the SQL results and a sample option which return a callstack. For further documentation you should read a <a href="http://samsaffron.com/archive/2012/07/12/miniprofiler-ruby-edition">blog post</a> by Sam Saffron who maintains this gem. There he goes into detail on profiling and ActiveRecord queries and show some other interesting features such as specifying a method that we want to profile in an initializer method to add it to the list of results. It&rsquo;s also worth reading the gem&rsquo;s <a href="https://github.com/SamSaffron/MiniProfiler/blob/master/Ruby/README.md">README file</a> which contains documentation on other things including the storage engine. This defaults to a file store but we can use Redis which is useful if we have multiple servers running our application.</p>

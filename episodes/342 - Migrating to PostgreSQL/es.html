@@ -1,0 +1,269 @@
+<p>PostgreSQL es una base de datos cada vez m&aacute;s popular entre los desarrolladores de Rails, y con raz&oacute;n.  La multitud de funcionalidades que aporta han hecho que muchos desarrolladores que previamente utilizaban MySQL se hayan pasado a Postgres.  Mencionaremos algunas de estas ventajas al final del episodio pero primero veremos c&oacute;mo configurar Postgres para una aplicaci&oacute;n Rails.  La  <a href="http://www.postgresql.org/download/">p&aacute;gina de descargas</a> de la web de PostgreSQL ofrece paquetes para la mayor&iacute;a de sistemas operativos, e incluso en Mac OS X Lion  viene preinstalado.  Podemos comprobar la versi&oacute;n de Postgres ejecutando la orden <code>psql</code>.</p>
+
+
+``` terminal
+$ psql --version
+psql (PostgreSQL) 9.0.5
+```
+
+<p>Pero aunque ya tengamos una versi&oacute;n instalada es mejor instalar Postgres mediante Homebrew para conseguir la &uacute;ltima versi&oacute;n y los ficheros de desarrollo.  La siguiente orden nos descargar&aacute; y compilar&aacute; Postgres.</p>
+
+``` terminal
+$ brew install postgresql
+```
+
+<p>Esto puede ser que lleve un rato.  Una vez que haya terminado el proceso veremos algunas instrucciones sobre c&oacute;mo configurarlo todo.  Tendremos que lanzar esta orden para finalizar la creaci&oacute;n de la base de datos.</p>
+
+``` terminal
+$ initdb /usr/local/var/postgres
+```
+
+<p>Luego tendremos que lanzar el servidor, y una forma de hacerlo es configurando un agente.</p>
+
+
+``` terminal
+$ mkdir -p ~/Library/LaunchAgents
+$ cp /usr/local/Cellar/postgresql/9.1.3/homebrew.mxcl.postgresql.plist ~/Library/LaunchAgents
+$ launchctl load -w ~/Library/LaunchAgents/homebrew.mxcl.postgresql.plist
+```
+
+<p>Alternativamente podemos arrancar manualmente el servidor con la siguiente orden.</p>
+
+``` terminal
+$ pg_ctl -D /usr/local/var/postgres -l /usr/local/var/postgres/server.log start
+```
+
+<p>Ahora deber&iacute;amos tener funcionando la &uacute;ltima versi&oacute;n de Postgres, y podemos ver que usamos la versi&oacute;n instalado en <code>/usr/local/bin</code> con <code>which psql</code>.  Hemos dejado, pues, de utilizar la versi&oacute;n incluida en Lion.</p>
+
+``` terminal
+$ psql --version
+psql (PostgreSQL) 9.1.3
+$ which psql
+/usr/local/bin/psql
+```
+
+<h3>Creaci&oacute;n de una aplicaci&oacute;n Rails con Postgres</h3>
+
+
+<p>Con Postgres instalado podemos crear una aplicaci&oacute;n Rails que lo use como base de datos.  Podemos utilizar la opci&oacute;n <code>-d</code> para especificar la base de datos que hay que usar.</p>
+
+``` terminal
+$ rails new blog -d postgresql
+```
+
+<p>Bundler instalar&aacute; autom&aacute;ticamente la gema <code>pg</code>.  Si vemos un error durante esta instalaci&oacute;n  quiere decir que Postgres no est&aacute;  configurado correctamente.  Si la gema ya estaba instalada puede ser que necesitemos desinstalarla y volverla a instalar de forma que la compilaci&oacute;n autodetecte y utilice la versi&oacute;n correcta de Postgres.</p>
+
+<p>Si miramos el fichero <code>database.yml</code> de nuestra aplicaci&oacute;n veremos que viene ya configurado para utilizar Postgres.</p>
+
+``` /config/database.yml
+development:
+  adapter: postgresql
+  encoding: unicode
+  database: blog_development
+  pool: 5
+  username: blog
+  password:
+```  
+
+<p>El nombre de usuario configurado en el fichero tiene por defecto el nombre de la aplicaci&oacute;n.  Se trata de una buena idea para los entornos de producci&oacute;n porque cada aplicaci&oacute;n tiene un nombre de usuario distinto.  En desarrollo conviene m&aacute;s tenerlo todo bajo el mismo usuario, que es el usuario con el que accedemos a nuestro sistema.  Homebrew se encarga de configurar dicha cuenta en la base de datos durante el proceso de instalaci&oacute;n, pero en otras instalaciones puede ser que tengamos que crearlo nosotros.  Usaremos este usuario en los entornos de desarrollo y pruebas y eliminaremos la configuraci&oacute;n de producci&oacute;n porque esta aplicaci&oacute;n nunca pasar&aacute; de ser un ejemplo.</p>
+
+``` /config/database.yml
+development:
+  adapter: postgresql
+  encoding: unicode
+  database: blog_development
+  pool: 5
+  username: eifion
+  password:
+
+test:
+  adapter: postgresql
+  encoding: unicode
+  database: blog_test
+  pool: 5
+  username: eifion
+  password:
+```  
+
+<p>Una vez que hayamos configurado el fichero <code>database.yml</code> correctamente podremos crear las bases de datos de la aplicaci&oacute;n usando rake.</p>
+
+
+``` terminal
+$ rake db:create:all
+```
+
+<p>A continuaci&oacute;n vamos a generar un andamiaje para la tabla <code>articles</code> y as&iacute; podremos hacer pruebas con la aplicaci&oacute;n, migrando la base de datos.</p>
+
+
+``` terminal
+$ rails g scaffold article name content:text
+$ rake db:migrate
+==  CreateArticles: migrating =================================================
+-- create_table(:articles)
+NOTICE:  CREATE TABLE will create implicit sequence "articles_id_seq" for serial column "articles.id"
+NOTICE:  CREATE TABLE / PRIMARY KEY will create implicit index "articles_pkey" for table "articles"
+   -> 0.0114s
+==  CreateArticles: migrated (0.0116s) ========================================
+```
+
+<p>Una diferencia que veremos con Postgres es que hay un par de mensajes que nos indican que se ha creado una secuencia y un &iacute;ndice.  Al arrancar el servidor podremos navegar en nuestra aplicaci&oacute;n y crear, editar y borrar art&iacute;culos igual que si estuvi&eacute;ramos con una base de datos SQLite.</p>
+
+<h3>C&oacute;mo acceder directamente con la base de datos</h3>
+
+<p>Si queremos interactuar directamente con la base de datos podemos hacerlo con la orden <code>psql</code> seguida del nombre de la base de datos.  Tambi&eacute;n se puede ejecutar <code>rails db</code> que hace exactamente lo mismo.</p>
+
+
+``` terminal
+$ rails db
+psql (9.1.3)
+Type "help" for help.
+
+blog_development=#
+```
+
+<p>Aqu&iacute; podemos lanzar consultas SQL contra la base de datos o utilizar &oacute;rdenes espec&iacute;ficas de Postgres como por ejemplo <code>\D</code> que lista las tablas de la base de datos en uso.</p>
+
+
+``` terminal
+blog_development=# \d
+               List of relations
+ Schema |       Name        |   Type   | Owner  
+--------+-------------------+----------+--------
+ public | articles          | table    | eifion
+ public | articles_id_seq   | sequence | eifion
+ public | schema_migrations | table    | eifion
+``` 
+
+<p>Si hacemos lo mismo pero pasando el nombre de una tabla obtendremos informaci&oacute;n acerca de la misma.</p>
+
+
+``` terminal
+blog_development=# \d articles
+                                     Table "public.articles"
+   Column   |            Type             |                       Modifiers                       
+------------+-----------------------------+-------------------------------------------------------
+ id         | integer                     | not null default nextval('articles_id_seq'::regclass)
+ name       | character varying(255)      | 
+ content    | text                        | 
+ created_at | timestamp without time zone | not null
+ updated_at | timestamp without time zone | not null
+Indexes:
+    "articles_pkey" PRIMARY KEY, btree (id)
+```	
+
+<p>Podemos ver todos las &oacute;rdenes propias de Postgres con <code>\?</code>.  La orden <code>\h</code> mostrar&aacute; adem&aacute;s las &oacute;rdenes SQL, y se le puede incluso pasar el nombre de una orden para ver la documentaci&oacute;n disponible acerca de dicha orden.  Cuando queramos abandonar la consola de Postgres podemos hacerlo con <code>\q</code>.  El sitio web de Postgres tiene un <a href="http://www.postgresql.org/docs/9.1/interactive/tutorial.html">tutorial</a> que nos ser&aacute; &uacute;til si nunca hemos trabajado con SQL.</p>
+
+<h3>Migraci&oacute;n de una aplicaci&oacute;n ya existente</h3>
+
+<p>Ahora ya sabemos c&oacute;mo crear una nueva aplicaci&oacute;n Rails que se ejecute con Postgres pero &iquest;qu&eacute; tenemos que hacer si tenemos una base de datos ya existente funcionando sobre otro motor como SQLite o MySQL?  Debajo se muestra una p&aacute;gina de una aplicaci&oacute;n que muestra una lista de productos.  Los datos de esta aplicaci&oacute;n se encuentran almacenados en una base de datos SQLite pero nos interesar&iacute;a moverlos a Postgres.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1124/original/E342I01.png" width="800" height="500" alt="La aplicación de tienda funcionando bajo SQLite."/>
+</div>
+
+<p>El fichero <code>database.yml</code> de la aplicaci&oacute;n tiene el siguiente aspecto:</p>
+
+
+``` /config/database.yml
+# SQLite version 3.x
+#   gem install sqlite3
+#
+#   Ensure the SQLite 3 gem is defined in your Gemfile
+#   gem &#x27;sqlite3&#x27;
+development:
+  adapter: sqlite3
+  database: db/development.sqlite3
+  pool: 5
+  timeout: 5000
+
+# Warning: The database defined as &quot;test&quot; will be erased and
+# re-generated from your development database when you run &quot;rake&quot;.
+# Do not set this db to the same as development or production.
+test:
+  adapter: sqlite3
+  database: db/test.sqlite3
+  pool: 5
+  timeout: 5000
+
+production:
+  adapter: sqlite3
+  database: db/production.sqlite3
+  pool: 5
+  timeout: 5000
+```
+
+<p>Sustituiremos estos valores por la configuraci&oacute;n de Postgres.</p>
+
+
+``` /config/database.yml
+development:
+  adapter: postgresql
+  encoding: unicode
+  database: store_development
+  pool: 5
+  username: eifion
+  password:
+
+test:
+  adapter: postgresql
+  encoding: unicode
+  database: store_test
+  pool: 5
+  username: eifion
+  password:
+```  
+
+<p>A continuaci&oacute;n tenemos que modificar el fichero <code>Gemfile</code> y reemplazar la gema <code>sqlite3</code> por <code>pg</code> y ejecutar <code>bundle</code> para instarla.</p>
+
+``` /Gemfile
+gem 'pg'
+```
+
+<p>Tendremos que crear las dos nuevas bases de datos ejecutando la orden Rake que vimos antes.</p>
+
+``` terminal
+$ rake db:create:all
+```
+
+<p>En este punto podr&iacute;amos lanzar las migraciones para crear la base de datos, pero queremos migrar los contenidos de las tablas (y no s&oacute;lo recrear el esquema), por lo que tendremos que hacer algo diferente.  Por suerte hay una gema Ruby llamada <a href="https://github.com/ricardochimal/taps">Taps</a> que sirve para esto, permiti&eacute;ndonos exportar los datos de una base de datos e importarlos en otra utilizando un servidor Sinatra.   Para ello primero tendremos que instalar la gema junto con sus dependencias.</p>
+
+
+``` terminal
+$ gem install taps
+```
+
+<p>La gema instala un ejecutable llamado <code>taps</code> que podemos usar para servir una base de datos y tambi&eacute;n para extraer datos e insertarlos en otra base de datos.  Esta nueva orden la usaremos para servir nuestra base de datos SQLite.  Tendremos que pasarle la ruta al fichero de la base de datos, as&iacute; como un nombre de usuario y clave para protegerla.</p>
+
+
+``` terminal
+$ taps server sqlite://db/development.sqlite3 eifion secret
+```
+
+<p>taps pasar&aacute; a servir los contenidos la base de datos con Sinatra en el puerto 5000.  En otra ventana de terminal podemos extraer los datos e insertarlos en nuestra base de datos Postgres.  Tenemos que especificar el nombre de usuario y la base de datos sobre la que queremos insertar los datos importados, as&iacute; como la URL del servidor Sinatra, incluyendo el usuario y clave definido al arrancar este servidor.</p>
+
+``` terminal
+$ taps pull postgres://eifion@localhost/store_development http://eifion:secret@localhost:5000
+Receiving schema
+Schema:          0% |                                          | ETA:  --:--:--
+Schema:         50% |=====================                     | ETA:  00:00:00
+Schema:        100% |==========================================| Time: 00:00:01
+Receiving data
+2 tables, 400 records
+products:      100% |==========================================| Time: 00:00:00
+schema_migrat: 100% |==========================================| Time: 00:00:00
+Receiving indexes
+schema_migrat:   0% |                                          | ETA:  --:--:--
+schema_migrat: 100% |==========================================| Time: 00:00:00
+```
+
+<p>Con esto extraeremos todos los datos de la base de datos SQLite en nuestro servidor Postgres.  Ahora podemos intentar ejecutar nuestra aplicaci&oacute;n Rails con la nueva base de datos.</p>
+
+<p>Funciona y todo parece estar igual que antes, pero los datos ahora son servidos desde Postgres.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1125/original/E342I02.png" width="800" height="500" alt="La página tiene el mismo aspecto pero la base de datos es Postgres."/>
+</div>
+
+<p>Ahora que hemos migrado a Postgres podemos aprovechar sus funcionalidades, incluyendo la b&uacute;squeda de texto completo.  Podemos echar un vistazo a las gemas <a href="http://tenderlove.github.com/texticle/">Texticle</a> o <a href="https://github.com/Casecommons/pg_search">PGSearch</a> que sirven para esto.  Tambi&eacute;n podemos usar Postgres como una cola de trabajos con la gema  <a href="https://github.com/ryandotsmith/queue_classic">queue_classic gem</a>.  Si queremos trabajar con un esquema NoSQL con Postgres tambi&eacute;n podemos hacerlo usando HStore. En <a href="http://schneems.com/post/19298469372/you-got-nosql-in-my-postgres-using-hstore-in-rails">esta anotaci&oacute;n de blog</a> se explica c&oacute;mo hacerlo.</p>

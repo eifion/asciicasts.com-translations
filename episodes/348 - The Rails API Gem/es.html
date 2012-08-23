@@ -1,0 +1,330 @@
+<p>Según se van haciendo más populares las aplicaciones basadas en el lado del cliente, hay una cuestión que se hace más y más popular: ¿debemos usar Rails si lo único que queremos es implementar desde el servidor una API en JSON?  Si necesitamos desarrollar una API podríamos mirar la gema  <a href="https://github.com/spastorino/rails-api">Rails::API gem</a> del miembro del <em>core</em> de Rails Santiago Pastorino.  El README de esta gema entra en detalle describiendo qué partes de Rails nos resultarán útiles si queremos construir una API.  Rails es muy modular y esta gema proporciona un generador para adelgazar nuestra aplicación Rails eliminando todo lo que no necesitamos si estamos construyendo una API.  En este episodio la vamos a usar con una aplicación muy sencilla para ver cómo funciona.</p>
+
+<h3>En marcha con Rails::API</h3>
+
+<p>Lo primero que tenemos que hacer es instalar la gema, lo que podemos hacer lanzando la siguiente orden.</p>
+
+``` terminal
+$ gem install rails-api
+```
+
+<p>Si estamos usando rbenv tendremos que ejecutar <code>rbenv rehash</code> para acceder a la orden <code>rails-api</code>.  Se puede utilizar esta orden para crear una aplicación nueva igual que haríamos con <code>rails</code>.  Nuestra aplicación se llamará <code>todo</code>.</p>
+
+
+``` terminal
+$ rails-api new todo
+```
+
+
+<p>Esta orden genera una aplicación con lo mínimo necesario para servir una API.  Una de las mayores diferencias es que el directorio <code>/app</code> es mucho más sencillo: no existen los directorios <code>assets</code> o <code>views</code>, tan sólo <code>controllers</code>, <code>mailers</code> y <code>models</code>.  Si miramos el <code>ApplicationController</code> que se ha generado veremos que hereda de <code>ActionController::API</code> que es mucho más ligero que <code>ActionController::Base</code>.</p>
+
+
+``` /app/controllers/application_controller.rb
+class ApplicationController < ActionController::API
+end
+```
+
+
+<p>Más adelante profundizaremos en las diferencias.</p>
+
+<p>Otra diferencia importante es el <code>Gemfile</code>.  Veremos que incluye la gema <code>rails-api</code> pero no existe el grupo <code>assets</code>.  También se lista la gema <code>jquery-rails</code>, pero podemos eliminarla (en futuras versiones de Rails::API no se incluirá).</p>
+
+
+``` /Gemfile
+source 'https://rubygems.org'
+
+gem 'rails', '3.2.3'
+
+# Bundle edge Rails instead:
+# gem 'rails', :git => 'git://github.com/rails/rails.git'
+
+gem 'rails-api'
+
+gem 'sqlite3'
+```
+
+
+<p>Los generadores funcionan también de manera distinta.  Si intentamos generar un andamiaje para un modelo llamado <code>Task</code> veremos que se generan muchos menos ficheros porque no existen ficheros de plantillas u otros recursos.</p>
+
+``` terminal
+$ rails g scaffold task name
+      invoke  active_record
+      create    db/migrate/20120517174851_create_tasks.rb
+      create    app/models/task.rb
+      invoke    test_unit
+      create      test/unit/task_test.rb
+      create      test/fixtures/tasks.yml
+       route  resources :tasks, except: :edit
+      invoke  scaffold_controller
+      create    app/controllers/tasks_controller.rb
+      invoke    test_unit
+      create      test/functional/tasks_controller_test.rb
+```	  
+
+<p>Una vez que hemos creado este andamiaje vamos a migrar la base de datos para poder usarlo.</p>
+
+``` terminal
+$ rake db:migrate
+```
+
+
+<p>Examinando el fichero <code>TasksController</code> que ha sido generado veremos que tan sólo muestra respuestas en JSON.</p>
+
+<code>
+``` /app/controllers/tasks_controller.rb
+class TasksController < ApplicationController
+  # GET /tasks
+  # GET /tasks.json
+  def index
+    @tasks = Task.all
+
+    render json: @tasks
+  end
+
+  # GET /tasks/1
+  # GET /tasks/1.json
+  def show
+    @task = Task.find(params[:id])
+
+    render json: @task
+  end
+
+  # Other actions omitted.
+end
+```
+</code>
+
+<p>Estas aplicaciones no están diseñadas para mostrar una vista en HTML o una interfaz de usuario por lo que los controladores tan sólo devuelven JSON.  Si visitamos la ruta <code>/tasks/</code> con el navegador veremos la salida JSON, que de momento será un <em>array</em> vacío porque todavía no hemos creado ninguna tarea.</p>
+
+<h3>Creación de una interfaz de usuario que utiliza la API</h3>
+
+<p>Para presentar una interfaz de usuario que cree y gestione tarea tendremos que hacerlo o bien en el directorio <code>/public</code> o bien completamente fuera de la aplicación.  Para nuestros propósitos nos bastará con cambiar los contenidos del fichero <code>index.html</code> por un código HTML que nos permitirá ver y crear nuevas tareas.</p>
+
+``` /public/index.html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>To Do List</title>
+    <style type="text/css" media="screen">
+      html, body {
+        background-color: #4B7399;
+		background-color: white;
+        font-family: Verdana, Helvetica, Arial;
+        font-size: 14px;
+      }
+      a { color: #0000FF; }
+
+      #container {
+        width: 75%;
+        margin: 0 auto;
+        background-color: #FFF;
+        padding: 20px 40px;
+        border: solid 1px black;
+        margin-top: 20px;
+      }
+    </style>
+    <script src="//ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js" type="text/javascript"></script>
+    <script type="text/javascript" charset="utf-8">
+      $(function() {
+        function addTask(task) {
+          $('#tasks').append('<li>' + task.name + '</ul>');
+        }
+
+        $('#new_task').submit(function(e) {
+          $.post('/tasks', $(this).serialize(), addTask);
+          this.reset();
+          e.preventDefault();
+        });
+
+        $.getJSON('/tasks', function(tasks) {
+          $.each(tasks, function() { addTask(this); });
+        });
+      });
+    </script>
+  <body>
+    <div id="container">
+      <h1>To-Do List</h1>
+      <form id="new_task">
+        <input type="text" name="task[name]" id="task_name">
+        <input type="submit" value="Add">
+      </form>
+      <ul id="tasks"></ul>
+    </div>
+  </body>
+</html>
+```
+
+
+<p>Por supuesto deberíamos estructurar todo esto de alguna manera (nosotros lo hemos incluído todo en línea).  En la raíz de esta aplicación ya tenemos una página donde podemos añadir elementos a una lista, que se guardarán mediante la API.  Podemos recargar la página para recuperar los ficheros guardados con la API.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1162/original/E348I01.png" width="800" height="300" alt="La sencilla página que habla con nuestra API."/>
+</div>
+
+<p>Y esto es precisamente lo que hace el código jQuery de nuestra página.  Invocamos a <code>$.getJSON</code> para obtener las tareas y <code>$.post</code> para crear una.</p>
+
+``` /public/index.html
+$('#new_task').submit(function(e) {
+  $.post('/tasks', $(this).serialize(), addTask);
+  this.reset();
+  e.preventDefault();
+});
+
+$.getJSON('/tasks', function(tasks) {
+  $.each(tasks, function() { addTask(this); });
+});
+```
+
+<p>Por supuesto este ejemplo es deliberadamente simple, pero podríamos utilizar un <em>framework</em> del lado del cliente como <a href="http://backbonejs.org">Backbone.js</a>.</p>
+
+<h3>Manipulación de formatos adicionales</h3>
+
+<p>A continuación vamos a ver algunas cosas que el controlador de Rails::API deja fuera.  Supongamos que queremos que la API responda a diferentes formatos, para poder devolver por ejemplo una lista de tareas en XML o en JSON.  Por lo general añadiríamos un bloque <code>respond_to</code> como:</p>
+
+``` /app/controllers/tasks_controller.rb
+def index
+  @tasks = Task.all
+    
+  respond_to do |format|
+    format.json { render json: @tasks }
+    format.xml { render xml: @tasks }
+  end
+end
+```
+
+<p>Si visitamos <code>http://localhost:3000/tasks.xml</code> esperaríamos ver el resultado en XML pero lo que vemos es el error  <code>undefined method `respond_to&rsquo;</code>.  En aras a mantener la sencillez, al controlador de Rails::API le faltan ciertas funcionalidades pero si queremosse las podemos añadir muy fácilmente.  Tenemos que modificar <code>TasksContoller</code> e incluir un módulo llamado <code>ActionController::MimeResponds</code>.</p>
+
+``` /app/controllers/tasks_controller.rb
+class TasksController < ApplicationController
+  include ActionController::MimeResponds
+
+  # Actions omitted
+end
+```
+
+<p>Si quisiéramos que otros controladores también pudiesen devolver XML podríamos incluir el módulo en <code>ApplicationController</code>.  Si ahora recargamos la página veremos que la tarea se muestra como XML.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1163/original/E348I02.png" width="800" height="300" alt="Las tareas se pueden mostrar como XML."/>
+</div>
+
+<P>EL README de RAILS::API incluye <a href="https://github.com/spastorino/rails-api/blob/master/README.md#adding-other-modules">la lista de módulos</a> que se pueden incluir.  Además de <code>ActionController::MimeResponds</code> podemos incluir otros para soporte de traducciones, autenticación HTTP básica, etcétera.  No es esta la lista completa, sin embargo, para verlos todos tenemos que ver el código para comparar los módulos que se incluyen en <a href="https://github.com/spastorino/rails-api/blob/master/lib/rails-api/action_controller/api.rb#L124">Rails::API controller</a> con los que se incluyen en  ActionController::Base. Por supuesto, si incluyésemos todos los módulos de <a href="https://github.com/rails/rails/blob/master/actionpack/lib/action_controller/base.rb#L192">ActionController::Base</a> habríamos duplicado su funcionalidad.  Así que podemos escoger exactamente lo que queramos.</p>
+
+<p>Sin embargo a veces queremos hacer algo más que tan sólo incluir un módulo en el controlador.  Por ejemplo si queremos añadir soporte de <em>cookies</em> tenemos que incluir un módulo así como un <em>middleware</em> de Rack.   Lo que nos lleva a un punto muy importante: Rails API no sólo recorta los controladores sino también toda la pila de <em>middlewares</em>.  Si vamos a nuestra aplicación Rails y ejecutamos <code>rake middleware</code> veremos una lista de todos los <em>middlewares</em> que se usan, y veremos que será más corta que la de una aplicación Rails normal.</p>
+
+``` terminal
+$ rake middleware
+use ActionDispatch::Static
+use Rack::Lock
+use #<ActiveSupport::Cache::Strategy::LocalCache::Middleware:0x007f9704a76118>
+use Rack::Runtime
+use ActionDispatch::RequestId
+use Rails::Rack::Logger
+use ActionDispatch::ShowExceptions
+use ActionDispatch::DebugExceptions
+use ActionDispatch::RemoteIp
+use ActionDispatch::Reloader
+use ActionDispatch::Callbacks
+use ActiveRecord::ConnectionAdapters::ConnectionManagement
+use ActiveRecord::QueryCache
+use ActionDispatch::ParamsParser
+use ActionDispatch::Head
+use Rack::ConditionalGet
+use Rack::ETag
+run Todo::Application.routes
+```
+
+<p>Nos faltan cinco <em>middlewares</em>  Si vemos la diferencia con los de una aplicación Rails completa, los que faltan son:</p>
+
+``` terminal
+> use Rack::MethodOverride
+> use ActionDispatch::Cookies
+> use ActionDispatch::Session::CookieStore
+> use ActionDispatch::Flash
+> use ActionDispatch::BestStandardsSupport
+```
+
+<p>Los que se pregunten qué hacen estos <em>middlewares</em> pueden echar un vistazo al <a href="http://railscasts.com/episodes/319-rails-middleware-walkthrough">episodio 319</a> para ver los detalles. </p>
+
+<p>Para recuperar alguna de estas funcionalidades, como por ejemplo soporte de <em>cookies</em> tenemos que añadir el <em>middleware</em> e incluir el módulo del controlador, lo que haremos en el fichero de configuración de la aplicación:</p>
+
+``` /config/application.rb
+module Todo
+  class Application < Rails::Application
+    config.middleware.insert_after ActiveRecord::QueryCache, ActionDispatch::Cookies
+     # Se omite el resto de la clase
+  end
+end
+```
+
+<p>Como es buena idea mantener el mismo orden que cuando tenemos una aplicación completa, hemos utilizado <code>insert_after</code> para añadir el <em>middleware</em> de Cookies después de <code>QueryCache</code>.  Ya podemos incluir el módulo <code>Cookies</code> en <code>TasksController</code> para gestionar <em>cookies</em>.</p>
+
+
+``` /app/controllers/tasks_controller.rb
+class TasksController < ApplicationController
+  include ActionController::MimeResponds
+  include ActionController::Cookies
+
+  # Contenido omitido
+end
+```
+
+<p>A continuación tenemos que reiniciar la aplicación para que surtan efecto los cambios.  Tras recargar la página, veremos un mensaje de error que nos indica que no se encuentra definido el método <code>helper_method</code>.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1164/original/E348I03.png" width="800" height="300" alt="Nuestra página tiene un error porque no hemos incluido el módulo de Helpers."/>
+</div>
+
+<p>Lo cual nos lleva a un punto muy importante.  Algunos módulos dependen de otros, en este caso el módulo <code>Cookies</code> depende de <code>Helpers</code> por lo que también tendremos que añadirlo.</p>
+
+``` /app/controllers/tasks_controller.rb
+class TasksController < ApplicationController
+  include ActionController::MimeResponds
+  include ActionController::Helpers
+  include ActionController::Cookies
+
+  # Contenido omitido
+end
+```
+
+<p>Ahora veremos que al recargar la página vuelve a funcionar y ya podemos usar <em>cookies</em> como en una aplicación Rails completa.</p>
+
+<h3>Uso de JBuilder y RABL para generar JSON</h3>
+
+<p>Discutiremos a continuación otras gemas que nos pueden ayudar a construir una API en JSON.  En anteriores episodios  hemos repasado <a href="http://railscasts.com/episodes/320-jbuilder">Jbuilder</a> y <a href="http://railscasts.com/episodes/322-rabl">RABL</a>.  Estas gemas muestran JSON utilizando plantillas de vista, lo que va contra la idea Rails::API, pero si queremos las podemos usar.  Como siempre tenemos que añadir la gema al <code>Gemfile</code> y luego ejecutar <code>bundle</code> para instalarlo todo.</p>
+
+``` /Gemfile
+gem 'rabl'
+```
+
+<p>Como nuestro directorio <code>/app</code> no contiene un directorio de vistas tenemos que crearlo para que RABL encuentre allí las plantillas.  Tenemos que crear un directorio <code>views/tasks</code> y en él un fichero llamado <code>index.json.rabl</code>.  En este archivo le tenemos que decir a RABL que muestre las tareas como una colección con atributos <code>id</code> y <code>name</code>.</p>
+
+``` /app/views/tasks/index.json.rabl
+collection @tasks
+attributes :id, :name
+```
+
+<p>En el controlador tenemos que cambiar el comportamiento de visualización de JSON para que muestre esta plantilla.  En una aplicación Rails normal podríamos eliminar la llamada a <code>render</code>, lo que de forma implícita mostraría la plantilla que coincidiese con la acción que se haya ejecutado.</p>
+
+``` /app/controllers/tasks_controller.rb
+def index
+  @tasks = Task.all
+  
+  respond_to do |format|
+    format.json { render }
+    format.xml { render xml: @tasks }
+  end
+end
+```
+
+<p>Tenemos que reiniciar la aplicación una vez más pero tras hacerlo podemos visitar <code>/tasks.json</code> y veremos la respuesta JSON que ha sido generada por RABL.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1165/original/E348I04.png" width="800" height="300" alt="Respuesta en JSON generada mediante una plantilla RABL."/>
+</div>
+
+<p>Podríamos incluir el módulo <code>ImplicitRender</code> y no tendríamos que llamar a <code>render</code> cada vez: añadiendo una plantilla XML podríamos eliminar todo el bloque <code>respond_to</code> porque se detectaría el formato para mostrar automáticamente la plantilla adecuada.</p>
+
+<p>Pero ya estamos acercándonos peligrosamente a una aplicación Rails completa, gestionando <em>cookies</em> y escogiendo plantillas de forma implícita dependiendo del formato.  Si volvemos a necesitar toda esta funcionalidad... ¿merece la pena utilizar Rails::API de entrada?  Llegados a este punto sería mejor que estuviéramos usando una aplicación Rails completa, aunque sólo estemos implementado una API.  La elección depende, por supuesto, de los requisitos de cada aplicación, y cuánto de la pila de Rails tenemos que utilizar.</p>
+
+<p>Merece la pena leer la sección del README llamada <a href="https://github.com/spastorino/rails-api/blob/master/README.md#why-use-rails-for-json-apis">¿Por qué utilizar Rails para implementar APIs en JSON?</a> que entra en detalle acerca de las capacidades de Rails más allá de servir contenidos en HTML.</p>

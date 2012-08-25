@@ -1,0 +1,185 @@
+<p>下に示したサンプルアプリケーションは映画のリストでユーザがレビューを書くことができます。これにソーシャルな機能を追加するために、Facebookと連携してレビューを友達と共有できるようにしましょう。今回のエピソードではその方法を紹介します。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1225/original/E360I01.png" width="800" height="500" alt="サンプルアプリケーション"/>
+</div>
+
+<h3>アプリケーションをFacebookに登録する</h3>
+
+<p>アプリケーションにFacebookとの連携機能を追加する一番簡単な方法は<a href="https://developers.facebook.com/docs/plugins/">ソーシャルプラグイン</a>を使う方法です。これによって「いいね」ボタンやコメント欄を追加することができます。しかし自分のサイトのメイン機能とより統合した形にしたい場合はこれでは不十分です。そこでアプリケーションを<a href="https://developers.facebook.com/apps">Facebookのデベロッパーサイト</a>に登録します。これによってFacebookのGraph APIとOpen Graphプラットフォームとの通信が可能になります。自分のアプリケーションを登録するには、開発者ページで“Create New App”ボタンをクリックしてアプリケーション名と名前空間を指定します。今回はどちらも“Cinematron”としますが、名前空間に関してはすべてのFacebookアプリケーションの中でユニークである必要があるので、アプリケーション名についていくつかのバリエーションを試してみる必要があるかも知れません。FacebookはWebアプリケーションのホスティングに関してHerokuとパートナー関係にあり、フォームの最下部のチェックボックスをチェックすると自動的に設定されますが、他の希望するホストを使用することも可能です。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1226/original/E360I02.png" width="960" height="600" alt="アプリケーションをFacebookに登録する"/>
+</div>
+
+<p>このフォームの送信時にはcaptchaの入力が必要です。入力が終わると、我々のページに関する情報が表示されたページが開きます。このページにはApp IDとApp Secretが含まれていて、FacebookのAPIとの通信時にこれらが必要です。その他にも、アプリケーションをカスタマイズするための設定項目がいくつかあります。有効にしなければいけないのが“Website with Facebook Login”です。これによって我々のアプリケーションのユーザをFacebookを介して認証できるようになります。このオプションを有効にしたら、セキュリティの目的のためにサイトのURLを指定しなくてはいけません。アプリケーションが開発段階の間はこれを<code>http://localhost:3000/</code>に設定できますが、本番環境にデプロイするときにはこのドメイン名を実際のURLに変更する必要があります。本番環境に移行した後にアプリケーションをローカル環境でテストする場合は、マシンのHOSTSファイルを修正して、本番のドメイン名のところにローカルシステムを指定しておきます。</p> 
+
+<p>次に“Auth Dialog”をカスタマイズします。これはFacebookが認証を行うときにユーザに表示するものです。フォームにアプリケーションの詳細を記入します。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1227/original/E360I03.png" width="960" height="600" alt=""/>
+</div>
+
+<p>プライバシーポリシーあるいはサービス規定のURLは記入しませんでした。サンドボックスモード以外にする場合、Facebookがこれらの入力を求めてきます。変更を保存すると、認証時にユーザに表示されるダイアログをプレビューできます。次に詳細設定を修正します。ここで、デフォルトでは無効となっているサンドボックスモードを有効化できます。ここで行う修正はこれだけです。</p> 
+
+<h3>アプリケーションにFacebookを統合する</h3>
+
+<p>アプリケーションをFacebookに統合する準備ができました。ユーザがFacebookを介して認証を行う必要があるので、アプリケーションに“Sign in through Facebook”のリンクを追加します。認証処理をおこなうために<a href="https://github.com/mkdynamic/omniauth-facebook">OmniAuth Facebook gem</a>を利用します。このgemはサーバ側とJavaScriptを用いたクライアント側の両方の認証をサポートしているので便利です。<a href="https://github.com/mkdynamic/omniauth-facebook#omniauth-facebook-%C2%A0">README</a>にはFacebookの認証の処理方法についての詳細な情報が記載されているので一読の価値があります。それではいつものように、アプリケーションのgemfileにgemを追加して、bundleコマンドを実行してインストールをおこないます。</p>
+
+``` /Gemfile
+gem 'omniauth-facebook'
+```
+
+<p>次に新規の初期化ファイルを作成し、そこでOmniAuthの設定をおこないます。</p>
+
+``` /config/initializers/omniauth.rb
+OmniAuth.config.logger = Rails.logger
+
+Rails.application.config.middleware.use OmniAuth::Builder do
+  provider :facebook, ENV['FACEBOOK_APP_ID'], ENV['FACEBOOK_SECRET']
+end
+```
+
+<p>ここでRails loggerにOmniAuth loggerを設定し、RackミドルウェアにOmniAuthを追加します。プロバイダをFacebookに設定して環境変数を介してApp IdとApp Secretを渡します。アプリケーションを再起動して<code>/auth/facebook</code>にアクセスすると、Facebookのログインページにリダイレクトされるはずです。ここでエラーが発生する場合は、環境変数をチェックしてidとパスワードが正しくOmniAuthに渡されていることを確認してください。</p> 
+
+<p>ログインするために‘Go To App’をクリックすると自分のアプリケーションにリダイレクトされます。ここでルーティングエラーが発生しますが、これはアプリケーションがまだコールバックを処理できないからです。これを修復するには、<a href="http://railscasts.com/episodes/241-simple-omniauth">エピソード241</a>で行なったのと同じ方法で対応します。まずOmniAuthが使用するパスを処理するためのルートを追加します。</p>
+
+``` /config/routes.rb 
+Cinema::Application.routes.draw do
+  match 'auth/:provider/callback', to: 'sessions#create'
+  match 'auth/failure', to: redirect('/')
+  match 'signout', to: 'sessions#destroy', as: 'signout'
+  
+  resources :movies do
+    resources :reviews
+  end
+  root to: 'movies#index'
+end
+```
+
+<p>Facebookがアプリケーションにリダイレクトすると、<code>SessionsController</code>の<code>create</code>アクションを探します。アプリケーションにはまだこのコントローラがないので、今ここで作成します。</p>
+
+``` /app/controllers/sessions_controller.rb
+class SessionsController < ApplicationController
+  def create
+    user = User.from_omniauth(env["omniauth.auth"])
+    session[:user_id] = user.id
+    redirect_to root_url
+  end
+end
+```
+
+<p>このコントローラのコードは、まだ書いていない<code>User</code>モデルに依存します。このモデルは、OmniAuthハッシュで渡されるデータに基づいてユーザを検索あるいは作成するものです。このようにユーザのデータをデータベースに永続的に持つべきかどうかを、ここで一度自問してるのがいいでしょう。ユーザに対して設定する関連情報がない場合は、Userレコードを作成せずにOmniAuthハッシュを直接セッションに保存することもできます。ここではUserモデルを作成することにして、これからその作業を行います。</p>
+
+``` terminal
+$ rails g model user provider uid name oauth_token oauth_expires_at:datetime
+$ rake db:migrate
+```
+
+<p><code>User</code>モデルに、名前、<code>oauth_token</code>、<code>oauth_expires_at</code>の情報と一緒に、OmniAuthが提供する<code>provider</code>と<code>uid</code>の秘密情報を保存します。Facebook OAuthトークンは永久に持つことはできないので、有効期限を保存しておくと便利でしょう。Facebook OmniAuthのREADMEを見ると、提供される詳細情報の<a href="https://github.com/mkdynamic/omniauth-facebook#auth-hash">ハッシュ形式のサンプル</a>があります。これのうちのいくつか、例えばユーザの顔写真を表示するために画像のURLなどをデータベースに保存したいなどの場合があるでしょう。</p>
+
+<p>次に新しく作成した<code>User</code>モデルを修正して、<code>SessionsController</code>から呼び出す<code>from_omniauth</code>メソッドのためのコードを記述します。</p> 
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  def self.from_omniauth(auth)
+    where(auth.slice(:provider, :uid)).first_or_initialize.tap do |user|
+      user.provider = auth.provider
+      user.uid = auth.uid
+      user.name = auth.info.name
+      user.oauth_token = auth.credentials.token
+      user.oauth_expires_at = Time.at(auth.credentials.expires_at)
+      user.save!
+    end
+  end
+end
+```
+
+<p>このコードは以前示したものから変わっています。ここで<code>provider</code>とハッシュの<code>uid</code>の値に一致するユーザを探して、この結果に対して<code>first_or_initialize</code>を呼び出します。これはRails 3.2で新たに提供されたメソッドで、最初に一致したレコードを返すか、渡されたパラメータで新規レコードを作成します。そしてこれに対して<code>tap</code>を呼び出して、ブロックにその<code>User</code>インスタンスを渡します。ブロック内でOmniAuthハッシュからの値に基づいてユーザのいろいろな属性を設定します。しかし、ここでハッシュキーをメソッドとして呼び出していることに注意してください。これはOmniAuthがHashie gemを使用しているからです。このgemによって、メソッドとしてキーを呼び出してハッシュの値にアクセスすることができます。最後にレコードを保存して返します。ユーザがリクエストされる度にこれらの属性を設定していることに留意してください。これはUserレコードがすでに存在している場合も同じです。これは最新の認証トークンを取得するという点において重要なことですが、それだけではなくユーザが名前やその他の認証情報を変更した場合にその情報を取得するという意味もあります。</p>
+
+<p>あと少し修正が必要な箇所があります。<code>ApplicationController</code>に現在のユーザを取得するためのメソッドを追加します。</p>
+
+``` /app/controllers/application_controller.rb
+class ApplicationController < ActionController::Base
+  protect_from_forgery
+  
+  private
+  def current_user
+    @current_user ||= User.find(session[:user_id]) if session[:user_id]
+  end
+  helper_method :current_user
+end
+```
+
+<p>アプリケーションのレイアウトファイルに、ユーザがログインとログアウトを行なうためのコードを追加します。</p>
+
+``` /app/views/layouts/application.html.erb
+<div id="user_nav">
+  <% if current_user %>
+    Signed in as <strong><%= current_user.name %></strong>!
+    <%= link_to "Sign out", signout_path, id: "sign_out" %>
+  <% else %>
+    <%= link_to "Sign in with Facebook", "/auth/facebook", id: "sign_in" %>
+  <% end %>
+</div>
+```
+
+<p>ではこれを試してみましょう。アプリケーションのトップページをリロードするとログインのためのリンクが表示され、それをクリックするとこのアプリケーションはすでにFacebookに認証されているため、すぐにログインが完了します。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1228/original/E360I04.png" width="960" height="600" alt="Facebookを介してアプリケーションにログインできるようになった"/>
+</div>
+
+<h3>クライアント側での認証</h3>
+
+<p>Facebookはクライアント側でユーザを認証するためのJavaScript SDKも提供しています。それによって、我々のアプリケーションから出た後にまた戻ってきたというような見え方をしないようにできます。これをアプリケーションに追加して、ユーザに気づかれずにサーバサイド処理に縮退できるようにします。そのために必要なのはJavaScriptだけで、ここではCoffeeScriptを使用します。<code>/app/assets/javascripts</code>ディレクトリの下に新規に<code>facebook.js.coffee.erb</code>ファイルを作成します。最後に<code>.erb</code>の拡張子を追加しているのは、動的なコンテンツを追加するためです。</p>
+
+``` /app/assets/javascripts/facebook.js.coffee.erb
+jQuery ->
+  $('body').prepend('<div id="fb-root"></div>')
+
+  $.ajax
+    url: "#{window.location.protocol}//connect.facebook.net/en_US/all.js"
+    dataType: 'script'
+    cache: true
+
+
+window.fbAsyncInit = ->
+  FB.init(appId: '<%= ENV["FACEBOOK_APP_ID"] %>', cookie: true)
+
+  $('#sign_in').click (e) ->
+    e.preventDefault()
+    FB.login (response) ->
+      window.location = '/auth/facebook/callback' if response.authResponse
+
+  $('#sign_out').click (e) ->
+    FB.getLoginStatus (response) ->
+      FB.logout() if response.authResponse
+    true
+```    
+
+<p>DOMのロードが完了したら、Facebookが求めるように、ドキュメントのbodyの最初に<code>fb-root</code>という<code>id</code>をつけた<code>div</code>要素を挿入します。そしてFacebookのJavaScript SDKに対してAJAXリクエストを発行します。この呼出しが非同期にコードをロードし、戻り値をスクリプトとして解釈します。スクリプトのロード後に、ウィンドウで<code>fbAsyncInit</code>関数が起動されます。これが起動されると、SDKがすべて読み込まれて利用可能な状態になります。そこで環境変数を使って設定したアプリケーションidを含むカスタム設定で初期化をおこないます(ここでerbが役に立ちます)。またクッキーを有効化してユーザの認証情報をクッキーに保存します。これによってサーバサイドでそれらの情報にアクセスできます。</p>
+
+<p>これをすべて初期化したら、ログインリンクの<code>click</code>イベントを待機します。リンクがデフォルトの振る舞いをおこなうのではなく、<code>FB.login</code>関数を起動してダイアログを表示し、ユーザに対してログインしてアプリケーションを認証するよう促します。認証が成功したら<code>/auth/facebook/callback</code>パスにリダイレクトされ、サーバで認証を完了しUserレコードを生成するなどの処理が行なわれます。すべてを一つのページ上で処理したいのであれば、ユーザを別のページに誘導するのではなく、AJAXを使ってこれを処理することも可能です。</p>
+
+<p>最後に、ログアウトのリンクがクリックされたときに実行されるコードがあります。これは、ユーザが現在ログイン中かどうかをチェックし、もしそうであればログアウトします。この関数がtrueを返すとリンクのデフォルトの振る舞いが起動され、アプリケーションからもログアウトされます。</p>
+
+<p>ではこれを試してみましょう。アプリケーションの認証情報を削除して、ログインの効果を確認できるようにしました。ここでログインのリンクをクリックすると、ポップアップダイアログが表示されてアプリケーションを認証するよう求められます。“Log in with Facebook”をクリックするとログインが行なわれて、(アプリケーションの仕様がそうなっている場合は)ユーザのレコードが作成されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1229/original/E360I05.png" width="960" height="600" alt="これでサイトにとどまったままログインできるようになりました。"/>
+</div>
+
+<p>“Sign Out”のリンクをクリックするとアプリケーションとFacebookの両方からログアウトされます。再度ログインしようとすると、まずFacebookにログインさせられますが、同時に我々のアプリケーションにも自動的にログインします。</p>
+
+<p>このJavaScriptによる方法では不可解な問題が発生する場合があります。例えばブラウザのコンソールを確認すると警告メッセージが表示されています。それでもJavaScriptは正常に動作しているようですが、この警告を止める方法を調べておいたほうがいいでしょう。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1230/original/E360I06.png" width="960" height="600" alt="クライアント側での処理ではJavaScriptのエラーが表示される場合があります。"/>
+</div>
+
+<p>また、Facebookのログインクッキーとアプリケーションのセッションクッキーの同期が取られていない状態になる場合があるようです。通常はこれが問題になることはないですが、おかしな動作を引き起こす可能性もあるので、この状態にならないよう注意した方がいいでしょう。</p> 
+
+<h3>Facebookとデータをやり取りする</h3>
+
+<p>ユーザの認証に成功したら、どのようにFacebookとデータをやり取りするのでしょうか?これを行なうには、Facebookが提供するJavaScript SDKか、Koala7というgemを利用してRubyで行ないます。このgemのREADMEには、このgemを使ったFacebook APIとの通信の方法についてのわかりやすい説明があります。また今週のProエピソードでこの話題についてのさらに詳しい情報を提供しています。</p>

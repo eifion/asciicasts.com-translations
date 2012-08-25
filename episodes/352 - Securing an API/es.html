@@ -1,0 +1,157 @@
+<p>La semana pasada en el <a href="http://railscasts.com/episodes/350-rest-api-versioning">episodio 350</a> vimos c&oacute;mo construir una API versionada para una tienda.  Si visitamos la ruta <code>/api/products</code> podemos interactuar con la aplicaci&oacute;n mediante JSON.  La API es totalmente p&uacute;blica lo que quiere decir que cualquiera puede utilizarla y editar o borrar los registros.  Normalmente querremos que esto no sea as&iacute; y que el acceso est&eacute; restringido.  Hay varias maneras de hacer esto, y la forma correcta depende de los requisitos de nuestra aplicaci&oacute;n.  En este episodio vamos a ver algunas soluciones que se pueden usar para cerrar una API.</p>
+
+<h3>Autenticaci&oacute;n b&aacute;sica HTTP</h3>
+
+<p>Una de las opciones m&aacute;s simples en la Autenticaci&oacute;n B&aacute;sica de HTTP.  Es incre&iacute;blemente f&aacute;cil de implementar en Rails y la mayor&iacute;a de clientes no deber&iacute;an tener ning&uacute;n problema con ella.  Para usarla s&oacute;lo tenemos que modificar el controlador que sirve la API con una llamada a <code>http_basic_authentication_with</code>, pas&aacute;ndole un nombre y una clave.</p>
+
+
+``` /app/controllers/api/v1/products_controller.rb
+module Api
+  module V1
+    class ProductsController < ApplicationController
+      http_basic_authenticate_with name: "admin", password: "secret"
+      respond_to :json
+
+      # Actions omitten
+    end
+  end
+end
+```
+
+<p>En una aplicaci&oacute;n de verdad el nombre y la clave estar&iacute;an en alg&uacute;n tipo de configuraci&oacute;n externo de forma que no estar&iacute;an guardados en control de versiones.  Si tuvi&eacute;ramos que hacer esto en m&uacute;ltiples controladores tendr&iacute;amos que moverlo todo a un nuevo controladory heredar nuestros controladores de &eacute;l.</p>
+
+<p>Podemos utilizar la orden <code>curl</code> para probar este funcionamiento.  Si hacemos una petici&oacute;n a la ruta de la API recibiremos un error.</p>
+
+
+``` terminal
+$ curl http://localhost:3000/api/products
+HTTP Basic: Access denied.
+```
+
+
+<p>Examinando las cabeceras de la respuesta veremos que hemos recibido un error <code>401 Unauthorized</code>.</p>
+
+
+``` terminal
+$ curl http://localhost:3000/api/products -I
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Basic realm="Application"
+Content-Type: text/html; charset=utf-8
+X-UA-Compatible: IE=Edge
+Cache-Control: no-cache
+X-Request-Id: c411eeceefc39ab3964d40301530843c
+X-Runtime: 0.002366
+Content-Length: 0
+Connection: keep-alive
+Server: thin 1.3.1 codename Triple Espresso
+```
+
+
+<p>Pero si pasamos el nombre y clave correctos recibiremos la respuesta JSON.</p>
+
+
+``` terminal
+$ curl http://localhost:3000/api/products -u "admin:secret"
+[{"category_id":2,"created_at":"2012-05-30T20:16:58Z","id":1,"name":"Settlers of Catan","price":"29.95","released_on":"2012-04-12","updated_at":"2012-05-30T20:16:58Z"}, ...etc]
+```
+
+
+<p>Tenemos que tener cuidado porque las credenciales se env&iacute;an en texto claro por lo que deber&iacute;amos utilizar una conexi&oacute;n segura.</p>
+
+<h3>Autenticaci&oacute;n mediante un <em>token</em> de acceso</h3>
+
+<p>Otra forma de cerrar la API es darle al cliente un <em>token</em> para acceder.  Tenemos que almacenar este <em>token</em> en alg&uacute;n lugar, y en nuestro caso lo haremos en un nuevo modelo llamado <code>api_key</code>.</p>
+
+
+``` terminal
+$ rails g model api_key access_token
+```
+
+
+<p>Hay otras columnas que le podemos a&ntilde;adir al modelo, por ejemplo se le puede a&ntilde;adir una columna <code>role</code> para especificar los permisos que tiene este c&oacute;digo, una columna <code>user_id</code> para especificar el usuario al que pertenece, o incluso una columna <code>expires_at</code> que indica el tiempo de validez.  Por ahora nuestro modelo ser&aacute; muy sencillo, con tan s&oacute;lo una columna  Tenemos que ejecutar <code>rake db:migrate</code> para crear la nueva tabla <code>api_keys</code>.</p>
+
+<p>En nuestro nuevo modelo tenemos que generar una cadena de acceso aleatoria cada vez que se crea un registro, lo que haremos con <code>before_create</code>.</p>
+
+
+``` /app/models/api_key.rb
+class ApiKey < ActiveRecord::Base
+  before_create :generate_access_token
+  
+private
+  
+  def generate_access_token
+    begin
+      self.access_token = SecureRandom.hex
+    end while self.class.exists?(access_token: access_token)
+  end
+
+end
+```
+
+
+<p>Este c&oacute;digo usa <code>SecureRandom.hex</code>, que es una funci&oacute;n de Ruby 1.9, que genera una cadena hexadecimal aleatoria.  Luego comprueba si existe un c&oacute;digo con la misma clave, en cuyo caso lo regenera para asegurar la unicidad (tambi&eacute;n podr&iacute;amos haber puesto una restricci&oacute;n en base de datos).  Podemos ver esto en acci&oacute;n con la consola, si invocamos a <code>ApiKey.create!</code> generaremos un nuevo registro con un c&oacute;digo aleatorio.</p>
+
+
+``` console
+1.9.3-p125 :001 > ApiKey.create!
+   (0.1ms)  begin transaction
+  ApiKey Exists (0.2ms)  SELECT 1 FROM "api_keys" WHERE "api_keys"."access_token" = 'afbadb4ff8485c0adcba486b4ca90cc4' LIMIT 1
+Binary data inserted for `string` type on column `access_token`
+  SQL (5.9ms)  INSERT INTO "api_keys" ("access_token", "created_at", "updated_at") VALUES (?, ?, ?)  [["access_token", "afbadb4ff8485c0adcba486b4ca90cc4"], ["created_at", Wed, 30 May 2012 21:17:53 UTC +00:00], ["updated_at", Wed, 30 May 2012 21:17:53 UTC +00:00]]
+   (2.7ms)  commit transaction
+ => #<ApiKey id: 1, access_token: "afbadb4ff8485c0adcba486b4ca90cc4", created_at: "2012-05-30 21:17:53", updated_at: "2012-05-30 21:17:53">
+``` 
+ 
+ 
+ <p>Nos toca decidir cu&aacute;ndo se genera el c&oacute;digo y c&oacute;mo se le muestra al cliente pero por lo general se hace en alguna p&aacute;gina de perfil de forma que puedan copiarlo y pegarlo en la herramienta de cliente con la que deseen usar la API.  Por nuestra parte, tenemos que restringir el acceso a la API exigiendo la presencia del c&oacute;digo.  Hay varias formas de hacerlo, una de ellas es a&ntilde;adirlo como par&aacute;metro en la URL, para lo que usaremos un <code>before_filter</code>.</p>
+ 
+ 
+``` /app/controllers/api/v1/products_controller.rb
+module Api
+  module V1
+    class ProductsController < ApplicationController
+      before_filter :restrict_access
+      respond_to :json
+
+      # Actions omitted
+
+      private
+      def restrict_access
+        api_key = ApiKey.find_by_access_token(params[:access_token])
+        head :unauthorized unless api_key
+      end
+    end
+  end
+end
+```
+
+
+<p>En <code>restrict_access</code> intentamos encontrar una <code>ApiKey</code> mediante el <code>access_token</code> que se ha recibido por la URL.  Si no encontramos dicho registro devolveremos el error  <code>401 Unauthorized</code>. Con esto siempre se ver&aacute; una respuesta en blanco al cargar la p&aacute;gina a no ser que se incluya un c&oacute;digo v&aacute;lido de acceso.</p>
+
+<p>Pero pasar el c&oacute;digo de acceso mediante la URL no es por lo general la mejor soluci&oacute;n, especialmente si el c&oacute;digo no tiene expiraci&oacute;n.  La gente tiene tendencia a copiar y pegar URLs, y no queremos que accidentalmente compartan sus credenciales.  En lugar de esto pasaremos el c&oacute;digo de acceso mediante una cabecera HTTP.  Rails hace que sea f&aacute;cil a&ntilde;adir esta funcionalidad porque podemos usar <code>authenticate_or_request_with_http_token</code> en un <code>before_filter</code>.  Tenemos ya un <code>before_filter</code> en nuestro controlador <code>ProductsController</code>, as&iacute; que modificaremos el metodo <code>restrict_access</code> para que utilice  <code>authenticate_or_request_with_http_token</code>.</p>
+
+
+``` /app/controllers/api/v1/products_controller.rb
+def restrict_access
+  authenticate_or_request_with_http_token do |token, options|
+    ApiKey.exists?(access_token: token)
+  end
+end
+```
+
+
+<p>Si el bloque se le pasa a  <code>authenticate_or_request_with_http_token</code> devuelve  <code>true</code> la autenticaci&oacute;n tiene &eacute;xito por lo que aqu&iacute; comprobaremos si existe un registro de <code>ApiKey</code> con el c&oacute;digo recibido.  Ahora se denegar&aacute; el acceso a la API a no ser que se establezca correctamente la cabecera  <code>Authorization</code>:</p>
+
+
+``` terminal
+$ curl http://localhost:3000/api/products -H 'Authorization: Token token="afbadb4ff8485c0adcba486b4ca90cc4"'
+```
+
+
+<p>Podemos combinar todos estos esquemas de autenticaci&oacute;n para que se adapten lo mejor posible a nuestra aplicaci&oacute;n.</p>
+
+<p>Las soluciones que hemos visto son bastante sencillas pero &iquest;qu&eacute; pasa si se complica un poco la situaci&oacute;n?  Por ejemplo, &iquest;y si queremos que las aplicaciones que utilizan la API puedan ser capaces de simular el inicio de sesi&oacute;n como un usuario y acceder a sus credenciales, pero s&oacute;lo si el usuario le da el permiso?  Es un escenario bastante frecuente en aplicaciones de redes sociales como Facebook o Twitter, y la forma m&aacute;s correcta de hacer esto es con  <a href="railscasts.com/episodes/353-oauth-with-doorkeeper">OAuth</a>.  No le dedicaremos mucho tiempo en este episodio a OAuth, pero se puede encontrar informaci&oacute;n detallada en su sitio web.  En esencia nos permite asegurar una API y proteger los datos del usuario sin que tengan que guardar sus claves en todos los sitios en los que inician sesi&oacute;n.</p>
+
+<p>Hay muchos proyectos que facilitan la implementaci&oacute;n de OAuth en una aplicaci&oacute;n Rails.  Uno de ellos es <a href="https://github.com/applicake/doorkeeper">Doorkeeper</a>  y si bien est&aacute; en una etapa muy temprana de desarrollo merece la pena echarle un vistazo, que es lo que haremos en el episodio Pro de esta semana.  Tambi&eacute;n merece la pena investigar la gema <a href="https://github.com/intridea/oauth2">oauth2</a>  Muchos otros proyectos la usan por lo que es buena idea echarle un vistazo para saber c&oacute;mo funciona.</p>
+
+<p>Por supuesto, sea cual sea la soluci&oacute;n por la que optemos, es muy importante que la interacci&oacute;n de la API se realice mediante una conexi&oacute;n segura SSL.</p>

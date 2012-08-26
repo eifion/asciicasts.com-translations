@@ -1,0 +1,165 @@
+<p>Supongamos que tenemos una p&aacute;gina que muestra un listado de productos.  La p&aacute;gina incluye una caja de texto para realizar b&uacute;squedas de productos por su nombre.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1204/original/E354I01.png" width="800" height="500" alt="La página de productso."/>
+</div>
+
+<p>El c&oacute;digo que implementa la b&uacute;squeda parece sencillo de escribir pero la consulta en el modelo <code>Product</code> es bastante complicada.  Tenemos que armar una b&uacute;squeda para devolver aquellos productos que: han sido publicados, no han sido retirados, se encuentran en stock y cuyo nombre coincide con el t&eacute;rmino de b&uacute;squeda.</p>
+
+
+``` /app/models/product.rb
+class Product < ActiveRecord::Base
+  belongs_to :category
+  attr_accessible :name, :price, :category_id, :released_at, :discontinued_at, :stock
+
+  def self.search(query)
+    where("released_at <= ? and (discontinued_at is null or discontinued_at > ?) and stock >= ? and name like ?", Time.zone.now, Time.zone.now, 2, "%#{query}%")
+  end
+end
+```
+
+
+<p>Estamos lanzando una consulta SQL compleja con muchas variables vinculadas que deben ser consistentes con los par&aacute;metros de la propia consulta.  Hay varias formas de mejorar esta consulta, y lo mejor ser&iacute;a mover la consulta a &aacute;mbitos con nombre.  Si lo hici&eacute;ramos, todav&iacute;a tendr&iacute;amos que seguir preocup&aacute;ndonos por las diferencias de comportamiento de SQL como por ejemplo la cl&aacute;usula <code>LIKE</code>.  En la mayor&iacute;a de bases de datos se lanzar&aacute; una consulta que no distingue entre may&uacute;sculas y min&uacute;sculas, por lo que si tuvi&eacute;ramos que cambiar el motor de base de datos a Postgres tendr&iacute;amos que cambiarlo por <code>ILIKE</code>.  Ser&iacute;a bueno tener aqu&iacute; un poco m&aacute;s de consistencia, de forma que pudi&eacute;semos abstraer estas consultas a la base de datos.  Podr&iacute;amos usar Arel, pero su uso directo en estos casos se nos puede complicar bastante.</p>
+
+<p>Si no queremos mezclar SQL con nuestro c&oacute;digo Ruby podemos utilizar la gema <a href="https://github.com/ernie/squeel">Squeel</a>, escrita por Ernie Miller que tambi&eacute;n escribi&oacute; la gema Metawhere que ya vimos en el  <a href="http://railscasts.com/episodes/251-metawhere-metasearch">episodio 251</a>. Squeel aporta un DSL que nos permite definir las b&uacute;squedas en Ruby sin tener que recurrir a SQL.  Para usarlo, tendremos que actualizar el <code>Gemfile</code> y ejecutar <code>bundle install</code>.</p>
+
+
+``` /Gemfile
+gem 'squeel'
+```
+
+
+<p>Empezaremos jugando con Squeel en la consola.  Squeel permite pasar un bloque a una llamada <code>where</code>, dentro del cual podremos utilizar el DSL de Squeel.  Podemos, por ejemplo, invocar cualquier columna como un m&eacute;todo:</p>
+
+
+``` console
+> Product.where{released_at <= 3.months.ago}
+  Product Load (0.3ms)  SELECT "products".* FROM "products" WHERE "products"."released_at" <= '2012-03-08 20:58:21.852780'
+ => [#<Product id: 1, name: "Settlers of Catan", category_id: 2, price: #<BigDecimal:7fdbf9b90aa0,'0.3495E2',18(45)>, released_at: "2012-03-01 00:00:00", discontinued_at: nil, stock: 5, created_at: "2012-06-08 20:09:13", updated_at: "2012-06-08 20:58:13">] 
+``` 
+
+ 
+<p>Esto se traduce a una consulta SQL que devuelve los productos coincidentes.  N&oacute;tese que la convenci&oacute;n del DSL de SQueel, y que nosotros seguimos, es no a&ntilde;adir espacios alrededor de las llaves de la consulta.  El objeto devuelto es de tipo  <code>ActiveRecord::Relation</code> que se puede combinar normalmente con el resto de &aacute;mbitos de ActiveRecord.  Pero Squeel va m&aacute;s all&aacute; de  <code>ActiveRecord::Relation</code>, usando Arel para convertir la consultas en SQL.  Esto se explica en el  <a href="https://github.com/ernie/squeel#squeel--">README de Squeel</a> donde se muestra una tabla con la lista de operadores soportados, as&iacute; como el operador SQL equivalente.  As&iacute; que en lugar de usar el operador  <code>&lt;</code> de Squeel podemos usar el m&eacute;todo <code>lt</code> de Arel directamente:</p>
+
+
+``` console
+> Product.where{released_at.lt 3.months.ago}
+  Product Load (0.3ms)  SELECT "products".* FROM "products" WHERE "products"."released_at" < '2012-03-08 21:29:36.133638'
+ => [#<Product id: 1, name: "Settlers of Catan", category_id: 2, price: #<BigDecimal:7fdbf96d3940,'0.3495E2',18(45)>, released_at: "2012-03-01 00:00:00", discontinued_at: nil, stock: 5, created_at: "2012-06-08 20:09:13", updated_at: "2012-06-08 20:58:13">]
+``` 
+
+ 
+<p>Otra funcionalidad &uacute;til de Squeel son los operadores AND y OR para combinar m&uacute;ltiples condiciones.  Si queremos cambiar la busqueda de forma que s&oacute;lo encuentre elementos con un costo de m&aacute;s de 20 d&oacute;lares podemos hacerlo as&iacute;:</p>
+
+
+``` console
+> Product.where{released_at.lt(3.months.ago) & price.gt(20)}
+  Product Load (0.6ms)  SELECT "products".* FROM "products" WHERE (("products"."released_at" < '2012-03-09 08:41:15.786451' AND "products"."price" > 20))
+ => [#<Product id: 1, name: "Settlers of Catan", category_id: 2, price: #<BigDecimal:7fe0aa2d5a40,'0.3495E2',18(45)>, released_at: "2012-03-01 00:00:00", discontinued_at: nil, stock: 5, created_at: "2012-06-08 20:09:13", updated_at: "2012-06-08 20:58:13">]
+``` 
+
+ 
+<p>N&oacute;tese que cuando se usan diferentes t&eacute;rminos de b&uacute;squeda como en este caso es importante rodear los t&eacute;rminos de b&uacute;squeda con par&eacute;ntesis de forma que el int&eacute;rprete de Ruby siga la precedencia correcta.  Lo bueno de esto es que hace que sea mucho m&aacute;s f&aacute;cil utilizar el operador OR.  Puede ser dif&iacute;cil hacerlo en ActiveRecord, pero con Squeel es inmediato:</p>
+
+
+``` console
+> Product.where{released_at.lt(3.months.ago) | price.gt(20)}
+  Product Load (0.4ms)  SELECT "products".* FROM "products" WHERE (("products"."released_at" < '2012-03-09 08:44:05.427791' OR "products"."price" > 20)
+# Se omiten los productos
+```
+
+
+<h3>Uso de Squeel en nuestra aplicaci&oacute;n</h3>
+
+<p>Ahora que ya tenemos suficiente informaci&oacute;n para adaptar la consulta de nuestra aplicaci&oacute;n con Squeel.  Este es el aspecto que tiene ahora mismo.</p>
+
+
+``` /app/models/product.rb
+def self.search(query)
+  where("released_at <= ? and (discontinued_at is null or discontinued_at > ?) and stock >= ? and name like ?", Time.zone.now, Time.zone.now, 2, "%#{query}%")
+end
+```
+
+
+<p>Traducido a Squeel el c&oacute;digo queda as&iacute;:</p>
+
+
+```  /app/models/product.rb
+def self.search(query)
+  where do
+    (released_at <= Time.zone.now) & 
+    ((discontinued_at == nil) | (discontinued_at > Time.zone.now)) & 
+    (stock >= 2) & (name =~ "%#{query}%")
+  end
+end
+```
+
+
+<p>N&oacute;tese que con la cl&aacute;usula LIKE utilizamos <code>=~</code>, similar al operador de expresi&oacute;n regular, que realizar&aacute; una b&uacute;squeda sin distinguir may&uacute;sculas o min&uacute;sculas independientemente del motor de base de datos que utilicemos.  Tambi&eacute;n usamos <code>==nil</code> para comparar con NULL en lugar de <code>is null</code>.</p>
+
+<p>Se puede discutir si este c&oacute;digo es m&aacute;s claro que el que ten&iacute;amos antes, pero una mejora clara es que los valores se encuentran embebidos en la consulta en lugar de a&ntilde;adirse por el final.  Tambi&eacute;n al estar usando c&oacute;digo Ruby podemos utilizar un bloque de m&uacute;ltiples l&iacute;neas para que la consulta quede m&aacute;s legible.  Veremos que si realizamos la misma consulta en el navegador vuelven a aparecer los mismos resultados que devolv&iacute;a nuestra consulta SQL.</p>
+
+<h3>Todo en su contexto</h3>
+
+<p>Conviene no olvidar que Squeel utiliza  <code>instance_eval</code> cuando invoca al bloque.  Esto quiere decir que el contexto del bloque no ser&aacute; la clase <code>Product</code> sino una instancia del DSL de Squeel.  Si queremos invocar un m&eacute;todo de clase dentro del bloque no podremos hacerlo directamente porque Squeel lo interpretar&aacute; como un nombre de columna.  Para superar esto tenemos que invocar <code>my</code> con un bloque.  Todo lo que vaya dentro de este bloque ser&aacute; evaluado en el contexto original, para demostrar esto vamos a a&ntilde;adir el m&eacute;todo <code>low_stock</code> a nuestra clase y lo emplearemos en la b&uacute;squeda.</p>
+
+
+``` /app/models/product.rb
+class Product < ActiveRecord::Base
+  belongs_to :category
+  attr_accessible :name, :price, :category_id, :released_at, :discontinued_at, :stock
+
+  def self.search(query)
+    where do
+      (released_at <= Time.zone.now) & 
+      ((discontinued_at == nil) | (discontinued_at > Time.zone.now)) & 
+      (stock >= my{low_stock}) & (name =~ "%#{query}%")
+    end
+  end
+  
+  def self.low_stock
+    2
+  end
+end
+```
+
+
+<p>Este c&oacute;digo realizar&aacute; la misma b&uacute;squeda que antes.</p>
+
+<h3>C&oacute;mo adaptar Squeel</h3>
+
+<p>Existe un generador que crear&aacute; un inicializador donde podremos modificar el comportamiento de Squeel.</p>
+
+
+``` terminal
+$ rails g squeel:initializer
+      create  config/initializers/squeel.rb
+```      
+
+
+<p>Esta orden crea un fichero de configuraci&oacute;n donde se incluyen comentarios que explican las diferentes opciones.  Por ejemplo si se descomenta la l&iacute;nea que se muestra a continuaci&oacute;n se a&ntilde;adir&aacute;n m&eacute;todos a las clases Hash y Symbol para simular la funcionalidad de Metawhere (lo cual nos puede ser &uacute;til si estamos migrando nuestra aplicaci&oacute;n para que use Squeel en lugar de Metawhere).</p>
+
+
+``` /config/initializers/squeel.rb
+# To load both hash and symbol extensions:
+#
+# config.load_core_extensions :hash, :symbol
+```
+
+
+<p>En este fichero tambi&eacute;n podemos a&ntilde;adir alias de forma que podr&iacute;amos  por ejemplo invocar <code>less_than</code> en lugar de <code>lt</code>.</p>
+
+
+``` /config/initializers/squeel.rb
+# Alias an existing predicate to a new name. Use the non-grouped
+# name -- the any/all variants will also be created. For example,
+# to alias the standard "lt" predicate to "less_than", and gain
+# "less_than_any" and "less_than_all" as well:
+#
+# config.alias_predicate :less_than, :lt
+```
+
+
+<p>Con esto cerramos nuestro repaso de Squeel.  Hay, como siempre, mucha m&aacute;s funcionalidad que la que hemos visto hoy, por lo que se recomienda leer toda la documentaci&oacute;n a los que vayan a usar Squeel en sus aplicaciones.</p>
+
+<p>Squeel es un proyecto muy bonito, por supuesto es posible que las mejoras al lenguaje de consulta no nos resulten de inter&eacute;s si nos encontramos c&oacute;modos con SQL, pero los que prefieran trabajar con Ruby en lugar de SQL ver&aacute;n que merece la pena.</p>

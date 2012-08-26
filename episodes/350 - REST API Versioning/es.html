@@ -1,0 +1,336 @@
+<p>Supongamos que tenemos una aplicaci&oacute;n que gestiona productos, con la que podemos ver un listado de elementos y su ficha de detalle, as&iacute; como crear, editar y borrar productos.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1175/original/E350I01.png" width="800" height="500" alt="Nuestra aplicación de productos."/>
+</div>
+
+<p>Queremos proporcionar una API REST de forma que podamos gestionar productos sin la interfaz HTML.  El controlador <code>ProductsController</code> ya es REST, por lo que simplemente tenemos que a&ntilde;adir un bloque <code>respond_to</code> a cada acci&oacute;n de forma que responda ante peticiones JSON, de esta manera:</p>
+
+
+``` /app/controllers/products_controller.rb
+def index
+  @products = Product.all
+  respond_to do |format|
+    format.html
+    format.json { render json: @products }
+  end
+end
+```
+
+
+<p>Si ahora visitamos la p&aacute;gina <code>/products.json</code> veremos el listado de productos en JSON.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1176/original/E350I02.png" width="800" height="500" alt="Los productos, en JSON."/>
+</div>
+
+<p>&iquest;Quiere decir que ya tenemos hecha una API en JSON?  Bueno, hay un serio problema con este enfoque, y es el versionado.  Es importante que las APIs sean consistentes.  Por ejemplo cada producto tiene un atributo llamado <code>released_on</code> que devuelve la fecha en la que se public&oacute; el producto.  Si queremos devolver la hora y cambiarle el nombre a la columna por <code>released_at</code> s&iacute; que podr&iacute;amos hacerlo, pero cualquier aplicaci&oacute;n que est&eacute; usando la API quedar&iacute;a rota, especialmente si utiliza el atributo <code>released_on</code>.
+
+<p>Si queremos mantener una API consistente con las diferentes versiones no es  buena idea mantener la API JSON junto con la interfaz HTML, y hay algunas gemas que sirven para subsanar este problema.  <a href="https://github.com/bploetz/versionist">Versionist</a> hace f&aacute;cil mantener versionadas las APIs mediante las rutas de la aplicaci&oacute;n, e incluye varios generadores.  <a href="https://github.com/filtersquad/rocket_pants">RocketPants</a> es otra gema que ayuda a construir APIs REST, incluyendo versionado.  Merece la pena leer su <a href="https://github.com/filtersquad/rocket_pants/blob/master/README.md">README</a>.</p>
+
+<p>En este episodio no usaremos una gema porque escribiendo la API desde cero nos haremos una mejor idea de c&oacute;mo funcionan las rutas en Rails y c&oacute;mo se pueden aplicar al versionado de APIs.  Ahora las rutas de la aplicaci&oacute;n tienen el aspecto:</p>
+
+
+``` /config/routes.rb
+Store::Application.routes.draw do
+  resources :products
+  root to: 'products#index'
+end
+```
+
+
+<p>A&ntilde;adiremos algunas rutas espec&iacute;ficas para la API de forma que estas rutas queden separadas de las rutas dedicadas a la interfaz HTML.  Para esto utilizaremos un espacio de nombres llamado <code>api</code>, lo que quiere decir que todas las rutas que definamos sobre &eacute;l vendr&aacute;n con el prefijo <code>/api</code>.  Tambi&eacute;n podr&iacute;amos a&ntilde;adir un subdominio en lugar de usar el prefijo <code>api/</code> pero con este enfoque nos bastar&aacute;.  Tambi&eacute;n tenemos que decidir c&oacute;mo hacer el versionado.  Una opci&oacute;n es guardar la versi&oacute;n como parte de la URL, lo que se puede hacer con otra llamada a <code>namespace</code>.  As&iacute; que por ahora pondremos el recurso <code>products</code> debajo de este espacio de nombres para servir nuestros productos de forma REST.</p>
+
+
+``` /config/routes.rb
+Store::Application.routes.draw do
+  namespace :api do
+    namespace :v1 do
+      resources :products
+    end
+  end
+  
+  resources :products
+  root to: 'products#index'
+end
+```
+
+
+
+<p>En el directorio <code>/app/controllers</code> tendremos que crear un directorio <code>api</code> con un subdirectorio <code>v1</code>.  En este directorio crearemos un controlador que llamaremos <code>ProductsController</code>.</p>
+
+
+``` /app/controllers/api/v1/products_controller.rb
+module Api
+  module V1
+    class ProductsController < ApplicationController
+      
+    end
+  end
+end
+```
+
+
+<p>La clase hereda de <code>ApplicationController</code> aunque podr&iacute;amos hacerlo heredar de, por ejemplo, un <code>Api::BaseController</code> si quisi&eacute;ramos tener alg&uacute;n tipo de comportamiento compartido por todos los controladores de API de la aplicaci&oacute;n.  Ya podemos empezar a a&ntilde;adir acciones a este controlador.</p>
+
+
+``` /app/controllers/api/v1/products_controller.rb
+module Api
+  module V1
+    class ProductsController < ApplicationController
+      respond_to :json
+      
+      def index
+        respond_with Product.all
+      end
+      
+      def show
+        respond_with Product.find(params[:id])
+      end
+      
+      def create
+        respond_with Product.create(params[:product])
+      end
+      
+      def update
+        respond_with Product.update(params[:id], params[:products])
+      end
+      
+      def destroy
+        respond_with Product.destroy(params[:id])
+      end
+    end
+  end
+end
+```
+
+
+
+<p>Aqu&iacute; hemos definido cada acci&oacute;n utilizando una llamada a <code>respond_with</code> de forma que devuelva formato JSON.  Se trata de una t&eacute;cnica muy simple y probablemente queramos hacer m&aacute;s cosas en una API de verdad.  Cuando visitemos <code>/api/v1/products.json</code> ahora veremos nuestra API.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1177/original/E350I03.png" width="800" height="500" alt="Version 1 de la API."/>
+</div>
+
+<p>La URL requiere que se especifique el formato JSON, de forma que si se quita la extensi&oacute;n <code>.json</code> no recibiremos ninguna respuesta.  Para que JSON sea el formato por defecto utilizaremos la opci&oacute;n <code>defaults</code> en las rutas:</p>
+
+
+``` /config/routes.rb
+Store::Application.routes.draw do
+  namespace :api, defaults: {format: 'json'} do
+    namespace :v1 do
+      resources :products
+    end
+  end
+  
+  resources :products
+  root to: 'products#index'
+end
+```
+
+
+<p>Ahora recibiremos datos en JSON cuando visitemos  <code>http://localhost:3000/api/v1/products</code>.</p> 
+
+<h3>Una nueva versi&oacute;n de la API</h3>
+
+<p>Por ahora todo va bien, pero &iquest;qu&eacute; tenemos que hacer cuando hagamos un cambio que rompa la compatibilidad de la API?  Supongamos que queremos cambiar la columna <code>released_on</code> y llamarla <code>released_at</code>.  Para demostrarlo, generaremos una migraci&oacute;n que cambiar&aacute; el tipo y el nombre de esta columna.</p>
+
+
+``` terminal
+$ rails g migration change_products_released_on
+```
+
+<p>El c&oacute;digo de la migraci&oacute;n tiene el siguiente aspecto.</p>
+
+``` /config/db/migrations/201205230000_change_products_released_on.rb
+class ChangeProductsReleasedOn < ActiveRecord::Migration
+  def up
+    rename_column :products, :released_on, :released_at
+    change_column :products, :released_at, :datetime
+  end
+
+  def down
+    change_column :products, :released_at, :date
+    rename_column :products, :released_at, :released_on
+  end
+end
+```
+
+<p>Al lanzar <code>rake db:migrate</code> se cambiar&aacute; la base de datos,y al recargar la p&aacute;gina de la API en el navegador veremos que la columna <code>released_on</code> ya no aparece y ha sido sustituida por <code>released_at</code>.  No es un cambio compatible hacia atr&aacute;s.</p>
+
+<p>Deber&iacute;amos tener montado un sistema autom&aacute;tico de forma que  nos avise cuando rompamos la API de esta manera, as&iacute; podremos corregir la versi&oacute;n anterior de la API antes de crear la nueva. Es un poco dif&iacute;cil porque usamos  <code>respond_with</code> en el controlador.  La forma m&aacute;s f&aacute;cil ser&iacute;a utilizar algo como RABL, como vimos en el  <a href="http://railscasts.com/episodes/322-rabl">episodio 322</a>, con lo que tendr&iacute;amos mayor control sobre los atributos que se devuelven en la respuesta JSON.</p>
+
+<p>Para una API tan sencilla como la nuestra saldreamos del paso con un <em>hack</em> r&aacute;pido.  Puede ser un enfoque adecuado, especialmente si la API dispone de buena cobertura de tests.  Lo que haremos ser&aacute; crear una nueva clase <code>Product</code> en <code>ProductsController</code> que hereda de la clase <code>Product</code> del modelo, y es en la que haremos los cambios.  Por tanto las referencias a <code>Product</code> en el controlador utilizar&aacute;n la nueva subclase en lugar de la original.  Podremos sobrecargar los m&eacute;todos en esta nueva clase de forma que se comporten de manera diferente para una versi&oacute;n concreta de la API.  Tendremos que reescribir <code>to_json</code> para que podamos poner de nuevo el atributo <code>released_on</code> en la respuesta.</p>
+
+``` /app/controllers/api/v1/products_controller.rb
+module Api
+  module V1
+    class ProductsController < ApplicationController
+      class Product < ::Product
+        def as_json(options={})
+          super.merge(released_on: released_at.to_date)
+        end
+      end
+      
+     respond_to :json
+	# Actions omitted
+    end
+  end
+end
+```
+
+<p>Si recargamos la versi&oacute;n 1 de la API veremos que vuelve a funcionar, mostrando el atributo <code>released_on</code>.</p>
+	
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1178/original/E350I04.png" width="800" height="500" alt="El atributo <code>released_on</div> ha vuelto."/>
+</div>
+
+<p>Los tests de nuestra aplicaci&oacute;n deber&iacute;an haber vuelto al verde.  Tenemos un atributo <code>released_at</code> en cada producto, pero se puede ver como una ventaja porque con esto facilitaremos la transici&oacute;n de aquellos que est&eacute;n usando la API antigua.  T&eacute;cnicamente, en este punto no tenemos que publicar una nueva versi&oacute;n de la API, pero si tenemos suficientes cambios de este tipo tendremos que hacerlo.</p>
+
+<p>Para generar una nueva versi&oacute;n de la API tan s&oacute;lo tenemos que copiar el c&oacute;digo de <code>app/controllers/api/v1</code> al directorio <code>v2</code>.</p>
+	
+
+``` terminal
+$ cp -R app/controllers/api/v1 app/controllers/api/v2
+```
+
+
+<p>En el fichero de rutas podemos copiar las rutas de <code>v1</code> en un nuevo espacio de nombres llamado <code>v2</code>.</p>
+
+
+``` /config/routes.rb
+Store::Application.routes.draw do
+  namespace :api, defaults: {format: 'json'} do
+    namespace :v1 do
+      resources :products
+    end
+    namespace :v2 do
+      resources :products
+    end
+  end
+  
+  resources :products
+  root to: 'products#index'
+end
+```
+
+
+<p>Si hay mucha duplicidad en la rutas podr&iacute;amos crear una funci&oacute;n lambda y pasarla en forma de bloque a cada una de las versiones pero esto s&oacute;lo sirve si las rutas son las mismas entre una versi&oacute;n y otra. En nuestro nuevo <code>ProductsController</code> de la versi&oacute;n <code>v2</code> podremos eliminar los <em>hacks</em> que hemos puesto en la versi&oacute;n <code>v1</code> y cambiar el nombre del m&oacute;dulo.</p>
+
+
+``` /app/controllers/api/v2/products_controller.rb
+module Api
+  module V2
+    class ProductsController < ApplicationController      
+      respond_to :json
+      
+      def index
+        respond_with Product.all
+      end
+      
+      def show
+        respond_with Product.find(params[:id])
+      end
+      
+      def create
+        respond_with Product.create(params[:product])
+      end
+      
+      def update
+        respond_with Product.update(params[:id], params[:products])
+      end
+      
+      def destroy
+        respond_with Product.destroy(params[:id])
+      end
+    end
+  end
+end
+```
+
+
+<p>Si ahora visitamos la versi&oacute;n 2 de la API veremos la salida m&aacute;s limpia sin el atributo <code>released_on</code> que ya es a extinguir.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1179/original/E350I05.png" width="800" height="500" alt="Versión 2 de la API."/>
+</div>
+
+<p>Puede parecernos que cuando implementamos el versionado de la API de esta manera estamos incurriendo en demasiada duplicaci&oacute;n.  En la versi&oacute;n 2 <code>ProductsController</code> tiene casi el mismo aspecto que la versi&oacute;n 1.  Pero no estamos vulnerando el principio DRY.  Es importante preguntarse si tendremos que cambiar el c&oacute;digo de una versi&oacute;n si lo cambiamos en la otra, lo que no es nuestro caso porque es dif&iacute;cil que volvamos a una versi&oacute;n anterior para tengamos que implementar alguna funcionalidad de una versi&oacute;n m&aacute;s nueva.   Es m&aacute;s probable que tengamos c&oacute;digo diferente en la versi&oacute;n antigua para que hacer que el modelo de datos sea compatible hacia atr&aacute;s.  Tambi&eacute;n es posible que en todo caso eliminaremos las versiones m&aacute;s antiguas en alg&uacute;n punto, por lo que embarcarse en una refactorizaci&oacute;n puede resultar excesivo.   Por supuesto, si pensamos que es necesario, podemos escribir una superclase diferente donde se guarde el comportamiento compartido entre que utilizar&aacute;n ambas versiones de la API.</p>
+
+<h3>N&uacute;meros de versi&oacute;n</h3>
+
+<p>A continuaci&oacute;n veremos c&oacute;mo se especifica el n&uacute;mero de versi&oacute;n.  Ahora mismo se encuentra en la ruta de la URL, lo cual es muy sencillo y directo pero que algunos no consideran que sea la mejor pr&aacute;ctica.  Github, por ejemplo, hizo un cambio de forma que en lugar de incluir la versi&oacute;n en la ruta de la URL, &eacute;sta se pasa en una cabecera <code>Accept</code>.  &iquest;C&oacute;mo hacer esto en nuestra aplicaci&oacute;n?</p>
+
+<p>Primero cambiaremos los espacios de nombres en nuestras rutas con una llamada a <code>scope</code>, de forma que podamos especificar el m&oacute;dulo a utilizar, as&iacute; como las restricciones.  La l&oacute;gica de restricciones puede ser bastante complicada por lo que la movemos a otra clase.</p>
+
+
+
+``` /config/routes.rb
+Store::Application.routes.draw do
+  namespace :api, defaults: {format: 'json'} do
+    scope module: :v1, constraints: ApiConstraints.new(version: 1) do
+      resources :products
+    end
+    scope module: :v2, constraints: ApiConstraints.new(version: 2, default: :true) do
+      resources :products
+    end
+  end
+  
+  resources :products
+  root to: 'products#index'
+end
+```
+
+
+<p>N&oacute;tese que hemos a&ntilde;adido una opci&oacute;n extra en las condiciones de la versi&oacute;n <code>v2</code> para indicar que esta es la versi&oacute;n por defecto.  Todav&iacute;a tenemos que definir una clase <code>ApiConstraints</code> para usar en el fichero de rutas, y la definiremos en el directorio <code>/lib</code>.</p>
+
+
+``` /lib/api_constraints.rb
+class ApiConstraints
+  def initialize(options)
+    @version = options[:version]
+    @default = options[:default]
+  end
+    
+  def matches?(req)
+    @default || req.headers['Accept'].include?("application/vnd.example.v#{@version}")
+  end
+end
+```
+
+
+<p>La clase es muy sencilla, en <code>initialize</code> se extraen las opciones como variables de instancia.  Tambi&eacute;n se a&ntilde;de el m&eacute;todo <code>matches?</code> que es el que activar&aacute; la ruta para comprobar la restricci&oacute;n, comprobando adem&aacute;s si se trata de la versi&oacute;n por defecto o si el encabezado <code>Accept</code> de la petici&oacute;n HTTP coincide con la versi&oacute;n de API que se ha inicializado en las opciones.  La cadena puede ser cualquier cosa, con tal de que coincida con el encabezado deseado.</p>
+
+
+<p>Por comodidad, iremos a la parte superior del fichero de rutas y haremos el <code>require</code> de esta clase ah&iacute;.</p>
+
+
+``` /config/routes.rb
+require 'api_constraints'
+
+Store::Application.routes.draw do
+  namespace :api, defaults: {format: 'json'} do
+    scope module: :v1, constraints: ApiConstraints.new(version: 1) do
+      resources :products
+    end
+    scope module: :v2, constraints: ApiConstraints.new(version: 2, default: :true) do
+      resources :products
+    end
+  end
+  
+  resources :products
+  root to: 'products#index'
+end
+```
+
+
+<p>Tras reiniciar el servidor si visitamos la ruta <code>/api/products</code> recibiremos la versi&oacute;n por defecto de la API, o sea la versi&oacute;n 2.  Podemos utilizar <code>curl</code> en el terminal para especificar el encabezamiento <code>Accept</code> para usar una versi&oacute;n diferente.</p>
+
+
+``` terminal
+$ curl -H 'Accept: application/vnd.example.v1' http://localhost:3000/api/products
+```
+
+
+<p>Esto devuelve una respuesta con productos que tienen el atributo <code>released_on</code>, lo que coincide con la versi&oacute;n 1 de la API.</p>

@@ -1,0 +1,298 @@
+<p>A continuaci&oacute;n se muestra una captura de pantalla de una aplicaci&oacute;n llamada  &ldquo;You Haiku&rdquo; que permite a los usuarios escribir y a&ntilde;adir Haikus en el sitio web.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1252/original/E364I01.png" width="800" height="400" alt="El sitio web de YouHaiku."/>
+</div>
+
+<p>Ya se han a&ntilde;adido varios Haikus en la aplicaci&oacute;n, y queremos que los usuarios puedan votar a favor o en contra de ellos.  Nuestra aplicaci&oacute;n todav&iacute;a no tiene ning&uacute;n sistema de votaciones, as&iacute; que &iquest;c&oacute;mo podemos a&ntilde;adir esta funcionalidad?  Podr&iacute;amos escribirla desde cero pero en lugar de eso utilizaremos una gema llamada  <a href="https://github.com/twitter/activerecord-reputation-system">Active Record Reputation System</a>.  Esta gema nos permite calcular la valoraci&oacute;n medio, sumar el total de votos, etc.  En este episodio veremos c&oacute;mo usarla en nuestra aplicaci&oacute;n.</p>
+
+<h3>Instalaci&oacute;n</h3>
+
+<p>Empezaremos a&ntilde;adiendo la gema al <code>Gemfile</code> y ejecutando <code>bundle</code> para instalarla.  N&oacute;tese que tenemos que requerir el fichero como <code>reputation_system</code>.</p>
+
+
+``` /Gemfile
+gem 'activerecord-reputation-system', require: 'reputation_system'
+```
+
+
+<p>Tenemos que ejecutar un generador para crear los ficheros de migraci&oacute;n con las tablas necesarias.  Luego veremos estos ficheros con m&aacute;s detenimiento, pero por ahora simplemente migraremos la base de datos a&ntilde;adiendo las tablas y columnas.</p>
+
+
+``` terminal
+$ rails g reputation_system
+$ rake db:migrate
+```
+
+
+<p>A continuaci&oacute;n tenemos que modificar el modelo sobre el que queremos que voten los usuarios, a&ntilde;adiendo una llamada a <code>has_reputation</code>.  Pasaremos el nombre que queramos darle a este concepto de reputaci&oacute;n (en nuestro caso votos), y dos opciones m&aacute;s: <code>source</code>, que es el nombre del modelo que realizar&aacute; la votaci&oacute;n, y <code>aggregated_by</code> que puede valer <code>sum</code>, <code>average</code> o <code>product</code>, dependiendo de c&oacute;mo queramos que se realicen los c&aacute;lculos.  Las opciones est&aacute;n documentadas en el  <a href="https://github.com/twitter/activerecord-reputation-system#active-record-reputation-system---">README</a> as&iacute; como el resto de opciones que podemos pasar.</p>
+
+
+
+``` /app/models/haiku.rb
+class Haiku < ActiveRecord::Base
+  attr_accessible :content
+
+  belongs_to :user
+  
+  has_reputation :votes, source: :user, aggregated_by: :sum
+end
+```
+
+
+<p>Con este c&oacute;digo ya podemos emepzar a trabajar en nuestro sistema de votaciones.  Queremos tener dos enlaces junto a cada haiku de forma que un usuario pueda votar a favor o en contra, pero &iquest;a d&oacute;nde deber&iacute;an llevar estos enlaces?  Tenemos un par de opciones: podr&iacute;amos generar un nuevo recurso llamado <code>haiku_votes</code> o bien podr&iacute;amos hacer acciones para miembros del recurso <code>Haiku</code>.  Seguiremos este &uacute;ltimo camino a&ntilde;adiendo una opci&oacute;n llamada <code>votes</code> que recibe peticiones POST.</p>
+
+
+``` /config/routes.rb
+Youhaiku::Application.routes.draw do
+  get 'signup', to: 'users#new', as: 'signup'
+  get 'login', to: 'sessions#new', as: 'login'
+  get 'logout', to: 'sessions#destroy', as: 'logout'
+
+  resources :users
+  resources :sessions
+  resources :haikus do
+    member { post :vote }
+  end
+
+  root to: 'haikus#index'
+end
+```
+
+
+<p>A continuaci&oacute;n vamos a a&ntilde;adir la acci&oacute;n del voto al controlador <code>HaikusController</code>.  El valor de un voto deber&iacute;a ser <code>1</code> o <code>-1</code>, dependiendo de si era a favor o en contra.  Vamos a usar un par&aacute;metro para el tipo de voto y contaremos que es a favor si tiene el valor  &ldquo;up&rdquo;.  Recuperaremos el haiku por su  <code>id</code> e invocaremos un m&eacute;todo llamado  <code>add_evaluation</code>. El m&eacute;todo recibe tres argumentos: el nombre de la reputaci&oacute;n, el valor a a&ntilde;adir y el objeto de origen (que en este caso es el usuario registrado).  Finalmente volveremos a la p&aacute;gina de origen y mostraremos un mensaje de aviso.</p>
+
+
+``` /app/controllers/haikus_controller.rb
+def vote
+  value = params[:type] == "up" ? 1 : -1
+  @haiku = Haiku.find(params[:id])
+  @haiku.add_evaluation(:votes, value, current_user)
+  redirect_to :back, notice: "Thank you for voting!"
+end
+```
+
+
+<p>A continuaci&oacute;n vamos a a&ntilde;adir los enlaces para votar en la plantilla de la vista, en el parcial que muestra el Haiku.  Los enlaces apuntan a <code>vote_haiku_path</code> con un tipo que refleja el car&aacute;cter del voto.</p>
+
+
+``` /app/views/haikus/_haiku.html.erb
+<div class="haiku">
+  <%= simple_format haiku.content %>
+  <em>
+    -- <%= haiku.user.name %>
+    | <%= link_to "up", vote_haiku_path(haiku, type: "up"), method: "post" %>
+    | <%= link_to "down", vote_haiku_path(haiku, type: "down"), method: "post" %>
+  </em>
+</div>
+```
+
+
+<p>Puede ser que tengamos que reiniciar el servidor para que tengan efecto los cambios, tras lo cual tras recargar la p&aacute;gina tendr&iacute;amos que ver los enlaces de votaci&oacute;n.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1253/original/E364I02.png" width="800" height="400" alt="The voting links are now visible."/>
+</div>
+
+
+<h3>Actualizaci&oacute;n de los votos</h3>
+
+<p>Si votamos a favor de un Haiku y luego cambiamos de idea y votamos de nuevo pero esta vez en contra veremos un mensaje de error de ActiveRecord.  Esto es porque el usuario vota dos veces en el mismo Haiku y el sistema de reputaci&oacute;n impide autom&aacute;ticamente los votos duplicados.  Podr&iacute;amos hacer un <code>rescue</code> de esta excepci&oacute;n en el controlador <code>HaikusController</code>, pero en su lugar utilizaremos un m&eacute;todo llamado <code>add_or_update_evaluation</code> para guardar el voto.</p>
+
+
+``` /app/controllers/haikus_controller.rb
+def vote
+  value = params[:type] == "up" ? 1 : -1
+  @haiku = Haiku.find(params[:id])
+  @haiku.add_or_update_evaluation(:votes, value, current_user)
+  redirect_to :back, notice: "Thank you for voting!"
+end
+```
+
+
+<p>Esto actualizar&aacute; los votos ya existentes.  Si ahora un usuario vota m&aacute;s de una vez se actualizar&aacute; un &uacute;nico voto.  Estar&iacute;a bien poder ver el n&uacute;mero de votos recibido por un Haiku, as&iacute; que lo a&ntilde;adiremos a continuaci&oacute;n.  Podemos hacerlo invocando <code>reputation_value_for</code> en el haiku, pas&aacute;ndole la reputaci&oacute;n cuyo valor queremos mostrar.  Esto devuelve un valor en punto flotante, as&iacute; que llamamos <code>to_i</code> para hacer un redondeo hacia abajo.</p>
+
+
+``` /app/views/haikus/_haiku.html.erb
+<div class="haiku">
+  <%= simple_format haiku.content %>
+  <em>
+    -- <%= haiku.user.name %>
+    | <%= pluralize haiku.reputation_value_for(:votes).to_i, "vote" %>
+    | <%= link_to "up", vote_haiku_path(haiku, type: "up"), method: "post" %>
+    | <%= link_to "down", vote_haiku_path(haiku, type: "down"), method: "post" %>
+  </em>
+</div>
+```
+
+
+<p>Nos gustar&iacute;a ordenar el listado de haikus bas&aacute;ndonos en el n&uacute;mero neto de votos a favor.  Lo haremos en la acci&oacute;n <code>index</code> de  <code>HaikusController</code>, en la que ahora mismo simplemente recuperamos los haikus sin m&aacute;s.  Podemos utilizar el m&eacute;todo <code>find_with_reputation</code> para recogerlos en el orden correcto.</p>
+
+
+``` /app/controllers/haikus_controller.rb
+def index
+  @haikus = Haiku.find_with_reputation(:votes, :all, order: 'votes desc')
+end
+```
+
+
+<p>El segundo argumento es el &aacute;mbito que queremos usar. A&uacute;n no hemos hablado de los &aacute;mbitos de reputaci&oacute;n, se trata de &aacute;mbitos nominales de ActiveRecord pero son especif&iacute;cos del sistema de reputaci&oacute;n, utilizaremos el &aacute;mbito <code>:all</code> para devolverlos todos.  Si recargamos la p&aacute;gina veremos que ahora se muestran en el orden deseado.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1254/original/E364I03.png" width="800" height="400" alt="Los haikus se muestran ordenados por el número de votos que tienen."/>
+</div>
+
+<p>A continuaci&oacute;n queremos mostrar el n&uacute;mero total de votos que un usuario ha recibido por sus haikus, y el sistema de reputaciones permite definir reputaciones de forma indirecta, por lo que podremos hacerlo de la siguiente manera:</p>
+
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  has_secure_password
+  attr_accessible :name, :password, :password_confirmation
+  validates_uniqueness_of :name
+
+  has_many :haikus
+  
+  has_reputation :votes, source: {reputation: :votes, of: :haikus}, aggregated_by: :sum
+end
+```
+
+
+<p>Aqu&iacute; utilizamos <code>has_reputation</code> con un <em>hash</em> para el origen, con lo que le decimos al sistema de reputaci&oacute;n que tiene que delegar en la reputaci&oacute;n llamada <code>votes</code> del modelo Haiku.  Se agrega el resultado para dar una puntuaci&oacute;n total para el usuario.  Podemos usarlo para mostrar con el nombre del usuario en el fichero de <em>layout</em> de la aplicaci&oacute;n.</p>
+
+
+``` /app/views/layouts/application.html.erb
+Logged in as <strong><%= current_user.name %></strong>
+(<%= current_user.reputation_value_for(:votes).to_i %>).
+```
+
+
+<p>Al recargar la p&aacute;gina veremos la puntuac&oacute;n del usuario actual junto a su nombre.</p>
+
+<h3>C&oacute;mo mostrar al usuario los haikus por los que ha votado</h3>
+
+<p>Para que a los usuarios les resulte sencillo ver los haikus que han votado, ocultaremos los enlaces y los cambiaremos por un breve texto.  A pesar de que la gema no incluye una forma clara de hacerlo, s&iacute; que es posible.  Si miramos los ficheros de migraci&oacute;n generados anteriormente veremos que la gema crea una tabla en la base de datos llamada <code>rs_evaluations</code>, en la que se crea un registro cada vez que un usuario vota.</p>
+
+
+``` /db/migrations/20120718000000_create_reputation_system.rb
+def self.up
+  create_table :rs_evaluations do |t|
+    t.string      :reputation_name
+    t.references  :source, :polymorphic => true
+    t.references  :target, :polymorphic => true
+    t.float       :value, :default => 0
+    t.timestamps
+  end
+  # Rest of migration omitted
+end
+```
+
+
+<p>La tabla tiene en cuenta el nombre de la reputaci&oacute;n, que en nuestro caso es <code>votes</code>, la fuente, que en este caso es el modelo <code>User</code>, el destino (el modelo <code>Haiku</code>) y el <code>value</code> que ser&aacute; <code>1</code> o <code>-1</code> dependiendo de si el voto es a favor o en contra.  N&oacute;tese que tanto <code>source</code> como <code>target</code> son asociaciones polim&oacute;rficas.  Hay un modelo <code>RSEvaluation</code> que refleja los contenidos de esta tabla, lo que quiere decir que podemos asociar un registro de <code>User</code> con este modelo de la siguiente manera:</p>
+
+
+``` /app/models/user.rb
+has_many :evaluations, class_name: "RSEvaluation", as: :source
+```
+
+
+<p>Es necesario llevar la opci&oacute;n <code>as:</code> porque se trata de una asociaci&oacute;n polim&oacute;rfica.  Con esto ya podemos determinar si un usuario dado ha votado en un haiku concreto.</p>
+
+
+``` /app/models/user.rb
+def voted_for?(haiku)
+  evaluations.where(target_type: haiku.class, target_id: haiku.id).present?
+end
+```
+
+
+<p>Aqu&iacute; recuperamos todas las evaluaciones para determinar si existe una con el <code>type</code> e <code>id</code> correctos.  Hay formas m&aacute;s eficientes de hacerlo para p&aacute;ginas en las que aparezca muchas veces, pero de momento con este enfoque nos servir&aacute;.  Podemos usar el m&eacute;todo para ocultar los enlaces si un usuario ya ha emitido un voto.</p>
+
+
+``` /app/views/haikus/_haiku.html.erb
+<div class="haiku">
+  <%= simple_format haiku.content %>
+  <em>
+    -- <%= haiku.user.name %>
+    | <%= pluralize haiku.reputation_value_for(:votes).to_i, "vote" %>
+    <% if current_user && !current_user.voted_for?(haiku) %>
+      | <%= link_to "up", vote_haiku_path(haiku, type: "up"), method: "post" %>
+      | <%= link_to "down", vote_haiku_path(haiku, type: "down"), method: "post" %>
+    <% end %>
+  </em>
+</div>
+```
+
+
+<p>Al recargar la p&aacute;gina veremos que los enlaces han desaparecido de los haikus para los que ya hemos votado.</p>
+
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1255/original/E364I04.png" width="800" height="400" alt="Los enlaces ya no aparecen en los haikus en los que ya hemos votado."/>
+</div>
+
+<p>Podr&iacute;amos hacer muchas m&aacute;s cosas en esta aplicaci&oacute;n, como por ejemplo a&ntilde;adir esta restricci&oacute;n en la acci&oacute;n del controlador o impedir que un usuario vote por sus propios haikus, pero no lo veremos.</p>
+
+<h3>C&oacute;mo a&ntilde;adir las votaciones desde cero</h3>
+
+<p>Con  esto concluimos nuestro repaso r&aacute;pido de ActiveRecord Reputation System.  Se trata de una gema muy &uacute;til, pero parece que deber&iacute;a ser f&aacute;cil reproducir la misma funcionalidad nosotros mismos.  De hecho es este el caso, y podemos ver el c&oacute;digo fuente  <a href="https://github.com/railscasts/364-active-record-reputation-system/tree/master/youhaiku-from-scratch">en Github</a>. En la parte final del episodio daremos un repaso r&aacute;pido a este c&oacute;digo.</p>
+
+<p>Tenemos un modelo <code>HaikuVote</code> que pertenece tanto a <code>Haiku</code> como a <code>User</code>.  Lo mejor de este enfoque es que podemos poner las validaciones que queramos en este caso, incluyendo los valores de los votos, o que un usuario no pueda votar por sus propios haikus.</p>
+
+
+``` /app/models/haiku_vote.rb
+class HaikuVote < ActiveRecord::Base
+  attr_accessible :value, :haiku, :haiku_id
+
+  belongs_to :haiku
+  belongs_to :user
+
+  validates_uniqueness_of :haiku_id, scope: :user_id
+  validates_inclusion_of :value, in: [1, -1]
+  validate :ensure_not_author
+
+  def ensure_not_author
+    errors.add :user_id, "is the author of the haiku" if haiku.user_id == user_id
+  end
+end
+```
+
+
+<p>Lo m&aacute;s dif&iacute;cil de hacer desde cero es ordenar los haikus bas&aacute;ndonos en el n&uacute;mero de votos.  Esto se implementa en el modelo <code>Haiku</code> con un m&eacute;todo llamado <code>by_votes</code>.</p>
+
+
+``` /app/models/haiku.rb
+class Haiku < ActiveRecord::Base
+  attr_accessible :content
+
+  belongs_to :user
+  has_many :haiku_votes
+
+  def self.by_votes
+    select('haikus.*, coalesce(value, 0) as votes').
+    joins('left join haiku_votes on haiku_id=haikus.id').
+    order('votes desc')
+  end
+
+  def votes
+    read_attribute(:votes) || haiku_votes.sum(:value)
+  end
+end
+```
+
+
+<p>Para que esto funcione hace falta escribir un poco de SQL, pero funcionar&aacute;.</p>
+
+<p>Otra &aacute;rea dif&iacute;cil es determinar el n&uacute;mero de votos recibidos por un usuario, si bien el m&eacute;todo <code>joins</code> de ActiveRecord hace que no tengamos que usar c&oacute;digo SQL.</p>
+
+
+``` /app/models/user.rb
+def total_votes
+  HaikuVote.joins(:haiku).where(haikus: {user_id: self.id}).sum('value')
+end
+```
+
+
+<p>&iquest;Es mejor escribir esta funcionalidad desde cero, o es mejor usar la gema?  La gema es &uacute;til si tenemos una configuraci&oacute;n m&aacute;s compleja, especialmente si hay m&uacute;ltiples modelos cuya reputaci&oacute;n queremos valor.  El uso de asociaciones polim&oacute;rficas puede resultar muy &uacute;til.  Si tenemos una configuraci&oacute;n m&aacute;s simple, como la aplicaci&oacute;n de ejemplo que hemos visto, es mejor implementarlo todo desde cero.</p>

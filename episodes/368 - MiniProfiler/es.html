@@ -1,0 +1,136 @@
+<p>Supongamos que estamos trabajando en una aplicaci&oacute;n Rails y empezamos a notar que va un poco lenta.  Obviamente queremos optimizar su rendimiento pero antes de hacerlo es mejor utilizar una herramienta de perfilado de forma que podamos averiguar d&oacute;nde est&aacute;n los cuellos de botella.  Hay disponibles muchas herramientas de este tipo, pero en este episodio vamos a usar  <a href="http://miniprofiler.com/">MiniProfiler</a>, que fue creada originalmente para el desarrollo en .Net pero que ha sido traducida a Ruby y viene muy bien para perfilar aplicaciones Rails.  Se puede incluir f&aacute;cilmente MiniProfiler a una aplicaci&oacute;n Rails, lo &uacute;nico que hay que hacer es a&ntilde;adir la gema al <code>Gemfile</code> para instalarla.
+	
+
+``` /Gemfile
+gem 'rack-mini-profiler'
+```
+
+
+<p>Tras reiniciar la aplicaci&oacute;n y cargar una de sus p&aacute;ginas veremos que MiniProfiler est&aacute; habilitado por defecto en modo de desarrollo. Se muestra en la parte superior el tiempo que ha tardado la p&aacute;gina en cargar, y haciendo clic en este tiempo iremos a un desglose detallado del tiempo empleado en cada parte de nuestra aplicaci&oacute;n.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1274/original/E368I01.png" width="800" height="500" alt="MiniProfiler en nuestra aplicación."/>
+</div>
+
+<p>Aqu&iacute; puede verse el tiempo empleado en el controlador y donde m&aacute;s tiempo hemos tardado ha sido en la ejecuci&oacute;n de la salida de la acci&oacute;n <code>index</code> , supuestamente porque tiene que ejecutar 5 consultas SQL (debido a la carga perezosa de objetos de la base de datos, este tiempo ocurre durante la interpretaci&oacute;n de la plantilla).  Si hacemos clic en el enlace SQL veremos  exactamente qu&eacute; consultas SQL se ejecutaron, as&iacute; como una traza de cada una de ellas.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1275/original/E368I02.png" width="800" height="500" alt="Las consultas SQL de nuestra aplicación."/>
+</div>
+
+<p>Esta traza muestra que se realiza una consulta SELECT para recuperar todos los contenidos de cada tarea de cada proyecto.  En la propia p&aacute;gina s&oacute;lo mostramos el n&uacute;mero de tareas que tiene cada proyecto por lo que estamos consultando muchos m&aacute;s datos de los que realmente necesitamos.  Si miramos la plantilla que hemos ejecutado veremos el c&oacute;digo que muestra el n&uacute;mero de tareas.</p>
+
+
+``` /app/views/projects/index.html.erb
+<%= pluralize project.tasks.length, "task" %>
+```
+
+
+<p>No es eficiente llamar a <code>project.tasks.length</code> para obtener el n&uacute;mero de tareas porque la consulta recuperar&aacute; todos los datos de todas las tareas de la base de datos, por lo que usaremos <code>tasks.size</code>.</p>
+
+
+``` /app/views/projects/index.html.erb
+<%= pluralize project.tasks.size, "task" %>
+```
+
+
+<p>Veremos que al recargar la p&aacute;gina MiniProfiler muestra un n&uacute;mero m&aacute;s peque&ntilde;o porque la base de datos tiene que enviar un n&uacute;mero menor de datos.  En lugar de obtener todos los datos relacionados con un proyecto s&oacute;lo estamos recuperando el recuento, lo que lleva menos tiempo.  Dicho esto todav&iacute;a estamos ejecutando cinco consultas SQL en esta p&aacute;gina, y seg&uacute;n vayamos a&ntilde;adiendo productos veremos que este n&uacute;mero va aumentando.  Hay una forma de reducir el n&uacute;mero de consultas a una pero tendremos que escribir SQL directamente.  Lo invocaremos en la acci&oacute;n <code>index</code> de <code>ProjectsController</code>, si bien en una aplicaci&oacute;n para producci&oacute;n este m&eacute;todo tendr&iacute;a que ir alojado en el modelo.</p>
+
+
+``` /app/controllers/projects_controller.rb
+def index
+  @projects = Project.order(:created_at).select("projects.*, count(tasks.id) as tasks_count").joins("left outer join tasks on project_id = projects.id").group("projects.id")
+end
+```
+
+
+<p>Tenemos que recuperar algo m&aacute;s que las columnas de la tabla de proyectos, tambi&eacute;n recuperamos la cuenta del n&uacute;mero de tareas.  Hemos llamado <code>tasks_count</code> a esta columna, y es importante tener en cuenta este nombre porque es lo que utilizar&aacute; <code>tasks.size</code> en lugar de ejecutar una segunda consulta.  Tenemos que unir el resultado con la asociaci&oacute;n <code>tasks</code> pero si usamos <code>joins(:tasks)</code> no ser&iacute;a la mejor manera de hacerlo porque realizar&aacute; un <em>join</em> interno y por tanto dejar&aacute; de lado los proyectos que no tengan tareas.  Hemos escrito un fragmento de SQL que realizar&aacute; la combinaci&oacute;n de tabla izquierda, no se trata de la consulta m&aacute;s elegante pero la p&aacute;gina carga mucho m&aacute;s r&aacute;pido, y MiniProfiler muestra que s&oacute;lo estamos ejecutando una consulta SQL.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1276/original/E368I03.png" width="800" height="500" alt="The profiler shows that only one SQL query is now run."/>
+</div>
+
+<p>Ahora la consulta SQL tarda un milisegundo en ejecutarse, pero veremos que a ActiveRecord le lleva cierto tiempo instanciar los objetos.  MiniProfiler proporciona un m&eacute;todo para ver el tiempo que tarda en ejecutarse un fragmento concreto de c&oacute;digo, que podemos usar en el controlador.  Podemos invocar a  <code>Rack::MiniProfiler.step</code> pas&aacute;ndole un bloque y una descripci&oacute;n, de forma que en el informe aparecer&aacute; el tiempo que ha tardado el bloque en ejecutarse.  Como los proyectos se cargan de forma diferida en la vista, tenemos que invocar aqu&iacute; <code>@project.all</code> para cargarlos antes.</p>
+
+
+``` /app/controllers/projects_controller.rb
+def index
+  @projects = Project.order(:created_at).select("projects.*, count(tasks.id) as tasks_count").joins("left outer join tasks on project_id = projects.id").group("projects.id")
+  Rack::MiniProfiler.step("fetch projects") do
+     @projects.all
+  end
+end
+```
+
+
+<p>Podemos ver el tiempo que lleva cargar todos los proyectos recargando la p&aacute;gina.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1277/original/E368I04.png" width="800" height="500" alt="Ahora aparece el tiempo que cuesta cargar todos los proyectos."/>
+</div>
+
+<p>Este enfoque es &uacute;til siempre que nos encontremos con que tenemos que medir algo muy concreto.  El siguiente paso en la optimizaci&oacute;n de esta consulta ser&iacute;a a&ntilde;adir una columna con el valor del contador, lo que no haremos aqu&iacute;, ya que se vi&oacute; en el <a href="http://railscasts.com/episodes/23-counter-cache-column">episodio 23</a>.</p>
+
+<h3>Ejecuci&oacute;n en modo de producci&oacute;n</h3>
+
+<p>Hasta ahora hemos estado realizando el perfilado en el entorno de desarrollo, que siempre funciona m&aacute;s lento que el modo de producci&oacute;n.  Cuando tengamos que hacer un perfilado intensivo de una aplicaci&oacute;n es mejor hacerlo en producci&oacute;n y esto puede ser un poco complicado en una m&aacute;quina de desarrollo si bien veremos aqu&iacute; los pasos a seguir.  Primero tenemos que cambiar la opci&oacute;n <code>serve_static_assets</code> en nuestro fichero de configuraci&oacute;n de producci&oacute;n para que sea <code>true</code>.</p>
+
+
+``` /config/environments/production.rb
+# Disable Rails's static asset server (Apache or nginx will already do this)
+config.serve_static_assets = true
+```
+
+
+<p>Alternativamente podemos configurar un entorno de preproducci&oacute;n separado como hicimos en el  <a href="http://railscasts.com/episodes/72-adding-an-environment">episodio 72</a>.  Luego tenemos que generar los est&aacute;ticos de nuestra aplicaci&oacute;n y configurar la base de datos en el entorno de producci&oacute;n.  Tras esto ya podemos arrancar el servidor en producci&oacute;n.</p>
+
+
+``` terminal
+$ rake assets:precompile
+$ rake db:setup RAILS_ENV=production
+$ rails s -e production
+```
+
+
+<p>Si ahora recargamos la p&aacute;gina veremos que la aplicaci&oacute;n funciona en modo de producci&oacute;n.  El tiempo que muestra MiniProfiler ya no aparece porque en producci&oacute;n la funcionalidad est&aacute; desactivada.  Conseguir que aparezca es f&aacute;cil, simplemente a&ntilde;adiendo un <code>before_filter</code> en <code>ApplicationController</code>.</p>
+
+
+``` /app/controllers/application_controller.rb
+class ApplicationController < ActionController::Base
+  protect_from_forgery
+  
+  before_filter :miniprofiler
+  
+  private
+  def miniprofiler
+    Rack::MiniProfiler.authorize_request
+  end
+end
+```
+
+
+
+<p>Un efecto &uacute;til de este enfoque es que nos permite cambiar el comportamiento seg&uacute;n el usuario actual, de forma que podr&iacute;amos hacer que el perfilador s&oacute;lo apareciese cuando el usuario fuese administrador.</p>
+
+<p>Cuando estamos en modo de producci&oacute;n tendremos que reiniciar el servidor cada vez que hagamos un cambio en el c&oacute;digo de la aplicaci&oacute;n.  Tras recargar la p&aacute;gina veremos que el perfilador vuelve a aparecer.  Al desplegar la aplicaci&oacute;n en las m&aacute;quinas de producci&oacute;n veremos que los resultados ser&aacute;n diferentes porque posiblemente el <em>hardware</em> sobre el que se ejecute la aplicaci&oacute;n ser&aacute; mucho m&aacute;s potente que la m&aacute;quina en la que estamos desarrollando la aplicaci&oacute;n.  Por tanto, en el equipo de desarrollo es mejor centrarse en el tiempo que podemos reducir en la carga de la p&aacute;gina que fijarse en un valor absoluto.  Si podemos mejorar el tiempo de carga de una p&aacute;gina en desarrollo es batante probable que tambi&eacute;n mejore el tiempo de carga en el entorno de producci&oacute;n.</p>
+
+<h3>M&aacute;s funcionalidades</h3>
+
+<p>Vamos a terminar este episodio con un repaso de otras de las funcionalidades de MiniProfiler.  Una de las m&aacute;s &uacute;tiles es la manera en la que gestiona las redirecciones.  Si editamos un producto y luego hacemos clic en  &ldquo;update&rdquo; veremos dos valores del perfilador, uno para la acci&oacute;n de actualizaci&oacute;n y otro para la de visualizaci&oacute;n.  Esto quiere decir que podemos ver los valores de perfilado de acciones que terminen con una redirecci&oacute;n.  Otra funcionalidad muy &uacute;til es la posibilidad de personalizar MiniProfiler enviando un par&aacute;metro especial en la URL de la petici&oacute;n.  Si a&ntilde;adimos el par&aacute;metro <code>pp=help</code> veremos la lista de opciones que podemos usar.</p>
+
+
+``` terminal
+Append the following to your query string:
+
+  pp=help : display this screen
+  pp=env : display the rack environment
+  pp=skip : skip mini profiler for this request
+  pp=no-backtrace : don&#x27;t collect stack traces from all the SQL executed
+  pp=full-backtrace : enable full backtrace for SQL executed
+  pp=sample : sample stack traces and return a report isolating heavy usage (requires the stacktrace gem)
+```  
+
+
+<p>Tenemos opciones para ver variables de entorno de Rack, configurar el volcado de las peticiones SQL, y una opci&oacute;n llamada <code>sample</code> que devuelve la pila de llamadas.  Sam Safron ha escrito una  <a href="http://samsaffron.com/archive/2012/07/12/miniprofiler-ruby-edition">anotaci&oacute;n en su blog</a> donde explica todas estas opciones de la gema, entrando en detalle sobre el perfilado de consultas ActiveRecord, as&iacute; como otras funcionalidades interesantes como especificar el m&eacute;todo que queremos perfilar para a&ntilde;adirlo a la lista de resultados.  Tambi&eacute;n merece la pena leerse el  <a href="https://github.com/SamSaffron/MiniProfiler/blob/master/Ruby/README.md">README de la gema</a> que contiene informaci&oacute;n de otras cosas como el motor de almacenamiento, que por defecto es en un archivo pero podemos usar Redis, lo que es &uacute;til si tenemos varios servidores ejecutando nuestra aplicaci&oacute;n.</p>

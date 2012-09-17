@@ -1,0 +1,275 @@
+<p>En Rails existen muchas soluciones para implementar los procesos que tarden demasiado como tareas de segundo plano.  Cada una una tiene sus ventajas, y <a href="http://mperham.github.com/sidekiq/">Sidekiq</a> no es la excepci&oacute;n.  Se trata de una gema similar a Resque, que ya vimos en el <a href="http://railscasts.com/episodes/271-resque">episodio 271</a> pero la diferencia principal es que gestiona m&uacute;ltiples tareas de forma concurrente mediante el uso de <em>threads</em> en lugar de procesos lo que resulta en un menor uso de la memoria.</p>
+
+<h3>Nuestra aplicaci&oacute;n de fragmentos de c&oacute;digo</h3>
+
+<p>La interfaz de Sidekiq es similar a la de otras soluciones, por lo que la veremos r&aacute;pidamente y luego nos centraremos en la funcionalidad que lo hace &uacute;nico.   La aplicaci&oacute;n de ejemplo con la que vamos a trabajar se muestra a continuaci&oacute;n; es bastante sencilla y tiene un formulario con un men&uacute; desplegable que incluye una lista de lenguajes y una caja de texto en la que podemos pegar un fragmento de c&oacute;digo.  Al enviar el formulario se mostrar&aacute; el fragmento con resaltado sint&aacute;tico.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1262/original/E366I01.png" width="800" height="500" alt="La aplicación de fragmentos de código."/>
+</div>
+
+<p>En la acci&oacute;n <code>create</code> de <code>SnippetsController</code> veremos c&oacute;mo se hace el resaltado sint&aacute;ctico.</p>
+
+
+``` /app/controllers/snippets_controller.rb
+def create
+  @snippet = Snippet.new(params[:snippet])
+  if @snippet.save
+    uri = URI.parse("http://pygments.appspot.com/")
+    request = Net::HTTP.post_form(uri, lang: @snippet.language, code: @snippet.plain_code)
+    @snippet.update_attribute(:highlighted_code, request.body)
+    redirect_to @snippet
+  else
+    render :new
+  end
+end
+```
+
+
+<p>Tras guardar el fragmento de c&oacute;digo, se hace una petici&oacute;n a un servicio web externo que utiliza Pygments para obtener el resaltado sint&aacute;ctico.  Si hacemos una petici&oacute;n POST e incluimos el lenguaje y el c&oacute;digo en plano, la respuesta contendr&aacute; el c&oacute;digo con las etiquetas de color.  Siempre es buena idea ejecutar este tipo de llamadas a servicios externos como procesos en segundo plano, de forma que si el servicio se encuentra ca&iacute;do o tarda en responder el usuario no se vea afectado.  Podemos utilizar Sidekiq para hacerlo.</p>
+
+<h3>C&oacute;mo a&ntilde;adir Sidekiq a nuestra aplicaci&oacute;n</h3>
+
+<p>Al igual que Resque, Sidekiq utiliza Redis para gestionar la cola de trabajos, por lo que primero tenemos que instalar Redis.  En OS X la forma m&aacute;s f&aacute;cil es con Homebrew:</p>
+
+
+``` terminal
+$ brew install redis
+```
+
+
+<p>Tras la instalaci&oacute;n podemos arrancar el servidor Redis con esta orden:</p>
+
+
+``` terminal
+$ redis-server /usr/local/etc/redis.conf
+```
+
+
+<p>A continuaci&oacute;n podemos a&ntilde;adir la gema Sidekiq al <code>Gemfile</code> y ejecutar <code>bundle</code> para instalarlo.</p>
+
+
+``` /Gemfile
+gem 'sidekiq'
+```
+
+
+<p>Sidekiq soporta varias interfaces.  La forma m&aacute;s normal de usarlo es creando una clase separada para la tarea, as&iacute; que la crearemos en el directorio <code>app/workers</code>, lo que garantiza que ser&aacute; cargada autom&aacute;ticamente por la aplicaci&oacute;n.</p>
+
+
+``` /app/workers/pygments_worker.rb
+class PygmentsWorker
+  include Sidekiq::Worker
+  
+  def perform
+    
+  end
+end
+```
+
+
+<p>La clase debe incluir el m&oacute;dulo <code>Sidekiq::Worker</code>, que veremos m&aacute;s adelante, as&iacute; como un m&eacute;todo llamado <code>perform</code> que contiene el c&oacute;digo que queremos que se ejecute en segundo plano.  Moveremos el c&oacute;digo referente al coloreado sint&aacute;ctico del controlador a este m&eacute;todo, y para ejecutarlo invocaremos  <code>PygmentsWorker.perform_async</code> que a&ntilde;adir&aacute; el trabajo a Redis y luego invocar&aacute; a <code>perform</code> de manera as&iacute;ncrona.  El m&eacute;todo <code>perform</code> debe tener acceso al registro del fragmento de c&oacute;digo, y si bien lo podr&iacute;amos pasar directamente a <code>perform_async</code> no ser&iacute;a la mejor idea porque tendr&iacute;amos que serializar el objeto entero en Redis.  Es mejor serializar objetos sencillos como cadenas o enteros que modelos de ActiveRecord, por lo que simplemente pasaremos el <code>id</code> y luego recuperaremos el registro de la base de datos en nuestra tarea de segundo plano.</p>
+
+
+``` /app/controllers/snippets_controller.rb
+def create
+  @snippet = Snippet.new(params[:snippet])
+  if @snippet.save
+    PygmentsWorker.perform_async(@snippet.id)
+    redirect_to @snippet
+  else
+    render :new
+  end
+end
+```
+
+
+<p>Podemos pegar ahora en la clase de la tarea el c&oacute;digo que hemos eliminado del controlador, modific&aacute;ndolo para que recupere el registro de la base de datos por su <code>id</code>.</p>
+
+
+``` /app/workers/pygments_worker.rb
+class PygmentsWorker
+  include Sidekiq::Worker
+  
+  def perform(snippet_id)
+    snippet = Snippet.find(snippet_id)
+    uri = URI.parse("http://pygments.appspot.com/")
+    request = Net::HTTP.post_form(uri, lang: snippet.language, code: snippet.plain_code)
+    snippet.update_attribute(:highlighted_code, request.body)
+  end
+end
+```
+
+
+<p>El &uacute;ltimo paso es arrancar el proceso en segundo plano ejecutando la orden <code>sidekiq</code> en el directorio de nuestra aplicaci&oacute;n.  N&oacute;tese que es posible que tengamos que usar <code>bundle exec</code> para que funcione correctamente.</p>
+
+
+``` terminal
+$ bundle exec sidekiq
+```
+
+
+<p>Ahora que Sidekiq se encuentra a la espera de nuevas tareas, tras reiniciar nuestro servidor web (para que se cargue la nueva clase) podemos hacer la siguiente prueba.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1263/original/E366I02.png" width="800" height="500" alt="El coloreado sintáctico aparece inmediatamente porque ahora se ejecuta en segundo plano."/>
+</div>
+
+<p>Veremos que el fragmento de c&oacute;digo no sale de inmediato con resaltado sint&aacute;ctico porque el proceso en segundo plano est&aacute; todav&iacute;a en ejecuci&oacute;n.  Para verlo aplicado tenemos que esperar un par de segundos y recargar la p&aacute;gina.</p>
+
+<h3>Cuestiones a considerar</h3>
+
+<p>Cuando usamos Sidekiq debemos tener en cuenta varias cosas.  Si un trabajo falla porque ha ocurido un error Sidekiq volver&aacute; a intentar ejecutarlo, lo que quiere decir que si se eleva una excepci&oacute;n en cualquier punto del m&eacute;todo <code>perform</code> tenemos que asegurarnos de que no habr&aacute; efectos laterales no deseados si el c&oacute;digo se vuelve a ejecutar.  Esto es especialmente importante cuando trabajamos con correos electr&oacute;nicos, porque no queremos enviarle a un usuario el mismo correo varias veces.  Para desactivar esta funcionalidad podemos utilizar el m&eacute;todo <code>sidekiq_options</code> as&iacute;:</p>
+
+
+``` /app/workers/pygments_worker.rb
+class PygmentsWorker
+  include Sidekiq::Worker
+  sidekiq_options retry: false
+  
+   # Rest of class omitted.
+end
+```
+
+
+<p>De momento vamos a dejar activados los reintentos porque no hay motivo para no reintentar este tipo de tareas si se produce un fallo.</p>
+
+<p>Otro posible problema a tener en cuenta es que el c&oacute;digo de la tarea debe ser seguro cuando se ejecuta en un hilo (<em>thread-safe</em>).  Ya lo vimos en  <a href="http://railscasts.com/episodes/365-thread-safety">el episodio  365</a>, pero por lo general debemos evitar compartir datos mutables entre instancias.  Esto quiere decir en Ruby que son datos a nivel de clase, y deber&iacute;amos evitar usarlos.  Adem&aacute;s, tambi&eacute;n deben ser seguras las librer&iacute;as que utiliza el c&oacute;digo de nuestra tarea.</p>
+
+<p>Tambi&eacute;n debemos tener en cuenta el l&iacute;mite en el tama&ntilde;o de conexiones en el fichero de configuraci&oacute;n de la base de datos.  Por defecto es 5, lo que quiere decir que s&oacute;lo pueden conectarse a la base de datos 5 hilos cada vez.  Es buena idea incrementar este l&iacute;mite.  Por defecto Sidekiq ejecuta hasta 25 tareas a la vez por lo que es buena idea incrementar el tama&ntilde;o del juego de conexiones a este valor, si bien el valor ideal depender&aacute; de la configuraci&oacute;n de cada aplicaci&oacute;n en concreto.</p>
+
+<h3>Funcionalidades de Sidekiq</h3>
+
+<p>Veamos ahora algunas de las funcionalidades de Sidekiq, muchas de las cuales est&aacute;n documentadas en el  <a href="https://github.com/mperham/sidekiq/wiki">wiki de Sidekiq</a>.  Una de las cosas que Sidekiq facilita es hacer que una tarea se ejecute en un momento futuro.  En lugar de invocar <code>perform_async</code> en la tarea podemos invocar <code>perform_in</code> con el n&uacute;mero de segundos que queremos que pasen hasta que se procese el trabajo.</p>
+
+
+``` /app/controllers/snippets_controller.rb
+PygmentsWorker.perform_in(1.hour, @snippet.id)
+```
+
+
+<p>Esto no tiene mucho sentido en nuestra aplicaci&oacute;n pero puede ser muy &uacute;til para expirar cach&eacute;s, por ejemplo.  Otra funcionalidad atractiva es la posibilidad de priorizar las colas.  Supongamos que nuestra aplicaci&oacute;n tiene varias tareas y queremos que algunas se procesen antes.  Para hacerlo tendremos que asignar un proceso de ejecuci&oacute;n a cada cola, lo que podemos hacer con la opci&oacute;n <code>queue</code>:</p>
+
+
+``` /app/workers/pygments_worker.rb
+class PygmentsWorker
+  include Sidekiq::Worker
+  sidekiq_options queue: "high"
+  
+   # Rest of class omitted.
+end
+```
+
+
+<p>Si no se especifica el nombre de una cola la tarea terminar&aacute; por defecto en una cola llamada <code>default</code>.  Si lanzamos la orden <code>sidekiq</code> podemos especificar las colas que queremos procesar, as&iacute; como su peso relativo, con la opci&oacute;n <code>-q</code>.</p>
+
+
+``` terminal
+$ bundle exec sidekiq -q height,5 default,1
+```
+
+
+<p>Con esta orden la cola <code>high</code> tendr&aacute; m&aacute;s prioridad.</p>
+
+<p>Existe una  <a href="https://github.com/mperham/sidekiq/wiki/Deployment">receta de Capistrano</a> que podemos usar para el despliegue.  Si hay opciones concretas que queramos pasar a la orden <code>sidekiq</code> (como la opci&oacute;n <code>-q</code> que aabamos de ver) podemos ponerlas en un fichero <code>sidekiq.yml</code> en el fichero <code>config</code>.  El fichero tiene este aspecto:</p>
+
+
+``` config.yml
+# Sample configuration file for Sidekiq.
+# Options here can still be overridden by cmd line args.
+#   sidekiq -C config.yml
+---
+:verbose: false
+:concurrency:  25
+:queues:
+  - [often, 7]
+  - [default, 5]
+  - [seldom, 3]
+```  
+
+
+<h3>C&oacute;mo monitorizar Sidekiq</h3>
+
+<p>Sidekiq incluye una interfaz web, para monitorizar el funcionamiento de las tareas al estilo de Resque, que est&aacute; basada en Sinatra y que podemos montar en el fichero de rutas de nuestra aplicaci&oacute;n Rails.</p>
+
+
+``` /config/routes.rb
+require 'sidekiq/web'
+
+Example::Application.routes.draw do
+  resources :snippets
+  root to: "snippets#new"
+  mount Sidekiq::Web, at: "/sidekiq"
+end
+```
+
+
+<p>N&oacute;tese que tenemos que requerir <code>sidekiq/web</code> porque por se incluye por defecto.  Si lo hacemos tenemos que incluir tambi&eacute;n otras gemas en el <code>Gemfile</code>, tras lo cual tenemos que ejecutar <code>bundle</code> y reiniciar el servidor para que coja los cambios.</p>
+
+
+``` /Gemfile
+gem 'sinatra', require: false
+gem 'slim'
+```
+
+
+<p>Si ahora visitamos la ruta <code>/sidekiq</code> veremos la interfaz web que dice cu&aacute;ntos procesos hay en ejecuci&oacute;n, el n&uacute;mero de fallos, nuestras colas y qu&eacute; procesos est&aacute;n activos.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1264/original/E366I03.png" width="800" height="626" alt="La interfaz web de Sidekiq."/>
+</div>
+
+<p>Esta ruta debe estar protegida por una clave cuando la aplicaci&oacute;n est&eacute; en producci&oacute;n, en el wiki de Sidekiq se explica c&oacute;mo hacerlo.</p>
+
+<h3>El c&oacute;digo fuente de Sidekiq</h3>
+
+<p>Vamos a terminar el episodio ech&aacute;ndole un vistazo al c&oacute;digo fuente de Sidekiq, porque siempre se aprende algo al hacerlo.  Empezaremos viendo el m&oacute;dulo <code>Sidekiq::Worker</code> que hemos incluido en la clase <code>PygmentsWorker</code>.  El m&oacute;dulo es bastante sencillo y tiene varios m&eacute;todos de clase, incluyendo los m&eacute;todos <code>perform_async</code> y <code>perform_in</code> que ya hemos utilizado.  Estos m&eacute;todos insertan un <em>hash</em> con los detalles en Redis.</p>
+
+
+``` /lib/sidekiq/worker.rb
+def perform_async(*args)
+  client_push('class' => self, 'args' => args)
+ end
+
+def perform_in(interval, *args)
+  int = interval.to_f
+  ts = (int < 1_000_000_000 ? Time.now.to_f + int : int)
+  client_push('class' => self, 'args' => args, 'at' => ts)
+end
+alias_method :perform_at, :perform_in
+
+def get_sidekiq_options # :nodoc:
+  self.sidekiq_options_hash ||= DEFAULT_OPTIONS
+end
+```
+
+
+<p>El m&oacute;dulo tambi&eacute;n incluye el m&eacute;todo <code>sidekiq_options</code> que us&aacute;bamos antes, y hay documentaci&oacute;n acerca de las opciones que recibe.</p>
+
+
+``` /lib/sidekiq/worker.rb
+##
+# Allows customization for this type of Worker.
+# Legal options:
+#
+#   :queue - use a named queue for this Worker, default 'default'
+#   :retry - enable the RetryJobs middleware for this Worker, default *true*
+#   :timeout - timeout the perform method after N seconds, default *nil*
+#   :backtrace - whether to save any error backtrace in the retry payload to display in web UI,
+#      can be true, false or an integer number of lines to save, default *false*
+
+def sidekiq_options(opts={})
+  self.sidekiq_options_hash = get_sidekiq_options.merge(stringify_keys(opts || {}))
+end
+
+DEFAULT_OPTIONS = { 'retry' => true, 'queue' => 'default' }
+
+def get_sidekiq_options # :nodoc:
+  self.sidekiq_options_hash ||= DEFAULT_OPTIONS
+end
+```
+
+
+<p>Otra parte interesante de Sidekiq es su <em>middleware</em>.  No debe confundirse con los <em>middlewares</em> de Rack; en este caso se trata de definir comportamientos que ocurren alrededor del procesamiento de una tarea.  Sidekiq dispone de <em>middlewares</em> en el cliente que se ejecutan antes de insertar la tarea en Redis y otros en el lado del servidor que se ejecutan antes de procesar dicha tarea.  Estos <em>middlewares</em> son los que se encargan de reintentar tareas, trazar su funcionamiento y gestionar las excepcones.  El  <a href="https://github.com/mperham/sidekiq/blob/master/lib/sidekiq/middleware/server/exception_handler.rb">&uacute;ltimo de ellos</a> puede conectar con varios gestores de excepciones como Airbrake, Exception o ExceptionNotifier.  En el wiki se puede encontrar informaci&oacute;n acerca de c&oacute;mo configurar estos servicios, que son un buen ejemplo de lo sencillo que es escribir <em>middlewares</em> en Sidekiq, por lo que podemos escribir los nuestros para extender el comportamiento de Sidekiq.</p>
+
+<p>Tambi&eacute;n merece la pena mirar  <a href="https://github.com/mperham/sidekiq/blob/master/lib/sidekiq/processor.rb">la clase <code>processor</code></a>, que gestiona el procesamiento de las tareas desde que se extraen de Redis.  La clase lista los <em>middlewares</em> incluidos por defecto.  Cuando se procesa una tarea se invoca cada uno de estos <em>middlewares</em>, esta clase tambi&eacute;n incluye <a href="http://celluloid.io/">Celluloid</a>, que es clave para el funcionamiento multihilo de Sidekiq.  Celluloid es un proyecto muy importante que puede ser de ayuda para gestionar la concurrencia con Ruby.  No lo veremos aqu&iacute; en detalle pero merece la pena echarle un vistazo.</p>

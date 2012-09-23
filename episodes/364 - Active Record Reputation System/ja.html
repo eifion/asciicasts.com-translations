@@ -1,0 +1,257 @@
+<p>下の図は、ユーザが俳句を作って投稿することができる“You Haiku”というアプリケーションのスクリーンショットです。</p> 
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1252/original/E364I01.png" width="800" height="400" alt="You Haikuのサイト"/>
+</div>
+
+<p>ここにはすでにいくつかの俳句が登録されていますが、ユーザがそれらに対してupかdownで投票できるようにしたいと思います。このアプリケーションには投票システムがまだありませんが、この機能をどう追加すればいいでしょうか? これをゼロから作る方法もありますが、ここでは<a href="https://github.com/twitter/activerecord-reputation-system">Active Record Reputation System</a>というgemを使用することにします。このgemを使って、簡単にユーザ評価の平均を計算したり、投票数を集計することなどが可能になります。今回はこれを自分のアプリケーションで利用できるようにする方法を説明します。</p>
+
+<h3>作業にとりかかる</h3>
+
+<p>まず最初にgemfileにgemを追加して、bundleコマンドを実行してインストールを行ないます。ファイルを別途<code>reputation_system</code>としてrequireする必要がありますので注意してください。</p>
+
+``` /Gemfile
+gem 'activerecord-reputation-system', require: 'reputation_system'
+```
+
+<p>ジェネレータを実行して、必要なデータベーステーブルを準備するためのmigrationファイルを作成します。これらのファイルの中身については後ほど詳しく見てみることにして、とりあえずここでは必要なテーブルとフィールドをデータベースに追加するためにマイグレーションを実行します。</p>
+
+``` terminal
+$ rails g reputation_system
+$ rake db:migrate
+```
+
+<p>次にユーザに投票させたい対象のモデルを修正して、<code>has_reputation</code>の呼び出しを追加します。これに対して、reputationに設定したい名前(今回はvotes)と2つのオプションを渡します。1つは<code>source</code>で投票を行なうモデルの名称を指定し、もう1つは<code>aggregated_by</code>で、これをどう集計したいかによって<code>sum</code>, <code>average</code>,  <code>product</code>のいずれかを指定します。これらのオプションは、渡すことができるその他のオプションと合わせて、<a href="https://github.com/twitter/activerecord-reputation-system#active-record-reputation-system---">README</a>に説明があります。</p>
+
+``` /app/models/haiku.rb
+class Haiku < ActiveRecord::Base
+  attr_accessible :content
+
+  belongs_to :user
+  
+  has_reputation :votes, source: :user, aggregated_by: :sum
+end
+```
+
+<p>このコードを設定したら、投票システムにとりかかることができます。それぞれの俳句の横に2つのリンクを設定したいと思います。ユーザがupかdownに投票できるようにするために、これらのリンクはどこにrouteを設定すればいいのでしょうか?いくつか選択肢があります。独立した<code>haiku_votes</code>リソースを作るか、あるいはこれを<code>Haiku</code>リソースのメンバーアクションにするという方法もあります。ここでは後者の方法をとることにして、POSTリクエストをとる<code>votes</code>アクションを追加します。</p>
+
+``` /config/routes.rb
+Youhaiku::Application.routes.draw do
+  get 'signup', to: 'users#new', as: 'signup'
+  get 'login', to: 'sessions#new', as: 'login'
+  get 'logout', to: 'sessions#destroy', as: 'logout'
+
+  resources :users
+  resources :sessions
+  resources :haikus do
+    member { post :vote }
+  end
+
+  root to: 'haikus#index'
+end
+```
+
+<p>次に<code>HaikusController</code>にvoteアクションを追加します。voteの値は、upかdownのいずれかに投票されることで<code>1</code>か<code>-1</code>のいずれかになります。typeパラメータを使用して、値が“up”の場合は投票をプラスの評価としてカウントします。次に<code>id</code>で俳句を取得して<code>add_evaluation</code>というメソッドを呼び出します。このメソッドは3つの引数をとります。reputationの名前、追加する値、ソースオブジェクト(今回の場合は現在のユーザ)です。最後に参照元にリダイレクトし、フラッシュメッセージを表示します。</p>
+
+``` /app/controllers/haikus_controller.rb
+def vote
+  value = params[:type] == "up" ? 1 : -1
+  @haiku = Haiku.find(params[:id])
+  @haiku.add_evaluation(:votes, value, current_user)
+  redirect_to :back, notice: "Thank you for voting!"
+end
+```
+
+<p>次に俳句を表示する部分テンプレートに投票用のリンクを追加します。このリンク先を<code>vote_haiku_path</code>にして、voteタイプを反映したタイプ属性をとります。</p>
+
+``` /app/views/haikus/_haiku.html.erb
+<div class="haiku">
+  <%= simple_format haiku.content %>
+  <em>    
+    -- <%= haiku.user.name %>
+    | <%= link_to "up", vote_haiku_path(haiku, type: "up"), method: "post" %>
+    | <%= link_to "down", vote_haiku_path(haiku, type: "down"), method: "post" %>
+  </em>
+</div>
+```
+
+<p>これらの変更を有効化するためにサーバを再起動して、ページをリロードすると投票用リンクが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1253/original/E364I02.png" width="800" height="400" alt="投票用リンクが表示された"/>
+</div>
+
+<h3>投票を更新する</h3>
+
+<p>俳句にupを投票してから気が変わって改めてdownの投票を行なうとActiveRecordエラーが表示されます。これは同じユーザが同じ俳句に2度投票を行なったためで、reputationシステムは自動的に重複投票を禁じます。<code>HaikusController</code>でこの例外を<code>rescue</code>する方法もありますが、ここでは<code>add_or_update_evaluation</code>という別のメソッドを使って投票を記録することにします。</p>
+
+``` /app/controllers/haikus_controller.rb
+def vote
+  value = params[:type] == "up" ? 1 : -1
+  @haiku = Haiku.find(params[:id])
+  @haiku.add_or_update_evaluation(:votes, value, current_user)
+  redirect_to :back, notice: "Thank you for voting!"
+end
+```
+
+<p>このコードは、既存の投票が見つかった場合にそれを更新します。これによって、あるユーザが2度目に投票した場合は、現在の投票が変更されます。それぞれの俳句に対する投票数がわかれば便利なので、次にその機能を付加します。そのためには俳句に対して<code>reputation_value_for</code>を呼び出して、値を取得したいreputationを渡します。これはfloat値を返すので、<code>to_i</code>を呼び出して位を丸めます。</p>
+
+``` /app/views/haikus/_haiku.html.erb
+<div class="haiku">
+  <%= simple_format haiku.content %>
+  <em>    
+    -- <%= haiku.user.name %>
+    | <%= pluralize haiku.reputation_value_for(:votes).to_i, "vote" %>
+    | <%= link_to "up", vote_haiku_path(haiku, type: "up"), method: "post" %>
+    | <%= link_to "down", vote_haiku_path(haiku, type: "down"), method: "post" %>
+  </em>
+</div>
+```
+
+<p>俳句の一覧をupの投票数に基づいてソートしておくといいでしょう。これを<code>HaikusController</code>内の、今はすべての俳句を取得しているだけの、<code>index</code>アクションで行なうことにします。新たに<code>find_with_reputation</code>を使用して、俳句を正しい順番で取得します。</p>
+
+``` /app/controllers/haikus_controller.rb
+def index
+  @haikus = Haiku.find_with_reputation(:votes, :all, order: 'votes desc')
+end
+```
+
+<p>2つ目の引数には、適用したいスコープを指定します。reputation scopeについてまだ説明していませんでした。これはActiveRecordの名前付きスコープとは別の、Reputation Systemに固有のものです。ここでは<code>:all</code>スコープを使用してすべてを検索します。ページをリロードすると、俳句が正しい順番で表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1254/original/E364I03.png" width="800" height="400" alt="俳句が投票数の順番で表示される"/>
+</div>
+
+<p>次にユーザが自分の俳句に対して受けた投票数を表示したいのですが、Reputation Systemがreputationを間接的に定義できるので以下のようにします。</p> 
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  has_secure_password
+  attr_accessible :name, :password, :password_confirmation
+  validates_uniqueness_of :name
+
+  has_many :haikus
+  
+  has_reputation :votes, source: {reputation: :votes, of: :haikus}, aggregated_by: :sum
+end
+```
+
+<p>ここでhas_reputationを元データのハッシュとともに使用します。これがReputation Systemに対して、Haikuモデルの中のvotesというreputationに委譲するよう指示します。この結果を集計し、ユーザに対する全体スコアを算出します。これを、アプリケーションのレイアウトファイルでユーザ名を表示する部分で使用します。</p>
+
+``` /app/views/layouts/application.html.erb
+Logged in as <strong><%= current_user.name %></strong>
+(<%= current_user.reputation_value_for(:votes).to_i %>).
+```
+
+<p>ページをリロードすると、ユーザ名の横に現在のユーザのスコアが表示されています。</p>
+
+<h3>ユーザ画面に自分が投票した俳句を表示する</h3>
+
+<p>自分が投票した俳句をユーザが簡単に見られるように、俳句の横に何かを表示してリンクを隠します。このgemにはこれを実現する方法はないようですが、できないというわけではありません。先ほど生成したmigrationファイルの一つを見てみると、gemが<code>rs_evaluations</code>というデータベーステーブルを作成しているのがわかります。ユーザが投票するとここにレコードが追加されます。</p> 
+
+``` /db/migrations/20120718000000_create_reputation_system.rb
+def self.up
+  create_table :rs_evaluations do |t|
+    t.string      :reputation_name
+    t.references  :source, :polymorphic => true
+    t.references  :target, :polymorphic => true
+    t.float       :value, :default => 0
+    t.timestamps
+  end
+  # Rest of migration omitted
+end
+```
+
+<p>このテーブルには以下の情報が記録されています。reputationの名前(今回の例では<code>votes</code>)、<code>source</code>(今回は<code>User</code>モデル)、target(<code>Haiku</code>モデル)、<code>value</code>は投票がupかdownかによって<code>1</code>あるいは<code>-1</code>になります。<code>source</code>と<code>target</code>が共にポリモーフィック関連であることに注目してください。このテーブルに対応した<code>RSEvaluation</code>というモデルがあり、これは以下のように<code>User</code>レコードをそのモデルに関連づけられることを意味しています。</p>
+
+``` /app/models/user.rb
+has_many :evaluations, class_name: "RSEvaluation", as: :source
+```
+
+<p>ポリモーフィック関連なので、ここでは<code>as:</code>オプションが必要です。これによって、あるユーザが特定の俳句に投票したかどうかがわかるようになっています。</p>
+
+``` /app/models/user.rb
+def voted_for?(haiku)
+  evaluations.where(target_type: haiku.class, target_id: haiku.id).present?
+end
+```
+
+<p>ここですべての評価を取得し、正しい<code>type</code>と<code>id</code>の評価が存在するかを判定します。一つのページでこの処理を何回も行なうのであればもっと効率的な方法もありますが、ここではこのアプローチで十分です。このメソッドを使って、ユーザがすでに投票している場合はリンクを隠します。</p>
+
+``` /app/views/haikus/_haiku.html.erb
+<div class="haiku">
+  <%= simple_format haiku.content %>
+  <em>
+    -- <%= haiku.user.name %>
+    | <%= pluralize haiku.reputation_value_for(:votes).to_i, "vote" %>
+    <% if current_user && !current_user.voted_for?(haiku) %>
+      | <%= link_to "up", vote_haiku_path(haiku, type: "up"), method: "post" %>
+      | <%= link_to "down", vote_haiku_path(haiku, type: "down"), method: "post" %>
+    <% end %>
+  </em>
+</div>
+```
+
+<p>ページをリロードすると、投票した俳句のリンクが消えました。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1255/original/E364I04.png" width="800" height="400" alt="ユーザがすでに投票した俳句にはリンクが表示されない"/>
+</div>
+
+<p>このアプリケーションにさらに手を加えることも可能です。例えば、上記の制限をコントローラアクションに追加したり、ユーザが自分自身の俳句には投票できないようにするなどが考えられますが、ここでは触れません。</p>
+
+<h3>投票機能をゼロから作る</h3>
+
+<p>ここまでActiveRecord Reputation Systemを駆け足で紹介しました。便利なgemですが、同じ機能をゼロから作るのもそれほど難しくないのではないかという気もします。実際そのとおりで、そのソースコードを<a href="https://github.com/railscasts/364-active-record-reputation-system/tree/master/youhaiku-from-scratch">Githubで</a>見ることができます。今回のエピソードの最後の部分を使ってこのコードの中身を簡単に見ていきます。</p> 
+
+<p>ここには<code>HaikuVote</code>モデルがあり、<code>Haiku</code>と<code>User</code>の両方に属して(belong to)います。このアプローチのいいところは、カスタムの検証を置くことができるという点です。これによって例えば受け入れた投票数の値や、投票しているユーザが自分自身の俳句に投票しているのかどうかなどを検証できます。</p>
+
+``` /app/models/haiku_vote.rb
+class HaikuVote < ActiveRecord::Base
+  attr_accessible :value, :haiku, :haiku_id
+
+  belongs_to :haiku
+  belongs_to :user
+
+  validates_uniqueness_of :haiku_id, scope: :user_id
+  validates_inclusion_of :value, in: [1, -1]
+  validate :ensure_not_author
+
+  def ensure_not_author
+    errors.add :user_id, "is the author of the haiku" if haiku.user_id == user_id
+  end
+end
+```
+
+<p>ゼロから作る場合にもっとも難しいのが、投票数に基づいて俳句をソートすることです。これは<code>Haiku</code>モデルの<code>by_votes</code>というクラスメソッドに実装されています。</p> 
+
+``` /app/models/haiku.rb
+class Haiku < ActiveRecord::Base
+  attr_accessible :content
+
+  belongs_to :user
+  has_many :haiku_votes
+
+  def self.by_votes
+    select('haikus.*, coalesce(value, 0) as votes').
+    joins('left join haiku_votes on haiku_id=haikus.id').
+    order('votes desc')
+  end
+
+  def votes
+    read_attribute(:votes) || haiku_votes.sum(:value)
+  end
+end
+```
+
+<p>この機能のためにはSQLのコーディングが多少必要ですが、これで目的は達せられます。</p>
+
+<p>もう一つ厄介なのが、ユーザが受けた投票数を求める部分ですが、ActiveRecordの<code>joins</code>メソッドを利用できるのでここではSQLコードを使う必要はありません。</p>
+
+``` /app/models/user.rb
+def total_votes
+  HaikuVote.joins(:haiku).where(haikus: {user_id: self.id}).sum('value')
+end
+```
+
+<p>では結局、この機能をゼロから書くべきか、gemを使うべきか、どちらがいいのでしょうか?複雑な設定の場合、特にreputationを処理するモデルが複数あるような場合にはこのgemが有効でしょう。ポリモーフィック関連を利用していることがここで役に立ちます。今回のサンプルアプリケーションのように比較的シンプルな設定の場合は、ゼロから作る方がいいでしょう。</p>

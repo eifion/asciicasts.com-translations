@@ -1,0 +1,189 @@
+<style type="text/css">.inlineThumbnail { border: solid 1px #333; float: left; margin: 0 8px 8px 0; }</style>
+
+<p><a href="http://www.jruby.org/">JRuby</a>はJava仮想マシン上に構築された、洗練されて安定したRuby実装です。あなたがJavaプログラマーでなかったとしても、JRubyから得られるものは多くあります。今回のエピソードではJRubyの設定の基礎を紹介し、Ruby MRIとの相違点に焦点をあてて説明します。</p>
+
+<h3>JRubyのインストール</h3>
+
+<p>JRubyをインストールする一つの方法は、JRubyのサイトからダウンロードするやり方ですが、RVMやrbenvのようなRubyのバージョン管理ツールを介してインストールすることも可能です。今回はrbenvの最新版(この記事の公開時は1.7.0.preview2)を使ってインストールを行ないます。</p>
+
+``` terminal
+$ rbenv install jruby-1.7.0-preview2
+```
+
+<p>OS X Mountain Lionを使用している場合は、ここでJava仮想マシンをインストールするよう促すプロンプトが出る場合があります。インストールが終わったら、使用するrubyを切り替えることで正しく動作しているかどうかを確認します。設定によっては、Ruby関連のコマンドに<code>j</code>を付けて、明示的にJRubyを使用するよう指示しなくてはいけないかも知れません。つまり、<code>ruby</code>や<code>irb</code>の代わりに<code>jruby</code>や<code>jirb</code>を実行します。</p>
+
+``` terminal
+$ rbenv shell jruby-1.7.0-preview2
+$ ruby -v
+jruby 1.7.0.preview2 (1.9.3p203) 2012-08-07 4a6bb0a on Java HotSpot(TM) 64-Bit Server VM 1.6.0_35-b10-428-11M3811 [darwin-x86_64]
+```
+
+<p>これからJRubyを見ていきますが、まず最初はコンソールを操作してJRubyの相違点を探ります。あたかもRuby MRI 1.9.3を実行しているかのように普通にRubyコマンドを実行でき、ほとんどの部分では違いを感じることはありません。一つの大きな違いは、Javaとそのライブラリの広大な世界にアクセスできるという点です。そのための鍵は、<code>require "java"</code>という一行です。これによって、多様なJavaクラス、例えばHashMapなどにアクセスできるようになります。新規にHashMapを作成し、値を追加してさらにそれを取得します。</p>
+
+``` console
+>> require "java"
+=> true
+>> h = java.util.HashMap.new
+=> {}
+>> h.put(:foo, "bar")
+=> nil
+>> h.get(:foo)
+=> "bar"
+```
+
+<p>このようなコアクラスでは、JRubyはJavaインタフェースが提供するものに加えていくつかの便利なメソッドを提供しています。例えばこの<code>HashMap</code>では、Rubyで行なうのと似た方法で値にアクセスすることができます。さらには、JavaのHashMapに対しての作業であるにも関わらず、<code>.each</code>を使用してキーに対して繰り返し処理を行なうこともできます。</p>
+
+``` console
+>> h[:foo]
+=> "bar"
+```
+
+<p>JRubyのもう一つの面白い利用方法はSwingで、これを使ってGUIを作成できます。 </p>
+
+``` console
+>> javax.swing.JOptionPane.showMessageDialog(nil, "Hello World!")
+=> nil￼
+```
+
+<p><img src="http://asciicasts.com/system/photos/1336/original/E376I01.png" width="262" height="167" alt="Swingの警告ボックス" class="inlineThumbnail"/> これを実行するとダイアログボックスが表示されます。この方法でフル機能のユーザインタフェースを作成することができます。Railsアプリケーションにはこれは役には立たないかも知れませんが、管理用スクリプトを作るのには便利です。JRubyではこれを行なうための別の方法も提供されます。それは、次のようによりRubyスタイルに沿ったものです。</p>
+
+``` console
+>> Java::JavaxSwing::JOptionPane.show_message_dialog(nil, "Hello")
+=> nil
+```
+
+<p>これによって先ほど見たのと似たダイアログボックを表示します。次にSwingの機能をフルに使って何ができるか一例を示します。</p>
+
+``` swing.rb
+require "java"
+
+java_import javax.swing.JFrame
+java_import javax.swing.JButton
+java_import javax.swing.JOptionPane
+
+class HelloWorld < JFrame
+  def initialize
+    super "Example"
+    
+    setSize(150, 100)
+    setDefaultCloseOperation(JFrame::EXIT_ON_CLOSE)
+    setLocationRelativeTo(nil)
+    
+    button = JButton.new("Say Hello")
+    add(button)
+    
+    button.addActionListener do |e|
+      JOptionPane.showMessageDialog(nil, "Hello World")
+    end
+    
+    setVisible(true)
+  end
+end
+
+HelloWorld.new
+```
+
+<p>このファイルの最初で、irbで行なったのと同じように<code>require "java"</code>を呼び出してSwingにアクセスできるようにしています。そして<code>java_import</code>でいくつかのJavaクラスをインポートすることで、使用する度にパッケージの中を探さなくてもこのスクリプトから直接クラスにアクセスできるようにしています。そしてJava <code>JFrame</code>クラスを継承したRubyクラスを生成します。これがウィンドウを生成し、クラス内でサイズなどの属性を設定します。そしてボタンを生成し、ウィンドウに置いてイベントを追加します。イベントのブロック内のコードは、ボタンがクリックされたときに起動されます。Javaでは匿名関数を使用してイベントのコードを定義しますが、ここではRubyブロックを使用します。そしてウィンドウをvisibleにします。最後にクラスの外でクラスの新規インスタンスを生成します。<code>ruby</code>コマンドを介してこのファイルを実行すると、作成したボタンが付いた小さなウィンドウが開きます。それをクリックすると、メッセージダイアログが表示されます。</p>
+
+<div class="imageWrapper" style="margin: 0 auto;">
+  <img src="http://asciicasts.com/system/photos/1337/original/E376I02.png" width="350" height="350" alt="シンプルなSwingアプリケーション"/>
+</div>
+
+<h3>JRubyの同時実行性能</h3>
+
+<p>RubyとJavaをつなぐものがあるのは便利ですが、Railsデベロッパーとしてはそれほど役に立つとは思えないかも知れません。JRubyについてより興味深いのは、スレッドの同時実行性能が向上している点です。これを実際に見てみるために、フィボナッチ数列を計算するRubyスクリプトを作成します。</p>
+
+``` fib.rb
+def fib(n)
+  n < 2 ? n : fib(n-1) + fib(n-2)
+end
+
+start = Time.now
+
+1.upto(5).map do |n|
+  Thread.new { puts "Thread #{n}: #{fib(32)}" }
+end.each(&:join)
+
+puts "Time: #{Time.now - start}"
+```
+
+<p>ここで、フィボナッチ数列を計算する簡単なメソッドを5回起動します。それぞれを別のスレッドにして、プログラムが終了したら全体の実行にかかった時間を出力します。これをJRubyで実行すると1秒以内に完了しますが、Rubyのバージョンを切り替えて同じプログラムをMRIで実行すると3秒以上かかります。この遅さの主な原因は、Global Interpreter Lockです。Matt Aimonettiが2011年に書いた<a href="http://merbist.com/2011/10/03/about-concurrency-and-the-gil/">これについての記事</a>で詳しく説明しています。基本的にはこのロックが原因でフィボナッチ数列を別々のスレッドで同時に実行できません。もしマルチコアのマシンで実行したら、この時間の差はさらに大きくなるでしょう。Rubyコードの処理が少なく、データベースやファイルシステムからのレスポンスを待っている時間の方が多いのであれば、このロックはかかりません。これを以下のテストコードで<code>sleep</code>の呼び出しで実際に試してみます。</p>
+
+``` fib.rb
+def fib(n)
+  n < 2 ? n : fib(n-1) + fib(n-2)
+end
+
+start = Time.now
+
+1.upto(5).map do |n|
+  Thread.new { puts "Thread #{n}: #{sleep(0.5)}" }
+end.each(&:join)
+
+puts "Time: #{Time.now - start}"
+```
+
+<p>このコードをMRI Rubyで実行すると、スレッドがスリープするときにロックがかからないので、約0.5秒で終了します。</p> 
+
+<p>もし今マルチスレッドのRailsアプリケーションを構築中で、この同時実行性能の違いによってJRubyでどれくらい性能が上がるのか知りたいのであれば、答えは「アプリケーションがDBへアクセスしている時間とRubyコードを実行している時間の割合と、マシンのCPUコアの数に依存する」ということになります。もちろんパフォーマンスを比較する場合には考慮しなくてはいけない点が他にもいくつかありますが、一般的にMRIで本番環境でマルチスレッド対応のRailsアプリケーションを構築している場合は、Railsアプリケーションを実行する複数のプロセスを立ち上げて、同時実行性能を最大限利用するようにしたほうがいいでしょう。一方JRubyではすべてを単独のプロセスで処理できる可能性が高いです。</p> 
+
+<h3>JRuby on Railsアプリケーション</h3>
+
+<p>このエピソードの最後に、JRuby互換のRailsアプリケーションを作成する方法を紹介します。まずシェルでJRubyに切り替えてRails gemをインストールします。すべてのgemがインストールされたら、<code>blog</code>という名前の新規のRailsアプリケーションを作成します。</p>
+
+``` terminal
+$ rbenv shell jruby-1.7.0-preview2 
+$ gem install rails
+$ rails new blog
+```
+
+<p>Railsジェネレーターはとても賢く、JRubyを実行中に新規のアプリケーションを作成した場合は、自動的にアプリケーションをJRuby互換にしてくれます。主な相違点はgemfileを見ればわかります。一つ目はSQLiteにアクセスするために使用するgemが通常の<code>sqlite3</code>ではなく別のものになっています。</p>
+
+``` /Gemfile
+gem 'activerecord-jdbcsqlite3-adapter'
+```
+
+<p>JDBCはJavaアプリケーションがデータベースと通信するための標準的な方法です。このgemはこれを使ってActiveRecordがアプリケーションのデータベースとやり取りできるようにします。gemの中にはJRubyと互換性がないものがあるということを理解するのが重要です。それらのgemはCエクステンションに依存していて、<code>sqlite3</code> gemもその一つです。JRubyの環境でこのgemをインストールしようとすると、ネイティブエクステンションをコンパイルしようとするときにエラーメッセージが表示されて失敗します。この問題を回避する方法もあるのですが、通常はJRubyに対応した別のgemを探すほうがいいでしょう。JRuby wikiにはCエクステンションの代替についての<a href="https://github.com/jruby/jruby/wiki/C-Extension-Alternatives">ページ</a>があるので、ここでアプリケーションで使用するCを要求するgemの代わりを探すのがいいでしょう。もう一つの便利な情報源は<a href="https://github.com/jruby/jruby-lint">JRuby-Lint gem</a>です。このgemが提供する<code>jrlint</code>コマンドをプロジェクト内で実行すると、JRubyと非互換の部分を見つけることができます。すべてをチェックしてくれるわけではないですが、Cエクステンションやその他の潜在的な問題を見つけてくれます。アプリケーションのgemfileに戻りましょう。次にリストされているgemは<code>jruby-openssl</code>で、これはRubyのネイティブのOpenSSLライブラリをエミュレートします。もう一つのJRuby特有のgemは<code>therubyrhino</code>で、これはJavaScriptを実行するのに使われます。既存のRailsアプリケーションをJRuby用に変換する場合、これらが互換性を持たせるために追加しなくてはいけない主なgemです。これでRailsアプリケーションの開発作業を続けることができるでしょう。試しに単純な<code>Article</code>モデルのためのscaffoldを作成してみます。</p>
+
+``` terminal
+$ rails g scaffold article name
+$ rake db:migrate
+$ rails s
+```
+
+<p>これによって通常のscaffoldで作成されるページができ、MRI Rubyを使用したアプリケーションと同じように、記事を作成、修正、一覧表示することができます。</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1338/original/E376I03.png" width="800" height="309" alt="JRuby環境で実行中のRailsアプリケーション"/>
+</div>
+
+<p>JRuby環境でRailsアプリケーション全体をロードするのにはかなり時間がかかります。一般的にJRubyは最初にコードをロードするのはとても遅いですが、ロードが終わればその後の実行速度はとても速いです。もしもこれが問題であれば、アプリケーションをMRIとJRubyの両方に互換性を持たせて、開発環境では頻繁にアプリケーションをリロードするのでMRIを使用するということが可能です。これを実現するためには、gemfileで<code>platform</code>コマンドを使用して、特定のgemが特定のRuby実装の時だけロードされるように設定できます。</p>
+
+``` /Gemfile
+source 'https://rubygems.org'
+
+gem 'rails', '3.2.8'
+
+platform :jruby do
+ gem 'activerecord-jdbcsqlite3-adapter'
+ gem 'jruby-openssl'
+ gem 'therubyrhino'
+end
+
+plaform :ruby do
+  gem 'sqlite3'
+end
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~> 3.2.3'
+  gem 'coffee-rails', '~> 3.2.1'
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+```
+
+<p>アプリケーションをMRI Ruby 1.9.3環境に切り替えて、bundleコマンドを実行してgemをインストールしてからサーバを起動すると、我々のRailsアプリケーションはMRIの環境で実行されます。これを行なう場合は、包括的なテストスイートを準備して、アプリケーションがJRubyとMRIの両方の環境で正しく動くことを確認する必要があるでしょう。</p>

@@ -1,0 +1,303 @@
+<p>En la aplicaci&oacute;n de ejemplo que se muestra a continuaci&oacute;n tenemos un listado de productos, y queremos que los usuarios puedan realizar b&uacute;squedas sobre cualquier columna del listado.  Si bien esta funcionalidad se puede desarrollar desde cero en este episodio vamos a utilizar una gema llamada  <a href="https://github.com/ernie/ransack/">Ransack</a>.   Es la sucesora de MetaSearch, que ya vimos en el <a href="http://railscasts.com/episodes/251-metawhere-metasearch">episodio 251</a>, y nos permite crear f&aacute;cilmente formularios complejos de b&uacute;squeda.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1291/original/E370I01.png" width="800" height="500" alt="La página mostrando el listado de productos."/>
+</div>
+
+<p>Ransack se instala a&ntilde;adi&eacute;ndolo al <code>Gemfile</code> y ejecutando <code>bundle</code>.</p>
+
+
+``` /Gemfile
+gem 'ransack'
+```
+
+
+<p>Tras instalar Ransack podemos usarlo en la acci&oacute;n a la que queramos a&ntilde;adir b&uacute;squedas, en este caso la acci&oacute;n <code>index</code> de <code>ProductsController</code>, en la que crearemos un objeto de b&uacute;squeda invocando a <code>Product.search</code> y pas&aacute;ndole el par&aacute;metro <code>q</code> (que contiene un <em>hash</em> con los par&aacute;metros de b&uacute;squeda que haya pasado el usuario).  As&iacute;, para recuperar los productos ejecutamos <code>result</code> en este objeto.</p>
+
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    @search = Product.search(params[:q])
+    @products = @search.result
+  end
+end
+```
+
+
+
+<p>A continuaci&oacute;n tenemos que construir el formulario.  Podemos crearlo con el constructor de formularios que incorpora Ransack y que se llama <code>search_form_for</code>.  El m&eacute;todo recibe un bloque en el cual definimos los campos sobre los que queremos realizar las b&uacute;squedas.  Los nombres que escojamos para estos campos tienen significado y son importantes para definir la funcionalidad. Por ejemplo si el campo de texto del formulario se llama <code>name_cont</code> Ransack buscar&aacute; los productos cuyo nombre contenga el valor introducido en este campo.</p>
+
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search do |f| %>
+  <div class="field">
+    <%= f.label :name_cont, "Name contains" %>
+    <%= f.text_field :name_cont %>
+  </div>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+
+<p>Tras recargar la p&aacute;gina veremos que ahora aparece un formulario de b&uacute;squeda que filtra los productos.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1292/original/E370I02.png" width="800" height="419" alt="Ya tenemos un formulario de búsquedas."/>
+</div>
+
+<p>Podemos a&ntilde;adir m&aacute;s funcionalidad a  estas b&uacute;squedas a&ntilde;adiendo m&aacute;s campos en la vista, no nos hace falta escribir m&aacute;s l&oacute;gica.  Por ejemplo para poder filtrar por precio podemos a&ntilde;adir dos campos:</p>
+
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search do |f| %>
+  <div class="field">
+    <%= f.label :name_cont, "Name contains" %>
+    <%= f.text_field :name_cont %>
+  </div>
+  <div class="field">
+    <%= f.label :price_gteq, "Price between" %>
+    <%= f.text_field :price_gteq %>
+    <%= f.label :price_lteq, "and" %>
+    <%= f.text_field :price_lteq %>    
+  </div>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+
+<p>Ahora podemos buscar en los productos dentro de cierto rango de precios.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1293/original/E370I03.png" width="800" height="432" alt="Podemos buscar productos en un rango de precios."/>
+</div>
+
+<p>Si miramos en la secci&oacute;n <a href="https://github.com/ernie/ransack/wiki/Basic-Searching">acerca de b&uacute;squedas b&aacute;sicas</a> del wiki veremos una lista de los predicados que se pueden pasar para personalizar la forma en que se realiza la b&uacute;squeda, y el SQL que se genera en cada caso.  Ransack tambi&eacute;n nos facilita incluir los enlaces para los diferentes tipos de ordenaci&oacute;n, as&iacute; que haremos que las cabeceras de la tabla sean enlaces que permitan ordenar los resultados de la b&uacute;squeda.  En la vista podemos usar un m&eacute;todo <em>helper</em> de Ransack llamado <code>sort_link</code>, lo que cambiaremos el texto est&aacute;tico por enlaces.</p>
+
+
+``` /app/views/products/index.html.erb
+<tr>
+  <th><%= sort_link(@search, :name, "Product Name") %></th>
+  <th><%= sort_link(@search, :released_on, "Release Date") %></th>
+  <th><%= sort_link(@search, :price, "Price") %></th>
+</tr>
+```
+
+
+<p>Al recargar la p&aacute;gina veremos que ya tenemos listos los enlaces para ordenar la tabla de resultados por cada uno de los campos.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1294/original/E370I04.png" width="800" height="432" alt="Los encabezados de la tabla como enlaces para ordenar el listado."/>
+</div>
+
+<h3>C&oacute;mo crear un formulario de b&uacute;squeda din&aacute;mica</h3>
+
+<p>A continuaci&oacute;n veremos algunas de las prestaciones m&aacute;s avanzadas de Ransack.  Las b&uacute;squedas pueden ser m&aacute;s complejas de lo que parece a simple vista y podemos crear formularios de b&uacute;squeda completamente din&aacute;micos de forma que el usuario tenga total control sobre las columnas y predicados a usar.  En lugar de tener campos concretos de b&uacute;squeda en la p&aacute;gina vamos a crear algo m&aacute;s din&aacute;mico.  Podemos llamar a un m&eacute;todo llamado <code>condition_fields</code> en el constructor del formulario, que a su vez crear&aacute; otro constructor de formulario para cada una de las condiciones de b&uacute;squeda.  Tras esto recorremos cada uno de los campos de <code>attribute_fields</code> y mostramos el <code>attribute_select</code> para cada uno de ellos, tras lo que mostramos los campos para el predicado y el valor.</p>
+
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search do |f| %>
+  <%= f.condition_fields do |c| %>
+  <div class="field">
+    <%= c.attribute_fields do |a| %>
+      <%= a.attribute_select %>
+    <% end %>
+    <%= c.predicate_select %>
+    <%= c.value_fields do |v| %>
+      <%= v.text_field :value %>
+    <% end %>
+    </div>
+  <% end %>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+
+<p>El c&oacute;digo parece bastante complicado pero es valioso por la cantidad de funcionalidad que aporta si bien tenemos que hacer un peque&ntilde;o cambio en el controlador para que esto funcione.  Por defecto las b&uacute;squedas no tienen condiciones as&iacute; que tenemos que a&ntilde;adir una vac&iacute;a.</p>
+
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    @search = Product.search(params[:q])
+    @products = @search.result
+    @search.build_condition
+  end  
+end
+```
+
+
+<p>Tras recargar la p&aacute;gina veremos que tenemos tres campos donde podemos escoger el campo que queremos filtrar, el predicado y la condici&oacute;n.  Al enviar el formulario veremos que se filtran los productos y tambi&eacute;n tenemos otro grupo de campos para a&ntilde;adir otra b&uacute;squeda.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1295/original/E370I05.png" width="800" height="459" alt="Ya podemos filtrar por varios campos a la vez."/>
+</div>
+
+<p>Lo mejor de todo es que podemos incluso incluir asociaciones.  El m&eacute;todo <code>attribute_select</code> puede recibir una asociaci&oacute;n, y como en nuestro caso un producto pertenece a una <code>Category</code> podemos a&ntilde;adirlo.</p>
+
+
+``` /app/views/products/index.html.erb
+<%= a.attribute_select associations: [:category] %>
+```
+
+
+<p>Si ahora recargamos la p&aacute;gina podremos hacer la b&uacute;squeda tmabi&eacute;n por los campos de categor&iacute;a de producto.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1296/original/E370I06.png" width="800" height="460" alt="Ahora los campos de búsqueda incluyen las categorías de productos."/>
+</div>
+
+<h3>C&oacute;mo a&ntilde;adir y quitar condiciones din&aacute;micamente</h3>
+
+<p>Ser&iacute;a muy c&oacute;modo poder a&ntilde;adir y quitar condiciones din&aacute;micamente mediante JavaScript.  La implementaci&oacute;n es un poco complicada pero el patr&oacute;n funciona de manera similar a los formularios anidados, por lo que haremos algo parecido a lo que vimos en el  <a href="http://railscasts.com/episodes/196-nested-model-form-part-1">episodio 196</a>. Lo primero que tenemos que hacer es mover los campos de condiciones a un parcial.</p>
+
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search do |f| %>
+  <%= f.condition_fields do |c| %>
+    <%= render "condition_fields", f: c%>
+  <% end %>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+
+<p>Luego tenemos que renombrar la variable del campo del formulario en el nuevo parcial y a&ntilde;adir un enlace para quitar la b&uacute;squeda.</p>
+
+
+``` /app/views/products/index.html.erb
+<div class="field">
+  <%= f.attribute_fields do |a| %>
+    <%= a.attribute_select associations: [:category] %>
+  <% end %>
+  <%= f.predicate_select %>
+  <%= f.value_fields do |v| %>
+    <%= v.text_field :value %>
+  <% end %>
+  <%= link_to "remove", '#', class: "remove_fields" %>
+</div>
+```
+
+
+<p>En el <code>ApplicationHelper</code> escribiremos un m&eacute;todo llamado <code>link_to_add_fields</code> que funciona de forma parecida al del episodio 196.</p>
+
+
+``` /app/helpers/application_helper.rb
+module ApplicationHelper
+  def link_to_add_fields(name, f, type)
+    new_object = f.object.send "build_#{type}"
+    id = "new_#{type}"
+    fields = f.send("#{type}_fields", new_object, child_index: id) do |builder|
+      render(type.to_s + "_fields", f: builder)
+    end
+    link_to(name, '#', class: "add_fields", data: {id: id, fields: fields.gsub("\n", "")})
+  end
+end
+```
+
+
+<p>Este m&eacute;todo ser&aacute; llamado en la plantilla <code>index</code> para generar el enlace que crea las condiciones.</p>
+
+
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search do |f| %>
+  <%= f.condition_fields do |c| %>
+    <%= render "condition_fields", f: c%>
+  <% end %>
+  <p><%= link_to_add_fields "Add Conditions", f, :condition %>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+
+<p>El &uacute;ltimo paso es el JavaScript para que todo esto funcione.</p>
+
+
+``` /app/assets/javascripts/products.js.coffee
+jQuery ->
+  $('form').on 'click', '.remove_fields', (event) ->
+    $(this).closest('.field').remove()
+    event.preventDefault()
+
+  $('form').on 'click', '.add_fields', (event) ->
+    time = new Date().getTime()
+    regexp = new RegExp($(this).data('id'), 'g')
+    $(this).before($(this).data('fields').replace(regexp, time))
+    event.preventDefault()
+```    
+
+
+<p>Con esto ya podemos a&ntilde;adir y quitar enlaces din&aacute;micamente.  Al recargar la p&aacute;gina veremos los enlaces para a&ntilde;adir y eliminar condiciones de b&uacute;squeda.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1297/original/E370I07.png" width="800" height="500" alt="Ya se pueden eliminar campos de búsqueda."/>
+</div>
+
+<p>Todo esto funciona bien pero si el usuario a&ntilde;ade demasiadas condiciones puede ser que lleguen al l&iacute;mite de los datos que se pueden enviar sobre una petici&oacute;n GET.  Una forma de resolver esto es enviar un POST, as&iacute; que lo implementaremos de esta manera.  Primero en el fichero de rutas a&ntilde;adiremos un bloque al recurso de productos y a&ntilde;adiremos una ruta <code>search</code> que recibe peticiones POST y que mapea con la acci&oacute;n <code>index</code>.</p>
+
+
+``` /config/routes.rb
+Store::Application.routes.draw do
+  resources :products do
+    collection { post :search, to: 'products#index' }
+  end
+  root to: 'products#index'
+end
+```
+
+
+
+<p>Tenemos que cambiar el formulario de b&uacute;squeda para que apunte a esta acci&oacute;n.</p>
+
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search, url: search_products_path, method: :post do |f| %>
+  <%= f.condition_fields do |c| %>
+    <%= render "condition_fields", f: c %>
+  <% end %>
+  <p><%= link_to_add_fields "Add Conditions", f, :condition %>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+
+<p>Cuando ahora realicemos una b&uacute;squeda en los productos los datos ser&aacute;n enviados mediante una petic&iacute;on POST en lugar de usar par&aacute;metros en la URL.  Todav&iacute;a tenemos el problema con los enlaces de ordenaci&oacute;n, porque siguen enviando una petici&oacute;n GET a la ruta <code>search</code>, lo que no funciona.  En lugar de gestionar la ordenaci&oacute;n mediante enlaces podr&iacute;amos mover esta funcionalidad al formulario, y para facilitar esto Ransack incluye m&eacute;todos para generar los <code>select</code> necesarios para ordenar por los distintos campos.</p>
+
+
+``` /app/views/index.html.erb
+<div class="field">
+  Sort:
+  <%= f.sort_fields do |s| %>
+    <%= s.sort_select %>
+  <% end %>
+</div>
+```
+
+
+<p>Como no hemos especificado ninguna ordenaci&oacute;n por defecto en el controlador podemos construir una igual que hicimos con las condiciones.</p>
+
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    @search = Product.search(params[:q])
+    @products = @search.result
+    @search.build_condition
+    @search.build_sort if @search.sorts.empty?
+  end  
+end
+```
+
+
+<p>En la p&aacute;gina aparecer&aacute;n campos de ordenaci&oacute;n en los que podemos escoger el campo y la direcci&oacute;n.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1298/original/E370I08.png" width="800" height="526" alt="Ya podemos ordenar el listado."/>
+</div>
+
+<p>Puede ser que en otros casos tengamos enlaces en los que tengamos que arrastrar las condiciones de b&uacute;squeda pero no podemos hacerlo mediante el formulario, como por ejemplo en los enlaces de paginaci&oacute;n.  Hay un par de soluciones a este problema.  Una es utilizar JavaScript para enviar el enlace como una petic&iacute;on POST, y otro es persistir los par&aacute;metros de b&uacute;squeda en la base de datos, como hicimos en el  <a href="http://railscasts.com/episodes/111-advanced-search-form">episodio 111</a>.</p>
+
+<p>Con esto terminamos nuestro episodio sobre Ransack.   Se puede ver un formulario de b&uacute;squeda complejo en  la <a href="http://ransack-demo.herokuapp.com/">demo de Ransack</a>, que incluye una funcionalidad de b&uacute;squeda avanzada m&aacute;s completa con m&uacute;ltiples campos de ordenaci&oacute;n e incluso grupos de condiciones.</p>

@@ -1,0 +1,115 @@
+<p>開発しているRailsアプリケーションの動きが少し遅くなり始めたとしましょう。パフォーマンスを最適化しなければいけないところですが、その前にプロファイリングツールを実行してボトルネックを見つけておく方がいいでしょう。プロファイリングツールは多くの種類がありますが、今回のエピソードでは<a href="http://miniprofiler.com/">MiniProfiler</a>を紹介します。このツールは元々は.Netの開発環境用に作られたものですが、最近Ruby向けに移植され、Railsアプリケーションのプロファイリングのための優れたツールとなっています。アプリケーションにMiniProfilerを追加するのは簡単です。gemfileにgemを追加して<code>bundle</code>コマンドを実行してインストールを行なうだけです。</p>
+
+``` /Gemfile
+gem 'rack-mini-profiler'
+```
+
+<p>アプリケーションを再起動して、いずれかのページを表示すると、developmentモードではデフォルトでMiniProfilerが有効化されていることがわかります。ページのロードにかかった時間が左上部に表示され、これをクリックするとより詳細にアプリケーションの各部品ごとにどれだけ時間がかかったかを分解して表示してくれます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1274/original/E368I01.png" width="800" height="500" alt="アプリケーションで実行中のMiniProfiler"/>
+</div>
+
+<p>ここでコントローラの処理にかかった時間を見ることができ、このindexアクションの出力がほとんどの時間をとっていることがわかります。おそらく原因は、lazy loading(怠慢な読み込み)のために5つのSQLクエリを実行しなくてはいけないことによるものでしょう。SQLのリンクをクリックすると、それぞれについてstack traceと一緒にどのSQLクエリが実行されたかが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1275/original/E368I02.png" width="800" height="500" alt="ページが実行したSQLクエリ"/>
+</div>
+
+<p>これによって、ここで完全なSELECTクエリが実行されて、各プロジェクトに属する個別のタスクのすべての内容が取得されます。ページの方には各プロジェクトに含まれるタスクの件数が表示されるだけなので、データベースから本来必要ないデータまで取得していることになります。出力されたテンプレートを見ると、タスクの件数を出力するコードがあります。</p>
+
+``` /app/views/projects/index.html.erb
+<%= pluralize project.tasks.length, "task" %>
+```
+
+<p><code>project.tasks.length</code>を呼び出す方法は件数を得るのにデータベースから全タスクデータを取得するので効率的とは言えません。そこで<code>tasks.size</code>を使用します。</p>
+
+``` /app/views/projects/index.html.erb
+<%= pluralize project.tasks.size, "task" %>
+```
+
+<p>ページをリロードすると、データベースから取得されるデータ量がずっと少なくなるので、MiniProfilerが示す数値が小さくなります。プロジェクトのタスクに関連するすべてのデータではなく、件数のカウントを取得するだけなので、実行時間はずっと短くなります。それでもまだこのページの表示時に5つのSQLクエリを実行していて、商品を追加するとその数はさらに増えていきます。クエリ数を1つに減らす方法がありますが、そのためにはそれ用のSQLを書く必要があります。これを<code>ProjectsController</code>の<code>index</code>アクションで行ないますが、もしこれが本番環境のアプリケーションであればこのコードはモデルの中に置くべきでしょう。</p>
+
+``` /app/controllers/projects_controller.rb
+def index
+  @projects = Project.order(:created_at).select("projects.*, count(tasks.id) as tasks_count").joins("left outer join tasks on project_id = projects.id").group("projects.id")
+end
+```
+
+<p>projectの列以外も取得する必要があるので、タスクの件数も同時に取得します。この列を<code>tasks_count</code>という名前にしましたが、2度目のクエリを実行する代わりにtasks.sizeがこの値を使用するので、この列名は重要です。<code>tasks</code>の関連をjoinする必要がありますが、<code>joins(:tasks)</code>がベストな方法ではありません。というのも、これはinner joinを実行するためタスクのないプロジェクトが返されないからです。そこで、代わりにleft outer joinを実行するSQL句を書きました。このクエリはきれいとは言えませんが、これによってページのロードは速くなり、MiniProfilerにはページのデータを取得するのにSQLクエリが1つだけ実行されていると表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1276/original/E368I03.png" width="800" height="500" alt="MiniProfilerによると1つのSQLクエリだけが実行されている"/>
+</div>
+
+<p>SQLクエリの実行時間は約1ミリ秒になりましたが、ActiveRecordがオブジェクトをインスタンス化するのに時間がかかっています。MiniProfilerは、あるコードが実行されるのにかかる時間を計測するメソッドを提供しているので、これをコントローラの中で使用することができます。<code>Rack::MiniProfiler.step</code>を呼び出して、説明文とブロックを渡します。ブロックを処理するのにかかった時間がレポートに表示されます。このアクションではプロジェクトはlazy-loadされていて、実際にはビューがロードします。ブロックで<code>@projects.all</code>を呼び出してロードします。</p>
+
+``` /app/controllers/projects_controller.rb
+def index
+  @projects = Project.order(:created_at).select("projects.*, count(tasks.id) as tasks_count").joins("left outer join tasks on project_id = projects.id").group("projects.id")
+  Rack::MiniProfiler.step("fetch projects") do
+     @projects.all
+  end
+end
+```
+
+<p>ページをリロードすると、商品情報をロードするのにかかった時間が表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1277/original/E368I04.png" width="800" height="500" alt="商品情報を取得するにかかった時間が表示される"/>
+</div>
+
+<p>このアプローチは、ある特定の部分を計測する必要がある場合には便利です。このクエリを最適化するための次のステップは、counter cache columnを追加することですがここではそれは行いません。<a href="http://railscasts.com/episodes/23-counter-cache-column">エピソード23</a>でこれについて詳しく説明しています。</p>
+
+<h3>アプリケーションをProductionモードで実行する</h3>
+
+<p>ここまでは開発環境のプロファイルを行なっていて、これによって本番環境での同じアプリケーションの時間がかかる処理を特定しています。さらにアプリケーションのプロファイリングを行なうのであれば、本番環境でも行なうほうがいいでしょう。開発用マシン上でRailsアプリケーションをproductionモードで起動するのは少し手間がかかる場合がありますが、ここでそのステップを一つずつ見ていきます。最初に、productionの設定ファイルの<code>serve_static_assets</code>オプションを<code>true</code>に変更します。</p>
+
+``` /config/environments/production.rb
+# Disable Rails's static asset server (Apache or nginx will already do this)
+config.serve_static_assets = true
+```
+
+<p>もう一つ別の方法としては、<a href="http://railscasts.com/episodes/72-adding-an-environment">エピソード72</a>で行なったように、別の実行環境を準備することもできます。次にアプリケーションのアセットを生成して、本番環境用にデータベースを設定します。そしてサーバをproductionモードで起動します。</p>
+
+``` terminal
+$ rake assets:precompile
+$ rake db:setup RAILS_ENV=production
+$ rails s -e production
+```
+
+<p>ページをリロードすると、アプリケーションは本番環境で実行されています。しかし、MiniProfilerの表示が消えてしまいました。というのも、productionモードではデフォルトで表示されないようになっているからです。これは<code>ApplicationController</code>に<code>before_filter</code>を追加することで簡単に復元することができます。</p>
+
+``` /app/controllers/application_controller.rb
+class ApplicationController < ActionController::Base
+  protect_from_forgery
+  
+  before_filter :miniprofiler
+  
+  private
+  def miniprofiler
+    Rack::MiniProfiler.authorize_request
+  end
+end
+```
+
+<p>このアプローチの便利な副作用として、現在のユーザによってこの振る舞いを変えることができるので、例えばユーザがadminの場合のみ表示させるということも可能です。</p>
+
+<p>productionモードでは修正を行なう度にアプリケーションを再起動する必要があります。その後でページをリロードすると、プロファイラが再度表示されます。アプリケーションをデプロイすると、本番環境のハードウェアはアプリケーションを開発していたマシンとは異なるために、プロファイラの結果は違ってくるでしょう。正確な結果を得るためには、なるべく本番に近い環境でプロファイルするのがいいでしょう。開発用マシンであっても、ページがロードするのにかかる絶対的な時間を気にするよりは、ページのロード時間をいかに減らせるかに注力した方がいいでしょう。開発環境のページで改善することができれば、確実に本番環境でも同じ改善が見られるでしょう。</p>
+
+<h3>その他の機能</h3>
+
+<p>このエピソードの締めくくりとしてMiniProfilerのその他の機能をいくつか見ていきます。便利なのが、リダイレクトの処理の仕方です。商品情報を編集して“update”をクリックすると、profilerに2つの数値が表示されます。一つはupdateアクション、もう一つはshowアクションのものです。これは、リダイレクトを行なうアクションの結果を見ることができるということを意味します。もう一つの便利なのが、クエリ句のパラメータを渡すことによってリクエストごとにMiniProfilerをカスタマイズできる機能です。<code>pp=help</code>パラメータを加えると、使用できるオプションのリストが表示されます。その内容を以下に示します。</p>
+
+``` terminal
+Append the following to your query string:
+
+  pp=help : display this screen
+  pp=env : display the rack environment
+  pp=skip : skip mini profiler for this request
+  pp=no-backtrace : don't collect stack traces from all the SQL executed
+  pp=full-backtrace : enable full backtrace for SQL executed
+  pp=sample : sample stack traces and return a report isolating heavy usage (requires the stacktrace gem)
+```  
+
+<p>Rackの環境変数を見るためのオプション、SQLの結果のバックトレースを設定するオプション、callstackを返すsampleオプションなどがあります。更に詳しい説明は、このgemのメインテナーであるSam Saffronの<a href="http://samsaffron.com/archive/2012/07/12/miniprofiler-ruby-edition">ブログ記事</a>を参照してください。そこには、プロファイリングとActiveRecordクエリについての詳細と、その他の興味深い機能(初期化メソッドでプロファイルしたいメソッドを指定して結果のリストに加える、など)も紹介されています。gemの<a href="https://github.com/SamSaffron/MiniProfiler/blob/master/Ruby/README.md">READMEファイル</a>には、それ以外の例えばストレージエンジンについての説明などが含まれているので、同じく読んでおく価値があるでしょう。ストレージはデフォルトではファイルになっていますが、Redisを利用することも可能で、例えばアプリケーションを複数のサーバで実行している場合に便利です。</p>

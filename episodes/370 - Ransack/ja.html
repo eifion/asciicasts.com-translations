@@ -1,0 +1,264 @@
+<p>下のサンプルアプリケーションには商品リストが表示されています。これらの商品をユーザがどのフィールドからでも検索できるようにしようと思います。この機能をゼロから作ることもできますが、今回は<a href="https://github.com/ernie/ransack/">Ransack</a>というgemを使います。このgemは、<a href="http://railscasts.com/episodes/251-metawhere-metasearch">エピソード251</a>で紹介したMetaSearchの後継で、複雑な検索フォームを簡単に作成することが可能になります。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1291/original/E370I01.png" width="800" height="500" alt="商品リストのページ"/>
+</div>
+
+<p>Ransackをインストールするには、gemfileにgemを追加して<code>bundle</code>コマンドを実行します。</p>
+
+``` /Gemfile
+gem 'ransack'
+```
+
+<p>Ransackをインストールしたら、検索機能を付加したいアクション内で利用できます。今回は<code>ProductsController</code>の<code>index</code>アクションに作成します。<code>Product.search</code>を呼び出して<code>q</code>パラメータ(ここにはユーザから渡された検索パラメータが含まれます)を渡してsearchオブジェクトを作成します。見つかった商品を取得するために、このオブジェクトに対して<code>result</code>を呼び出します。</p>
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    @search = Product.search(params[:q])
+    @products = @search.result
+  end
+end
+```
+
+<p>次にフォームを作成します。Ransackは<code>search_form_for</code>というフォームビルダーを持っています。これを使ってページの先頭に検索フォームを追加します。このメソッドはブロックをとり、それに対してフォームビルダーを渡します。ブロックで、検索の対象にするフィールドを定義しますが、これらのフィールドに対してつける名前が重要になります。フォームのテキストフィールドに<code>name_cont</code>という名前をつけたのは、Ransackがこのテキストフィールドに入力された値を名前に含んだ商品を検索するという意味です。</p>
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search do |f| %>
+  <div class="field">
+    <%= f.label :name_cont, "Name contains" %>
+    <%= f.text_field :name_cont %>
+  </div>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+<p>ページをリロードすると検索フォームが現れるので、フィールドに値を入力してフォームを送信すると、商品にフィルタがかかります。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1292/original/E370I02.png" width="800" height="419" alt="ページに検索フォームが追加された"/>
+</div>
+
+<p>これはかなり強力で、ビューにさらにフィールドを追加することで、簡単にさらに機能を加えることができるということを意味しています。その場合に、ほかの場所に別のロジックが必要になるということもありません。例えば価格でフィルターをかけるには、下のようにさらに2つフィールドを追加します。</p>
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search do |f| %>
+  <div class="field">
+    <%= f.label :name_cont, "Name contains" %>
+    <%= f.text_field :name_cont %>
+  </div>
+  <div class="field">
+    <%= f.label :price_gteq, "Price between" %>
+    <%= f.text_field :price_gteq %>
+    <%= f.label :price_lteq, "and" %>
+    <%= f.text_field :price_lteq %>    
+  </div>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+<p>これで、ある価格の範囲の商品を検索することができます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1293/original/E370I03.png" width="800" height="432" alt="ある価格帯の商品を検索することもできる"/>
+</div>
+
+<p>wikiの<a href="https://github.com/ernie/ransack/wiki/Basic-Searching">基本的な検索のセクション</a>を見ると、検索をどう行なうかをカスタマイズするために渡すことができる述語(predicate)のリストと、それぞれで実行されるSQLが示されています。またRansackを使うと、ソート用のリンクを簡単につけることができるので、表のヘッダ列を検索結果を並び替えるためのリンクにします。ビューの中で<code>sort_link</code>というヘルパーメソッドを使って、表のヘッダのセルの静的な文字列を、商品をソートするためのリンクに置き換えます。</p>
+
+``` /app/views/products/index.html.erb
+<tr>
+  <th><%= sort_link(@search, :name, "Product Name") %></th>
+  <th><%= sort_link(@search, :released_on, "Release Date") %></th>
+  <th><%= sort_link(@search, :price, "Price") %></th>
+</tr>
+```
+
+<p>ページをリロードすると、結果の表を各フィールドでソートするためのリンクができました。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1294/original/E370I04.png" width="800" height="432" alt="表のヘッダ列がリンクになり、クリックで商品リストをソートできる"/>
+</div>
+
+<h3>動的な検索フォームを作る</h3>
+
+<p>次にRansackのさらに高度な機能を紹介します。検索フォームビルダーには、目に見える部分以外にもさらに機能があります。ユーザが検索で使用するカラムと述語を自由に設定したり、完全に動的な検索フォームを作ることもできます。ページに具体的な検索フィールドを持つ代わりに、より動的なものを作ります。フォームビルダーで<code>condition_fields</code>メソッドを呼び出し、これがそれぞれの検索条件に対して別のフォームビルダーを渡します。そして各条件のattribute_fieldをループして、それぞれに<code>attribute_select</code>を表示します。次に述語と値のためのフィールドを表示します。</p>
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search do |f| %>
+  <%= f.condition_fields do |c| %>
+  <div class="field">
+    <%= c.attribute_fields do |a| %>
+      <%= a.attribute_select %>
+    <% end %>
+    <%= c.predicate_select %>
+    <%= c.value_fields do |v| %>
+      <%= v.text_field :value %>
+    <% end %>
+    </div>
+  <% end %>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+<p>このコードは冗長に見えるかも知れませんが、この機能のためには必要なものです。うまく動くようにするために、コントローラを少し修正します。検索にデフォルトでは条件がないので、新規に空の条件を追加します。</p>
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    @search = Product.search(params[:q])
+    @products = @search.result
+    @search.build_condition
+  end  
+end
+```
+
+<p>ページをリロードすると、フィールドが3つあり、対象フィールド、述語、条件を指定します。フォームを送信すると、商品リストにフィルターがかけられ、別のフィールドのセットができるので別の検索条件を追加できます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1295/original/E370I05.png" width="800" height="459" alt="複数のフィールドでフィルタをかけられるようになった"/>
+</div>
+
+<p>この方法のいい点は、ここに関連を追加することも可能だというところです。<code>attribute_select</code>はオプションとして関連を持つこともでき、一つの商品は一つの<code>Category</code>に属するので、これを追加することにします。</p>
+
+``` /app/views/products/index.html.erb
+<%= a.attribute_select associations: [:category] %>
+```
+
+<p>ページをリロードすると、商品カテゴリのフィールドでも検索できるようになります。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1296/original/E370I06.png" width="800" height="460" alt="検索フィールドに、商品のカテゴリフィールドが追加された"/>
+</div>
+
+<h3>動的に条件を追加・削除する</h3>
+
+<p>JavaScriptで動的に条件を追加したり削除したりできれば便利でしょう。この機能を実装するのは少し複雑ですが、ネストされたフォームと同じようなパターンで動作するので、<a href="http://railscasts.com/episodes/196-nested-model-form-part-1">エピソード196</a>で行なったのと似た方法で実装します。まず条件フィールドを部分テンプレートに移動させます。</p>
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search do |f| %>
+  <%= f.condition_fields do |c| %>
+    <%= render "condition_fields", f: c%>
+  <% end %>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+<p>新しい部分テンプレートに作成したフォームフィールドの変数の名前を変更し、検索条件を削除するためのリンクを追加します。</p>
+
+``` /app/views/products/index.html.erb
+<div class="field">
+  <%= f.attribute_fields do |a| %>
+    <%= a.attribute_select associations: [:category] %>
+  <% end %>
+  <%= f.predicate_select %>
+  <%= f.value_fields do |v| %>
+    <%= v.text_field :value %>
+  <% end %>
+  <%= link_to "remove", '#', class: "remove_fields" %>
+</div>
+```
+
+<p><code>ApplicationHelper</code>に、エピソード196で作成したのと似たような動きをする<code>link_to_add_fields</code>メソッドを作成します。</p>
+
+``` /app/helpers/application_helper.rb
+module ApplicationHelper
+  def link_to_add_fields(name, f, type)
+    new_object = f.object.send "build_#{type}"
+    id = "new_#{type}"
+    fields = f.send("#{type}_fields", new_object, child_index: id) do |builder|
+      render(type.to_s + "_fields", f: builder)
+    end
+    link_to(name, '#', class: "add_fields", data: {id: id, fields: fields.gsub("\n", "")})
+  end
+end
+```
+
+<p>indexテンプレートでこのメソッドを呼び出し、条件を作成するためのリンクを作ります。</p>
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search do |f| %>
+  <%= f.condition_fields do |c| %>
+    <%= render "condition_fields", f: c%>
+  <% end %>
+  <p><%= link_to_add_fields "Add Conditions", f, :condition %>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+<p>最後にJavaScriptでこれを動かします。</p>
+
+``` /app/assets/javascripts/products.js.coffee
+jQuery -&gt;
+  $('form').on 'click', '.remove_fields', (event) -&gt;
+    $(this).closest('.field').remove()
+    event.preventDefault()
+
+  $('form').on 'click', '.add_fields', (event) -&gt;
+    time = new Date().getTime()
+    regexp = new RegExp($(this).data('id'), 'g')
+    $(this).before($(this).data('fields').replace(regexp, time))
+    event.preventDefault()
+```    
+
+<p>これでフィールドを動的に追加や削除をできるようになります。ページをリロードすると、検索条件を追加・削除するためのリンクが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1297/original/E370I07.png" width="800" height="500" alt="検索フィールドを削除できる"/>
+</div>
+
+<p>これでうまくいきますが、もしユーザが条件を追加しすぎた場合はGETリクエストで送信できる上限に達してしまいます。この問題を回避する一つの方法は、代わりにPOSTを使う方法で、以下でその実装を行ないます。まずroutesファイルでproducts resourceにブロックを追加して、<code>search</code> routeを加えます。これがPOSTリクエストを受け付け、<code>index</code>アクションを呼び出します。</p>
+
+``` /config/routes.rb
+Store::Application.routes.draw do
+  resources :products do
+    collection { post :search, to: 'products#index' }
+  end
+  root to: 'products#index'
+end
+```
+
+<p>このアクションを実行するよう検索フォームを変更します。</p>
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search, url: search_products_path, method: :post do |f| %>
+  <%= f.condition_fields do |c| %>
+    <%= render "condition_fields", f: c %>
+  <% end %>
+  <p><%= link_to_add_fields "Add Conditions", f, :condition %>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+<p>これで商品に対して検索を行なうと、データはURLパラメータを使わずにPOSTリクエストで送信されます。しかしまだソート用リンクに問題があります。今のままでは<code>search</code> routeにGETリクエストを送るので機能しません。リンクでソートを処理するのではなく、この機能をフォームに移動し、Ransackの機能を利用して、別のフィールドでソートするためのselectメソッドを生成するようにします。</p>
+
+``` /app/views/index.html.erb
+<div class="field">
+  Sort:
+  <%= f.sort_fields do |s| %>
+    <%= s.sort_select %>
+  <% end %>
+</div>
+```
+
+<p>コントローラにはデフォルトではソート順が設定されてないので、条件の設定時に行ったのと同じように作成することができます。</p>
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    @search = Product.search(params[:q])
+    @products = @search.result
+    @search.build_condition
+    @search.build_sort if @search.sorts.empty?
+  end  
+end
+```
+
+<p>ページにソート用のフィールドができたので、対象フィールドと降順・昇順を選択できます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1298/original/E370I08.png" width="800" height="526" alt="リストをソートするためのフィールドが追加された"/>
+</div>
+
+<p>検索条件を引き継がなくてはいけないリンクを持つ場合がありますが、ページネーションのリンクのようにフォーム経由では行えないようなものもあります。この問題を解決するための方法がいくつかあります。一つはリンクを POSTリクエストとして送信するためにJavaScriptを使用する方法、もう一つは<a href="http://railscasts.com/episodes/111-advanced-search-form">エピソード111</a>で行ったように検索パラメータをデータベースに保存する方法です。</p>
+
+<p>Ransackについての今回のエピソードは以上です。複雑な検索フォームの例として、<a href="http://ransack-demo.herokuapp.com/">Ransackデモアプリケーション</a>を見てみましょう。ここには、より完全な高度な検索機能が含まれていて、複数のソート用フィールドを指定したり、条件グループを追加することができます。</p>

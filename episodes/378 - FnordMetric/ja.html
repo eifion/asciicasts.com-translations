@@ -1,0 +1,224 @@
+<p><a href="https://github.com/paulasmuth/fnordmetric">FnordMetric</a>を使うと、Railsアプリケーションで、ユーザの活動などのイベントをリアルタイムにトラックしたりグラフ化することが可能になります。インタフェースがすっきりとしていて、作成されたグラフを簡単にブラウズできます。今回のエピソードでは、その設定方法とRailsアプリケーションに統合する方法の基本を紹介します。</p>
+
+<h3>FnordMetricを使う</h3>
+
+<p>FnordMetricはイベントの保存にRedisを利用するので、まずそれをインストールします。OS Xを利用しているのであれば、Homebrewを使うのが一番簡単でしょう。</p>
+
+``` terminal
+$ brew install redis
+```
+
+<p>インストールが完了したら、以下のコマンドで起動します。</p>
+
+``` terminal
+$ redis-server /usr/local/etc/redis.conf
+```
+
+<p>Redisが起動したので、FnordMetricの設定をREADMEについているサンプルを使って行ないます。この記事の執筆時点では、このページのsimple exampleには何らか問題があるようなので、full exampleの方を使います。新規に<code>fnordmetric.rb</code>というファイルを作成し、そこにこのサンプルのコードをペーストします。長すぎるのでここに表示はしませんが、<a href="https://github.com/paulasmuth/fnordmetric#full-example">Githubのここ</a>で確認できます。これを実行する前に、FnordMetric gemをインストールする必要があります。インストールが終わったらサンプルを実行してみます。</p>
+
+``` terminal
+$ gem install fnordmetric
+$ ruby fnordmetric.rb
+>> Thin web server (v1.3.1 codename Triple Espresso)
+>> Maximum connections set to 1024
+>> Listening on 0.0.0.0:4242, CTRL+C to stop
+[12-09-26 17:54:46] listening on http://0.0.0.0:4242
+[12-09-26 17:54:46] listening on tcp://0.0.0.0:2323
+[12-09-26 17:54:46] worker started
+```
+
+<p>このスクリプトが実行されると、いくつかのポートが待機状態になります。Webアプリケーションが4242番ポートで待機し、新規のイベントを2323番ポートにpostすることができます。<code>localhost:4242</code>にアクセスすると、各種のイベントについてのグラフが表示されているWeb画面が表示されます。これらのグラフ用のデータはスクリプトによって生成され、グラフはリアルタイムで更新されます。左側のパネルのリンクをクリックすると他のグラフが表示されますが、その例を後で紹介します。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1345/original/E378I01.png" width="960" height="600" alt="FnordMetricのWeb画面"/>
+</div>
+
+<p>このスクリプトのコードを見てみると、画面に表示されるgaugeを定義するために準備されたDSLがあります。イベントを生成するにはeventを呼び出してブロックを渡します。するとFnordMetricがこのイベントに対して待機状態になり、ブロックのコードで定義されたグラフを更新します。</p>
+
+``` fnordmetric.rb
+event :search do
+  observe :popular_keywords, data[:keyword]
+endTowards the bottom of this script we can see how the events are populated. 
+
+fnordmetric.rb
+def start_example_data_generator
+
+  api = FnordMetric::API.new
+  Thread.new do
+    loop do
+      api.event(:_type => :signup, :referrer => (rand(3) == 1 ? :twitter : :facebook))
+      api.event(:_type => :search, :keyword => (%w(Donau Dampf Schiff Fahrts Kaptitaens Muetzen Staender).shuffle[0..2] * ""))
+      api.event(:_type => :user_demography, :age => rand(15..85), :gender => (rand(2)==1 ? :female : :male) )
+      sleep (rand(10)/10.to_f)
+    end
+  end
+end
+```
+
+<p>ここでは<code>FnordMetric::API</code>クラスの新規インスタンスを生成し、<code>event</code>を呼び出してイベントを起動します。これに対して、イベントに関して定義した属性の一つである<code>_type</code>と、その他の必要な属性を渡します。このコードはこれらのイベントをループしながらランダムな間隔で呼び出します。</p>
+
+<h3>RailsアプリケーションにFnordMetricを追加する</h3>
+
+<p>FnordMetricの基本機能が理解できたところで、次に商品リストを扱う簡単なRailsアプリケーションに統合する方法を見ていきます。</p> 
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1346/original/E378I02.png" width="800" height="500" alt="商品の一覧を表示するRailsアプリケーション"/>
+</div>
+
+<p>各商品のページが閲覧された回数をトラックしようと思います。ページが閲覧されたらイベントをFnordMetricに送信し、この情報を各種のグラフに表示できるようにします。そのためにはまずgemfileに<code>fnordmetric</code> gemを追加して、<code>bundle</code>コマンドを実行してインストールを行ないます。</p>
+
+``` /Gemfile
+gem 'fnordmetric'
+```
+
+<p>次にFnordMetricを設定するための初期化ファイルを新規に作成します。<code>FnordMetric::API</code>の新規インスタンスを作成して定数に割り当て、Railsアプリケーション内のどこからでもアクセスできるようにします。</p>
+
+``` /config/initializers/fnordmetric.rb
+FNORD_METRIC = FnordMetric::API.new
+```
+
+<p>これがRedisデータベースに対して新規の接続を開き、直接イベントを挿入します。これは、2323番ポートからイベントを追加するよりも効率的です。次に<code>ProductsController</code>の<code>show</code>アクション(個別の商品の情報を表示するページ)の中でイベントを起動します。</p> 
+
+``` /app/controllers/products_controller.rb
+def show
+ @product = Product.find(params[:id])
+   FNORD_METRIC.event(@product.attributes.merge(_type: :view_product))
+end
+```
+
+<p>イベントを起動するために<code>FNORD_METRIC.event</code>を呼び出して必要なパラメータ(今回の場合は商品の属性)を渡します。イベントに名前をつけるために<code>_type</code>属性も同時に渡すことに留意してください。商品ページにアクセスするたびにRedisにイベントが追加されます。次にFnordアプリケーションを設定してこのイベントを待機するようにし、gaugeを調整する必要があります。これを行なうRubyスクリプトを作成してアプリケーションのルートディレクトリに置きます。</p> 
+
+``` /fnordmetric_app.rb
+require "fnordmetric"
+
+FnordMetric.namespace :store do
+  toplist_gauge :popular_products, title: "Popular Products"
+  
+  event :view_product do
+    observe :popular_products, data[:name]
+  end
+end
+
+FnordMetric::Web.new(port: 4242)
+FnordMetric::Worker.new
+FnordMetric.run
+```
+
+<p>ここで<code>fnordmetric</code>をrequireして<code>store</code>という名前空間を定義し、そこでgaugeを定義することができます。そして<code>Web</code>と<code>Worker</code>を起動します。イベントを直接Redisに追加するのでacceptorは起動しない点に注意してください。使用できるgaugeのタイプがいくつかあり、ここでは<code>toplist_gauge</code>を使用して人気商品を表示します。それでは、<code>view_product</code>イベントを待機する新規のイベントリスナーを作成します。これは、先ほど設定した<code>popular_products</code>のgaugeを監視します。このリスナーに対して商品名を、コントローラで渡した商品の属性を含む<code>data</code>ハッシュの形式で渡します。</p>
+
+<p><code>ruby fnordmetric_app.rb</code>を実行してFnordMetricアプリケーションを起動して、ブラウザでgaugeを見てみます。まだイベントが発生していないのでページには何も表示されていません。ブラウザで適当な商品ページにアクセスして左側のパネルの“Popular Products”をクリックすると、今までに閲覧した商品が表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1347/original/E378I03.png" width="800" height="500" alt="FnordMetricが閲覧された商品のリストを表示する"/>
+</div>
+
+<p>これらのイベントを手動で起動させるのは面倒なので、これを行なうRakeタスクを設定して実際のユーザの動きをシミュレートします。その前にFnordMetricイベントトリガーをコントローラから<code>Product</code>モデルに移動させます。これによってコントローラが多少整理され、Rakeタスクからイベントを起動できるようになります。モデル内に<code>trigger_view_event</code>という新規のメソッドを作成して、コントローラから呼び出します。</p>
+
+``` /app/controllers/products_controller.rb
+def show
+  @product = Product.find(params[:id])
+  @product.trigger_view_event
+end
+```
+
+<p>次にモデル内に次のメソッドを新規に作成します。</p>
+
+``` /app/models/product.rb
+def trigger_view_event
+  FNORD_METRIC.event(attributes.merge(_type: :view_product))    
+end
+```
+
+<p>これでRakeタスクを作成することができます。</p>
+
+```  /lib/tasks/fnordmetric.rake
+namespace :fnordmetric do
+  desc "Populate FnordMetric with events to simulate user activity"
+  task :populate => :environment do
+    products = Product.all
+    loop do
+      products.sample.trigger_view_event
+      sleep(rand)
+    end
+  end
+end
+```
+
+<p>これはシンプルなRakeタスクで、Railsの環境をロードして商品に対して、0〜1秒間隔でランダムにスリープしながら連続してビューイベントを起動します。ここで作成したRakeタスクを起動するとバックグラウンドで実行されます。</p>
+
+``` terminal
+$ rake fnordmetric:populate
+```
+
+<p>gaugeをリロードすると、より多くの追加されたイベントが表示され、商品の人気の上り下がりを見ることができます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1348/original/E378I04.png" width="800" height="500" alt="リストに商品の人気の移り変わりが表示される"/>
+</div>
+
+<p>次に別のgaugeを追加して、どの価格帯が最も人気があるかを表示します。そのためには、<code>distribution_gauge</code>を追加して、それに<code>title</code>と価格帯の配列を渡します。このgaugeも監視する必要があります。</p>
+
+``` /fnordmetric_app.rb
+require "fnordmetric"
+
+FnordMetric.namespace :store do
+  hide_active_users
+  
+  toplist_gauge :popular_products, title: "Popular Products"
+  
+  distribution_gauge :popular_prices, title: "Popular Prices",
+    value_ranges: [0..5, 5..10, 10..20, 20..50, 50..10000]
+  
+  event :view_product do
+    observe :popular_products, data[:name]
+    observe :popular_prices, data[:price]
+  end
+end
+
+FnordMetric::Web.new(port: 4242)
+FnordMetric::Worker.new
+FnordMetric.run
+```
+
+<p>このファイルに、<code>hide_active_users</code>の呼び出しも追加しました。これによって、不要になった左パネルのActive Usersのメニューオプションを外します。このスクリプトの変更を反映するため一度終了して再起動します。すると“Popular Prices”のグラフが表示され、クリックするとページの訪問数に基づいてもっとも人気の商品が表示されます。</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1349/original/E378I05.png" width="800" height="500" alt="価格帯によって分類された商品のグラフ"/>
+</div>
+
+<p>最後にリストに1秒間の閲覧数を表示するgaugeを追加します。</p>
+
+``` /fnordmetric_app.rb
+FnordMetric.namespace :store do
+  hide_active_users
+  
+  toplist_gauge :popular_products, title: "Popular Products"
+  
+  distribution_gauge :popular_prices, title: "Popular Prices",
+    value_ranges: [0..5, 5..10, 10..20, 20..50, 50..10000]
+    
+  gauge :product_views_per_second, tick: 1.second
+  widget "Product Views",
+    title: "Views per Second",
+    type: :timeline,
+    width: 100,
+    gauges: :product_views_per_second,
+    include_current: true,
+    autoupdate: 1
+  
+  event :view_product do
+    observe :popular_products, data[:name]
+    observe :popular_prices, data[:price]
+    incr :product_views_per_second
+  end
+end
+```
+
+<p>これは、1秒ごとに更新される汎用的なgaugeを生成します。このようなgaugeを作成した場合は、通常は同時に<code>widget</code>を追加して表示方法を定義します。<code>view_product</code>イベントを受け取るごとにこのgaugeを更新したいので、<code>incr</code>を使ってgaugeの数値を記録します。スクリプトを終了して再起動すると、商品が閲覧されるごとに自動的に更新されるproduct views widgetが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1350/original/E378I06.png" width="800" height="500" alt="1秒間に閲覧された商品の数を表示するグラフ"/>
+</div>
+
+<p>FnordMetricの紹介は以上です。今はまだドキュメントが整備されていない状況ですが、Railsアプリケーションでイベントをトラックしたい場合には導入を検討する価値があるでしょう。</p>

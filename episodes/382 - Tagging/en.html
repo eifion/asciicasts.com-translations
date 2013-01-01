@@ -1,0 +1,235 @@
+<p>Below is a page from a blogging application that shows a list of articles. We&rsquo;d like to add tagging so that each article can have a number of tags assigned to it. In this episode we&rsquo;ll show two different techniques to add tagging support to a Rails app.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1370/original/E382I01.png" width="800" height="500" alt="Our blogging application."/>
+</div>
+
+<h3>Adding Tagging With Acts-as-Taggable-on</h3>
+
+<p>There are a lot of <a href="https://www.ruby-toolbox.com/categories/rails_tagging">tagging libraries available</a> but by far the most popular is <a href="https://github.com/mbleigh/acts-as-taggable-on">acts-as-taggable-on</a>. This gem is a little dated but it&rsquo;s one of the few to have been maintained over the years. To use it in a Rails application we just need to add it to the gemfile then run bundle to install it.</p>
+
+``` /Gemfile
+gem 'acts-as-taggable-on'
+```
+
+<p>Next we need to run a generator that the gem provides to create a migration and then migrate the database to add the fields that <code>acts-as-taggable-on</code> uses.</p>
+
+``` terminal
+$ rails g acts_as_taggable_on:migration
+$ rake db:migrate
+```
+
+<p>This migration creates two tables: <code>tags</code> and <code>taggings</code>. We don&rsquo;t have to create models for these as they&rsquo;re included with the gem so we can get started with adding tagging to our application. We want an extra field on the page for editing an article where we can add tags for that article. To do this we&rsquo;ll modify the <code>Article</code> model by adding a call to <code>acts_as_taggable</code>, which is a method provided by the gem, and also a <code>tag_list</code> field to the <code>attr_accessible</code> list.</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  attr_accessible :content, :name, :tag_list
+  acts_as_taggable
+end
+```
+
+<p>Next we&rsquo;ll add a new field to our article form for editing the list of tags.</p>
+
+``` /app/views/articles/_form.html.erb
+<div class="field">
+  <%= f.label :tag_list, "Tags (separated by commas)" %><br />
+  <%= f.text_field :tag_list %>
+</div>
+```
+
+<p>We can try this out now. If we edit an article and add a couple of tags to the new field (separated by commas) we&rsquo;ll see those tags listed when we go back to edit the article again, so it looks as if this is working so far.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1371/original/E382I02.png" width="800" height="412" alt="The tag list now shows in the edit page."/>
+</div>
+
+<p>If you want to add auto-completion behaviour when you edit the tags, take a look at <a href="http://railscasts.com/episodes/102-auto-complete-association">episode 102</a>. We won&rsquo;t be doing this here; the next thing we&rsquo;ll do is add each article&rsquo;s tags under its content. The simplest way to do this is to show the <code>tag_list</code> for each article.</p>
+
+``` /app/views/articles/index.html.erb
+<h1>Articles</h1>
+
+<div id="articles">
+  <% @articles.each do |article| %>
+    <h2><%= link_to article.name, article %></h2>
+    <%= simple_format article.content %>
+    <p>Tags: <%= article.tag_list %></p>
+    <p><%= link_to "Edit Article", edit_article_path(article) %></p>
+  <% end %>
+</div>
+
+<p><%= link_to "New Article", new_article_path %></p>
+```
+
+<p>The tags for each article will now be displayed on the <code>index</code> page.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1372/original/E382I03.png" width="800" height="500" alt="Each article now shows its tag list."/>
+</div>
+
+<p>It would be better if the tags were links so that if we click one we&rsquo;ll see just the articles that have that tag. The <code>tag_list</code> attribute actually returns an array of strings, even though when we set the tag list it&rsquo;s set through a single string with the tags separated by commas. We can turn this array of tags into a set of links like this:</p>
+
+``` /app/views/articles/index.html.erb
+<p>Tags: <%= article.tag_list.map { |t| link_to t, tag_path(t) }.join(', ') %></p>
+```
+
+<p>We don&rsquo;t have any routes set up for tags so we&rsquo;ll do that now. We could set up a full tags resource but to keep things simple we&rsquo;ll set up a single route. This will take a <code>:tag</code> argument and map to the articles index page.</p>
+
+``` /config/routes.rb
+Blog::Application.routes.draw do
+  get 'tags/:tag', to: 'articles#index', as: :tag
+  resources :articles
+  root to: 'articles#index'
+end
+```
+
+<p>When we reload the page this doesn&rsquo;t quite work, however, as the HTML for the tags is escaped. To fix this we can pass this code through the <code>raw</code> method so that it isn&rsquo;t escaped. Whenever we use this method it&rsquo;s a sign that we&rsquo;re doing something a little complicated for the view layer and that we should move it off into a helper method. We won&rsquo;t do that here, but it&rsquo;s worth bearing this in mind.</p>
+
+``` /app/views/articles/index.html.erb
+<p>Tags: <%= raw article.tag_list.map { |t| link_to t, tag_path(t) }.join(', ') %></p>
+```
+
+<p>When we reload the page now we have links for each tag, each of which points to the correct path. Clicking on one doesn&rsquo;t filter the list of articles yet, though.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1373/original/E382I04.png" width="800" height="500" alt="Each tag is now a link."/>
+</div>
+
+<p>We can do this easily enough in the <code>ArticlesController</code>&rsquo;s index action by checking for a <code>:tag</code> parameter and filtering the list by that tag if it&rsquo;s found. The gem provides a <code>tagged_with</code> that we can used to find the articles with a given tag.</p>
+
+``` /app/controllers/articles_controller.rb
+def index
+  if params[:tag]
+    @articles = Article.tagged_with(params[:tag])
+  else
+    @articles = Article.all
+  end
+end
+```
+
+<p>When we reload the page now the articles are filtered by the selected tag.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1374/original/E382I05.png" width="800" height="500" alt="Clicking a tag now filters the articles."/>
+</div>
+
+<h3>Adding a Tag Cloud</h3>
+
+<p>Our tag list works now but what if we want to browse all the tags? A common way to do this is to use a tag cloud that shows all the tags, each with a size proportional to its popularity. We&rsquo;ll add this near the top of the index template and as the gem supplies a <code>tag_cloud</code> method doing this is quite easy.</p>
+
+``` /app/views/articles/index.html.erb
+<div id="tag_cloud">
+  <% tag_cloud Article.tag_counts, %w{s m l} do |tag, css_class| %>
+    <%= link_to tag.name, tag_path(tag.name), class: css_class %>
+  <% end %>
+</div>
+```
+
+<p>This method takes two arguments. The first one is a set of the tags that we want to display. An easy way to get this is to call <code>Article.tag_counts</code> which will give us a list of the tags and how often each one is used, which is needed to know how big each tag should be shown. The second argument we pass in should be a array of the CSS classes we want to use for the various sizes. The method also takes a block which is passed a <code>tag</code> object and the CSS class that matches that tag. Inside this block we render out the tag, passing <code>link_to</code> the tag object&rsquo;s name, the <code>tag_path</code> (which we also pass the tag name as we want to use the name in the URL), and the CSS class. We don&rsquo;t have styles defined for our tag cloud so we&rsquo;ll add those now.</p>
+
+``` /app/assets/stylesheets/articles.css.scss
+#tag_cloud {
+  width: 400px;
+  line-height: 1.6em;
+  .s { font-size: 0.8em; }
+  .m { font-size: 1.2em; }
+  .l { font-size: 1.8em; }
+}
+```
+
+<p>When we reload the articles page now we&rsquo;ll see a tag cloud with the two tags that we&rsquo;ve already added. If we add some more tags to the articles and reload the page we&rsquo;ll see a better looking tag cloud with tags that vary in size depending on the number of articles with that tag. Clicking a tag will filter the articles to those with that tag.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1375/original/E382I06.png" width="800" height="500" alt="The tag cloud sizes tags based on their popularity."/>
+</div>
+
+<p>There&rsquo;s a lot more we can do here such as highlighting the current tag or sorting the tags by their name but we won&rsquo;t do those in our application.</p> 
+
+<h3>Implementing Tagging From Scratch</h3>
+
+<p>We&rsquo;ve done a lot with the <code>acts-as-taggable-on gem</code> but how much work would it be to implement something like this from scratch? Before we can do this we&rsquo;ll need to roll back some of the functionality that we&rsquo;ve added. First we&rsquo;ll undo the database change we made and remove the migration.</p>
+
+``` terminal
+$ rake db:rollback
+$ rails d acts_as_taggable_on:migration
+```
+
+<p>Next we&rsquo;ll remove the gem from the gem file and run bundle again. We can then start rebuilding the tagging functionality from scratch. First we&rsquo;ll generate a <code>Tag</code> model with a <code>name</code> column.</p>
+
+``` terminal
+$ rails g model tag name
+```
+
+<p>Next we&rsquo;ll create a <code>Tagging</code> model that belongs to both <code>Tag</code> and <code>Article</code>.</p>
+
+``` terminal
+$ rails g model tagging tag:belongs_to article:belongs_to
+```
+
+<p>We could set up a polymorphic association here which is what the gem does internally but since we have a simple setup we&rsquo;ll link directly to the <code>Article</code> model here. We can then run <code>rake db:migrate</code> to ad the new tables. Next we need to set up the associations in the models, starting with <code>Tag</code>.</p>
+
+``` /app/models/tag.rb
+class Tag < ActiveRecord::Base
+  attr_accessible :name
+  has_many :taggings
+  has_many :articles, through: :taggings
+end
+```
+
+<p>The <code>Article</code> model needs to be a little more complicated as we need to replace the functionality of <code>acts_as_taggable</code>. We&rsquo;ll need to add some associations and a few methods for managing tags.</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  attr_accessible :content, :name, :tag_list
+  has_many :taggings
+  has_many :tags, through: :taggings
+
+  def self.tagged_with(name)
+    Tag.find_by_name!(name).articles
+  end
+
+  def self.tag_counts
+    Tag.select("tags.*, count(taggings.tag_id) as count").
+      joins(:taggings).group("taggings.tag_id")
+  end
+  
+  def tag_list
+    tags.map(&:name).join(", ")
+  end
+  
+  def tag_list=(names)
+    self.tags = names.split(",").map do |n|
+      Tag.where(name: n.strip).first_or_create!
+    end
+  end
+end
+```
+
+<p>First we set up the associations for taggings and for tags through taggings then we implement the four methods that we call on the <code>Article</code> model elsewhere in our application. The <code>tagged_with</code> method returns the articles with tags matching a given name while <code>tag_counts</code> returns the tags and a count for each one. (This method may well be better off in the <code>Tag</code> model.) We also have methods for getting and setting the <code>tag_list</code>, although there&rsquo;s a slight change here as the getter returns a string instead of an array. Because of this we&rsquo;ll need to change the <code>index</code> template  as it currently treats the <code>tag_list</code> as an array.  Instead we&rsquo;ll call <code>article.tags</code> and map the <code>name</code> attribute so that it has similar behaviour to the gem.</p>
+
+``` /app/views/articles/index.html.erb
+<%= raw article.tags.map(&:name).map { |t| link_to t, tag_path(t) }.join(', ') %>
+```
+
+<p>The last thing we need to write is the <code>tag_cloud</code> method. We&rsquo;ll write this in the <code>ApplicationHelper</code> module.</p>
+
+``` /app/helpers/application_helper.rb
+module ApplicationHelper
+  def tag_cloud(tags, classes)
+    max = tags.sort_by(&:count).last
+    tags.each do |tag|
+      index = tag.count.to_f / max.count * (classes.size - 1)
+      yield(tag, classes[index.round])
+    end
+  end
+end
+```
+
+<p>This method is fairly simple and takes the same arguments as the gem&rsquo;s method. In it we find the tag with the highest count so that we can determine the relative popularity of the other tags and determine the class to use with each one.  We now have roughly the same functionality but written from scratch. If we add a couple of tags to an article then go back to the list we&rsquo;ll see the tags next to that article and also added to the cloud.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1376/original/E382I07.png" width="800" height="500" alt="The tag cloud for for our own from-scratch solution."/>
+</div>
+
+<p>The majority of the code for our solution is in the <code>Article</code> model. We&rsquo;ve not had to write too much code to implement this and now we don&rsquo;t have an extra dependency in our application. There are a lot of features in the gem that we haven&rsquo;t added to our scratch solution such as different contexts that we can supply when we create tags on a model. With the gem we can also mark owners so that we can make, say, a User a tagger and the gem will keep track of this when we track models.</p> 
+
+<p>If you just want a simple tagging solution then implementing it from scratch is a good idea, but for a full featured solution them gem makes more sense.</p>

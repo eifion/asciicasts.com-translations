@@ -1,0 +1,161 @@
+<p><a href="https://github.com/flyerhzm/bullet">Bullet</a> gemは、Richard Huangが開発したgemで、アプリケーションで非効率なデータベースクエリー( N+1クエリーやmissing counter cache columnなど)が行なわれたときに、いろいろな方法で警告を出してくれます。今回のエピソードでは、このgemを使ってRailsアプリケーションの最適化をおこないます。</p>
+
+<h3>商品ページを最適化する</h3>
+
+<p>下に示したページは、カテゴリ別の商品一覧です。このページには2つのモデルが含まれています。一つが<code>Category</code>で、これは複数の<code>Products</code>を持つことができます。</p> 
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1307/original/E372I01.png" width="800" height="500" alt="カテゴリページに商品が表示されている"/>
+</div>
+
+<p>このページには現在、N+1クエリ問題があり、これはRailsのログを見ることで確認できます。ログによると、カテゴリを取得するためにクエリが1回実行され、関連する各商品を取得する度ごとに別のクエリが実行されます。</p>
+
+``` log
+Category Load (0.2ms)  SELECT "categories".* FROM "categories" ORDER BY name
+Product Load (0.2ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" = 3
+Product Load (0.2ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" = 1
+Product Load (0.2ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" = 5
+Product Load (0.2ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" = 4
+Product Load (0.3ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" = 2
+```
+
+<p>これがN+1クエリ問題といわれるもので、親を取得するクエリとそれ以外のレコードを取得するために子供の数だけのクエリが生成されることを意味します。この種の問題は見落とされがちなので、Bulletが役に立ちます。アプリケーションのgemfileのdevelopmentグループのみにgemを追加して、<code>bundle</code>コマンドでインストールをおこないます。</p>
+
+``` /Gemfile
+gem 'bullet', group: :development
+```
+
+<p>新規に初期化ファイルを作成してBulletを有効化します。すべての環境にはロードされないので、最初に定義されているかどうかを確認します。定義されていたらそれを有効化して、クエリの問題をどう通知してほしいかを指定します。<code>alert</code>を<code>true</code>に設定すると、ブラウザに警告が表示されます。</p>
+
+``` /config/initializers/bullet.rb
+if defined? Bullet
+  Bullet.enable = true
+  Bullet.alert = true
+end
+```
+
+<p>サーバを再起動してページをリロードすると、JavaScriptの警告で、BulletがN+1クエリを検知したこととそれを修正するためにとるべき方法が表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1308/original/E372I02.png" width="803" height="500" alt="BulletがN+1クエリ問題について警告している"/>
+</div>
+
+<p>Bulletの推奨に従うことにして、カテゴリのデータと同時に商品も取得するようにします。</p>
+
+``` /app/controllers/categories_controller.rb
+class CategoriesController < ApplicationController
+  def index
+    @categories = Category.order(:name).includes(:products)
+  end
+end
+```
+
+<p>いずれこのデータは必要になるので、eager loadingで商品情報を取得します。ページをリロードすると、データを効率的に取得しているので警告は表示されません。ログファイルを見ると、2つのクエリだけでデータを取得していることがわかります。一つ目でカテゴリを取得して、次にこれらのカテゴリに属する商品を取得しています。</p>
+
+``` log
+Category Load (0.2ms)  SELECT "categories".* FROM "categories" ORDER BY name
+Product Load (0.4ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" IN (3, 1, 5, 4, 2)
+```
+
+<p>Bulletは、不必要なeager loadingを行なっている場合も教えてくれます。例えばこのindexページから商品リストをはずして、各商品のshowページに移すと決めたとします。indexテンプレートの商品リストのコードを削除して、カテゴリについての情報だけを表示します。</p>
+
+``` /app/views/categories/index.html.erb
+
+<h1>Categories</h1>
+<% @categories.each do |category| %>
+  <div class="category">
+    <h2><%= link_to category.name, category %></h2>
+  </div>
+<% end %>
+```
+
+<p>ページをリロードすると、再度警告が表示されますが、Bulletが今度は使われていないeager loadingを検知したことを通知しています。</p> 
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1309/original/E372I03.png" width="" height="" alt="今度は不必要なeager loadingの警告を受けた"/>
+</div>
+
+<p>これを修正するために、<code>CategoriesController</code>の<code>includes</code>の呼び出しを削除します。</p>
+
+``` /app/controllers/categories_controller.rb
+class CategoriesController < ApplicationController
+  def index
+    @categories = Category.order(:name).includes(:products)
+  end
+end
+```
+
+<p>ページをリロードすると警告は消えました。</p>
+
+<h3>Counter Cache Column</h3>
+
+<p>Bulletはcounter cache columnの使用を検討した方がいい場合も通知してくれます。例えば各カテゴリ名の下に、そのカテゴリに属する商品数を表示したいとします。これを次のようにします。</p>
+
+``` /app/views/categories/index.html.erb
+<h1>Categories</h1>
+
+<% @categories.each do |category| %>
+  <div class="category">
+    <h2><%= link_to category.name, category %></h2>
+    <%= pluralize category.products.size, "product" %>
+  </div>
+<% end %>
+```
+
+<p>ページをリロードするとまた警告が表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1310/original/E372I04.png" width="800" height="500" alt="カテゴリ表にはcounter cache columnが必要"/>
+</div>
+
+<p>今回はcounter cache columnを追加することを推奨しています。各カテゴリに属する商品数をカウントするためにデータベースに対してクエリを実行する必要があります。これは先に触れたN+1クエリ問題に似ています。これは、<code>Product</code>モデルの<code>belongs_to</code>の呼び出しで<code>counter_cache</code>オプションを使用することで簡単に修正することが可能です。</p>
+
+``` /app/models/product.rb
+class Product < ActiveRecord::Base
+  belongs_to :category, counter_cache: true
+  attr_accessible :name, :price, :category_id
+end
+```
+
+<p>migrationを生成して、productsテーブルにcounter列を追加します。</p>
+
+``` terminal
+$ rails g migration add_products_count_to_categories products_count:integer
+```
+
+<p>migrationを実行する前に、<code>counter_cache</code>列にデフォルト値を設定します。</p>
+
+``` /db/migrations/20120820000000_add_products_count_to_categories.rb
+class AddProductsCountToCategories < ActiveRecord::Migration
+  def change
+    add_column :categories, :products_count, :integer, default: 0, null: false
+  end
+end
+```
+
+<p>これを既存の<code>Product</code>レコードに適用させたい場合は、その列にデータを入れる必要があるので、もう一つ別のmigrationを作成して対応します。</p>
+
+``` terminal
+$ rails g migration cache_product_count
+```
+
+<p>このmigrationでActiveRecordを利用してこの列を埋めることもできますが、ここではそれは行なわず、SQLコードを書いて対応することにします。</p>
+
+``` /db/migrations/20120820000000_cache_product_count.rb
+class CacheProductsCount < ActiveRecord::Migration
+  def up
+    execute "update categories set products_count=(select count(*) from products where category_id=categories.id)"
+  end
+
+  def down
+  end
+end
+```
+
+<p>これによって、既存のカテゴリについて商品数が更新されます。これらのmigrationを<code>rake db:migrate</code>で実行してページをリロードすると、警告は消えています。</p>
+
+<h3>その他の通知オプション</h3>
+
+<p>ここまでは、Bulletの通知方法として警告メッセージを介する方法のみを見てきましたが、その他の通知方法のオプションを選択することができます。これのために<a href="https://github.com/flyerhzm/uniform_notifier">Uniform Notifier</a>という別のgemを利用しますが、これ自体もとても興味深いプロジェクトです。アプリケーションでBulletの機能は一応試したので、通知メッセージをより邪魔にならないもの、例えば<code>bullet_logger</code>に切り替えます。この方法でアプリケーションの開発を継続し、時々これをチェックしてクエリの問題がないかどうかを確認することにします。</p> 
+
+<p>このようなツールで重要なことは、その指示に盲目的に従わないということです。警告メッセージでeager loadingを追加するように言われたときに、その警告を消すために言われた通りに追加するべきではありません。eager loadingを追加することによって実際にはパフォーマンスが落ちてしまう場合がしばしばあるので、その場合はキャッシュを利用するなど他の最適化手法を検討する必要があるでしょう。疑わしい場合には、ベンチマークを行なって複数のソリューションのパフォーマンスを比較するのがいいでしょう。また常に考慮しなくてはいけないのが、本番稼働用サーバが設定された環境、例えばデータベース接続の待ち時間などにも影響を受けるという点です。</p>

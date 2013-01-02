@@ -1,0 +1,74 @@
+<p><a href="https://github.com/rails/turbolinks">Turbolinks</a>は新規作成したRails 4のアプリケーションにデフォルトで含まれるgemです。Rails 3とも互換性があるので、既存のアプリケーションで使用することも可能です。このgemによって、ページ全体をロードすることなく、新規ページのHTMLのボディ部分をJavaScriptで置き換えることで、ユーザに対してアプリケーションの動作を速く見せることができます。今回のエピソードではRails 3アプリケーションでこのgemを試してみます。使用するアプリケーションは、複数のプロジェクトに対応したTodoリストで、各プロジェクトが複数のタスクを持つことができます。新規タスクは項目名の横に最初は「未完了」のマークが付いていて、チェックボックスをチェックすることで完了にすることができます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1402/original/E390I01.png" width="800" height="400" alt="Todoリストアプリケーション"/>
+</div>
+
+<h3>Turbolinksを追加する</h3>
+
+<p>このアプリケーションにTurbolinksを追加して、その動きがどうなっているかを見ていきます。最初にgemfileのgemのリストに追加して、bundleコマンドを実行してインストールを行ないます。</p>
+
+``` /Gemfile
+gem 'turbolinks'
+```
+
+<p>次にアプリケーションのJavascriptのmanifestファイルを開いて、<code>turbolinks</code>をrequireする行を追加します。TurbolinksはjQueryに依存しないので、アプリケーションがjQueryを使用していなくても利用することが可能です。</p>
+
+``` /app/assets/javascripts/application.js
+//= require jquery
+//= require jquery_ujs
+//= require turbolinks
+//= require_tree .
+```
+
+<p>ここでRailsアプリケーションを再起動すると、前と同じようにブラウズでき、違いがあるようには見えません。Turbolinksが動作しているかどうかを確認するために、ネットワークインスペクタを開いてサイトのところどころをクリックしてみます。するとリンクを押すたびにページ全体がリロードされているようなので、Turbolinksは機能していないようです。これは、使用しているブラウザをTurbolinksがサポートしていない可能性があるので、アップグレードするか別のブラウザを使います。Turbolinksは最新のブラウザで使用されることを想定していますが、サポートされていないブラウザの場合にもgraceful degradationによって、アプリケーションは想定した通りに動作します。ここでは最新版のChromeを使ってページを見てみることにしましょう。リンクをクリックすると、今度はページの全体がリロードされずに、<code>turbolinks.js</code>ファイルによって、次ページに移動するためのAJAXリクエストが生成されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1403/original/E390I02.png" width="801" height="562" alt="ネットワークインスペクタでAJAXリクエストを見ることができます。"/>
+</div>
+
+<p>これによってページがロードされるたびにJavaScriptとCSSが解釈し直されることがなくなり、ユーザに対してサイトの速度が向上したように見えます。これはどういう仕組みで動いているのでしょうか? Turbolinksは、ページ上の各リンクの<code>click</code>イベントを待機します。イベントが起動されると、JavaScriptによってリクエストが生成され、Turbolinksがレスポンスのbodyをチェックします。そしてJavaScriptを使って現在のページをこの新しい内容で更新して、<code>title</code>と<code>body</code>要素を置き換えて新しいページに見えるようにしています。またPush State APIを使って、URLを変更し新しいページに移動したように見せます。この方法は、<a href="http://railscasts.com/episodes/294-playing-with-pjax">エピソード294</a>で紹介したPJAXによく似ています。</p>
+
+<h3>既存のJavaScriptの動作の問題</h3>
+
+<p>このアプリケーションではTurbolinksがうまく機能しているように見えますが、既存のJavaScriptのいくつかが動作しないことに気づくでしょう。例えば、タスクを更新して「完了」にチェックしても何も起こりません。現在のページをリロードして再度チェックボックスをチェックすると、今度はうまく動作します。このページのCoffeeScriptのコードは次のようになります。</p>
+
+``` /app/assets/javascripts/projects.js.coffee
+jQuery ->
+  $('.edit_task input[type=checkbox]').click ->
+    $(this).parent('form').submit()
+```    
+
+<p>このコードは、各タスクのチェックボックスの<code>click</code>イベントを待機します。いずれかがクリックされると、そのチェックボックスを含んだフォームが送信されて、タスクに完了のマークが付きます。このコードの中で重要なのは、1行目の<code>jQuery</code>の関数を呼び出している部分です。このコードは、ページのDOMのロードが完了したときに起動される<code>ready</code>イベントを待機します。この関数の残りのコードをラップしなかった場合、jQueryがチェックボックスに対してそれらがロードされる前に<code>click</code>イベントを付加しようと試みます。</p>
+
+<p>Turbolinksを使用した場合、このコールバックは最初にページがロードされるときだけ起動されます。もし別のページを表示していて、タスクを見るためにこのページに来たという場合、実際には同じHTMLページにいることになるので、DOMの<code>ready</code>イベントは起動されません。<a href="https://github.com/rails/turbolinks#events">Turbolinksが起動するイベント</a>はいくつかあり、その中の一つが<code>page:load</code>です。これを使って、CoffeeScriptファイルの中でDOM readyの振る舞いをシミュレートできます。</p>
+
+``` /app/assets/javascripts/projects.js.coffee
+ready = ->
+  $('.edit_task input[type=checkbox]').click ->
+    $(this).parent('form').submit()
+
+$(document).ready(ready)
+$(document).on('page:load', ready)
+```
+
+<p>ここで<code>ready</code>という変数に、チェックボックスをチェックする関数を設定して、それを<code>document.ready</code>と<code>page:load</code>の両方のイベントに渡します。このようにすることで、Turbolinksを使用しているかどうかにかかわらず、チェックボックスのイベントがページをロードしたときに付加されます。この変更によってチェックボックスは従来の動きをするようになり、未完了のタスクにチェックを付けるとそのタスクは完了リストに移動します。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1404/original/E390I03.png" width="800" height="443" alt=""/>
+</div>
+
+<p>自動的にこのような振る舞いにしたい場合は、<a href="https://github.com/kossnocorp/jquery.turbolinks">JQuery Turbolinks gem</a>を利用します。この問題を回避する、もう一つ別の方法もあります。要素を選択してその<code>click</code>イベントを待機するのではなく、ドキュメントの<code>click</code>イベントを待機して、イベントを発生させた要素がタスクのチェックボックスである場合に、このイベントの起動をチェックします。</p>
+
+``` /app/assets/javascripts/projects.js.coffee
+$('document').on 'click', '.edit_task input[type=checkbox]', ->
+    $(this).parent('form').submit()
+```    
+
+<p>これによってDOM readyのイベントに対してこのコードを起動する必要がなくなります。これはHTMLに追加されたすべてのチェックボックスに対して、それがたとえこのJavaScriptが実行された後であってもイベントが起動されるからです。この方法には別の利点もあります。AJAXでさらにタスクを加えた場合、それらに自動的にこのイベントが適用されます。</p>
+
+<p>Turbolinksのissue trackerを定期的にチェックするのがいいでしょう。というのも気をつけなくてはいけない問題がいくつかあるからです。サードパーティのライブラリの中には、例えばTwitter BootstrapやjQuery UI Calendarなどのように、Turbolinksと互換性がないものもいくつかありますが、現在対応が取られているところです。また一部のブラウザで、ページをリロードしたり「戻る」ボタンをクリックした場合におかしな状況が発生して期待しない挙動を行なう場合があります。例えば、一定の状況でGETの代わりにPOSTリクエストを送信したような場合です。このような状況で発生する問題を回避するには、Turbolinksを無効にするという方法がありますが、将来のバージョンのTurbolinksではそれも必要なくなるでしょう。</p> 
+
+<p>このような問題があるのにTurbolinksをわざわざ使う意味があるのかと迷っている人もいることでしょう。迷っているあなたに試してみようと思わせるかもしれないのが<a href="https://github.com/steveklabnik/turbolinks_test">Turbolinks Test</a>です。このツールはベンチマークを実行して、Turbolinksを使うことで速度の向上を見込めるかどうかをチェックしますが、大抵の場合は速度は向上します。大きい場合にはレスポンス時間を半分に削減することもあります。もちろんアプリケーションによって状況はそれぞれですが、自分のアプリケーションに組み込んで反応速度が向上するかどうかを試してみることは簡単です。</p> 
+
+<p>新規にRails 4のアプリケーションを作成して、Turbolinksを使用しないと決めた場合には、gemfileのgemの行と、アプリケーションのJavaScript manifestファイルの<code>require</code>の行をコメントアウトします。</p>

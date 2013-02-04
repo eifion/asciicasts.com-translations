@@ -1,0 +1,311 @@
+<p>The next major version of Rails is just around the corner and as this is episode 400 it seems like a good time to discuss what&rsquo;s coming in Rails 4.0. At the time of writing there&rsquo;s no gem pre-release yet so to take a look at it we&rsquo;ll have to check out the master branch, which we can do by cloning it from Github. Once we&rsquo;ve done that we&rsquo;ll need to move into its directory and run bundle to install its dependencies. Note that Rails 4 requires Ruby 1.9.3 or higher to run.</p>
+
+``` terminal
+$ git clone https://github.com/rails/rails.git
+$ cd rails
+$ bundle
+```
+
+<p>If you see an error message that says that the version of Bundler is incorrect you might need to install the prerelease version which we can do like this:</p>
+
+``` terminal
+$ gem install bundler --pre
+```
+
+<p>After this has installed we can try running <code>bundle</code> again and once it completes we can create our first Rails 4 application. We do this by running the <code>rails</code> command from the <code>railties/bin/</code> directory of the version of Rails that we&rsquo;ve downloaded to create a new application called <code>blog</code> and telling it to use Edge Rails. We&rsquo;ll also specify the Postgres database as there are some new Postgres features that we&rsquo;ll be demonstrating later.</p>
+
+``` terminal
+$ railties/bin/rails new ~/code/blog --edge -d postgresql
+```
+
+<p>Once a prerelease version of the Rails 4 gem is released this will become much easier. We&rsquo;ll be able to run something like <code>gem install rails --pre</code> and then create a Rails 4 application in the usual way. Once we&rsquo;ve installed this gem we can create a new Rails 3.2 application by passing in the version number.</p>
+
+``` terminal
+$ rails _3.2.10_ new my_app
+```
+
+<h3>New Postgres Features</h3>
+
+<p>Now that we know how to create a new Rails 4 application let&rsquo;s take a look at it. Before we look at any new features we&rsquo;ll set up the database. The first thing we&rsquo;ll do is remove the username option from each database in the <code>database.yml</code> file so that the application can connect to our Postgres database. We should then be able to create the application&rsquo;s databases by running <code>rake db:create</code>. (Setting up a Rails application to use Postgresql was covered in more detail back in <a href="http://railscasts.com/episodes/342-migrating-to-postgresql">episode 342</a>.)</p>
+
+<p>Next we&rsquo;ll generate create an <code>Article</code> scaffold so that we have something in our application to work with. Rails 4 has support for native datatypes in Postgres and we&rsquo;ll show two of these here, although a lot more are supported: array and hstore. We can store arrays in a string-type column and specify the type for hstore.</p>
+
+``` terminal
+$ rails g scaffold article name content:text published_on:date tags properties:hstore
+```
+
+<p>Before we migrate the database we&rsquo;ll need to make a small change to the migration so that the <code>tags</code> column is treated as an array. We do this by adding the <code>array</code> option and setting it to <code>true</code>. To get hstore working we need to run <code>execute &quot;create extension hstore&quot;</code> before creating the table.</p>
+
+``` /db/migrate/20130119000000_create_articles.rb
+class CreateArticles < ActiveRecord::Migration
+  def change
+    execute "create extension hstore"
+    create_table :articles do |t|
+      t.string :name
+      t.text :content
+      t.date :published_on
+      t.string :tags, array: true
+      t.hstore :properties
+
+      t.timestamps
+    end
+  end
+end
+```
+
+<p>Running <code>rake db:migrate</code> will create this table. Running migrations for Postgres databases in Rails 4 isn&rsquo;t as noisy as in previous versions as the log messages aren&rsquo;t shown. Let&rsquo;s look now at how these datatypes are handled in the console. We&rsquo;ll start by creating a new <code>Article</code>. For the <code>tags</code> we can pass in a Ruby array which will be converted to a Postgres array while for the <code>properties</code> we can pass in a hash.</p>
+
+``` console
+>> Article.create! name:"Hello", tags: %w[ruby rails], properties: {author:"Eifion"}
+```
+
+<p>When we fetch these properties back later we get an array and a hash that we can interact with just like any other. While it&rsquo;s true that we could do something similar by serializing a text column this approach allows us to interact with these columns in a much more efficient way. <a href="http://railscasts.com/episodes/345-hstore">Episode 345</a> covers hstore in more detail.</p>
+
+<h3>New ActiveRecord Features</h3>
+
+<p>Next we&rsquo;ll explore some of the other new features in ActiveRecord, starting with the <code>all</code> method. This now returns an ActiveRecord relation instead of an array of results which means that it&rsquo;s now lazily loaded and only triggers a database query when it needs to. This also gets rid of the need for the <code>scoped</code> as it replaces this functionality. If we do need to old functionality where we get an array of results we can all <code>to_a</code> on any ActiveRecord relation. This will do the same thing as all did in previous versions of Rails.</p>
+
+<p>Another new method which goes along with this is <code>load</code>. This will trigger the database query but return an ActiveRecord relation instead of an array of results. This is useful if we want to trigger the query, say for some kind of caching behaviour, but still want to return a relation. There&rsquo;s also a new <code>none</code> method which will return a ActiveRecord relation with no records. This is useful if we don&rsquo;t want to return any records but want something that we can call other scopes on. Speaking of scopes, we can now call not on the where scope to invert it.</p>
+
+``` console
+>> Article.where.not(name: "Hello")
+  Article Load (107.6ms)  SELECT "articles".* FROM "articles" WHERE ("articles"."name" != 'Hello')
+```
+
+<p>The <code>order</code> clause now accepts a hash so we can pass in a column name and the order that we want the results to be in. We can also pass in multiple column names to order by multiple columns. Another useful new method is <code>find_by</code>. We&rsquo;ve always been able to use dynamic finders, such as <code>find_by_name</code>, but these rely on <code>method_missing</code> and the implementation isn&rsquo;t very clean. Rails 4 introduces a <code>find_by</code> method that we can pass a hash to, like this:</p>
+
+``` console
+>> Article.find_by name: "Hello"
+```
+
+<p>There are also new <code>find_or_create_by</code> and <code>find_or_inititalize_by</code> methods and you&rsquo;re encouraged to use these instead of the other ones.</p> 
+  
+<h3>ActiveModel::Model</h3>
+
+<p>Another interesting new feature is a new module called <code>ActiveModel::Model</code>. Say that we want to create a new class and be able to update its attributes through a form, like an ActiveModel object, but not persist it to the database. If we include <code>ActiveModel::Model</code> in the class we can create <code>attr_accessors</code> for any method we want and also add validations just like we would with ActiveRecord. We can then instantiate instances of this class and interact with its attributes just like we would with an ActiveRecord model, even though this is just a plain Ruby class.</p>
+
+``` console
+>> class Message
+>> include ActiveModel::Model
+>> attr_accessor :name, :content
+>> end
+=> nil
+>> m = Message.new(name: "foo")
+=> #<Message:0x007ff5dca1e760 @name="foo">
+>> m.name
+=> "foo"
+```
+
+<p>This was possible to do with ActiveModel before but it required including a lot of different modules. In Rails 4 this is much easier. It&rsquo;s especially great if you want to pass a custom class into a <code>form_for</code> call.</p>
+
+<h3>Changes To The Gemfile</h3>
+
+<p>We&rsquo;ll shift gears away from the console now and take a look at the welcome page that&rsquo;s displayed when we visit a new application&rsquo;s home page. This page looks much the same as it did before but it&rsquo;s now dynamically generated by Rails internals. This means that we no longer have to delete the <code>public/index.html</code> page from our applications.  Next we&rsquo;ll take a look at the gemfile. The default gemfile looks like this:</p>
+
+``` /Gemfile
+source 'https://rubygems.org'
+
+gem 'rails',     github: 'rails/rails'
+gem 'arel',      github: 'rails/arel'
+gem 'activerecord-deprecated_finders', github: 'rails/activerecord-deprecated_finders'
+
+gem 'pg'
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sprockets-rails', github: 'rails/sprockets-rails'
+  gem 'sass-rails',   github: 'rails/sass-rails'
+  gem 'coffee-rails', github: 'rails/coffee-rails'
+
+  # See https://github.com/sstephenson/execjs#readme for more supported runtimes
+  # gem 'therubyracer', platforms: :ruby
+
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+
+# Turbolinks makes following links in your web application faster. Read more: https://github.com/rails/turbolinks
+gem 'turbolinks'
+
+# Build JSON APIs with ease. Read more: https://github.com/rails/jbuilder
+gem 'jbuilder', '~> 1.0.1'
+
+# To use ActiveModel has_secure_password
+# gem 'bcrypt-ruby', '~> 3.0.0'
+
+# Use unicorn as the app server
+# gem 'unicorn'
+
+# Deploy with Capistrano
+# gem 'capistrano', group: :development
+
+# To use debugger
+# gem 'debugger'
+```
+
+<p>The top three gems are only included here because we&rsquo;re using Edge Rails. In the assets group the <code>sprockets-rails</code> gem is new as part of a Sprockets refactoring to move part of it out into a separate gem. The gemfile also has a new <code>turbolinks</code> gem which we covered in detail in <a href="http://railscasts.com/episodes/390-turbolinks">episode 390</a>. Even though turbolinks is enabled by default it&rsquo;s easy to remove if we want to. All we need to do is remove the gem from the gemfile, remove the turbolinks line from the <code>app/assets/javascripts/application.js</code> file and finally remove the references to <code>data-turbolinks-track</code> from the application&rsquo;s layout file. This attribute is something new that&rsquo;s been added since episode 390 was written. Turbolinks will track assets with this attribute and will reload the entire page if they change.</p> 
+
+<p>Next we&rsquo;ll take a look at the controller and see what was generated by the scaffolding.</p> 
+
+``` /app/controllers/articles_controller.rb
+class ArticlesController < ApplicationController
+  before_action :set_article, only: [:show, :edit, :update, :destroy]
+
+  # Some methods omitted.
+
+  # PATCH/PUT /articles/1
+  # PATCH/PUT /articles/1.json
+  def update
+    respond_to do |format|
+      if @article.update(article_params)
+        format.html { redirect_to @article, notice: 'Article was successfully updated.' }
+        format.json { head :no_content }
+      else
+        format.html { render action: 'edit' }
+        format.json { render json: @article.errors, status: :unprocessable_entity }
+      end
+    end
+  end
+
+  private
+    # Use callbacks to share common setup or constraints between actions.
+    def set_article
+      @article = Article.find(params[:id])
+    end
+
+    # Never trust parameters from the scary internet, only allow the white list through.
+    def article_params
+      params.require(:article).permit(:name, :content, :published_at)
+    end
+end
+```
+
+<p>Quite a lot has changed has changed here. The scaffolding now loads the record using a before filter, except that it&rsquo;s no longer called <code>before_filter</code> but <code>before_action</code>. This does exactly the same thing (and we can still use <code>before_filter</code> if we want) but <code>before_action</code> seems to be the new convention. The next thing of note is that the update action now responds to either a PUT request or a PATCH request. PATCH seems to fit the behaviour of an update action more clearly, though it&rsquo;ll be a while before PUT disappears. In the action the <code>update_attributes</code> method on the model has been renamed to <code>update</code> although we can still use <code>update_attributes</code> without deprecation warnings. Finally we have support for strong parameters built in. This approach is a much better solution than <code>attr_accessible</code>. This was covered in <a href="http://railscasts.com/episodes/371-strong-parameters">episode 371</a> and it&rsquo;s worth taking a look at this for more information about strong parameters. This means that in our model we no longer need the <code>attr_accessible</code> line, although if we want this functionality back we can adding with the Protected Attributes gem.</p>
+
+<p>While we&rsquo;re talking about the model we&rsquo;ll mention scopes. Previously we could pass in another scope as a second argument, like this:</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  scope :sorted, order(:name)
+end
+```
+
+<p>We now need to pass in a callable object as a second object, such as a lambda. This is because it was too common to accidentally use something dynamic, such as the current time, in the second argument and this prevents that problem as it will always be evaluated at runtime.</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  scope :sorted, -> { order(:name) }
+end
+```
+
+<h3>Concerns</h3>
+
+<p>The <code>controllers</code> and <code>models</code> directories now have a <code>concerns</code> directory. This is designed for modules that we can include in our models to help reduce their size. There are alternative approaches to doing this, such as service objects and these were discussed in <a href="http://railscasts.com/episodes/398-service-objects">episode 398</a>. There&rsquo;s no compulsion to use concerns if we don&rsquo;t want to and we can remove these directories if we want.</p>
+
+<h3>Changes to Views</h3>
+
+<p>What about the views? Quite a lot has been added here with a lot of new helper methods that can be used to generate form fields, including ones for collections. You&rsquo;re probably familiar with the <code>collection_select</code> helper method to create a select menu for an association. We can now use <code>collection_check_boxes</code> and <code>collection_radio_buttons</code> to generate lists of checkboxes or radio buttons for an association. The ability to generate a list of checkboxes is useful for many-to-many associations or we can use it on an array attribute such as our <code>Article</code>&rsquo;s tags. We pass in the attribute&rsquo;s name, a collection of values, and a name and id.</p>
+
+``` /app/views/articles/_form.html.erb
+<div class="field">
+  <%= f.collection_check_boxes :tags, %w[ruby rails design], :to_s, :to_s %>
+</div>
+```
+
+<p>Now when we edit or create an article we&rsquo;ll have a list of checkboxes that we can use to set the tags.</p> 
+
+<div class="imageWrapper">
+	<img src="http://asciicasts.com/system/photos/1436/original/E400I01.png" width="800" height="500" alt="A collection rendered using collection_check_boxes."/>
+</div>
+
+<p>This makes many-to-many associations a lot easier to handle with checkboxes.</p>
+
+<p>There are also helper methods for the different HTML 5 input types. For example we have a <code>date_select</code> field that we can change to a <code>date</code> field. This will display a text field in some browsers, but others will handle it with a date selector. Chrome, for example, will give us a dropdown calendar that we can use to select a date from. Rails doesn&rsquo;t do anything special here, just renders out an <code>input</code> element with a type of <code>date</code>, any special handling is done by the browser.</p>
+
+<p>Template handlers are another useful new view feature. If we rename our <code>edit.html.erb</code> file to <code>edit.html.ruby</code> (this is <code>ruby</code> not <code>rb</code> as that conflicted with Mustache templating) we can use plain Ruby code in the template and any string that is returned will be rendered out.</p>
+
+``` /app/views/edit.html.ruby
+content_tag(:h1, "Edit") + render("form")
+```
+
+<p>This will give us the same edit page as before. The only difference is that it&rsquo;s generated using straight Ruby code. This might have limited uses for rendering HTML but it can be really useful for handling JSON formats. See <a href="http://railscasts.com/episodes/379-template-handlers">episode 379</a> for more details about this.</p>
+
+<p>Another new feature of views in Rails 4 is the cache digest, also known as Russian doll caching. We won&rsquo;t cover that here, but it was covered in detail in <a href="http://railscasts.com/episodes/387-cache-digests">episode 387</a>.</p>
+
+<h3>Routes</h3>
+
+<p>Let&rsquo;s take a look at our application&rsquo;s routes file next as there are some noticeable changes here. The biggest new feature is the addition of concerns which can help us reduce duplication in the routes. Let&rsquo;s say that we have a nested <code>comments</code> resource under <code>articles</code> and that we also have a photos <code>resource</code> that has nested <code>comments</code> too. In a Rails 3 app, the routes for these resources would look like this:</p>
+
+``` /config/routes.rb
+resources :articles do
+  resources :comments
+end
+
+resources :photos do
+  resources :comments
+end
+```
+
+<p>In Rails 4 we can remove this duplication by moving the comments into a concern that we&rsquo;ll call <code>commentable</code>. We put the concern&rsquo;s behaviour into a block then add it to resources by calling <code>concerns</code>.</p>
+
+``` /config/routes.rb
+concern :commentable do
+  resources :comments    
+end
+resources :articles, concerns: :commentable
+resources :photos, concerns: :commentable
+```
+
+<p>This can be really useful if we have a complicated route set with a lot of APIs with duplication between them. For simpler examples such as this it may be better to stick with using rested resources, however.</p>
+ 
+<p>The <code>match</code> method has been used as a way to support any type of request, be it GET, POST or any other verb, but this is no longer supported. This is being done to encourage you to specify exactly what type of request you want to accept so that there are no wildcard matches. We should now instead use the <code>get</code> or <code>post</code> methods (or the newly supported <code>patch</code>).</p>
+
+<p>We&rsquo;ve left one of the best new features of routing in Rails 4 to last. If we supply constraints to a route these will automatically turn into default attributes when we generate the URL. Here&rsquo;s an example:</p>
+
+``` /config/routes.rb
+get 'foo', to: 'articles#index', constraints: {protocol: "https", subdomain: "test"}
+```
+
+<p>Before, if we called <code>foo_url</code> in our application these restraints wouldn&rsquo;t be included, but now they are.</p>
+
+``` console
+>> app.foo_url
+=> "https://test.example.com/foo"
+```
+
+<h3>A Few Last Changes</h3>
+
+<p>There are just a few more things left to show. We&rsquo;ll start in the application&rsquo;s configuration file. In here we now can pass in a call to <code>console</code> with a block. The contents of the block will be evaluated when we load the Rails environment through the console. We can add some console-specific configuration here such as using Pry. (Note that we&rsquo;ll need to add Pry to our gemfile for this to work).</p>
+
+``` console
+console do
+  require 'pry'
+  config.console = Pry
+end
+```
+
+<p>Next we&rsquo;ll look at the production config file, specifically at the following line.</p>
+
+``` /config/environments/production.rb
+config.eager_load = true
+```
+
+<p>This will eager-load our entire Rails application and all its classes instead of using autoloading, which makes it thread-safe. Previously this behaviour was enabled using an option called <code>threadsafe!</code> but this has now been deprecated as a way to encourage you to use this behaviour instead. <a href="http://railscasts.com/episodes/365-thread-safety">Episode 365</a> has more details on this.</p>
+
+<h3>Testing</h3>
+
+<p>The next place we&rsquo;ll look is in the <code>test</code> directory. This is now structured a little differently: instead of having <code>unit</code> and <code>functional</code> directories we have <code>controllers</code>, <code>models</code> and so on making it structured more like RSpec is. Also, this now uses MiniTest.</p>
+
+<p>We&rsquo;ll finish up by looking at the new exception page in development. This now has a different look and if a routing error is thrown it shows a list of the valid routes which is useful.</p> 
+
+<div class="imageWrapper">
+	<img src="http://asciicasts.com/system/photos/1437/original/E400I02.png" width="883" height="498" alt="The new error page showing the list of valid routes."/>
+</div>
+
+<p>Another way to get the routing information in development is to go to the <code>/rails/info</code> path. This will display the same routing info table and we can toggle between this and our application&rsquo;s properties.</p> 
+
+<p>That brings us to the end of our look at Rails 4. There are a number of great features and we haven&rsquo;t covered all of them. There&rsquo;s more information in this excellent <a href="http://blog.wyeworks.com/2012/11/13/rails-4-compilation-links/">blog post</a> by Santiago Pastorino which compiles a long list of various links that cover the new additions in Rails 4.</p>
+
+<p>There were several things that were removed from Rails 4 such as ActiveResource, model observers, page and action caching and disabling <code>Rack::Cache</code> by default. All of these can be brought back by using various gems if you can&rsquo;t live without them. One feature that we haven&rsquo;t covered here is <code>ActionController::Live</code>. This will be covered in detail in a future episode as it&rsquo;s big enough to deserve one to itself. If you were expecting a queueing API with asynchronous mailing support this has been pulled from Rails 4.0 but should be included in Rails 4.1.</p>

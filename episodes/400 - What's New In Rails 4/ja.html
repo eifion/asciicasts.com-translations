@@ -1,0 +1,311 @@
+<p>Railsの次のメジャーバージョンの公開がいよいよ近づいてきました。今回のエピソードはちょうど第400回なので、Rails 4.0の新機能を取り上げるいい機会でしょう。この記事の公開時にはまだgemのプレリリース版は出ていません。中身を見てみるにはマスターブランチをチェックアウトする必要があるので、Githubからcloneします。次にディレクトリを移動して、bundleコマンドを実行して依存関係をインストールします。Rails 4を実行するためには、Ruby 1.9.3以上が必要なので注意してください。</p>
+
+``` terminal
+$ git clone https://github.com/rails/rails.git
+$ cd rails
+$ bundle
+```
+
+<p>Bundlerのバージョンが正しくないというエラーが出た場合は、次の方法でプレリリース版をインストールします。</p>
+
+``` terminal
+$ gem install bundler --pre
+```
+
+<p>インストールができたら再度<code>bundle</code>を実行します。それが完了したら、最初のRails 4アプリケーションを作成することができます。ダウンロードしたRailsの<code>railties/bin/</code>ディレクトリから<code>rails</code>コマンドを実行して、Edge Railsを使用するよう指定して、<code>blog</code>という名前の新規のアプリケーションを作成します。後でPostgres関連の新しい機能を試すのでデータベースはPostgresを指定します。</p>
+
+``` terminal
+$ railties/bin/rails new ~/code/blog --edge -d postgresql
+```
+
+<p>Rails 4 gemのプレリリース版が公開されたらこの作業はずっと簡単になるでしょう。<code>gem install rails --pre</code> のようなコマンドを実行して通常の方法でRails 4のアプリケーションを作成することができるようになります。このgemをインストールしたら、バージョン番号を指定することで新規のRails 3.2のアプリケーションを作成することもできます。</p>
+
+``` terminal
+$ rails _3.2.10_ new my_app
+```
+
+<h3>Postgres関連の新機能</h3>
+
+<p>Rails 4アプリケーションを新規作成する方法がわかったら、次にその中身を見ていきましょう。新機能を見る前にデータベースを設定します。まず最初に、<code>database.yml</code>ファイルの各データベースからユーザ名のオプションを削除して、アプリケーションがPostgresデータベースに接続できるようにします。これで<code>rake db:create</code>を実行することでアプリケーションのデータベースを作成することができます。(RailsアプリケーションでPostgresqlを使用するための設定方法についての詳細は<a href="http://railscasts.com/episodes/342-migrating-to-postgresql">エピソード342</a>を参照してください。)</p>
+
+<p>次に<code>Article</code>のscaffoldを作成して、アプリケーションになんらか操作を行なうための対象を準備します。Rails 4はPostgresのネイティブのデータ型をサポートします。多くの型がサポートされていますがここではその中の2つ、arrayとhstoreについて紹介します。arrayを文字列型のカラムに保存する場合には、型をhstoreに設定します。</p>
+
+``` terminal
+$ rails g scaffold article name content:text published_on:date tags properties:hstore
+```
+
+<p>データベースのマイグレーションを行なう前に、migrationファイルを少し修正して、 <code>tags</code>カラムをarrayとして処理するようにします。そのために<code>array</code>オプションを追加して<code>true</code>に設定します。hstoreを利用できるようにするためには、テーブルを作成する前に<code>execute "create extension hstore"</code>を実行します。</p>
+
+``` /db/migrate/20130119000000_create_articles.rb
+class CreateArticles < ActiveRecord::Migration
+  def change
+    execute "create extension hstore"
+    create_table :articles do |t|
+      t.string :name
+      t.text :content
+      t.date :published_on
+      t.string :tags, array: true
+      t.hstore :properties
+
+      t.timestamps
+    end
+  end
+end
+```
+
+<p><code>rake db:migrate</code>を実行するとテーブルが作成されます。Rails 4でPostgresデータベース用にマイグレーションを実行すると、ログメッセージが表示されなくなったので以前のように画面がうるさくなくなりました。次にコンソールでこれらのデータ型がどう処理されるかを見てみましょう。まず最初に<code>Article</code>を新規に作成します。<code>tags</code>にRuby arrayを渡すとPostgres arrayに変換され、<code>properties</code>に対してはhashを渡します。</p>
+
+``` console
+>> Article.create! name:"Hello", tags: %w[ruby rails], properties: {author:"Eifion"}
+```
+
+<p>これらの属性を後で取得すると、arrayとhashが得られますが、どちらに対しても問題なくやり取りができます。テキストカラムをシリアライズするやり方でも確かに同じことをできますが、このアプローチの方がこれらのカラムとのやり取りをずっと効率的に処理できます。hstoreの詳細については<a href="http://railscasts.com/episodes/345-hstore">エピソード345</a>を参照してください。</p>
+
+<h3>ActiveRecordの新機能</h3>
+
+<p>次にActiveRecordに関するいくつかの新機能を見ていきます。まず最初は<code>all</code>メソッドです。このメソッドは今までは結果のarrayを返していましたが、新たにActiveRecord relationを返します。つまりlazy loadingされるようになったことで、実際に必要になったときに初めてデータベースクエリが起動されます。これによって機能が置き換えられることになる<code>scoped</code>の存在意義はなくなります。もし結果のarrayを取得するために古い機能が必要な場合には、ActiveRecord relationに対して<code>to_a</code>を呼び出します。これは以前のバージョンのRailsのallと同じことを行ないます。</p>
+
+<p>これと一緒に準備されたもう一つの新しいメソッドが<code>load</code>です。これはデータベースクエリを起動しますが、結果のarrayの代わりにActiveRecord relationを返します。これは例えば、キャッシュ的な振る舞いのためにクエリを起動したいが結果としてはrelationを返してほしい、という場合には便利です。また、新たにレコードがないActiveRecord relationを返す<code>none</code>メソッドも準備されました。レコードを返したくはないが他のscopeを呼び出すために何かが必要なときに、これは役に立ちます。scopeに関してもう一つ言えば、where scopeに対してnotを呼び出して結果を反転できるようになりました。</p>
+
+``` console
+>> Article.where.not(name: "Hello")
+  Article Load (107.6ms)  SELECT "articles".* FROM "articles" WHERE ("articles"."name" != 'Hello')
+```
+
+<p><code>order</code>句がhashを受け付けるようになったので、カラム名とソート順を渡して結果を得ることができるようになりました。また複数のカラム名を渡して、ソートをかけることも可能になりました。もう一つの便利な新しいメソッドが<code>find_by</code>です。今までも、<code>find_by_name</code>のようなdynamic finderを使用することはできましたが、これらは<code>method_missing</code>に依存していて、あまりきれいな実装ではありませんでした。Rails 4では、hashを渡すことができる<code>find_by</code>メソッドが導入されました。例を以下に示します。</p>
+
+``` console
+>> Article.find_by name: "Hello"
+```
+
+<p>また新たに<code>find_or_create_by</code>と<code>find_or_inititalize_by</code>の各メソッドが準備されたので、こちらを使用することが推奨されます。</p> 
+  
+<h3>ActiveModel::Model</h3>
+
+<p>もうひとつの興味深い新機能は、<code>ActiveModel::Model</code>と呼ばれる新しいモジュールです。例えば新規にActiveModelオブジェクトのようなクラスを作成してその属性をフォームから更新したいが、データベースには置きたくないという場合があるとします。クラス内で<code>ActiveModel::Model</code>をincludeしたら、そのメソッドに対して自由に<code>attr_accessors</code>を設定でき、ActiveRecordに対してのようにvalidationを追加することも可能です。そしてこのクラスのインスタンスを作成して、その属性とやり取りすることができます。実際は単なるRubyクラスであるにも関わらず、ActiveRecordモデルと同じように扱えます。</p>
+
+``` console
+>> class Message
+>> include ActiveModel::Model
+>> attr_accessor :name, :content
+>> end
+=> nil
+>> m = Message.new(name: "foo")
+=> #<Message:0x007ff5dca1e760 @name="foo">
+>> m.name
+=> "foo"
+```
+
+<p>これは以前はActiveModelを使用することで可能でしたが、各種のモジュールをincludeする必要がありました。Rails 4ではこれはずっと簡単になりました。<code>form_for</code>の呼び出しにカスタムクラスを渡したい場合には特に便利です。</p>
+
+<h3>Gemfileの変更点</h3>
+
+<p>コンソールの話題はここまでにして、新規のアプリケーションのホームページにアクセスしたときに表示されるwelcomeページを見てみましょう。このページは前と同じように見えますが、Rails internalによって動的に生成されています。これによって、アプリケーションから<code>public/index.html</code>ページを削除する必要がなくなりました。次にgemfileを見ていきます。デフォルトのgemfileは以下のようになっています。</p>
+
+``` /Gemfile
+source 'https://rubygems.org'
+
+gem 'rails',     github: 'rails/rails'
+gem 'arel',      github: 'rails/arel'
+gem 'activerecord-deprecated_finders', github: 'rails/activerecord-deprecated_finders'
+
+gem 'pg'
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sprockets-rails', github: 'rails/sprockets-rails'
+  gem 'sass-rails',   github: 'rails/sass-rails'
+  gem 'coffee-rails', github: 'rails/coffee-rails'
+
+  # See https://github.com/sstephenson/execjs#readme for more supported runtimes
+  # gem 'therubyracer', platforms: :ruby
+
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+
+# Turbolinks makes following links in your web application faster. Read more: https://github.com/rails/turbolinks
+gem 'turbolinks'
+
+# Build JSON APIs with ease. Read more: https://github.com/rails/jbuilder
+gem 'jbuilder', '~> 1.0.1'
+
+# To use ActiveModel has_secure_password
+# gem 'bcrypt-ruby', '~> 3.0.0'
+
+# Use unicorn as the app server
+# gem 'unicorn'
+
+# Deploy with Capistrano
+# gem 'capistrano', group: :development
+
+# To use debugger
+# gem 'debugger'
+```
+
+<p>最初の3つのgemは、Edge Railsを使用しているために含まれているものです。assetsグループに<code>sprockets-rails</code> gemが新たに加わりました。これはSprocketsのリファクタリングによってその一部が独立したgemに切り離されたからです。gemfileにはさらに新たに<code>turbolinks</code> gemが含まれています。このgemの詳細については<a href="http://railscasts.com/episodes/390-turbolinks">エピソード390</a>を参照してください。turbolinksはデフォルト状態では有効化されていますが、削除するのは簡単です。gemfileからgemを削除し、<code>app/assets/javascripts/application.js</code>ファイルからturbolinksの行を削除して、最後にアプリケーションのレイアウトファイルから<code>data-turbolinks-track</code>への参照を削除します。この属性はエピソード390が書かれた後に追加された新しいものです。Turbolinkはこの属性でアセットを監視し、変更を見つけたらページ全体をリロードします。</p> 
+
+<p>次にコントローラを確認して、scaffoldで何が生成されたかを見てみましょう。</p> 
+
+``` /app/controllers/articles_controller.rb
+class ArticlesController < ApplicationController
+  before_action :set_article, only: [:show, :edit, :update, :destroy]
+
+  # Some methods omitted.
+
+  # PATCH/PUT /articles/1
+  # PATCH/PUT /articles/1.json
+  def update
+    respond_to do |format|
+      if @article.update(article_params)
+        format.html { redirect_to @article, notice: 'Article was successfully updated.' }
+        format.json { head :no_content }
+      else
+        format.html { render action: 'edit' }
+        format.json { render json: @article.errors, status: :unprocessable_entity }
+      end
+    end
+  end
+
+  private
+    # Use callbacks to share common setup or constraints between actions.
+    def set_article
+      @article = Article.find(params[:id])
+    end
+
+    # Never trust parameters from the scary internet, only allow the white list through.
+    def article_params
+      params.require(:article).permit(:name, :content, :published_at)
+    end
+end
+```
+
+<p>ここでは多くの変更が行なわれています。scaffoldはレコードをbefore filterをつかってロードするようになりました。ただし名前が<code>before_filter</code>ではなく<code>before_action</code>に変わります。実行される内容は同じです(希望すれば<code>before_filter</code>を使い続けることも可能です)が<code>before_action</code>が新しい標準になりそうです。次の標準ということで言えば、updateアクションはPUTリクエストかPATCHリクエストのいずれかにレスポンスを返すようになります。PATCHの方がupdateアクションの振る舞いによりフィットしているように思いますが、PUTが使われなくなるまでにはまだ時間がかかるでしょう。アクションでは、モデルに対する<code>update_attributes</code>メソッドの名前が<code>update</code>に変更されました。ただし、<code>update_attributes</code>の方もまだdeprecation warning(非推奨の警告)なしに利用できます。最後に、strong parameterのサポートが標準になりました。このアプローチの方が<code>attr_accessible</code>よりもずっと優れたソリューションです。これについては<a href="http://railscasts.com/episodes/371-strong-parameters">エピソード371</a>で説明しました。strong parameterに関する情報を得るためにぜひ参照することをお勧めします。これによってモデル内の<code>attr_accessible</code>の行は不要になりました。ただしこの機能を戻したいという場合はProtected Attributes gemを使って追加することができます。</p>
+
+<p>モデルの話が出たところで、scopeについても触れておきます。以前は、例えば以下のように、別のscopeを2つ目の引数として渡すことができました。</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  scope :sorted, order(:name)
+end
+```
+
+<p>今後は呼び出し可能なオブジェクト(例えばlambda)を2番目のオブジェクトとして渡す必要があります。これは、2番目の引数に例えばcurrent timeのような動的な値を無意識に使用してしまうケースが頻繁に起こってしまったことへの対策で、これがランタイム時に常に評価されるようになったことでその問題を回避できるようになりました。</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  scope :sorted, -> { order(:name) }
+end
+```
+
+<h3>Concern</h3>
+
+<p><code>controllers</code>と<code>models</code>の各ディレクトリの下に新たに<code>concerns</code>というディレクトリができました。これはモデル内をモジュール化することによって、モデルのサイズを減らすことを目的としたものです。同じ目的のための異なるアプローチの一つにservice objectがあります。これについては<a href="http://railscasts.com/episodes/398-service-objects">エピソード398</a>を参照してください。concernを強制的に使用しなくてはいけない理由はないので、不要であればconcernsディレクトリを削除しても問題ありません。</p>
+
+<h3>ビュー関連の変更点</h3>
+
+<p>ビューは何が変わったのでしょうか? フォームフィールドを生成するための新しいヘルパーメソッドが追加されたことにより、かなり機能が増えました。collection用のメソッドもその中の一つです。従来は関連(association)からselect menuを作成するための<code>collection_select</code>というヘルパーメソッドがありました。<code>collection_check_boxes</code>と<code>collection_radio_buttons</code>を利用して、関連のデータからのチェックボックスやラジオボタンのリストを生成することができます。チェックボックスのリストを生成する機能は、多対多の関連のため、あるいは<code>Article</code>のtagsのようなarray型の属性のためには便利です。属性の名前、値のコレクション、名前とidを渡します。</p>
+
+``` /app/views/articles/_form.html.erb
+<div class="field">
+  <%= f.collection_check_boxes :tags, %w[ruby rails design], :to_s, :to_s %>
+</div>
+```
+
+<p>これで、記事を編集あるいは新規作成するときに、タグを設定するためのチェックボックスのリストを表示することができます。</p> 
+
+<div class="imageWrapper">
+	<img src="http://asciicasts.com/system/photos/1436/original/E400I01.png" width="800" height="500" alt="collection_check_boxesを使用して出力されたコレクション"/>
+</div>
+
+<p>多対多の関連をチェックボックスで処理することが、これによってずっと簡単になりました。</p>
+
+<p>別のHTML 5のインプット型用のヘルパーメソッドもあります。例えば、<code>date_select</code>フィールドを<code>date</code>フィールドに変更します。これはあるブラウザではテキストフィールドとして表示されますが、その他のブラウザでは日付セレクタとして処理されます。例えばChromeでは、ドロップダウンカレンダーが表示されてそこから日付を選択できます。ここでRailsは特別なことをしている訳ではなく、<code>input</code>要素に<code>date</code>型を付けて出力しているだけで、特別な処理はすべてブラウザ側で行なわれます。</p>
+
+<p>Template handlerは、ビュー関連のもう一つの便利な新機能です。<code>edit.html.erb</code>のファイル名を<code>edit.html.ruby</code>(Mustacheテンプレートと衝突しないようここは<code>rb</code>ではなく<code>ruby</code>となっている)に変更すると、純粋なRubyコードをテンプレートで使用でき、返される文字列がそのままレンダリングされます。</p>
+
+``` /app/views/edit.html.ruby
+content_tag(:h1, "Edit") + render("form")
+```
+
+<p>表示される編集用ページは以前と同じです。唯一違うところは、それが純粋なRubyコードで生成されるという点だけです。HTMLを出力するための用途としては限定的かも知れませんが、JSONフォーマットの処理のためにはこれは非常に便利です。詳細については<a href="http://railscasts.com/episodes/379-template-handlers">エピソード379</a>を参照してください。</p>
+
+<p>Rails 4のビューに関するもう一つの新機能が、cache digestあるいはRussian doll cachingと呼ばれる機能です。詳細については<a href="http://railscasts.com/episodes/387-cache-digests">エピソード387</a>を参照してください。</p>
+
+<h3>Routes</h3>
+
+<p>次にアプリケーションのroutesファイルについても、いくつかの変更があったので見てみましょう。もっとも大きな新機能は、concernの追加です。これによりroutes内の重複が削減されます。例えば<code>articles</code>の下にネストされた<code>comments</code>リソースがあり、同じくphotos <code>resource</code>にもネストされた<code>comments</code>があるとします。Rails 3アプリケーションでは、これらのリソースへのroutesは次のようになります。</p>
+
+``` /config/routes.rb
+resources :articles do
+  resources :comments
+end
+
+resources :photos do
+  resources :comments
+end
+```
+
+<p>Rails 4では、commentsを<code>commentable</code>という名前をつけたconcernに移動させることによって、この重複を排除できます。concernの振る舞いをブロックに入れて、<code>concerns</code>を呼び出すことでresourcesに追加します。</p>
+
+``` /config/routes.rb
+concern :commentable do
+  resources :comments    
+end
+resources :articles, concerns: :commentable
+resources :photos, concerns: :commentable
+```
+
+<p>これは、例えばAPIを多く提供する複雑なルートのセットがあってそれら相互に重複があるという場合には、とても便利な機能です。ですが先ほどの例のように単純なものであれば、ネストされたリソースを使用したほうがいいかもしれません。</p>
+ 
+<p>GET、POSTあるいはその他の動詞のいずれのリクエストのタイプもサポートするように、<code>match</code>メソッドが利用されてきましたが、これはサポートされないことになりました。これはワールドカードによる一致をできないようにすることで、受け付けるリクエストのタイプを開発者が正しく特定することを奨励するための措置です。今後はその代わりに<code>get</code>か<code>post</code>のいずれかのメソッド(あるいは新たにサポートされる<code>patch</code>)を使用するべきです。</p>
+
+<p>最後に残ったのが、ルーティングに関するもっとも重要な新機能の一つです。ルートにconstraintを指定すると、URLを生成するときにそれらが自動的にデフォルトの属性になります。以下にサンプルを示します。</p>
+
+``` /config/routes.rb
+get 'foo', to: 'articles#index', constraints: {protocol: "https", subdomain: "test"}
+```
+
+<p>以前はアプリケーションで<code>foo_url</code>を呼び出してもこの制限は含まれませんでしたが、新たに含まれるようになりました。</p>
+
+``` console
+>> app.foo_url
+=> "https://test.example.com/foo"
+```
+
+<h3>その他の変更点</h3>
+
+<p>まだいくつか紹介するものが残っています。まず最初はアプリケーションの設定ファイルです。ここで、<code>console</code>の呼び出しをブロックと共に渡せるようになりました。ブロックの内容は、コンソールからRailsの環境をロードしたときに評価されます。Pryを使用する場合などのためにコンソール特有の設定を追加できます。(この設定を機能させるためにはgemfileにPryを追加する必要があります。)</p>
+
+``` console
+console do
+  require 'pry'
+  config.console = Pry
+end
+```
+
+<p>次にproductionの設定ファイル、特に以下の行を見てみましょう。</p>
+
+``` /config/environments/production.rb
+config.eager_load = true
+```
+
+<p>これによってRailsアプリケーションの全体とすべてのクラスが、autoloadではなく、eager-loadされることによりthread-safeになります。以前はこの振る舞いは<code>threadsafe!</code>と呼ばれるオプションを使用することで有効化していましたが、これはユーザを新しい方法に移行させるために非推奨になりました。詳細については<a href="http://railscasts.com/episodes/365-thread-safety">エピソード365</a>を参照してください。</p>
+
+<h3>テスト</h3>
+
+<p>次に我々が見るのは<code>test</code>ディレクトリです。ここは構造が新たに少し変更されました。<code>unit</code>と<code>functional</code>の各ディレクトリの代わりに、RSpecと同じように<code>controllers</code>、<code>models</code>などで構成されるようになりました。また新たにMiniTestが採用されました。</p>
+
+<p>最後にdevelopmentの新しい例外エラーのページを見てみましょう。見た目が変わり、ルーティングエラーが投げられた場合に有効なルートのリストを表示するようになったのが便利です。</p> 
+
+<div class="imageWrapper">
+	<img src="http://asciicasts.com/system/photos/1437/original/E400I02.png" width="883" height="498" alt="新しいエラーページに表示された有効なルートのリスト"/>
+</div>
+
+<p>developmentでルーティング情報を得るもう一つの方法として、<code>/rails/info</code>にアクセスします。すると同じルーティング情報の表が表示され、これとアプリケーションのプロパティの間でトグルできます。</p> 
+
+<p>Rails 4の紹介は以上です。優れた機能が多く含まれていますが、すべてを紹介できませんでした。Santiago Pastorinoによるこのすばらしい<a href="http://blog.wyeworks.com/2012/11/13/rails-4-compilation-links/">ブログ記事</a>に、Rails 4の新機能についての数多くの情報へのリンクがまとめられています。</p>
+
+<p>Rails 4で削除された機能もいくつかあります。ActiveResource、モデルオブザーバー、ページキャッシュ、アクションキャッシュが削除され、<code>Rack::Cache</code>はデフォルトでは無効化されました。これらの機能がどうしても必要という場合は、すべて各種のgemを利用することで元に戻すことができます。今回取り上げられなかった機能が、<code>ActionController::Live</code>です。これについては、一回のエピソードを要する大きいテーマのため、将来のエピソードで改めて詳しく解説する予定です。非同期メールをサポートしたキューイングAPIを期待していたユーザもいたかも知れませんが、Rails 4.0からは除かれました。おそらくRails 4.1に含まれることになるでしょう。</p>

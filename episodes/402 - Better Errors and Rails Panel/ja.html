@@ -1,0 +1,90 @@
+<p>今回のエピソードでは、開発時に役に立つ2つのツールを紹介します。プロジェクト管理のためのRailsアプリケーションをサンプルにして説明します。プロジェクト一覧のページは正しく表示されますが、個別のプロジェクトを見るためのリンクをクリックするとエラーメッセージが表示されます。</p>
+
+<div class="imageWrapper">
+	<img src="http://asciicasts.com/system/photos/1445/original/E402I01.png" width="800" height="500" alt="プロジェクトのページが例外を投げる"/>
+</div>
+
+<p><code>nil</code>に対して未定義の<code>empty?</code>メソッドが呼び出されていて、このエラーはチェックボックを作成しようとするときに発生するようです。ソースコードを見ても<code>empty?</code>を呼び出しているような部分は特に見当たりません。この例外ページを改善して、エラーが投げられた場所をわかりやすくできればいいのですが。</p>
+
+<h3>Better Errorsを使用する</h3>
+
+<p>そこで、今回のエピソードで扱う1つ目のツール<a href="https://github.com/charliesome/better_errors">Better Errors</a>を紹介します。このツールによって、エラーページが今までよりもずっと便利になり、さらに見た目もきれいになります。それでは既存のアプリケーションを使って試してみましょう。</p>
+
+<p>アプリケーションにこのgemを追加するときには、<code>development</code>グループのみに入れるようにして、production環境ではアプリケーションのエラーの詳細を表示させないようにすることが重要です。いつものように<code>bundle</code>コマンドを実行してgemをインストールします。</p>
+
+``` /Gemfile
+group :development do
+  gem 'better_errors'
+end
+```
+
+<p>サーバを再起動してページをリロードすると、Better Errorsがエラーを解析して、エラーが発生した場所を正確に知ることができます。</p>
+
+<div class="imageWrapper">
+	<img src="http://asciicasts.com/system/photos/1446/original/E402I02.png" width="800" height="x00" alt="Better Errorsがエラーを発生させたコード行を表示する"/>
+</div>
+
+<p>関係するソースコードが見やすくシンタックスハイライトされて、問題を起こしている<code>empty?</code>メソッドを見ることができます。このソースコードの上にはstack traceがあり、行をクリックするとstackのその部分のソースコードが表示されます。あるいはRailsアプリケーションの全体について、stack traceの一部であるRailsの本体あるいはgemのどの部分についてもエラーを表示させることができます。</p>
+
+<p>便利な副次的効果として、Railsがどのようにして動いているかをよりよく理解するための手助けにもなります。今回のエラーについては、コードの中で<code>check_box</code>メソッドが起動されていて、stack traceをたどっていくとこのメソッドがフォームビルダから呼び出されていることがわかり、引き続き処理の各ステップを一つずつ追っていくことで何が起こっているのかをよく理解することができます。エラーページの一番下に、使用されたパラメータやクッキーを含んだリクエストについての情報が表示されます。このgemの機能はこれだけではありません。エラーページを見ると、機能を増やすために<code>binding_of_caller</code>というgemを追加するというtipが表示されているので、これを試してみましょう。このgemも先ほどと同じようにdevelopmentグループに入れて、<code>bundle</code>コマンドを実行してインストールを行ないます。</p>
+
+``` /Gemfile
+group :development do
+  gem 'better_errors'
+  gem 'binding_of_caller'
+end
+```
+
+<p>このgemを利用する場合は、悪意を持ったユーザがこの経路からあなたのRailsアプリケーションにアクセスすることがないよう、安全なネットワーク上にいることを確認するようにしてください。アプリケーションを再起動して再度ページをリロードすると、ローカル変数やインスタンス変数を含んだ多くの情報を得ることができます。</p>
+
+<div class="imageWrapper">
+	<img src="http://asciicasts.com/system/photos/1447/original/E402I03.png" width="800" height="592" alt="Binding of Caller gemを利用してローカル変数やインスタンス変数など多くの情報を得る"/>
+</div>
+
+これはstack traceのすべての行で有効なので、stackのあらゆるポイントのローカル変数とインスタンス変数を見ることができます。これはとても便利ですが、もっとも優れた機能のひとつがstack traceのどこからでも呼び出せる対話的プロンプトです。これをTaskモデルで使用すると、<code>completed_at</code>の値が<code>nil</code>になっていて、これが原因で<code>empty?</code>を呼び出したときに例外が発生します。
+
+<div class="imageWrapper">
+	<img src="http://asciicasts.com/system/photos/1448/original/E402I04.png" width="800" height="592" alt="変数の値を得るために対話的コンソールを使用する"/>
+</div>
+
+<p><code>empty?</code>の代わりに<code>present?</code>を呼び出すべきで、この変更を加えるためにファイル名をクリックすると、そのファイルがテキストエディタで開きます。ここでは単に修正を行なうだけですが、実際のアプリケーションではまず失敗するテストを書いてこのバグが修正されて再度発生しないことを確認します。</p>
+
+<h3>Better ErrorsでAJAXリクエストを扱う</h3>
+
+<p>我々のアプリケーションにはもう一つのバグがあります。タスクのチェックボックスをクリックして完了にしたら、これらがすべてAJAXリクエストで処理されて、自動的に「完了したタスク」のセクションに移動して、データベースのレコードが更新されるはずです。しかしこれを行なってもタスクは移動せず、developmentログを見るとAJAXリクエストの間に例外が発生しています。Better Errorsを介してこの例外を確認して操作することができれば便利ですが、これは<code>/__better_errors</code>というパスにアクセスすることで可能です。</p>
+
+<div class="imageWrapper">
+	<img src="http://asciicasts.com/system/photos/1449/original/E402I05.png" width="800" height="600" alt="AJAXリクエストに対しても同じ機能を利用できる"/>
+</div>
+
+<p>これは最後に発生した例外を表示していて、development logにあるエラーと一致します。コンソールを使って変数の値を見ると、それが“1”という値を含んだ文字列であることがわかります。これによって、この値に対して<code>zero?</code>を呼び出したときに例外を得る理由がわかりました。呼び出す前にintegerに変換する必要があります。再度リンクをクリックしてテキストエディタで関連のファイルを開き、このエラーを修正します。タスクを完了としてチェックすると、正しく別のリストに移動します。</p>
+
+<p>Better Errorsの説明の最後に、テキストエディタを開くリンクについていくつか留意点をあげておきます。これは内部のgemのページに対しても機能するので、例えば<code>assign_attributes</code>がActiveRecordでどう機能しているのかを知りたいというような場合にも、自分が書いたソースコードと同じようにリンクをクリックして表示させることができます。Better Errorsが使用するエディタを変更する場合には、アプリケーションに新規の初期化ファイルを作成して<code>BetterErrors.editor</code>属性を設定します。</p>
+
+``` /config/initializers/better_errors.rb
+BetterErrors.editor = :sublime if defined? BetterErrors
+```
+
+<p>ここで設定できる値は、Sublime Text用の:sublimeなどいくつかあります。この値の前に<code>BetterErrors</code>が定義されていることを確認してください。RDocに<a href="http://rubydoc.info/github/charliesome/better_errors/BetterErrors#editor%3D-class_method">これについての詳細情報</a>があり、それによるとここでは文字列やさらにカスタマイズしたい場合にはprocオブジェクトを使用することもできます。</p>
+
+<h3>Rails Panel</h3>
+
+<p>今回紹介するもう一つのツールは<a href="https://github.com/dejan/rails_panel">Rails Panel</a>です。これはChrome用の機能拡張でブラウザに開発用ログを追加します。これは<a href="https://chrome.google.com/webstore/detail/railspanel/gjpfobpafnhjhbajcjgccbbdofdckggg">Chrome Web Store</a>からインストールできますが、合わせてアプリケーション側にもMeta Requestというgemを追加します。使用した他のgemと同じように<code>development</code>グループの中に追加して、<code>bundle</code>コマンドを実行してインストールします。</p>
+
+``` /Gemfile
+group :development do
+  gem 'better_errors'
+  gem 'binding_of_caller'
+  gem 'meta_request'
+end
+```
+
+<p>アプリケーションを再起動してChromeの開発用パネルを開くと新たにRailsPanelタブが表示されています。アプリケーション内のいろいろなページにアクセスすると、パネル内に各ページに対応したエントリが表示されます。これはAJAXリクエストでも同様に機能します。</p>
+
+<div class="imageWrapper">
+	<img src="http://asciicasts.com/system/photos/1450/original/E402I06.png" width="804" height="702" alt="RailsPanelタブが表示されたChrome"/>
+</div>
+
+<p>このパネルには各リクエストについてのあらゆる種類の詳細情報が含まれていて、形式、処理時間、パラメータ、DBクエリ、出力したビューなどを見ることができます。Better Errorsでは、ビューをクリックすることでテキストエディタを開きます。使用するエディタをカスタマイズするには、Chromeのプレファレンスを開いてTextMate、MacVim、Sublime Textの中から選択します。</p> 
+
+<p>シンプルなツールですが、この種の情報をすべて、ログファイルを別途開くことなくブラウザでインラインで確認できるのはとても便利です。</p>

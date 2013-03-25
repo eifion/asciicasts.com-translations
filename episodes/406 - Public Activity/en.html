@@ -1,0 +1,250 @@
+<p>It&rsquo;s a common request to have a user activity feed on a website, similar to the one that Github has. This is great for social network-style applications so that we can see what other users have been up to.</p> 
+
+<p>We have a cookbook application where users can create, edit and share recipes. Users can add comments to recipes and mark other users as friends. We&rsquo;ll add an activity page to this application so that we can see all our friends&rsquo; activity and know what they&rsquo;ve been up to, be it posting new recipes or adding comments.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1467/original/E406I01.png" width="800" height="500" alt="Our cookbook application."/>
+</div>
+
+<p>We&rsquo;ll accomplish this with a gem called <a href="https://github.com/pokonski/public_activity">Public Activity</a>. To use it in our application we&rsquo;ll add it to the gemfile then run <code>bundle</code> to install it.</p>
+
+``` /Gemfile
+gem 'public_activity'
+```
+
+<p>To set up the database tables that the gem needs we need to run a generator called <code>publish_activity:migration</code> then migrate the database.</p> 
+
+``` terminal
+$ rails g public_activity:migration
+$ rake db:migrate
+```
+
+<p>This creates an <code>activities</code> table to go with the ActiveRecord model for managing activities. Public Activity is also compatible with Mongoid and these steps aren&rsquo;t necessary if you&rsquo;re using that. See the documentation if you&rsquo;re using this setup. The next step is include a <code>PublicActivity::Model</code> module in any model that we want to track the activity of and to call a method called <code>tracked</code>. We&rsquo;ll do this in our <code>Recipe</code> model.</p>
+
+``` /app/models/recipe.rb
+class Recipe < ActiveRecord::Base
+  include PublicActivity::Model
+  tracked
+  
+  attr_accessible :description, :image_url, :name
+
+  belongs_to :user
+  has_many :comments, dependent: :destroy
+end
+```
+
+<p>The <code>tracked</code> method sets up some callbacks to automatically create activity records after a model is created, updated or destroyed. We&rsquo;ll do this in the <code>Comment</code> model as well as we also want to track those. If we add a comment to a recipe now it will be automatically tracked by Public Activity.</p> 
+
+<h3>The Activities Page</h3>
+
+<p>Next we need to create a page that displays the activities. We&rsquo;ll generate a new controller with an <code>index</code> action for this.</p>
+
+``` terminal
+$ rails g controller activities index
+```
+
+<p>Next we&rsquo;ll modify the routes file and replace the generated route with an activities resource.</p>
+
+``` /config/routes.rb
+resources :activities
+```
+
+<p>In the this controller&rsquo;s index action we want to want to list all the activities. Calling <code>PublicActivity::Activity</code> will return the ActiveRecord models so we can query the database like we would normally. We&rsquo;ll order the results by the time they were created at so that the most recent activities are displayed at the top.</p>
+
+``` /app/config/activities_controller.rb
+class ActivitiesController &lt; ApplicationController
+  def index
+    @activities = PublicActivity::Activity.order(&quot;created_at desc&quot;)
+  end
+end
+```
+
+<p>In the view we can loop through this data and display it. For now we&rsquo;ll just inspect each activity to see what it contains.</p>
+
+``` /app/views/activities/index.html.erb
+<h1>Friends&rsquo; Activities</h1>
+<% @activities.each do |activity| %>
+  <%= activity.inspect %>
+<% end %>
+```
+
+<p>When we reload the page now we&rsquo;ll see the one activity that we&rsquo;ve already added.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1468/original/E406I02.png" width="800" height="400" alt="The activities page showing the single activity that we&rsquo;ve added."/>
+</div>
+
+<p>We can see the different attributes that this activity has including <code>trackable_id</code> and <code>trackable_type</code> columns. This is a polymorphic association and we know that this activity is associated with a <code>Comment</code> model. There are a couple of other polymorphic associations here, too: <code>recipient</code> and <code>owner</code>. The owner is the user who performed the activity and we&rsquo;ll want to set this so that we can display the user&rsquo;s name next to their activity. We&rsquo;ll do this next.</p>
+
+<p>We mentioned earlier that this gem uses callbacks to record activity. This presents a problem, however, as the model layer doesn&rsquo;t have access to the current user so we can&rsquo;t set the owner when we record the activity? Public Activity has a workaround for this; to use it we need to include a module in the <code>ApplicationController</code>.</p>
+
+``` /app/controllers/application_controller.rb
+class ApplicationController < ActionController::Base
+  include PublicActivity::StoreController
+
+  # Rest of class omitted
+end
+```
+
+<p>This records the controller on each request allowing us to access it from the models. We can do this in the <code>Comment</code> model by adding an <code>owner</code> option to <code>tracked</code>.</p>
+
+``` /app/models/comment.rb
+tracked owner: ->(controller, model) { controller.current_user }
+```
+
+<p>We set this option to a lambda and this is evaluated each time it tracks an activity. The controller and model are passed in to this and we can use the controller to set the owner to the current user. This presents a small problem, however, as <code>current_user</code> is a private method in our <code>ApplicationController</code>. We&rsquo;ll make it public and use <code>hide_action</code> to stop it from being considered an action.</p>
+
+``` /app/controllers/application_controller.rb
+class ApplicationController < ActionController::Base
+  include PublicActivity::StoreController
+  protect_from_forgery
+
+  def current_user
+    @current_user ||= User.find(session[:user_id]) if session[:user_id]
+  end
+  helper_method :current_user
+  hide_action :current_user
+
+private
+
+  def require_login
+    redirect_to login_url, alert: "You must first log in or sign up." if current_user.nil?
+  end
+end
+```
+
+<p>Another potential issue is that in <code>Comment</code> calling <code>controller.current_user</code> raises an exception if we try to create a record outside the current request as there won&rsquo;t be a controller. We&rsquo;ll check to see if there is a controller here before trying to fetch the current user from it.</p>
+
+``` /app/models/comment.rb
+tracked owner: ->(controller, model) { controller && controller.current_user }
+```
+
+<p>This workaround isn&rsquo;t ideal and it feels a little ugly to have to access the controller in the model list but it does work. We&rsquo;ll copy this into the <code>Recipe</code> model so that we can fetch the user here, too. We&rsquo;ll then try it out by adding another comment then visiting the activities page again.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1469/original/E406I03.png" width="800" height="376" alt="The second activity shows its owner_id."/>
+</div>
+
+<p>Now we have two activities and the first one, which is the most-recently added, has its <code>owner_id</code> set. We&rsquo;ll fix up this view now so that it displays the activities instead.</p>
+
+``` /app/views/activities/index.html.erb
+<h1>Friends&rsquo; Activities</h1>
+<% @activities.each do |activity| %>
+  <div class="activity">
+  <%= link_to activity.owner.name, activity.owner if activity.owner %>
+  added comment to <%= link_to activity.trackable.recipe.name, activity.trackable.recipe %>
+  </div>
+<% end %>
+```
+
+<p>We have a <code>div</code> with a class of <code>activity</code> for each activity and inside it we display the activity&rsquo;s owner&rsquo;s name, but only if the activity has an owner. Next we describe the activity and this can be a little difficult as each one is unique so for now we&rsquo;ve hardcoded this as all our activities are comments. We then display the recipe&rsquo;s name in a link to the recipe. To get the recipe we use <code>activity.trackable</code> which is the polymorphic association which references the model that the activity is for, in this case <code>Comment</code>. We&rsquo;ll also want some styling for our list of activities so we&rsquo;ll add that now.</p>
+
+``` /app/assets/activities.css.scss
+.activity {
+  border-bottom: solid 1px #CCC;
+  padding: 16px 0;
+  em {
+    color: #777;
+    font-size: 12px;
+    padding-left: 5px;
+  }
+}
+```
+
+<p>When we reload the page now we should see our list of activities.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1470/original/E406I04.png" width="800" height="376" alt="The page now shows the list of activities."/>
+</div>
+
+<p>This looks quite good but we&rsquo;re hard-coding the description. How can we change it depending on the type of activity? Public Activity provides a helper method called <code>render_activity</code> that we can use; all we need to do is pass it the activity.</p>
+
+``` /app/views/activities/index.html.erb
+<h1>Friends&rsquo; Activities</h1>
+<% @activities.each do |activity| %>
+  <div class="activity">
+    <%= link_to activity.owner.name, activity.owner if activity.owner %>
+    <%= render_activity activity %>
+  </div>
+<% end %>
+```
+
+<p>This will render a partial for the activity&rsquo;s action. It will look for these in a <code>public_activity</code> directory and in there we&rsquo;ll need a directory for each different type of model that we track. We want a partial that will be displayed when a comment is created so we&rsquo;ll call it <code>_create.html.erb</code>. In it we can describe the activity like we did before.</p>
+
+``` /app/views/public_activity/comment/_create.html.erb
+added comment to <%= link_to activity.trackable.recipe.name, activity.trackable.recipe %>
+```
+
+<p>This looks like it did before but we can now define partials for the different types of activities including <code>_destroy</code> and <code>_update</code>. Once we&rsquo;ve done this and added or updated some comments we can see how these appear on the activities page.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1471/original/E406I05.png" width="867" height="469" alt="Each activity is now described correctly."/>
+</div>
+
+<p>This all looks good but if we remove a record, say a recipe, then visit the activities page we&rsquo;ll get an error message.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1472/original/E406I06.png" width="867" height="469" alt="Viewing the activities page after deleting a recipe throws an exception."/>
+</div>
+
+<p>This is because we&rsquo;re calling <code>activity.trackable.recipe</code> for a recipe that no longer exists. It&rsquo;s important in each activity partial to take into consideration the fact that the object may no longer exist so we&rsquo;ll modify each one  like this.</p>
+
+``` /app/views/public_activity/comment/_create.html.erb
+added comment to 
+<% if activity.trackable %>
+  <%= link_to activity.trackable.recipe.name, activity.trackable.recipe %>
+<% else %>
+  which has since been removed 
+<% end %>
+```
+
+<p>When we reload the activities page now it works again.</p> 
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1473/original/E406I07.png" width="867" height="469" alt="The activities page now handles deleted records."/>
+</div>
+
+<h3>Excluding Actions</h3>
+
+<p>Next we&rsquo;ll show you how to exclude certain actions. For example updated comments aren&rsquo;t that interesting so we might not want to show them in the activities list. We can do this by passing an option to the call to <code>tracked</code> in the <code>Comment</code> model: either <code>only</code> to specify which activities should be tracked or <code>except</code> to specify the ones to exclude.</p> 
+
+``` /app/models/comment.rb
+tracked except: :update, owner: ->(controller, model) { controller && controller.current_user }
+```
+
+<p>The <code>tracked</code> method is starting to get a little complex with all these options and it&rsquo;s not always the best approach to perform activity tracking through callbacks on the model so instead we&rsquo;ll handle it through the controllers. To do this we include the <code>PublicActivity::Common</code> in the model instead of <code>PublicActivity::Model</code>. We can also removed the call to <code>tracked</code> here, too.</p>
+
+``` /app/models/comment.rb
+class Comment < ActiveRecord::Base
+ include PublicActivity::Common
+  attr_accessible :content
+
+  belongs_to :user
+  belongs_to :recipe
+end
+```
+
+<p>Now in the <code>CommentsController</code> we can record the activity whenever we save, update or destroy a comment.</p> 
+
+``` /app/controllers/comments_controller.rb
+if @comment.save
+  @comment.create_activity :create, owner: current_user
+  redirect_to @recipe, notice: "Comment was created."
+else
+  render :new
+end
+```
+
+<p>This gives us more control over when and how activities are created and it means that we can avoid the workaround for setting the current user. This approach also means that we can create custom activities very easily.</p>
+
+<p>To finish this episode off we&rsquo;ll change the list of activities so that is only shows our fiends&rsquo; activities instead of everyone&rsquo;s. We can do this by adding a scope to our <code>ActivitiesController</code>.</p>
+
+``` /app/controllers/activities_controller.rb
+class ActivitiesController < ApplicationController
+  def index
+    @activities = PublicActivity::Activity.order("created_at desc").where(owner_id: current_user.friend_ids, owner_type: "User")
+  end
+end
+```
+
+<p>Now only the activities that belong to the current user&rsquo;s friends will be shown. As owner can be a polymorphic association it&rsquo;s a good idea to ensure that the <code>owner_type</code> is <code>User</code>. When we reload the page now we don&rsquo;t see any activities as we don&rsquo;t have any other users marked as friends, but if we mark another user who has made comments as a friend then try again we&rsquo;ll see their activities listed.</p>

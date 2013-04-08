@@ -1,0 +1,175 @@
+<p><a href="http://railscasts.com/episodes/362-exporting-csv-and-excel">エピソード362</a>で、データベースのレコードをCSVやExcelファイルにエクスポートする方法を紹介しました。それ以来、レコードをインポートする方法も紹介してほしいという多くのリクエストを受けました。そこで今回はCSVとExcel形式のファイルからレコードをインポートする方法を紹介します。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1421/original/E396I01.png?" width="800" height="476" alt="商品リストを表示するページ"/>
+</div>
+
+<p>方法としては、このページの一番下にフォームを追加し、レコードを含んだファイルをユーザにアップロードさせます。フォームが送信されると、ファイルが解析されてレコードがデータベースに追加されます。ビューテンプレートの最後にフォームを追加します。</p>
+
+``` /app/views/products/index.html.erb
+<h2>Import Products</h2>
+<%= form_tag import_products_path, multipart: true do %>
+  <%= file_field_tag :file %>
+  <%= submit_tag "Import" %>
+<% end %>
+```
+
+<p>インポートを処理するためのオブジェクトがまだないので、 <code>form_for</code>ではなく<code>form_tag</code>を使用しました。フォームは、<code>ProductsController</code>内に新しく作る<code>import</code>アクションに送信されます。<code>multipart</code>オプションを設定することで、ファイルのアップロードに対応させています。routesファイルに新しいパスを設定する必要があるので、ここで行ないます。</p>
+
+``` /config/routes.rb
+Store::Application.routes.draw do
+  resources :products do
+    collection { post :import }
+  end
+  root to: 'products#index'
+end
+```
+
+<p>次に<code>ProductsController</code>に<code>import</code>アクションを追加します。これはアップロードされたファイルを取得して、データをデータベースにインポートします。ファイルは<code>file</code>パラメータにアップロードされて、Railsがアップロードされたファイルが処理されるまで一時的にファイルシステムに保存します。つまり、アップロードされたファイルの処理にCarrierWaveやPaperclipを使用しなくてもいいということです。このアクションではアップロードされたファイルを、<code>Product</code>モデル内に新しく作成した<code>import</code>メソッドに渡して、トップページにリダイレクトします。</p>
+
+``` /app/controllers/products_controller.rb
+def import
+  Product.import(params[:file])
+  redirect_to root_url, notice: "Products imported."
+end
+```
+
+<h3>CSVデータをインポートする</h3>
+
+<p>次はモデルとインポート処理に注力します。このクラスにはすでにCSVデータをエクスポートするためのコードがあるので、まずCSVデータをインポートすることに注力し、その後でExcelファイルの処理に取り組みます。アプリケーションの設定ファイルにはすでに<code>require 'csv'</code>の行があるので、Rubyに最初から組み込まれているCSVライブラリを利用することができます。</p> 
+
+``` /app/models.product.rb
+def self.import(file)
+  CSV.foreach(file.path, headers: true) do |row|
+    Product.create! row.to_hash
+  end
+end
+```
+
+<p><code>import</code>メソッドを上に示しました。ここでは<code>CSV.foreach</code>を呼び出し、ファイルへのパスを渡します。これが、見つかったデータの各行ごとにブロックに渡されます。<code>headers</code>オプションを使用したのは、データの先頭行に各列の名称が入っているのを想定して、これをデータの名前をつけるのに使用するからです。そして<code>row.to_hash</code>を渡して商品データを作成します。列名が<code>Product</code>の属性と一致した場合、各行に対応した新規レコードが生成されます。単純なCSVファイルを使用してこれを試してみましょう。</p>
+
+``` products.csv
+name,price,released_on
+Christmas Music Album,12.99,2012-12-06
+Unicorn Action Figure,5.85,2012-12-06
+```
+
+<p>新しく作成したフォームからこのファイルをアップロードして送信すると、リストに新しい商品が表示されます。</p>
+
+<div class="imageWrapper">
+    <img src="http://asciicasts.com//system/photos/1422/original/E396I02.png" width="800" height="600" alt="CSVファイルのデータがインポートされた"/>
+</div>
+
+<h3>既存のレコードを修正する</h3>
+
+<p>データ中に<code>id</code>列があれば、新規レコードを追加する代わりに、その列を使って既存のレコードを更新することができれば便利でしょう。これを利用すれば、CSVファイルをダウンロードして、そのファイル上で商品情報を修正し、再度アップロードするという方法で、複数の商品情報を一度に修正することができます。既存の商品情報をダウンロードすると、以下のようなCSVデータを取得できます。</p>
+
+``` products.csv
+id,name,released_on,price,created_at,updated_at
+4,Acoustic Guitar,2012-12-26,1025.0,2012-12-29 18:23:40 UTC,2012-12-29 18:23:40 UTC
+5,Agricola,2012-10-31,45.99,2012-12-29 18:23:40 UTC,2012-12-29 18:23:40 UTC
+6,Christmas Music Album,2012-12-06,12.99,2012-12-29 20:55:29 UTC,2012-12-29 20:55:29 UTC
+2,Red Shirt,2012-10-04,12.49,2012-12-29 18:23:40 UTC,2012-12-29 18:23:40 UTC
+1,Settlers of Catan,2012-10-01,34.95,2012-12-29 18:23:40 UTC,2012-12-29 18:23:40 UTC
+3,Technodrome,2012-12-22,27.99,2012-12-29 18:23:40 UTC,2012-12-29 18:23:40 UTC
+7,Unicorn Action Figure,2012-12-06,5.85,2012-12-29 20:55:29 UTC,2012-12-29 20:55:29 UTC
+```
+
+<p>これを利用しやすい形にするためにインポート方法を変更します。データの各行ごとに商品情報を作成するのではなく、<code>id</code>列の値に基づいて該当データを検索します。<code>find_by_id</code>を使用して、一致するレコードが見つからなかった場合にはnilが返されるようにして、その場合は新規レコードを作成します。 次に該当行のデータに基づいて商品の属性を設定しますが、その中には例えば<code>id</code>のように変更したくない属性も含まれるので、モデルの<code>attr_accessible</code>リストに含まれる属性だけを更新します。</p>
+
+``` /app/models/product.rb
+def self.import(file)
+  CSV.foreach(file.path, headers: true) do |row|
+    product = find_by_id(row["id"]) || new
+    product.attributes = row.to_hash.slice(*accessible_attributes)
+    product.save!
+  end
+end
+```
+
+<p>ここでCSVファイルを編集して、いくつかの商品の名前を変更しました。このファイルをアップロードしたら、これらの変更が反映されて、新規レコードは追加されないはずです。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1423/original/E396I03.png" width="800" height="600" alt="CSVファイルから既存のレコードを修正する"/>
+</div>
+
+<p>うまくいきました。2つの商品の名前を変更したのが反映されていて、新規レコードは追加されていません。</p>
+
+<h3>Excelスプレッドシートをインポートする</h3>
+
+<p>CSVファイルの処理はうまくいきましたが、Excelファイルのインポートはどのようにすればいいでしょうか?  Excelからのインポートを処理するgemはいくつかあります。今回のエピソードで使用する<a href="https://github.com/Empact/roo">Roo gem</a>はExcelやCSVを含む多くのスプレッドシートの形式に対応した標準的なインターフェイスを提供します。このgemは通常の方法でインストールします。アプリケーションのgemfileにgemを追加して<code>bundle</code>コマンドを実行します。</p>
+
+``` /Gemfile
+gem 'roo'
+```
+
+<p>それに加えてアプリケーションの設定ファイルを修正して、<code>iconv</code>ライブラリをrequireします。残念ながら現在はRailsアプリケーションを起動するごとに警告が出てしまうので、gemがこれを使わない方式に移行してくれることを期待したいところです。</p>
+
+``` /config/application.rb
+require 'iconv'
+```
+
+<p>Rooがインストールできたので、これでスプレッドシートから商品レコードをインポートすることができます。まず最初にRooからスプレッドシートを取得します。この操作は少し複雑なので、独立した<code>open_spreadsheet</code>というメソッドにして、後で書くことにします。Rooスプレッドシートにはrowメソッドがあり、その行の値の配列を返します。第1行目にはヘッダ情報が含まれているのでまずそれを取得します。その後で残りの行をループして各行のデータを取得し、スプレッドシートオブジェクトの<code>last_row</code>を呼び出して行の総数を取得します。</p>
+
+<p>その次が厄介な部分です。各行を取得すると値の配列が返されますが、ヘッダ列をkeyに設定しながらそれをハッシュに変換する必要があります。そのためにはヘッダとカレント行で配列を作成してそれに対して<code>transpose</code>を呼び出して配列の配列を作成します。その各々に、ヘッダ名とカレント行の対応する値が含まれています。最後にこれをハッシュに変換することにより、CSVライブラリから得られるのに似たオブジェクトになります。</p>
+
+``` /app/models/product.rb
+def self.import(file)
+  spreadsheet = open_spreadsheet(file)
+  header = spreadsheet.row(1)
+  (2..spreadsheet.last_row).each do |i|
+    row = Hash[[header, spreadsheet.row(i)].transpose]
+    product = find_by_id(row["id"]) || new
+    product.attributes = row.to_hash.slice(*accessible_attributes)
+    product.save!
+  end
+end
+```
+
+<p>次に<code>open_spreadsheet</code>メソッドを定義します。これは、ファイルの拡張子に基いてそれに対応したRooスプレッドシートを組み立てます。アップロードされたファイルは拡張子を持たない一時ファイルに保存されているので、<code>original_filename</code>を使用します。現在のRooのマスターブランチでは<code>Roo</code>名前空間の下にクラス名があるので、新しいバージョンが公開されたら、例えば単に<code>Excel</code>とするのではなく<code>Roo::Excel</code>とします。3つ目のオプションの<code>:ignore</code>を指定することで、ファイルの拡張子がタイプに一致しなくても例外を発生させないようにします。</p>
+
+``` /app/models/product.rb
+def self.open_spreadsheet(file)
+  case File.extname(file.original_filename)
+  when '.csv' then Csv.new(file.path, nil, :ignore)
+  when '.xls' then Excel.new(file.path, nil, :ignore)
+  when '.xlsx' then Excelx.new(file.path, nil, :ignore)
+  else raise "Unknown file type: #{file.original_filename}"
+  end
+end
+```
+
+<p>正しい列名といくつかの商品レコードが入った<code>xlsx</code>形式のExcelファイルを準備して、フォームからアップロードしてうまくいくか見てみます。</p>
+
+<div class="imagewrapper">
+  <img src="http://asciicasts.com/system/photos/1424/original/E396I04.png" width="800" height="650" alt="リストにExcelスプレッドシートからのデータが表示された"/>
+</div>
+
+<p>うまくいきました。リストには、Excelファイルからの新規の商品情報が入っています。この方法の問題の一つとして、アプリケーション自身からエキスポートしたファイルをインポートできません。これを試すと例外が発生します。Excelで作成したファイルは、問題なくインポートできるようです。</p> 
+
+<h3>データを検証する</h3>
+
+<p>この問題を除いては作成したインポートスクリプトはうまく動作しているようですが、まだインポートしたデータの検証ができていません。例えば<code>price</code>フィールドが空欄でないことを検証することにして、1件のレコードでこのフィールドが空欄であったとします。この状況にはどのように対応すればいいでしょうか? 今回の方法では検証機能を付加するのは少し難しいので、検証をおこなうことが重要な場合には別のアプローチを採用するのがいいでしょう。</p> 
+
+<p>一つの対応案を紹介します。商品一覧のページ内に直接表示させるのではなく、別のページにユーザに対する指示(どの列が必須入力でデータ型が何であるべきかなど)を表示させます。このページでデータを検証して、エラーになった行を表示して修正させてから再度ファイルをアップロードできるようにします。</p>
+
+<p>時間がないのでこの機能を今回のエピソードの中で作成することはできませんが、仕組みの概要を簡単に紹介します。商品一覧ページに、商品をアップロードするためのリンクがあり、<code>new_product_import_path</code>に関連づけられています。これが新規に作成した<code>ProductImportsController</code>によって処理され、 もう一つ新規に作成した<code>ProductImport</code>モデルによって商品データのインポートが処理されます。これを独立したモデルとすることによって、新しいテンプレートの中で<coee>form_for</coee>を使うことができます。</p>
+
+``` /app/controllers/product_imports_controller.rb
+class ProductImportsController < ApplicationController
+  def new
+    @product_import = ProductImport.new
+  end
+
+  def create
+    @product_import = ProductImport.new(params[:product_import])
+    if @product_import.save
+      redirect_to root_url, notice: "Imported products successfully."
+    else
+      render :new
+    end
+  end
+end
+```
+
+<p>ファイルをアップロードするための、<code>form_for</code>を使った新しいテンプレートがあるので、他のモデルのときと同じように検証エラーを簡単に表示させることができます。このモデルはデータベースに保存されているものではなく、シンプルなRubyクラスです。ここでは<code>ActiveModel</code>を使って<code>ActiveRecord</code>をシミュレートします。このモデルを保存しようとすると、商品データをインポートしてデータが正しいかどうかをチェックします。正しくない場合は対応した数のエラーメッセージが表示されます。インポートの処理自体は、前のコードと同じように動作します。処理の結果として、商品データをインポートしようはhaとしたときに発生した検証エラーがすべて表示されます。この方法の詳細については、<a href="https://github.com/railscasts/396-importing-csv-and-excel/tree/master/store-with-validations">Github上の</a>完成版アプリケーションのソースコードを参照してください。</p>

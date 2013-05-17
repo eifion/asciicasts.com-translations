@@ -1,0 +1,177 @@
+<style type="text/css">.inlineThumbnail { border: solid 1px #333; float: left; margin: 0 8px 8px 0; }</style>
+
+
+<p>3年前にRyan Batesが<a href="http://dailystamp.com">Daily Stamp</a>というアプリケーションを書きました。毎日必ず行なうことを決めてこのアプリケーションに入力すると、カレンダーとスタンプが表示され、指定したタスクを実行した日にスタンプを押すことができます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1321/original/E374I01.png" width="824" height="539" alt="Daily Stampアプリケーション"/>
+</div>
+
+<p>今回のエピソードでは、このスタンプをカスタマイズする機能にフォーカスして説明をおこないます。このアプリケーションでは、事前に設定されたスタンプの一覧から選択するか、好きな画像をアップロードしてカスタムのスタンプを作ることができます。アップロードされた画像は自動的にサイズ調整されてエフェクトがかけられ、ゴム印のようになります。スタンプの色を選ぶこともできます。今回のエピソードで、これらの画像操作の方法を紹介します。キーとなる要素は<a href="http://www.imagemagick.org/script/index.php">ImageMagick</a>です。使える状態にするまでが難しいので、多くの人がこのツールに対して愛憎入り交じった思いを持っています。ですがひとたび設定がうまくいけば、とても強力なツールになります。画像操作をおこないたいのであれば、このソフトウェアを利用することでかなりのことが可能になります。まず最初に<a href="http://www.imagemagick.org/script/command-line-tools.php">コマンドラインツール</a>について説明します。これを理解することで、およそImageMagickがどのようなことをできるのか、また画像を操作するときにどのようなステップが必要なのかがわかるようになります。 </p>
+
+<p>ImageMagickのインストールはややこしくなりがちです。Mac OS Xを使用しているのであれば、Homebrewを利用するのがいいでしょう。その場合は、<code>brew install imagemagick</code>のコマンドを実行するだけです。インストール作業が完了したら、convertなど画像処理のためのコマンドが使えるようになります。</p> 
+
+<p>画像の元ファイル(GithubのマスコットOctocatのPNGファイル)に加えて、その画像に重ねるためのテクスチャで、ゴム印のように見える効果をつけた半透明の空白の画像もあります。最初の目標は、元の画像をリサイズして切り取って、重ねるテクスチャとうまく合うようにすることです。<code><a href="http://www.imagemagick.org/script/convert.php">convert</a></code>コマンドのドキュメントを見ると、渡すことができるオプションのリストがあり、そこに画像の切り取りとリサイズのオプションも含まれています。いずれのオプションも位置情報のパラメータをとり、<a href="http://www.imagemagick.org/script/command-line-processing.php#geometry">ドキュメント</a>には引数を指定して振る舞いを変えるための複数の方法が記述されています。これは、今回のように形が整っていない画像から正方形のサムネイルを作成するときに便利です。オプションにcaretシンボルを付けて、アスペクト比を保ったままスタンプ画像の隙間を埋めます。まずはターミナルで、画像を70x70ピクセルにリサイズします。同じサイズに切り取ってオフセット値を与え、ファイルを<code>source.png</code>という名称で保存します。</p>
+
+``` terminal
+$ convert octocat.png -resize '70x70^' -crop '70x70+0+0' source.png
+```
+
+<p><img src="http://asciicasts.com/system/photos/1322/original/E374I02.png" width="70" height="70" alt="サムネイルを生成する1回目の試みでは画像が中心からずれてしまった" class="inlineThumbnail"/> 結果の画像はこのようになりました。サイズは合っていますが、中心からずれてしまっています。これを中心から切り取るようにしなければいけません。そのためには、cropの前にgravityオプションを指定します。centerを指定することで、切り取り時に画像が中心に保たれます。</p>
+
+```terminal
+$ convert octocat.png -resize '70x70^' -gravity center -crop '70x70+0+0' source.png
+```
+
+<p><img src="http://asciicasts.com/system/photos/1323/original/E374I03.png" width="70" height="70" alt="画像が正しくセンタリングされた" class="inlineThumbnail"/> これで画像を正しく切り取ることができるので、どんな画像もサムネイルに変換するコマンドができました。このサムネイルをグレイスケールに変換し、スタンプ画像に変換しやすいようにコントラストを強くします。そのためにいくつかのオプションを追加する必要があります。<code>quantize</code>はカラーパレットをグレイスケールに設定します。<code>colors</code>で変換をおこない、<code>contrast</code>で画像をもう少しpopにします。<code>quantize</code>に渡すオプションは大文字にしなくてはいけないので注意してください。</p>
+
+``` terminal
+$ convert octocat.png -resize '70x70^' -gravity center -crop '70x70+0+0' -quantize GRAY -colors 256 -contrast source.png
+```
+
+<p><img src="http://asciicasts.com/system/photos/1324/original/E374I04.png" width="70" height="70" alt="グレイスケール画像ができた" class="inlineThumbnail"/> グレイスケールの画像ができたので、その上に重ねる画像を合成してスタンプにテクスチャをつけます。<code>composite</code>コマンドを使って、2つの画像を重ね合わせます。重ねる画像を元画像の上に合成して、元画像を新しい画像で上書きします。</p>
+
+``` terminal
+$ composite stamp_overlay.png source.png source.png
+```
+
+<p><img src="http://asciicasts.com/system/photos/1329/original/E374I05.png" width="70" height="70" alt="画像にスタンプの重ね合わせが適用された" class="inlineThumbnail"/> 画像にスタンプのテクスチャが重ね合わされたので、次に色を加えます。<code>convert</code>コマンドは、すでにある画像の処理に使えるだけでなく、画像を新規に作る場合にも使えます。新規に70x70ピクセルの画像を作成し、色を赤にします。ここでは<code>canvas</code>オプションを使いますが、ImageMagickのバージョンによっては代わりに<code>cx</code>オプションを使うので注意してください。</p>
+
+``` terminal
+$ convert -size 70x70 canvas:red colour.png
+```
+
+<p>これによって正方形の赤の画像が生成されるので、元画像と合成します。別のファイルを処理する代わりに、同じconvertコマンドで合成処理をおこなえます。元画像を読み込んで、それをもう一つの画像とどう合成するかを指定します。<code>copy-opacity</code>の透過設定を使って、元画像を赤いキャンバスとを合成させます。</p>
+
+``` terminal
+$ convert -size 70x70 canvas:red source.png -compose copy-opacity -composite stamp.png
+```
+
+<p><img src="http://asciicasts.com/system/photos/1325/original/E374I06.png" width="70" height="70" alt="合成画像を反転する" class="inlineThumbnail"/> 生成された画像は求めているものに近づきましたが、期待する結果を得るためには元画像を反転させる必要があります。そのためには、画像をロードするときにカッコでnegateオプションを渡して色を反転させます。</p>
+
+``` terminal
+convert -size 70x70 canvas:red \( source.png -negate \) -compose copy-opacity -composite stamp.png
+```
+
+<p><img src="http://asciicasts.com/system/photos/1326/original/E374I07.png" width="70" height="70" alt="これで求めているスタンプの画像ができた" class="inlineThumbnail"/> 生成された画像は、求めている通りのものに見えます。別のスタンプを作るために色を変更するコマンドを設定するのは簡単でしょう。これについてもわかったので、全体を一つのコマンドにまとめて、一度で画像のサイズを変更してスタンプを作成できるようにします。このコマンドは長くて複雑に見えますが、期待通りの処理をしてくれます。</p>
+
+``` terminal
+convert -size 70x70 canvas:red \( octocat.png -resize '70x70^' -gravity center -crop '70x70+0+0' -quantize GRAY -colors 256 -contrast stamp_overlay.png -composite -negate \) -compose copy-opacity -composite stamp.png
+```
+
+<h3>Railsアプリケーションに適用する</h3>
+
+<p>次にこれをRailsアプリケーションで動くようにします。一つのやり方は、このコマンドをRuby内で実行するという方法で、これも悪くはありません。この目的のためのgemもいくつか存在します。<a href="https://github.com/EricR/image_sorcery">Image Sorcery</a>は、軽量のコマンドラインラッパーの一つで、<a href="https://github.com/probablycorey/mini_magick">MiniMagick</a>も似た機能を提供します。これらのgemのインタフェースは複雑な画像操作をおこなう場合には少し扱いにくいところもあるので、コマンド全体を一つにまとめて実行するのが結局は一番いい方法であるという場合が多いです。定番の<a href="http://rmagick.rubyforge.org/">RMagick gem</a>も使えます。最近はあまりアップデートされておらず、メモリーリークを批判されることもありますが、コマンドラインインタフェースの代替としては有効な選択肢です。Cライブラリをラップしているので、インタフェースがコマンドラインと常に1対1で対応するわけではないですが、わかりやすい<a href="http://studio.imagemagick.org/RMagick/doc/">ユーザガイド</a>が提供されています。同じスタンプ画像を作成しながら、RMagickを使ったやり方を具体的に見ていきましょう。まずgemをインストールします。</p>
+
+``` terminal
+$ gem install rmagick
+```
+
+<p>単純なRubyスクリプトで画像処理ができるように設定してから、それをRailsアプリケーション内に移動させます。スクリプトは以下のとおりです。</p>
+
+``` stamp.rb
+require "rmagick"
+
+source = Magick::Image.read("octocat.png").first
+source = source.resize_to_fill(70, 70).quantize(256, Magick::GRAYColorspace).contrast(true)
+overlay = Magick::Image.read("stamp_overlay.png").first
+source.composite!(overlay, 0, 0, Magick::OverCompositeOp)
+colored = Magick::Image.new(70, 70) { self.background_color = "red" }
+colored.composite!(source.negate, 0, 0, Magick::CopyOpacityCompositeOp)
+colored.write("stamp.png")
+```
+
+<p>まず<code>rmagick</code>をrequireし、元の画像をロードします。画像を読み込むと、複数レイヤーの画像の配列ができるので、その内の最初の画像を選択します。次に<code>resize_to_fill</code>メソッドを使って画像を切り取ってリサイズし、返されたサムネール画像に対して<code>quantize</code>を呼び出し、グレースケールに変換します。<code>contrast</code>を呼び出して<code>true</code>を渡すと、画像のコントラストが上がります。</p>
+
+<p>次に重ねる画像を合成します。メイン画像と同じようにロードして、元画像に対して<code>composite!</code>を呼び出して重ねる画像を合成します。次に赤の背景で新規画像を作成し、色を反転させた元画像に合成します。引数の<code>Magick::CopyCapacityCompositeOp</code>が、コマンドラインで使用した<code>-compose copy-opacity</code>オプションに対応することに注意してください。最後に画像を書き出します。</p>
+
+<p><img src="http://asciicasts.com/system/photos/1327/original/E374I08.png" width="70" height="70" alt="RMagickで生成されたスタンプ画像" class="inlineThumbnail"/>
+ではこれを試してみましょう。スクリプトを実行すると、返された画像はコマンドラインで生成したものと同じに見えるので、スクリプトは正しく動作しているようです。比較のために、Rubyでこのスクリプトを生成するための他のアプローチも掲載しておきます。</p>
+
+``` stamp.rb
+# Or through the command line:
+system <<-COMMAND
+convert -size 70x70 canvas:red \\( octocat.png \
+  -resize '70x70^' -gravity center -crop '70x70+0+0' \
+  -quantize GRAY -colors 256 -contrast stamp_overlay.png \
+  -composite -negate \
+\\) -compose copy-opacity -composite stamp.png
+COMMAND
+```
+
+<p>この方法の場合、ユーザからパラメータを受け付けるのであれば、shell injection攻撃に留意する必要があります。RMagickを使えば詳細に指定できるかも知れませんが、それは同時により動的な処理なので、潜在的なメモリリークの可能性に注意する必要があります。</p> 
+
+<p>アップロードされた画像がどう変換されるかを示す、簡単なRailsアプリケーションをすでに作成済みです。このアプリケーションには、アップロードされた画像をスタンプに変換するファイルアップロード用のダイアログを持ったページがあります。ファイルアップロードの処理のために、このサンプルではCarrierWaveに加えてRMagickを利用しています。(CarrierWaveについては<a href="http://railscasts.com/episodes/253-carrierwave-file-uploads">エピソード253</a>で解説しています。)</p>
+
+``` /Gemfile
+gem 'rmagick'
+gem 'carrierwave'
+```
+
+<p><code>Stamp</code>モデルは、<code>StampUploader</code>という名前のCarrierWaveのアップローダをmountします。</p>
+
+``` /app/models/stamp.rb
+class Stamp < ActiveRecord::Base
+  attr_accessible :image
+  mount_uploader :image, StampUploader
+end
+```
+
+<p><code>StampUploader</code>クラスは、画像処理部分のコードを除いては標準的なものです。</p>
+
+``` /app/uploaders/stamp_uploader.rb
+# encoding: utf-8
+
+class StampUploader < CarrierWave::Uploader::Base
+  include CarrierWave::RMagick
+
+  include Sprockets::Helpers::RailsHelper
+  include Sprockets::Helpers::IsolatedHelper
+
+  storage :file
+
+  def store_dir
+    "uploads/#{model.class.to_s.underscore}/#{mounted_as}/#{model.id}"
+  end
+
+  def extension_white_list
+    %w(jpg jpeg gif png)
+  end
+
+  %w[red green blue purple black].each do |color|
+    version(color) { process stamp: color }
+  end
+
+  def stamp(color)
+    manipulate! format: "png" do |source|
+      overlay_path = Rails.root.join("app/assets/images/stamp_overlay.png")
+      overlay = Magick::Image.read(overlay_path).first
+      source = source.resize_to_fill(70, 70).quantize(256, Magick::GRAYColorspace).contrast(true)
+      source.composite!(overlay, 0, 0, Magick::OverCompositeOp)
+      colored = Magick::Image.new(70, 70) { self.background_color = color }
+      colored.composite(source.negate, 0, 0, Magick::CopyOpacityCompositeOp)
+    end
+  end
+end
+```
+
+<p>画像処理は<code>stamp</code>メソッドでおこなわれます。複数バージョンのスタンプを作成するのに必要な処理はこれだけです。おこなっている処理としては、色のリストをループしてそれぞれの版を作成しています。stampメソッドがカスタムCarrierWaveメソッドの<code>manipulate!</code>を呼び出して、PNG画像の生成にRMagickを使うことを指示します。このメソッドはブロックをとり、そこに元画像を渡します。ブロックのコードは修正された画像を返し、基本的には以前使用した同じコードにいくつか変数を設定しただけのものです。本番環境用のアプリケーションでこのコードを使用する場合はバックグラウンド処理に移すべきですが、今回のエピソードの範囲外なのでその処理は割愛します。各色が別のバージョンなので、違うバージョンを渡すことでビューに表示されるスタンプの色を簡単に変えることができます。</p>
+
+``` /app/views/stamps/index.html.erb
+<h1>Stamps</h1>
+
+<% @stamps.each do |stamp| %>
+  <div class="stamp">
+    <%= image_tag stamp.image_url(:blue) %>
+  </div>
+<% end %>
+<div class="clear"></div>
+
+<p><%= link_to "New Stamp", new_stamp_path %></p>
+```
+
+<p>スタンプの色が変わりました。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1328/original/E374I09.png" width="800" height="360" alt="スタンプの色を選択できるようになった"/>
+</div>

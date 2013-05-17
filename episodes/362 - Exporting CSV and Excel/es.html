@@ -1,0 +1,213 @@
+<p>Es muy normal tener que exportar datos de una aplicaci&oacute;n web en formato CSV o Excel, y en este episodio veremos como hacerlo en una aplicaci&oacute;n Rails.  A continuaci&oacute;n se muestra una p&aacute;gina con un listado de productos al que querr&iacute;amos a&ntilde;adir unos enlaces que permitan la descarga en CSV o Excel.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1238/original/E362I01.png" width="800" height="400" alt="La lista de productos."/>
+</div>
+
+<p>Hay muchas gemas que nos pueden servir de ayuda, pero no usaremos ninguna porque hacerlo desde cero es realmente sencillo.</p>
+
+<h3>Exportaci&oacute;n a CSV</h3>
+
+<p>Ruby 1.9 incluye una excelente  <a href="http://ruby-doc.org/stdlib-1.9.3/libdoc/csv/rdoc/CSV.html">librer&iacute;a CSV</a> anteriormente llamada Faster CSV en Ruby 1.8.  Como es parte de la biblioteca est&aacute;ndar lo &uacute;nico que tenemos que hacer es requerirla, lo que haremos en el fichero de configuraci&oacute;n de nuestra aplicaci&oacute;n.</p>
+
+
+``` /config/application.rb
+require File.expand_path('../boot', __FILE__)
+
+require 'csv'
+require 'rails/all'
+```
+
+
+<p>Ya podemos usar esta librer&iacute;a para generar datos separados por comas cuando el usuario visite la ruta <code>/products.csv</code>.  Por supuesto esto todav&iacute;a no funciona porque la acci&oacute;n no responde a este formato todav&iacute;a, lo cual es f&aacute;cil de corregir a&ntilde;adiendo un bloque <code>respond_to</code> a la acci&oacute;n <code>index</code> en  <code>ProductsController</code>.  Ahora tenemos una decisi&oacute;n que tomar: podemos generar una plantilla de vista o bien podemos mostrar los datos en l&iacute;nea desde el controlador.  Haremos esto &uacute;ltimo porque es bastante m&aacute;s sencillo para lo que necesitamos, si bien ambas t&eacute;cnicas funcionan igual de bien.</p>
+
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    @products = Product.order(:name)
+    respond_to do |format|
+      format.html
+      format.csv { render text: @products.to_csv }
+    end
+  end
+end
+```
+
+
+<p>Vamos a generar los datos CSV en el modelo de producto, con un nuevo m&eacute;todo llamado <code>to_csv</code> cuyo nombre est&aacute; estrat&eacute;gicamente escogido para que no desentone con <code>to_json</code> y <code>to_xml</code>.</p>
+
+
+
+``` /app/models/product.rb
+class Product < ActiveRecord::Base
+  attr_accessible :name, :price, :released_on
+  
+  def self.to_csv
+    CSV.generate do |csv|
+      csv << column_names
+      all.each do |product|
+        csv << product.attributes.values_at(*column_names)
+      end
+    end
+  end
+end
+```
+
+
+<p>Para crear estos datos le a&ntilde;adimos el <em>array</em> de valores al objeto <code>csv</code> que se le pasa al bloque.  La primera fila es el encabezado, y hemos hecho que su valor sea <code>column_names</code>, que devuelve una lista con los nombres de los atributos del modelo.  Si quis&iacute;eramos devolver un subconjunto de estos atributos tendr&iacute;amos que enumerarlos aqu&iacute; a mano.  Luego iteramos sobre los productos y a&ntilde;adimos una fila al fichero CSV para cada producto, y luego le a&ntilde;adios los valores que se corresponden con el nombre de la columna.  Con esto estamos seguros de que se devuelven los campos correctos en el orden adecuado.  Tras reiniciar el servidor para que coja la librer&iacute;a deber&iacute;amos poder ver nuestro fichero CSV.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1239/original/E362I02.png" width="800" height="400" alt="Los datos CSV en el navegador."/>
+</div>
+
+<p>Si queremos descargar estos datos en lugar de mostrarlos en el navegador podemos utilizar la opci&oacute;n <code>send_data</code> en lugar de <code>render :text</code> del controlador.  Si recargamos la p&aacute;gina ahora veremos que al mostrar el fichero CSV se inicia su descarga.</p>
+
+<h3>Exportaci&oacute;n a Excel</h3>
+
+<p>&iquest;Y qu&eacute; pasa con Excel?  La soluci&oacute;n m&aacute;s sencilla ser&iacute;a que el usuario abriese el fichero CSV en Excel, pero es mejor proporcionar un fichero <code>xls</code> que se abrir&iacute;a por defecto en Excel.  Para esto tendremos que a&ntilde;adir un nuevo tipo MIME para los ficheros <code>xls</code>, lo que haremos en el fichero de inicializaci&oacute;n <code>mime_types</code>.</p>
+
+
+``` /config/initializers/mime_types.rb
+Mime::Type.register "application/xls", :xls
+```
+
+
+<p>Tenemos que modificar el controlador para que responda a este tipo MIME.  Los datos tienen que estar separados por tabuladores para que se muestren en Excel; por suerte la librer&iacute;a CSV permite indicar un separador de columnas, por lo que usaremos el car&aacute;cter de tabulaci&oacute;n.</p>
+
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    @products = Product.order(:name)
+    respond_to do |format|
+      format.html
+      format.csv { send_data @products.to_csv }
+      format.xls { send_data @products.to_csv(col_sep: "\t") }
+    end
+  end
+end
+```
+
+
+<p>Tenemos que cambiar el m&eacute;todo <code>to_csv</code> de la clase  <code>Product</code> para aceptar un <em>hash</em> con las opciones que puede recibir <code>CSV.generate</code>.</p>
+
+
+``` /app/models/product.rb
+class Product < ActiveRecord::Base
+  attr_accessible :name, :price, :released_on
+  
+  def self.to_csv(options = {})
+    CSV.generate(options) do |csv|
+      csv << column_names
+      all.each do |product|
+        csv << product.attributes.values_at(*column_names)
+      end
+    end
+  end
+end
+```
+
+
+<p>Si ahora visitamos la ruta <code>/products.xls</code> veremos que se descarga un archivo que se puede abrir con Excel.  En la mayor&iacute;a de casos con esto nos bastar&aacute;: el fichero se abre y las columnas se encuentran separadas correctamente, pero hay algunos problemas.  Por ejemplo el fichero no tiene la codificaci&oacute;n correcta, por lo que algunos caracteres como el s&iacute;mbolo de grado cent&iacute;grado se ve mal.  Hay varias soluciones a este problema, pero el enfoque que estamos usando tiene uno a&uacute;n m&aacute;s grave, y es que las celdas no pueden contener un car&aacute;cter de salto de l&iacute;nea.</p>
+
+<p>En lugar de mostrar los datos en el controlador vamos a crear un fichero de plantilla para mostrar el fichero <code>xls</code>.  Primero tenemos que quitar el bloque del formato <code>xls</code> en el controlador.</p>
+
+
+``` app/controllers/products.rb
+class ProductsController < ApplicationController
+  def index
+    @products = Product.order(:name)
+    respond_to do |format|
+      format.html
+      format.csv { send_data @products.to_csv }
+      format.xls
+    end
+  end
+end
+```
+
+
+<p>Empezaremos con nuestra nueva plantilla.</p>
+
+
+
+``` /app/views/products/index.xls.erb
+<table border="1">
+  <tr>
+    <th>ID</th>
+    <th>Name</th>
+    <th>Release Date</th>
+    <th>Price</th>
+  </tr>
+  <% @products.each do |product| %>
+  <tr>
+    <td><%= product.id %></td>
+    <td><%= product.name %></td>
+    <td><%= product.released_on %></td>
+    <td><%= product.price %></td>
+  </tr>
+  <% end %>
+</table>
+```
+
+
+<p>Podemos usar una tabla HTML con los datos que queremos exportar porque Excel no tiene ning&uacute;n problema cargando este tipo de tablas.  Cuando lo abramos con Excel veremos que el problema de la codificaci&oacute;n ha desaparecido y que se muestran bien las celdas con saltos de l&iacute;nea.  Pero la hoja de c&aacute;lculo tiene un aspecto un poco diferente porque el formato en HTML a&ntilde;ade un borde a las celdas, y adem&aacute;s justifica al centro las celdas del encabezado.  Esto se puede ajustar un poco en el documento HTML.  Si queremos generar un fichero que se parece m&aacute;s a un documento Excel nativo podemos cambiar la plantilla:</p>
+
+
+``` /app/views/products/index.xls.erb
+<?xml version="1.0"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:o="urn:schemas-microsoft-com:office:office"
+  xmlns:x="urn:schemas-microsoft-com:office:excel"
+  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+  xmlns:html="http://www.w3.org/TR/REC-html40">
+  <Worksheet ss:Name="Sheet1">
+    <Table>
+      <Row>
+        <Cell><Data ss:Type="String">ID</Data></Cell>
+        <Cell><Data ss:Type="String">Name</Data></Cell>
+        <Cell><Data ss:Type="String">Release Date</Data></Cell>
+        <Cell><Data ss:Type="String">Price</Data></Cell>
+      </Row>
+    <% @products.each do |product| %>
+      <Row>
+        <Cell><Data ss:Type="Number"><%= product.id %></Data></Cell>
+        <Cell><Data ss:Type="String"><%= product.name %></Data></Cell>
+        <Cell><Data ss:Type="String"><%= product.released_on %></Data></Cell>
+        <Cell><Data ss:Type="Number"><%= product.price %></Data></Cell>
+      </Row>
+    <% end %>
+    </Table>
+  </Worksheet>
+</Workbook>
+```
+
+
+<p>Con esto nuestros datos se muestran como XML en un formato comprensible por Excel, lo que nos otorga mucha m&aacute;s flexibilidad en lo que podemos hacer.  Por ejemplo podemos generar m&uacute;ltiples hojas, y especificar el formato de cada celda.  Si generamos otra hoja de c&aacute;lculo veremos un aviso (al menos en OS X) porque un fichero con este formato puede incluir c&oacute;digo potencialmente peligroso como macros.</p>
+
+<p>Ahora veremos que el archivo tiene la codificaci&oacute;n correcta y tiene el aspecto de un documento Excel de verdad.  La mejor documentaci&oacute;n acerca de este formato es la <a href="http://msdn.microsoft.com/en-us/library/aa140066(v=office.10).aspx">Referencia de XML para Hojas de C&aacute;lculo</a> en el sitio web de MSDN, que contiene un listado con todas las etiquetas que podremos usar en nuestros documentos Excel.  Si adem&aacute;s una hoja de c&aacute;lculo incluye una funcionalidad que queramos usar, siempre podemos intentar hacer ingenier&iacute;a inversa guard&aacute;ndola como XML y abri&eacute;ndolo en un editor d etexto.</p>
+
+<h3>Enlaces</h3>
+
+<p>Ahora que podemos generar ambos formatos vamos a a&ntilde;adir los enlaces que permitir&aacute;n al usuario descargar los ficheros relevantes.  Los a&ntilde;adiremos en la parte superior de la p&aacute;gina.</p>
+
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<p>
+  Download:
+  <%= link_to "CSV", products_path(format: "csv") %> |
+  <%= link_to "Excel", products_path(format: "xls") %>
+</p>
+<!-- Se omite el resto del archivo -->
+```
+
+
+<p>Al recargar la p&aacute;gina veremos los enlaces de descarga, que al hacer clic en ellos devolver&aacute;n el fichero solicitado.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1240/original/E362I03.png" width="800" height="400" alt="La página contiene enlaces para descargar los datos en ambos formatos."/>
+</div>

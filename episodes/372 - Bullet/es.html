@@ -1,0 +1,190 @@
+<p><a href="https://github.com/flyerhzm/bullet">Bullet</a>, de Richard Huang, es una gema que sirve para recibir avisos cuando nuestra aplicaci&oacute;n realiza consultas ineficientes a la base de datos como por ejemplo una consulta N+1 o cuando falta una columna con una cach&eacute; de contador.  En este episodio vamos a usarla para optimizar una aplicacion Rails.</p>
+
+<h3>Optimizando la p&aacute;gina de productos</h3>
+
+<p>La p&aacute;gina muestra los productos por la categor&iacute;a a la que pertenecen.  En esta p&aacute;gina hay dos modelos implicados: uno es <code>Category</code>, que puede tener muchos <code>Products</code>.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1307/original/E372I01.png" width="800" height="500" alt="La página de categorias, mostrando los productos."/>
+</div>
+
+<p>La p&aacute;gina sufre del problema de las N+1 consultas como puede verse viendo la traza de Rails que muestra que hacemos una consulta para obtener las categor&iacute;as y luego una consulta separada para cada recuperar los productos de cada categor&iacute;a.</p>
+
+
+``` log
+Category Load (0.2ms)  SELECT "categories".* FROM "categories" ORDER BY name
+Product Load (0.2ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" = 3
+Product Load (0.2ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" = 1
+Product Load (0.2ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" = 5
+Product Load (0.2ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" = 4
+Product Load (0.3ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" = 2
+```
+
+
+<p>Este es el problema de las N+1 consultas: hacer una consulta para obtener los padres y luego tantas consultas como hijos para obtener los otros registros.  Este tipo de problemas puede pasarse f&aacute;cilmente por alto, y aqu&iacute; es donde interviene Bullet.  Lo a&ntilde;adiremos al <code>Gemfile</code> de nuestra aplicaci&oacute;n, pero s&oacute;lo en el grupo de desarrollo, ejecutando <code>bundle</code> para instalarlo.</p>
+
+
+``` /Gemfile
+gem 'bullet', group: :development
+```
+
+
+<p>Vamos a activar Bullet en un nuevo fichero inicializador.  Dado que no se va a cargar en todos los entornos, primero tenemos que consultar si est&aacute; definido, en cuyo caso lo activamos e indicamos c&oacute;mo queremos ser notificados de los problemas que haya en las consultas.  Vamos a establecer <code>alert</code> a <code>true</code>, lo que nos avisar&aacute; mediante el navegador.</p>
+
+
+``` /config/initializers/bullet.rb
+if defined? Bullet
+  Bullet.enable = true
+  Bullet.alert = true
+end
+```
+
+
+<p>Al reiniciar el servidor y recargar la p&aacute;gina veremos una alerta en JavaScript que nos indica que Bullet ha encontrado una consulta de tipo N+1, indicando adem&aacute;s los pasos para resolver el problema.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1308/original/E372I02.png" width="803" height="500" alt="Bullet nos avisa que tenemos un problema de N+1 consultas."/>
+</div>
+
+<p>Vamos a seguir el consejo de Bullet, obteniendo los productos a la vez que las categor&iacute;as.</p>
+
+
+``` /app/controllers/categories_controller.rb
+class CategoriesController < ApplicationController
+  def index
+    @categories = Category.order(:name).includes(:products)
+  end
+end
+```
+
+
+<p>De esta forma recuperamos los productos de antemano porque ya sabemos que vamos a necesitarlos de todas formas.  Al recargar la p&aacute;gina ya no saldr&aacute; la alerta porque estamos recuperando los datos de manera eficiente.  Si miramos en el fichero de trazas veremos que los datos se recuperan con dos consultas, una para las categor&iacute;as y otra para los productos de dichas categor&iacute;as.</p>
+
+
+``` log
+Category Load (0.2ms)  SELECT "categories".* FROM "categories" ORDER BY name
+Product Load (0.4ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" IN (3, 1, 5, 4, 2)
+```
+
+
+<p>Bullet tambi&eacute;n puede indicarnos si hacemos esta carga anticipada de forma innecesaria.  Supongamos que tenemos que sacar de esta p&aacute;gina los listados de productos y queremos llevarlas a la p&aacute;gina de cada producto.  Eliminaremos el c&oacute;digo que lista los productos en la plantilla <code>index</code> de forma que s&oacute;lo mostremos informaci&oacute;n acerca de  las categor&iacute;as.</p>
+
+
+``` /app/views/categories/index.html.erb
+<h1>Categories</h1>
+
+<% @categories.each do |category| %>
+  <div class="category">
+    <h2><%= link_to category.name, category %></h2>
+  </div>
+<% end %>
+```
+
+
+<p>Al recargar la p&aacute;gina veremos otra vez la alerta pero esta vez nos indicar&aacute; que Bullet ha detectado una carga anticipada de datos que luego no se usan.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1309/original/E372I03.png" width="" height="" alt="El aviso ahora nos indica que hemos cargado demasiados datos de antemano."/>
+</div>
+
+<p>Esto se corrige al quitar la llamada a <code>includes</code> en el controlador <code>CategoriesController</code>.</p>
+
+
+``` /app/controllers/categories_controller.rb
+class CategoriesController < ApplicationController
+  def index
+    @categories = Category.order(:name).includes(:products)
+  end
+end
+```
+
+
+<p>Veremos que al cargar la p&aacute;gina ya no nos sale la alerta.</p>
+
+<h3>Columnas con cach&eacute; de contador</h3>
+
+<p>Bullet tambi&eacute;n nos puede indicar cu&aacute;ndo deber&iacute;amos usar una columna como cach&eacute; de contador.  Supongamos que debajo de los nombres de cada categor&iacute;a queremos mostrar el n&uacute;mero de productos que tiene.  Podemos hacerlo as&iacute;:</p>
+
+
+``` /app/views/categories/index.html.erb
+<h1>Categories</h1>
+
+<% @categories.each do |category| %>
+  <div class="category">
+    <h2><%= link_to category.name, category %></h2>
+    <%= pluralize category.products.size, "product" %>
+  </div>
+<% end %>
+```
+
+
+<p>Al recargar la p&aacute;gina, veremos la siguiente alerta:</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1310/original/E372I04.png" width="800" height="500" alt="La tabla de categorías necesita una columna para alojar el contador."/>
+</div>
+
+<p>Esta vez nos indica que deber&iacute;amos a&ntilde;adir una columna con una cach&eacute; de contador.  La aplicaci&oacute;n tiene que realizar consultas a la base de datos para obtener el recuento de los productos de cada una de las categor&iacute;as.  Esto es similar al problema de las N+1 consultas que vimos antes, y podemos arreglarlo f&aacute;cilmente incluyendo la opci&oacute;n <code>counter_cache</code> en la llamada a <code>belongs_to</code> del modelo <code>Product</code>.</p>
+
+
+``` /app/models/product.rb
+class Product < ActiveRecord::Base
+  belongs_to :category, counter_cache: true
+  attr_accessible :name, :price, :category_id
+end
+```
+
+
+<p>Tenemos que generar una migraci&oacute;n para a&ntilde;adir esta columna a la tabla de productos.</p>
+
+
+
+``` terminal
+$ rails g migration add_products_count_to_categories products_count:integer
+```
+
+
+<p>Antes de ejecutar la migraci&oacute;n la modificaremos para hacer que <code>counter_cache</code> tenga un valor por defecto.</p>
+
+
+
+``` /db/migrations/20120820000000_add_products_count_to_categories.rb
+class AddProductsCountToCategories < ActiveRecord::Migration
+  def change
+    add_column :categories, :products_count, :integer, default: 0, null: false
+  end
+end
+```
+
+
+<p>Para que esto funcione con los registros ya existentes tenemos que rellenar dicha columna, por lo que vamos a crear una migraci&oacute;n separada para hacerlo.</p>
+
+
+``` terminal
+$ rails g migration cache_product_count
+```
+
+
+<p>En la migraci&oacute;n podemos usar ActiveRecord para rellenar la columna pero en su lugar lo haremos con SQL.</p>
+
+
+
+``` /db/migrations/20120820000000_cache_product_count.rb
+class CacheProductsCount < ActiveRecord::Migration
+  def up
+    execute "update categories set products_count=(select count(*) from products where category_id=categories.id)"
+  end
+
+  def down
+  end
+end
+```
+
+
+<p>Con esto actualizaremos la cuenta de productos para cada categor&iacute;a.  Podemos ejecutar las migraciones con <code>rake db:migrate</code> y al recargar la p&aacute;gina veremos que la alerta ya no sale.</p>
+
+<h3>Otras opciones de notificaci&oacute;n</h3>
+
+<p>Hasta ahora s&oacute;lo hemos visto una de las maneras que tiene Bullet de enviarnos notificaciones: mediante un mensaje de alerta.  Pero hay otras opciones posibles para recibir las notificaciones, y las gestiona la  <a href="https://github.com/flyerhzm/uniform_notifier">gema Uniform Notifier</a> que es un proyecto muy interesante en s&iacute; mismo.  Tras probar Bullet en nuestra aplicaci&oacute;n podemos cambiar el m&eacute;todo de notificaci&oacute;n para que sea menos intrusivo, como por ejemplo <code>bullet_logger</code>, de esta manera podemos seguir desarrollando la aplicaci&oacute;n y comprobarlo de vez en cuando para ver si hay problemas con las consultas.</p>
+
+<p>Como con cualquier herramienta de este estilo es muy importante  no limitarse a seguir ciegamente las sugerencias que nos de.  Si un mensaje de alerta nos indica que tenemos que a&ntilde;adir la carga anticipada de registros no deber&iacute;amos simplemente a&ntilde;adirla para quitarnos el mensaje de encima.  En ocasiones la carga anticipada puede empeorar el rendimiento por lo que hay que considerar otro tipo de optimizaciones como el uso de cach&eacute;s.  Cuando dudemos, siempre es buena idea realizar pruebas comparativas del rendimiento relativo de cada soluci&oacute;n.  Tambi&eacute;n debemos tener en cuenta que el entorno de ejecuci&oacute;n de nuestro servidor de producci&oacute;n tambi&eacute;n influye, por ejemplo la latencia de las conexiones de base de datos.</p>

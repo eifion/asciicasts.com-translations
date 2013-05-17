@@ -1,0 +1,138 @@
+<p>先週は<a href="http://railscasts.com/episodes/350-rest-api-versioning">エピソード350</a>で販売サイト用のバージョン管理されたAPIを構築する方法を紹介しました。<code>/api/products</code>というパスにアクセスすると、JSONを介してこのアプリケーションとデータのやりとりが可能です。このAPIは完全に公開されていて誰でも利用可能で商品情報の編集や削除ができてしまいますが、APIへのアクセスには制限をかけるのが通常でしょう。これを実現する方法はいろいろありますが、どの方法を選択するかはアプリケーションの要求によります。今回のエピソードではAPIに制限をかける方法をいくつか紹介し、アプリケーションのスタイルにもっとも合った方法を選択できるようにします。</p>
+
+<h3>HTTPベーシック認証を使用する</h3>
+
+<p>もっともシンプルな方法はHTTPベーシック認証です。これをRailsで行なうのはとても簡単なので、ほとんどのAPIクライアントで問題なく対応させることができるでしょう。これを使用するにはただ単にAPIを提供するコントローラを修正して、<code>http_basic_authentication_with</code>の呼び出しを追加して名前とパスワードを渡すだけです。</p>
+
+``` /app/controllers/api/v1/products_controller.rb
+module Api
+  module V1
+    class ProductsController < ApplicationController
+      http_basic_authenticate_with name: "admin", password: "secret"
+      respond_to :json
+
+      # Actions omitten
+    end
+  end
+end
+```
+
+<p>本番環境のアプリケーションでは、名前とパスワードをなんらかの外部設定に移動して、バージョン管理の中には保存しないようにします。複数のコントローラでこれを行なう必要がある場合は、新規のコントローラを作成して他のコントローラをそこからサブクラス化します。</p> 
+
+<p><code>curl</code>コマンドでこれを試してみます。APIにリクエストを送るとエラーが発生します。</p>
+
+``` terminal
+$ curl http://localhost:3000/api/products
+HTTP Basic: Access denied.
+```
+
+<p>レスポンスヘッダを見ると、<code>401 Unauthorized</code>レスポンスが返されたのがわかります。</p>
+
+``` terminal
+$ curl http://localhost:3000/api/products -I
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Basic realm="Application"
+Content-Type: text/html; charset=utf-8
+X-UA-Compatible: IE=Edge
+Cache-Control: no-cache
+X-Request-Id: c411eeceefc39ab3964d40301530843c
+X-Runtime: 0.002366
+Content-Length: 0
+Connection: keep-alive
+Server: thin 1.3.1 codename Triple Espresso
+```
+
+<p>正しいユーザ名とパスワードを渡すと、JSONレスポンスが返されます。</p>
+
+``` terminal
+$ curl http://localhost:3000/api/products -u "admin:secret"
+[{"category_id":2,"created_at":"2012-05-30T20:16:58Z","id":1,"name":"Settlers of Catan","price":"29.95","released_on":"2012-04-12","updated_at":"2012-05-30T20:16:58Z"}, ...etc]
+```
+
+<p>一つ注意が必要なのは、認証情報が平文で送信されるため必ずセキュア接続かダイジェスト接続を使用するようにします。</p> 
+
+<h3>アクセストークンによる認証</h3>
+
+<p>APIに制限をかけるもう一つの方法は、クライアントにアクセストークンを提供する方法です。どこかにこのトークンを保存する必要があるので、そのための<code>api_key</code>モデルを新規に作成します。</p> 
+
+``` terminal
+$ rails g model api_key access_token
+```
+
+<p>このモデルにいくつか他の列も追加します。例えば、<code>role</code>列でトークンが持つ権限を指定したり、<code>user_id</code>列でトークンを所有するユーザを指定したり、<code>expires_at</code>列でトークンの有効期限を指定したりできます。ここではモデルをシンプルにするために、列を一つだけ追加します。<code>rake db:migrate</code>を実行して新規に<code>api_keys</code>テーブルを作成します。</p>
+
+<p>このモデルで、レコードが新規に作成されるごとにランダムなアクセス用トークン文字列を生成します。これを<code>before_create</code>コールバックで行ないます。</p>
+
+``` /app/models/api_key.rb
+class ApiKey < ActiveRecord::Base
+  before_create :generate_access_token
+  
+private
+  
+  def generate_access_token
+    begin
+      self.access_token = SecureRandom.hex
+    end while self.class.exists?(access_token: access_token)
+  end
+
+end
+```
+
+<p>このコードではRuby 1.9が提供する<code>SecureRandom.hex</code>を使ってランダムな16進数の文字列を生成しています。その後に同じトークンで別のキーがないかをチェックし、存在した場合はトークンを再度生成します。データベース側でもこの列にユニーク制約を追加して、値がユニークであることを確実にすることができます。これの実際の動作をコンソールで確認します。<code>ApiKey.create!</code>を呼び出すと、ランダムなトークンと共に新規レコードが作成されます。</p>
+
+``` console
+1.9.3-p125 :001 > ApiKey.create!
+   (0.1ms)  begin transaction
+  ApiKey Exists (0.2ms)  SELECT 1 FROM "api_keys" WHERE "api_keys"."access_token" = 'afbadb4ff8485c0adcba486b4ca90cc4' LIMIT 1
+Binary data inserted for `string` type on column `access_token`
+  SQL (5.9ms)  INSERT INTO "api_keys" ("access_token", "created_at", "updated_at") VALUES (?, ?, ?)  [["access_token", "afbadb4ff8485c0adcba486b4ca90cc4"], ["created_at", Wed, 30 May 2012 21:17:53 UTC +00:00], ["updated_at", Wed, 30 May 2012 21:17:53 UTC +00:00]]
+   (2.7ms)  commit transaction
+ => #<ApiKey id: 1, access_token: "afbadb4ff8485c0adcba486b4ca90cc4", created_at: "2012-05-30 21:17:53", updated_at: "2012-05-30 21:17:53">
+``` 
+
+<p>トークンを生成してそれをクライアントに表示する方法をどうするかは作成者に委ねられますが、通常はプロフィール画面などでユーザが生成して、手でAPIツールにコピー&amp;ペーストさせるという方法がとられます。それではAPIへのアクセスに制限をかけるために、トークンを要求するように変更します。これを行なう方法はいくつかあります。一つの方法は、URLパラメータとして追加して、それをコントローラでチェックするやり方です。これを<code>before_filter</code>で行ないます。</p>
+
+``` /app/controllers/api/v1/products_controller.rb
+module Api
+  module V1
+    class ProductsController < ApplicationController
+      before_filter :restrict_access
+      respond_to :json
+
+      # Actions omitted
+
+      private
+      def restrict_access
+        api_key = ApiKey.find_by_access_token(params[:access_token])
+        head :unauthorized unless api_key
+      end
+    end
+  end
+end
+```
+
+<p><code>restrict_access</code>の中で、URLから渡された<code>access_token</code>で<code>ApiKey</code>を探します。一致するキーが見つからなければ<code>401 Unauthorized</code>を返します。有効なアクセストークンが渡されるまでこのページにアクセスしても何もレスポンスが返されない状態ですが、サーバのログを見るとサーバが<code>401</code>レスポンスを返しているのがわかります。</p>
+
+<p>アクセストークンをURLで渡すやり方はベストな方法とは言えません。トークンに有効期限がない場合は特にそうです。URLはコピー&amp;ペーストで人から人に渡る場合があり、秘密情報を共有される状況は好ましくありません。別のやり方として、アクセストークンをHTTPヘッダで渡す方法があります。Railsではこの機能を簡単に追加するためのコントローラメソッドが提供されています。before filterで<code>authenticate_or_request_with_http_token</code>を使用します。<code>ProductsController</code>にbefore filterがあるので、そこで呼びされる<code>restrict_access</code>メソッドを<code>authenticate_or_request_with_http_token</code>を使うように修正します。</p>
+
+``` /app/controllers/api/v1/products_controller.rb
+def restrict_access
+  authenticate_or_request_with_http_token do |token, options|
+    ApiKey.exists?(access_token: token)
+  end
+end
+```
+
+<p><code>authenticate_or_request_with_http_token</code>に渡されるブロックが<code>true</code>を返したら認証は成功なので、ここでは渡されたトークンで<code>ApiKey</code>が存在するかチェックします。APIに対してリクエストが行なわれると、以下のように<code>Authorization</code>ヘッダが設定されない限りアクセスが拒否されます。</p>
+
+``` terminal
+$ curl http://localhost:3000/api/products -H 'Authorization: Token token="afbadb4ff8485c0adcba486b4ca90cc4"'
+```
+
+<p>これらの複数の認証トークン方式を混在させて、アプリケーションのニーズにもっとも合った方法をとるようにします。</p>
+
+<p>ここで紹介した方法はシンプルなものですが、より複雑な状況の場合はどうすればいいでしょうか? 例えばあるユーザが我々のアプリケーションにログインすることができて、我々のAPIを利用する別のアプリケーションにも(そのユーザが許可をした場合のみ)そのユーザとしてログインしたことにさせて認証情報にアクセスさせたいというような場合です。これはFacebookやTwitterなどのようなソーシャルネットワーク系のアプリケーションでは典型的なシナリオで、これを実現するのに最も適しているのは<a href="http://railscasts.com/episodes/350-rest-api-versioning">OAuth</a>を使う方法です。今回のエピソードではOAuthに詳しく触れることはしませんが、ウェブサイトには多くの情報があります。基本的にはAPIにセキュリティを設定してログインする先のサイトにパスワードを保存することなくユーザのデータを保護する機能を提供します。</p>
+
+RailsアプリケーションでOAuthを簡単に設定できるようにするためのプロジェクトはいくつもあります。その中の一つが<a href="https://github.com/applicake/doorkeeper">Doorkeeper</a>で、まだ開発段階ではありますがチェックする価値があるので、今週のProエピソードで取り上げています。<a href="https://github.com/intridea/oauth2">oauth2</a> gemも詳しく見てみる価値があります。多くのプロジェクトがこのgemをベースにして構築されているので、そのしくみを理解しておくのがいいでしょう。 
+
+<p>今回紹介したいずれのツールを使う場合も、APIとのやりとりをセキュアな接続で行なうことがとても重要なので、かならずSSLを使用するようにしてください。</p>

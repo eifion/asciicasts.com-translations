@@ -1,0 +1,89 @@
+<p>In this episode we&rsquo;ll take a look at a couple of different tools that can help us in development. To demonstrate this we have a Rails application that manages projects. The page that lists the projects works but when we click a link to view a single project we get an error message.</p>
+
+<div class="imageWrapper">
+	<img src="http://asciicasts.com/system/photos/1445/original/E402I01.png" width="800" height="500" alt="The page for a project throws an exception."/>
+</div>
+
+<p>It seems that we have an undefined <code>empty?</code> method being called on <code>nil</code> and that this error happens when we try to create a checkbox. There&rsquo;s no obvious place in the source code that&rsquo;s displayed that calls <code>empty?</code> and it seems that this exception page could be improved to give us a better idea as to where the error is thrown.</p>
+
+<h3>Using Better Errors</h3>
+
+<p>That brings us to the first tool we&rsquo;ll show in this episode: <a href="https://github.com/charliesome/better_errors">Better Errors</a>. This makes the error pages much more useful and makes them look better, too. Let&rsquo;s try it in our application.</p>
+
+<p>When we add this gem to our app it&rsquo;s important to place it in the <code>development</code> group so that we don&rsquo;t show details of any of our application&rsquo;s errors in production. As ever we&rsquo;ll need to run <code>bundle</code> afterwards in order to install the gem.</p>
+
+``` /Gemfile
+group :development do
+  gem 'better_errors'
+end
+```
+
+<p>If we restart then server then reload the page Better Errors will handle the error and we&rsquo;ll see exactly where the error has occurred.</p>
+
+<div class="imageWrapper">
+	<img src="http://asciicasts.com/system/photos/1446/original/E402I02.png" width="800" height="x00" alt="Better Errors shows the exact line of code that's causing the error."/>
+</div>
+
+<p>The relevant source code is now nicely syntax-highlighted and we can see the <code>empty?</code> method that is causing the problems. Above this source code is a stack trace and we can click any line of this to see the source code for that part of the stack. We can also look at the entire Rails app and view the source code for any part of the Rails source code or any gems that are part of the stack trace for the error.</p>
+
+<p>A useful side-effect of this is that it helps us to get a better understanding of how Rails works. For our error we can see that the <code>check_box</code> method is triggered in our code and working through the stack trace we&rsquo;ll see that this method is called on a form builder and we can carry on and go through every step in the process to get a better understanding of what&rsquo;s going on. At the bottom of the error page we&rsquo;ll see information about the request including the parameters and any cookies that are used. This isn&rsquo;t all that this gem can do, though. If we look at the error page we&rsquo;ll see a tip to add a gem called <code>binding_of_caller</code> which gives more functionality so let&rsquo;s give that a try. Again, this gem should go in the development group and again we&rsquo;ll need to run <code>bundle</code> to install it.</p>
+
+``` /Gemfile
+group :development do
+  gem 'better_errors'
+  gem 'binding_of_caller'
+end
+```
+
+<p>Make sure you&rsquo;re on a trusted network if you&rsquo;re going to use this gem as you don&rsquo;t want malicious users accessing your Rails application this way. When we restart the app and reload the page again we get a lot more information including the local and instance variables.</p>
+
+<div class="imageWrapper">
+	<img src="http://asciicasts.com/system/photos/1447/original/E402I03.png" width="800" height="592" alt="With the Binding of Caller gem we get more information, including local and instance variables."/>
+</div>
+
+This works for any line of the stack trace so we can view the local and instance variables at any point in the stack. This is really useful, but one of the greatest features is the interactive prompt which we can also use at any point in the stack trace. If we use this in the Task model we&rsquo;ll see that the value of <code>completed_at</code> is <code>nil</code> which is why we&rsquo;re getting an exception raised when we call <code>empty?</code> on it.
+
+<div class="imageWrapper">
+	<img src="http://asciicasts.com/system/photos/1448/original/E402I04.png" width="800" height="592" alt="Using the interactive console to get the value of a variable."/>
+</div>
+
+<p>Instead of <code>empty?</code> we should be calling <code>present?</code> and to make this change we can click the name of the file which will open it up in a text editor. We&rsquo;ll just make the change here but in a real application we&rsquo;d write a failing test first to ensure that this bug is fixed and doesn&rsquo;t recur.</p>
+
+<h3>Using Better Errors With AJAX Requests</h3>
+
+<p>Our application has another bug. If we mark a task as complete by checking its checkbox it should be automatically moved to the &ldquo;Completed Tasks&rdquo; section and its record updated in the database, all this being done by an AJAX request. When we do this, however, the task isn&rsquo;t moved and if we look in the development log we&rsquo;ll see than an exception was raised during the AJAX request. It would be better if we could see this exception and interact with it through Better Errors and we can by visiting the path <code>/__better_errors</code>.</p>
+
+<div class="imageWrapper">
+	<img src="http://asciicasts.com/system/photos/1449/original/E402I05.png" width="800" height="600" alt="We have access to the same functionality even for AJAX requests."/>
+</div>
+
+<p>This shows us the last exception to occur and it matches the error in the development log. If we use the console to get the value of the value variable we&rsquo;ll see that it&rsquo;s a string containing the value &ldquo;1&rdquo;. This explains why we get an exception when we call <code>zero?</code> on this value as we need to convert this to an integer first. Again we can open up the relevant file in our text editor by clicking the link and we can then fix this error. Now when we mark a task as complete it&rsquo;s moved correctly to the other list.</p>
+
+<p>Before we finish our look at Better Errors we&rsquo;ll mention a couple of things about the link that opens up a text editor. This works with internal gem pages too so if we want to know how, say, <code>assign_attributes</code> works in ActiveRecord we can click the link just like we would for our own source code. If we want to change the editor that Better Errors uses we can do so by creating a new initializer file in our application and setting the <code>BetterErrors.editor</code> property.</p>
+
+``` /config/initializers/better_errors.rb
+BetterErrors.editor = :sublime if defined? BetterErrors
+```
+<p>There are several different values we can set this to such as :sublime for Sublime Text. Note that we check that <code>BetterErrors</code> is defined before setting this. The RDocs have <a href="http://rubydoc.info/github/charliesome/better_errors/BetterErrors#editor%3D-class_method">more information about this</a> and they show that we can use a string or even a proc object if we need a more customized solution.</p>
+
+<h3>Rails Panel</h3>
+
+<p>The other tool we&rsquo;ll take a look at is called <a href="https://github.com/dejan/rails_panel">Rails Panel</a>. This is an extension for Chrome which adds a development log within the browser. This can be installed via the <a href="https://chrome.google.com/webstore/detail/railspanel/gjpfobpafnhjhbajcjgccbbdofdckggg">Chrome Web Store</a>, although we also need to add a gem to our application called Meta Request. As with the other gems we&rsquo;ve used this should go in the <code>development</code> group and we we&rsquo;ll need to run <code>bundle</code> to install it.</p>
+
+``` /Gemfile
+group :development do
+  gem 'better_errors'
+  gem 'binding_of_caller'
+  gem 'meta_request'
+end
+```
+
+<p>Now, after restarting our application, we can open Chrome&rsquo;s developer panel and we should see a new RailsPanel tab. As we visit various pages in our application we should see an entry for each one in the panel. This works for AJAX requests, too.</p>
+
+<div class="imageWrapper">
+	<img src="http://asciicasts.com/system/photos/1450/original/E402I06.png" width="804" height="702" alt="Chrome with the RailsPanel tab showing."/>
+</div>
+
+<p>This panel contains all sorts of details about each request, including the format, how long it took to process, what the parameters were, what database queries were made and which views were rendered. As with Better Errors we can click on a view to open it up in a text editor. To customize the editor that&rsquo;s used we need to open the Chrome preferences and we can choose between TextMate, MacVim or Sublime Text.</p> 
+
+<p>This is a fairly simple tool but it&rsquo;s useful to have all of this information inline in the browser instead of having to look in a separate log.</p>

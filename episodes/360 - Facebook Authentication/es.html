@@ -1,0 +1,206 @@
+<p>En la aplicaci&oacute;n de ejemplo que se muestra a continuaci&oacute;n tenemos un listado de pel&iacute;culas en las que los usuarios pueden escribir sus opiniones.  Queremos a&ntilde;adir un poco de interacci&oacute;n social integrando nuestra aplicaci&oacute;n con Facebook de forma que los usuarios puedan compartir las rese&ntilde;as con sus amigos, en este episodio veremos c&oacute;mo hacerlo.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1225/original/E360I01.png" width="800" height="500" alt="Nuestra aplicación."/>
+</div>
+
+<h3>Registro de la aplicaci&oacute;n en Facebook</h3>
+
+<p>La forma m&aacute;s sencilla de integrar Facebook en una aplicaci&oacute;n es mediante el uso de los <a href="https://developers.facebook.com/docs/plugins/"><em>plugins</em> sociales</a>, con los que podemos a&ntilde;adir un bot&oacute;n &ldquo;Like&rdquo;, una secci&oacute;n de comentarios y m&aacute;s.  Si queremos algo un poco m&aacute;s integrado con la funcionalidad de nuestro sitio tendremos que ir m&aacute;s all&aacute; y ser&aacute; necesario registrar nuestra aplicaci&oacute;n en el  <a href="https://developers.facebook.com/apps">sitio para desarrolladores de Facebook</a> con el objetivo de poder comunicarnos con la plataforma Open Graph y su API.  Para registrar la aplicaci&oacute;n tan s&oacute;lo tenemos que hacer clic en el bot&oacute;n  &ldquo;Create New App&rdquo; del sitio para desarrolladores y darle un nombre y un espacio de nombres a nuestra aplicaci&oacute;n.  Nosotros hemos escogido  &ldquo;Cinematron&rdquo; pero en este caso lo importante es que el espacio de nombres debe ser &uacute;nico de entre todas las aplicaciones de Facebook (es probable que tengamos que probar con alguna variaci&oacute;n del nombre de nuestra aplicaci&oacute;n hasta dar con uno que no haya usado nadie).  Facebook ha llegado a un acuerdo con Heroku para alojar aplicaciones web, por lo que si dejamos marcada la casilla del fondo de la p&aacute;gina  quedar&aacute; todo configurado para usar Heroku, si bien podemos usar cualquier alojamiento que queramos.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1226/original/E360I02.png" width="960" height="600" alt="Registro de la aplicación en Facebook."/>
+</div>
+
+<p>Para enviar este formulario tenemos que rellenar un <em>captcha</em>.  Tras esto iremos a una p&aacute;gina que muestra cierta informaci&oacute;n sobre nuestra aplicaci&oacute;n.  La p&aacute;gina contiene un identificativo de aplicaci&oacute;n y un secreto, que son ambos imprescindibles para que nuestra aplicaci&oacute;n se comunique con la API de Facebook.  Hay varias opciones que podemos especificar aqu&iacute; para personalizar nuestra aplicaci&oacute;n.  Una que tenemos que habilitar es  &ldquo;Website with Facebook Login&rdquo;, dado que es la permitir&aacute; que los usuarios de nuestra aplicaci&oacute;n se autentiquen mediante Facebook.  Tendremos que especificar la URL de nuestro sitio, por motivos de seguridad.  Mientras la aplicaci&oacute;n se encuentre en desarrollo podemos dejarlo a  <code>http://localhost:3000/</code> pero cuando la aplicaci&oacute;n pase a producci&oacute;n tendremos que cambiar el dominio para que coincida con nuestra aplicaci&oacute;n.  Para probar la aplicaci&oacute;n en local tras su paso a producci&oacute;n podemos modificar el fichero <code>/etc/hosts</code> de nuestra m&aacute;quina de forma que el dominio de producci&oacute;n apunte a nuestra m&aacute;quina local.</p>
+
+<p>La siguiente opción es  &ldquo;Auth Dialog&rdquo;. Es lo que mostrará Facebook a los usuarios cuando traten de autenticarse.  Rellenaremos este formulario con detalles acerca de nuestra aplicación.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1227/original/E360I03.png" width="960" height="600" alt=""/>
+</div>
+
+<p>N&oacute;tese que no hemos proporcionado URLs para la pol&iacute;tica de privacidad ni los t&eacute;rminos de servicio.  Facebook exige su presencia a no ser que nuestra aplicaci&oacute;n se encuentre en modo de pruebas.  Tras guardar los cambios podremos previsualizar el di&aacute;logo que contiene exactamente lo que ver&aacute; el usuario cuando se autentique.  Lo siguiente que tendremos que hacer es modificar la configuraci&oacute;n avanzada, que es donde podemos activar el modo de pruebas (<em>Sandbox mode</em>), que aparece desactivado por defecto.  Es el &uacute;nico cambio que hemos de hacer en esta pantalla.</p>
+
+<h3>Integraci&oacute;n de Facebook con nuestra aplicaci&oacute;n</h3>
+
+<p>Ya estamos listos para integrar la aplicaci&oacute;n en Facebook.  Lo primero que haremos es a&ntilde;adir un enlace para que el usuario pueda autenticarse mediante Facebook.  Para gestionar la autenticaci&oacute;n utilizaremos la <a href="https://github.com/mkdynamic/omniauth-facebook">gema OmniAuth</a>, que es &uacute;til porque soporta la autenticaci&oacute;n tanto en el servidor como en el cliente usando JavaScript.  El <a href="https://github.com/mkdynamic/omniauth-facebook#omniauth-facebook-%C2%A0">README</a> detalla bien c&oacute;mo gestionar la autenticaci&oacute;n con Facebook.  Como viene siendo habitual empezaremos a&ntilde;adiendo la gema al <code>Gemfile</code> de la aplicaci&oacute;n y luego ejecutaremos <code>bundle</code> para instalarla.</p>
+
+
+``` /Gemfile
+gem 'omniauth-facebook'
+```
+
+
+<p>A continuaci&oacute;n, crearemos un nuevo fichero de inicializaci&oacute;n donde pondremos la configuraci&oacute;n de OmniAuth.</p>
+
+
+
+``` /config/initializers/omniauth.rb
+OmniAuth.config.logger = Rails.logger
+
+Rails.application.config.middleware.use OmniAuth::Builder do
+  provider :facebook, ENV['FACEBOOK_APP_ID'], ENV['FACEBOOK_SECRET']
+end
+```
+
+
+<p>Aqu&iacute; hacemos que las trazas de OmniAuth aparezcan en el <em>log</em> de Rails y a&ntilde;adiremos OmniAuth a los <em>middlewares</em> de Rack, indicando que el proveedor a integrar es Facebook, incluyendo las variables de entorno con el identificativo de aplicaci&oacute;n y el secreto.  Cuando reiniciemos la aplicaci&oacute;n y visitemos <code>/auth/facebook</code> deber&iacute;amos ir a la p&aacute;gina de inicio de sesi&oacute;n de Facebook.   Si recibimos un error, deber&iacute;amos comprobar que las variables de entorno que le estamos pasando a OmniAuth sean las correctas.</p>
+
+<p>Al hacer clic en  &lsquo;Go To App&rsquo; para iniciar la sesi&oacute;n, iremos de vuelta a la aplicaci&oacute;n.  Veremos un error de rutas al hacerlo, lo cual no nos deber&iacute;a sorprender porque la aplicaci&oacute;n todav&iacute;a no es capaz de gestionar esta URL a la que le redirige Facebook.   Esto se corrige de forma similar a como lo hicimos en el  <a href="http://railscasts.com/episodes/241-simple-omniauth">episodio 241</a>. Primero a&ntilde;adiremos las rutas para gestionar las URLs que necesita OmniAuth.</p>
+
+
+``` /config/routes.rb 
+Cinema::Application.routes.draw do
+  match 'auth/:provider/callback', to: 'sessions#create'
+  match 'auth/failure', to: redirect('/')
+  match 'signout', to: 'sessions#destroy', as: 'signout'
+  
+  resources :movies do
+    resources :reviews
+  end
+  root to: 'movies#index'
+end
+```
+
+
+<p>Cuando Facebook nos redirija a la aplicaci&oacute;n buscar&aacute; la acci&oacute;n <code>create</code> del controlador <code>SessionsController</code>.  Nuestra aplicaci&oacute;n todav&iacute;a no tiene este controlador, as&iacute; que lo tendremos que escribir ahora.</p>
+
+
+
+``` /app/controllers/sessions_controller.rb
+class SessionsController < ApplicationController
+  def create
+    user = User.from_omniauth(env["omniauth.auth"])
+    session[:user_id] = user.id
+    redirect_to root_url
+  end
+end
+```
+
+
+<p>El c&oacute;digo de este controlador depende de un modelo <code>User</code> que todav&iacute;a no hemos escrito, pero que buscar&aacute; o crear&aacute; un usuario bas&aacute;ndose en los datos que le pasa el <em>hash</em> de OmniAuth.  Conviene plantearse si necesitamos persistir los datos del usuario de esta manera, porque si no tenemos que mantener ninguna otra asociaci&oacute;n con el usuario bien podr&iacute;amos guardar este <em>hash</em> en la sesi&oacute;n en lugar de crear un registro en la base de datos que es como lo haremos nosotros.</p>
+
+
+``` terminal
+$ rails g model user provider uid name oauth_token oauth_expires_at:datetime
+$ rake db:migrate
+```
+
+
+<p>En el modelo <code>User</code> almacenaremos las credenciales <code>provider</code> y <code>uid</code> que nos da OmniAuth, as&iacute; como nombre, <code>oauth_token</code> y <code>oauth_expires_at</code>.  Los <em>tokens</em> OAuth de Facebook no son eternos, por lo que debemos almacenar la fecha de expiraci&oacute;n.  Leyendo el README de OmniAuth para Facebook encontraremos  <a href="https://github.com/mkdynamic/omniauth-facebook#auth-hash">un <em>hash</em> de ejemplo</a> con detalles con los datos que la aplicaci&oacute;n recibe de Facebook.  Algunos de estos datos los queremos guardar en la base de datos, como por ejemplo la URL de la imagen para poder mostrar la imagen de perfil del usuario.</p>
+
+<p>A continuaci&oacute;n, modificaremos nuestro modelo <code>User</code> y escribiremos el c&oacute;digo del m&eacute;todo <code>from_omniauth</code> que invocaremos desde <code>SessionsController</code>.</p>
+
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  def self.from_omniauth(auth)
+    where(auth.slice(:provider, :uid)).first_or_initialize.tap do |user|
+      user.provider = auth.provider
+      user.uid = auth.uid
+      user.name = auth.info.name
+      user.oauth_token = auth.credentials.token
+      user.oauth_expires_at = Time.at(auth.credentials.expires_at)
+      user.save!
+    end
+  end
+end
+```
+
+
+<p>Este c&oacute;digo es distinto del que hemos visto antes.  Aqu&iacute; intentamos encontrar un usuario que coincida con los valores de <code>provider</code> y <code>uid</code> recibidos en el <em>hash</em> de Omniauth, y luego llamamos a <code>first_or_initialize</code> sobre el resultado.  Se trata de un m&eacute;todo introducido en Rails 3.2 que o bien devuelve el primer resultado o bien inicializa un nuevo registro con los par&aacute;metros que se le pasan.  Luego se invoca <code>tap</code> para pasar esa instancia de <code>User</code> al bloque.  Dentro del bloque se establecen varios atributos del usuario bas&aacute;ndonos en el <em>hash</em> de OmniAuth.  N&oacute;tese, sin embargo, que estamos usando las claves del <em>hash</em> como si fueran m&eacute;todos, esto es as&iacute; porque OmniAuth utiliza la gema Hashie, que hace precisamente esto. Por &uacute;ltimo guardamos el registro y lo devolvemos.  Un detalle interesante es que estamos estableciendo estos atributos cada vez, incluso para registros de <code>User</code> ya existentes.  Esto es importante por que hace que no s&oacute;lo tengamos siempre el &uacute;ltimo <em>token</em> de autenticaci&oacute;n sino que si el usuario cambia su nombre o cualquier otro atributo en Facebook, estos valores se vean actualizados en nuestra base de datos.</p>
+
+<p>Todav&iacute;a nos quedan por hacer algunos cambios.  En  <code>ApplicationController</code> tenemos que a&ntilde;adir un m&eacute;todo para recuperar el usuario actual.</p>
+
+
+``` /app/controllers/application_controller.rb
+class ApplicationController < ActionController::Base
+  protect_from_forgery
+  
+  private
+  def current_user
+    @current_user ||= User.find(session[:user_id]) if session[:user_id]
+  end
+  helper_method :current_user
+end
+```
+
+
+<p>En el fichero de <em>layout</em> de la aplicaci&oacute;n tenemos que a&ntilde;adir el c&oacute;digo que permite a los usuarios iniciar y terminar la sesi&oacute;n.</p>
+
+
+
+``` /app/views/layouts/application.html.erb
+<div id="user_nav">
+  <% if current_user %>
+    Signed in as <strong><%= current_user.name %></strong>!
+    <%= link_to "Sign out", signout_path, id: "sign_out" %>
+  <% else %>
+    <%= link_to "Sign in with Facebook", "/auth/facebook", id: "sign_in" %>
+  <% end %>
+</div>
+```
+
+
+<p>Ya podemos hacer la prueba.  Si recargamos la portada de la aplicaci&oacute;n  veremos el enlace para iniciar la sesi&oacute;n, y si hacemos clic en &eacute;l habremos iniciado la sesi&oacute;n directamente porque ya hab&iacute;amos autorizado la aplicaci&oacute;n con Facebook anteriormente.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1228/original/E360I04.png" width="960" height="600" alt="Ya podemos iniciar la sesión en nuestra aplicación con Facebook."/>
+</div>
+
+<h3>Autenticaci&oacute;n en el cliente</h3>
+
+<p>Facebook tiene publicado un SDK en JavaScript que podemos usar para autenticar al usuario en el lado del cliente de forma que no parezca que deja nuestra aplicaci&oacute;n para luego regresar a ella.  Vamos a a&ntilde;adir esta funcionalidad a nuestra aplicaci&oacute;n, haciendo que degrade a la soluci&oacute;n basada en el servidor.  Lo &uacute;nico que hace falta es un poco de JavaScript, o CoffeeScript en nuestro caso.  Bajo el directorio <code>/app/assets/javascripts</code> vamos a crear un nuevo fichero <code>facebook.js.coffee.erb</code>.  Ponemos la extensi&oacute;n extra <code>.erb</code> para poder incluir contenido din&aacute;mico.</p>
+
+
+``` /app/assets/javascripts/facebook.js.coffee.erb
+jQuery ->
+  $('body').prepend('<div id="fb-root"></div>')
+
+  $.ajax
+    url: "#{window.location.protocol}//connect.facebook.net/en_US/all.js"
+    dataType: 'script'
+    cache: true
+
+
+window.fbAsyncInit = ->
+  FB.init(appId: '<%= ENV["FACEBOOK_APP_ID"] %>', cookie: true)
+
+  $('#sign_in').click (e) ->
+    e.preventDefault()
+    FB.login (response) ->
+      window.location = '/auth/facebook/callback' if response.authResponse
+
+  $('#sign_out').click (e) ->
+    FB.getLoginStatus (response) ->
+      FB.logout() if response.authResponse
+    true
+```    
+
+<p>Tras la carga del DOM insertamos un elemento <code>div</code> con <code>id</code> de <code>fb-root</code> en la parte superior del <code>body</code> del documento, que es donde Facebook espera encontrar este elemento.  Luego hacemos una petici&oacute;n AJAX a los SDKs en JavaScript de Facebook.  Esta llamada cargar&aacute; el c&oacute;digo de forma as&iacute;ncrona, interpretando lo que nos devuelvan como si fuera un <em>script</em>.  Tras su ejecuci&oacute;n, este <em>script</em> invocar&aacute; la funci&oacute;n <code>fbAsyncInit</code> que se haya definido en el objeto de la ventana en JavaScript, as&iacute; que cuando se invoque esta funci&oacute;n sabremos que el SDK ha terminado de cargar y est&aacute; listo para ser usado. Aprovecharemos este evento para inicializar algunos valores incluyendo el identificador de la aplicaci&oacute;n que establecemos usando la misma variable de entorno de antes (aqu&iacute; es donde es &uacute;til usar ERb)  Tambi&eacute;n habilitamos la opci&oacute;n que hace que las credenciales del usuario se guardan en una <em>cookie</em> para poder accederlas en el lado del servidor.</p>
+
+<p>Una vez que ha terminado toda esta inicializaci&oacute;n tenemos que atender al evento <code>click</code> del enlace del inicio de sesi&oacute;n.  En lugar del comportamiento por defecto, haremos que este clic active la funci&oacute;n <code>FB.login</code> que mostrar&aacute; el di&aacute;logo al usuario para que inicie la sesi&oacute;n en Facebook.  Una vez que hagan esto, ser&aacute; redirigidos a <code>/auth/facebook/callback</code> para que termine el proceso de autenticaci&oacute;n y se genere el registro de <code>User</code> (o lo que quiera que sea que estemos usando) en el servidor.  Tambi&eacute;n podr&iacute;amos activar esto mediante AJAX en lugar de redirigir al usuario si no queremos que cambie de p&aacute;gina.</p>
+
+<p>Por &uacute;ltimo, tenemos c&oacute;digo que se ejecuta cuando el usuario hace clic en el enlace para cerrar la sesi&oacute;n.  Aqu&iacute; se comprueba si el usuario tiene dicha sesi&oacute;n, en cuyo caso se cierra.  La funci&oacute;n siempre devuelve true de forma que no se bloquee el comportamiento por defecto del enlace, que en este caso tambi&eacute;n lo lleva a la URL que cierra la sesi&oacute;n.</p>
+
+<p>Ya podemos hacer la prueba.  Hemos quitado la aplicaci&oacute;n de nuestra lista de aplicaciones Facebook autorizadas para poder ver los efectos del inicio de sesi&oacute;n.  Al hacer clic en este enlace aparece un di&aacute;logo emergente que nos pide autorizar la aplicaci&oacute;n, una vez que lo hacemos habremos iniciado la sesi&oacute;n y se habr&aacute; creado el registro de usuario correspondiente.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1229/original/E360I05.png" width="960" height="600" alt="Ya podemos iniciar la sesión sin abandonar nuestra aplicación."/>
+</div>
+
+<p>Si hacemos clic en el enlace para cerrar la sesi&oacute;n, habremos finalizado la sesi&oacute;n tanto en nuestra aplicaci&oacute;n como en Facebook, por lo que si volvemos a intentar iniciar la sesi&oacute;n primero tendremos que hacerlo en Facebook, tras lo cual habremos iniciado sesi&oacute;n autom&aacute;ticamente tambi&eacute;n en la aplicaci&oacute;n.</p>
+
+<p>Esta soluci&oacute;n en JavaScript puede dar algunos problemas extra&ntilde;os.  Por ejemplo, en la consola del navegador veremos un mensaje de advertencia, pese a lo cual el JavaScript parece funcionar, si bien ser&iacute;a conveniente imaginarse c&oacute;mo podemos parar esta advertencia.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1230/original/E360I06.png" width="960" height="600" alt="La solución en el lado del cliente puede dar errores de JavaScript."/>
+</div>
+
+<p>A veces tambi&eacute;n podr&iacute;a haber casos en los que la <em>cookie</em> de sesi&oacute;n de Facebook y la de nuestra aplicaci&oacute;n quedan desacopladas, lo cual no es generalmente un problema pero s&iacute; puede dar lugar a comportamientos an&oacute;malos, as&iacute; que debemos vigilar que esto no ocurra.</p>
+
+<h3>Interacci&oacute;n con Facebook</h3>
+
+<p>Tras autenticar al usuario, &iquest;c&oacute;mo interactuamos con Facebook?  Podemos hacerlo mediante el SDK en JavaScript o bien en Ruby con una gema llamada Koala.  El README de esta gema incluye una explicaci&oacute;n de su uso con la API  de Facebook, y aprenderemos m&aacute;s sobre la materia en el episodio de pago de esta semana.</p>

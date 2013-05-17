@@ -1,0 +1,175 @@
+<p>Dans l'<a href="http://railscasts.com/episodes/342-migrating-to-postgresql">épisode 342</a>, nous avons vu comment initialiser une application Rails qui utilise PostgreSQL comme base de données. Une bonne chose avec Postgres est qu'il peut être responsable de choses qui requièrent des tâches de fond comme la gestion de queue. Ci-dessous, un écran d'une application Rails qui utilise Postgres et qui envoie des newsletter.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1138/original/E344I01.png" width="800" height="450" alt="Our newsletter application."/>
+</div>
+
+<p>Nous pouvons envoyer une newsletter en cliquant sur son lien "Deliver Newsletter". Ceci prend un certain temps à se faire et pendant ce temps, l'instance Rails sera incapable de traiter une autre requête et le navigateur paraîtra "figé" pendant qu'il attend une réponse. À cause de ceci, c'est une bonne idée de déplacer les tâches longues à exécuter dans un processus de fond quand c'est possible. Quand une newsletter est finalement envoyée, nous verrons un message en haut de la page
+et son statut sera affiché dans la liste.</p>
+
+<h3>Introduction aux queues classiques</h3>
+
+<p>Nous résoudrons ce problème en utilisant la gemme <a href="https://github.com/ryandotsmith/queue_classic">queue_classic</a>. Cette gemme facilite la prise d'une tâche longue à exécuter et la déplacer en tâche de fond gérée par Postgres. Nous utiliserons la version 2 de cette gemme qui est actuellement à l'état de Release Candidate. Le <a href="https://github.com/ryandotsmith/queue_classic/blob/master/readme.md">README</a> a certaines instructions pour initialiser queue_classic dans
+une application Rails et nous allons les suivre. Comme toujours la première étape est d'ajouter la gemme au Gemfile et exécuter la commande <code>bundle</code>. Comme nous installons une version pre-release, nous devons spécifier un numéro de version.</p>
+
+``` /Gemfile
+gem 'queue_classic', '2.0.0rc14'
+```
+
+<p>Ensuite, nous chargerons les tâches Rake de queue_clqssic en créant un fichier <code>queue_classic.rake</code> dans le répertoire <code>/lib/tasks</code> et en y insérant les 2 lignes du README.</p>
+
+``` /lib/tasks/queue_classic.rake
+require "queue_classic"
+require "queue_classic/tasks"
+```
+
+<p>Nous aurons également besoin de créer un initializer <code>queue_classic</code>. Dans celui-ci, nous spécifions la configuration, ce qui se fait via les variables d'environnement. Cela le rend complètement compatible avec Heroku. Nous avons juste besoin d'ajouter une variable <code>DATABASE_URL</code> qui contient les informations de connexion pour la base de données. Comme la base de données est sur notre système local, nous n'avons pas besoin de spécifier de nom d'utilisateur
+et de mot de passe.</p>
+
+``` /config/initializers/queue_classic.rb
+ENV["DATABASE_URL"] = "postgres://localhost/mailer_development"
+```
+
+<p>Ensuite, nous avons besoin d'une migration <code>add_queue_classic</code> pour initialiser la base de données.</p>
+
+``` terminal
+$ rails g migration add_queue_classic
+      invoke  active_record
+      create    db/migrate/20120502000000_add_queue_classic.rb
+```
+
+<p>Dans cette migration, nous ajouterons du code pour charger les fonctions <code>queue_classic</code>.</p>
+
+``` db/migrate/20120502000000_add_queue_classic.rb
+class SetupQueueClassic < ActiveRecord::Migration
+  def up
+    QC::Setup.create
+  end
+
+  def down
+    QC::Setup.drop
+  end
+end
+```
+
+<p>Nous aurons besoin d'exécuter la commande <code>rake db:migrate</code> pour lancer la migration. Ensuite, nous démarrerons le processus de fond du worker en lançant cette commande :</p>
+
+``` terminal
+$ rake qc:work
+```
+
+<p>Si tout se passe bien, vous ne verrez aucune sortie de cette commande. Nous pouvons expérimenter queue_classic dans la console Rails dans une nouvelle fenêtre. Pour ajouter un job à la queue, nous appelons <code>QC.enqueue</code> et lui passons la méthode que l'on veut déclencher et les arguments que nous voulons transmettre à cette méthode.</p>
+
+``` console
+1.9.3p125 :001 > QC.enqueue "puts", "hello world"
+lib=queue_classic action=insert_job elapsed=13
+ => nil
+```
+
+<p>Dans l'onglet exécutant <code>rake qc:working</code>, nous devrions maintenant voir "hello world". Quand on appelle <code>enqueue</code>, les arguments sont sérialisés en JSON et transmis à la table de queue à traiter par le worker. La sérialisation JSON est un peu pointilleuse donc il est important de garder les arguments qu'on transmet aussi simple que possible. Ça n'apprécie même pas les symboles donc si on transmet un hash comme ci-dessous, une exception sera jetée.</p>
+
+``` console
+1.9.3p125 :002 > QC.enqueue "puts", msg:"hello world"
+lib=queue_classic level=error error="QC::OkJson::Error" message="Hash key is not a string: :msg" action=insert_job
+QC::OkJson::Error: Hash key is not a string: :msg
+```
+
+<p>Si on vue transmettre un hash, nous aurons besoin d'utiliser des strins, comme là :</p>
+
+``` console
+1.9.3p125 :003 >   QC.enqueue "puts", "msg" => "hello world"
+```
+
+<p>Ceci s'exécutera correctement et affichera le hash.</p>
+
+<h3>Envoyer des newsletter avec une queue classique</h3>
+
+<p>Nous allons modifier notre application afin que quand on clique sur un lien "deliver newsletter", le long processus d'envoi d'une newsletter se passe en arrière-plan. Quand un lien est cliqué, il déclenche une action <code>deliver</code> dans <code>NewsletterController</code>. Cette action récupère une newsletter, patiente pendant 10 secondes pour simuler un processus long puis met à jour l'heure d'envoi de la newsletter.</p>
+
+``` /app/controllers/newsletters_controller.rb
+def deliver
+  newsletter = Newsletter.find(params[:id])
+  sleep 10 # simulate long newsletter delivery
+  newsletter.update_attribute(:delivered_at, Time.zone.now)
+  redirect_to newsletters_url, notice: "Delivered newsletter."
+end
+```
+
+<p>Quand nous avons un processus long dans un contrôleur, il est bon de le déplacer dans une méthode de classe d'un modèle pour simplifier l'interface autant que possible. Nous allons créer une méthode <code>deliver</code> dans le modèle <code>Newsletter</code> et l'appeler depuis le contrôleur.</p>
+
+``` /app/controllers/newsletters_controller.rb
+def deliver
+  Newsletter.deliver(params[:id])
+  redirect_to newsletters_url, notice: "Delivered newsletter."
+end
+```
+
+<p>Ensuite, nous allons écrire cette méthode dans le modèle</p>
+
+``` /app/models/newsletter.rb
+class Newsletter < ActiveRecord::Base
+  attr_accessible :delivered_at, :subject
+
+  def self.deliver(id)
+    newsletter = find(id)
+    sleep 10 # simulate long newsletter delivery
+    newsletter.update_attribute(:delivered_at, Time.zone.now)
+  end
+end
+```
+
+<p>Il est maintenant aisé de déplacer la livraison dans un processus de fond et modifier la notification flash pour dire "Livraison de la newsletter en cours." au lieu de "Newsletter envoyée."</p>
+
+``` /app/controllers/newsletters_controller.rb
+def deliver
+  QC.enqueue "Newsletter.deliver", params[:id]
+  redirect_to newsletters_url, notice: "Delivering newsletter."
+end
+```
+
+<p>Nous pouvons déjà essayer. Si on clique sur un lien "Deliver newsletter", nous verrons la réponse directement mais la newsletter ne sera pas envoyer pour le moment puisque c'est traité en tâche de fond donc elle ne sera pas montrée comme livrée dans la liste.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1139/original/E344I02.png" width="800" height="467" alt="The browser now gets an immediate response telling us that the newsletter is being delivered."/>
+</div>
+
+<p>Si on attend 10 secondes et qu'on recharge la page, nous verrons que la newsletter a été envoyée.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1140/original/E344I03.png" width="800" height="443" alt="When we refresh the page ten seconds later we see that the newsletter has been delivered."/>
+</div>
+
+<h3>Traiter les jobs érronés</h3>
+
+<p>Que se passe-t-il quand un job plante et qu'une exception est soulevée pendant le traitement ? Nous allons jeter une exception pour voir quel est le résultat.</p>
+
+``` /app/models/newsletter.rb
+def self.deliver(id)
+  newsletter = find(id)
+  raise "Oops"
+  sleep 10 # simulate long newsletter delivery
+  newsletter.update_attribute(:delivered_at, Time.zone.now)
+end
+```
+
+<p>Maintenant, quand on clique sur "Deliver Newsletter", nous verrons un message disant que la newsletter est en train d'être livrée mais l'exception sera touchée quand le job est traité en tâche de fond. Si on regarde la sortir du processus du worker, nous voyons que l'erreur y est mentionnée. (Nous devrions logger la sortie de ce worker dans une application de production.) Par défaut, queue_classic n'essaie pas de faire quoique ce soit tel que de réessayer automatiquement le job. Si on
+regarde <a href="https://github.com/ryandotsmith/queue_classic/blob/master/lib/queue_classic/worker.rb">le code source de la classe <code>Worker</code></a>, nous trouverons une méthode <code>handle_failure</code> qui affiche l'erreur.</p>
+
+``` worker.rb
+#override this method to do whatever you want
+def handle_failure(job,e)
+  puts "!"
+  puts "! \t FAIL"
+  puts "! \t \t #{job.inspect}"
+  puts "! \t \t #{e.inspect}"
+  puts "!"
+end
+```
+
+<p>Si on veut traiter les jobs échoués d'une manière différente, nous avons besoin de surcharger cette méthode. Un exemple de comment nous pouvons faire ceci en héritant de la classe <code>Worker</code> est montrée dans le README. Il y a beaucoup d'informations utiles dans ce README tel qu'un exemple de comment définir un exécutable <code>worker</code> au lieu d'utiliser une tâche Rake. L'avantage de ceci est que nous pouvons contrôler exactement ce qui sera chargé d'où si l'on n'a pas
+besoin que toute notre application soit chargée pour ce worker, nous pouvons la sauter et épargner de la mémoire.</p>
+
+<p>Une autre fonctionnalité intéressante est l'habilité d'écouter des notifications des jobs. De cette façon, is un job est ajouté à la queue, notre worker peut être notifié instantanément au lieu d'attendre un billet de la base de donnée. Ceci devrait jouer un rôle dans le choix de queue_classic plutôt qu'une autre solution de queue.</p>
+
+<p>La question finale est : comment queue_classic se compare aux autres solutions de queueing ? C'est proche de Delayed Job, qui est aussi soutenu par une base de données, mais queue_classic prend un meilleur avantage des fonctionnalités de Postgres et ne requiert par ActiveRecord donc avec ça, nous pouvons minimiser le processus du worker. Comme pour les autres options, comme Resque, RabbitMQ et Beanstealk, cela requiert un démon séparé pour gérer la queue. Si vous voulez conserver une
+initialisation serveur simple, queue_classic est une excellente option, bien qu'une chose soit manquante, à savoir une interface web comme celle que Resque fourni.</p>

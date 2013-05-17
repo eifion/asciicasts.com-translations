@@ -1,0 +1,308 @@
+<p>下の画面はフィールド数が多くて長いユーザ登録フォームです。このようなフォームはこれから登録するかも知れないユーザを不安にさせ、登録をあきらめさせてしまう可能性があります。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1146/original/E346I01.png" width="800" height="700" alt="長い登録フォーム"/>
+</div>
+
+<p>複雑なフォームに対応する場合の一つの選択肢は、複数ステップのフォーム、いわゆるウィザード形式に作り変えるという方法です。これを実現するのに一番簡単なのはJavaScriptを用いる方法です。この方法ではすべてをクライアント側に置いたままにできるのでRailsアプリケーションを修正する必要がありません。しかしこの方法がいつも最善だとは限りません。データを途中で失うことがないようにステップごとにデータベースに保存できるようにしたり、フォームをダイナミックに処理してRailsアプリケーションによってステップを変化させたい場合があるでしょう。各ステップでフィールドに入力チェック機能を付加したいかも知れません。</p>
+
+<h3>Wickedを導入する</h3>
+
+<p>ウィザードをRailsアプリケーションから管理したい場合は<a href="https://github.com/schneems/wicked">Richard SchneemanのWicked gem</a>の利用を検討しましょう。このgemはRailsのコントローラに振る舞いを追加して複数ステップのフォームに作り変えます。今回のエピソードではその仕組みを紹介していきます。最初のステップは、長いフォームをできる限り少ないフィールドに減らします。大まかにはユーザが後でそのレコードに再度アクセスできる最低限の情報だけにします。登録フォームの場合だと、認証の関連のフィールドのみに限定することができます。つまりユーザ名とパスワードのみです。残りはすべてウィザードの別のステップに含めれば、フォーム上のフィールドを減らすことができます。</p>
+
+``` /app/views/users/new.html.erb
+
+<h1>Sign Up</h1>
+
+<%= form_for @user do |f| %>
+  <% if @user.errors.any? %>
+    <div class="error_messages">
+      <h2><%= pluralize(@user.errors.count, "error") %>  prohibited this user from being saved:</h2>
+      <ul>
+      <% @user.errors.full_messages.each do |msg| %>
+        <li><%= msg %></li>
+      <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="field">
+    <%= f.label :email %><br />
+    <%= f.text_field :email %>
+  </div>
+  <div class="field">
+    <%= f.label :password %><br />
+    <%= f.password_field :password %>
+  </div>
+  <div class="field">
+    <%= f.label :password_confirmation %><br />
+    <%= f.password_field :password_confirmation %>
+  </div>
+
+  <div class="actions">
+    <%= f.submit "Sign Up" %>
+  </div>  
+<% end %>
+```
+
+<p>フォームをリロードするとフィールドが減りました。これがウィザードの第1ステップになります。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1147/original/E346I02.png" width="800" height="400" alt="ウィザードの第1ステップ"/>
+</div>
+
+<p>ここで一度立ち止まって、本当にウィザードが必要かどうかを自問してみるのがいいでしょう。別途「プロファイル編集」ページを持って残りのフィールドをそこに置くという選択肢もあります。しかしここではウィザードが最善のアプローチであるという結論に達したものとして説明を続けます。gemfileにWicked gemを追加してbundleコマンドを実行してインストールします。</p>
+
+``` /Gemfile
+gem 'wicked'
+```
+
+<p>次に新規に<code>user_steps</code>というコントローラを作成します。これによって、ウィザードのステップを管理することだけに特化したコントローラを作ります。このコントローラには、Wickedに影響がないので、自由な名前をつけることができます。</p>
+
+``` terminal
+$ rails g controller user_steps
+```
+
+<p>routesファイルに、このコントローラのために新規に<code>user_steps</code>というリソースを追加します。</p>
+
+``` /config/routes.rb
+Signup::Application.routes.draw do
+  resources :users
+  resources :user_steps
+  root to: 'users#index'
+end
+```
+
+<p>作成したコントローラで、<code>Wicked::Wizard</code>モジュールをincludeします。これによって、ユーザが作成された後に<code>steps</code>メソッドを利用してウィザードのステップを定義できるようになります。フォームにステップを2つ追加します。一つは個人情報用でもう一つはユーザが参加するソーシャルネットワーク関連です。このコントローラは<code>show</code>アクションに応答し、このアクションはウィザードのステップを出力します。<code>render_wizard</code>メソッドを使って、ウィザードの各ステップ用のフォームのビューテンプレートを探します。</p> 
+
+``` /app/controllers/user_steps_controller.rb
+class UserStepsController < ApplicationController
+  include Wicked::Wizard
+  steps :personal, :social
+  
+  def show
+    render_wizard
+  end
+end
+```
+
+<p>これらのビューを<code>/app/views/user_steps</code>ディレクトリの下に作成します。ここに<code>personal.html.erb</code>と<code>social.html.erb</code>の2ファイルを作成します。これらのステップを区別するために、とりあえずそれぞれのファイルにただ“personal”と“social”という単語のみを置きます。これで<code>/user_steps/&lt;step_name&gt;</code>から各ステップにアクセスできるはずです。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1148/original/E346I03.png" width="800" height="400" alt="ウィザードのPersonalステップ"/>
+</div>
+
+<p><code>render_wizard</code>のしくみは次のとおりです。URLから渡される名前のテンプレートを出力します。<code>UserStepsController</code>の<code>index</code>アクションにアクセスすると、ウィザードの第1ステップ(今回の場合は<code>personal</code>ステップ)にリダイレクトされます。フォームの送信時に、<code>/users/new</code>アクションがウィザードの第1ステップにリダイレクトされるようにします。フォームを送信することによって、<code>UsersController</code>の<code>create</code>アクションが起動されます。</p>
+
+``` /app/controllers/users_controller.rb
+def create
+  @user = User.new(params[:user])
+  if @user.save
+    session[:user_id] = @user.id
+    redirect_to users_path, notice: "Thank you for signing up."
+  else
+    render :new
+  end
+end
+```
+
+<p>このアクションは新規ユーザを保存して、セッション変数に<code>id</code>を保存してそれをログに記録します。このときにユーザを、現在リダイレクトされているページではなく、ウィザードの第1ステップにリダイレクトさせます。</p>
+
+``` /app/controllers/users_controller.rb
+def create
+  @user = User.new(params[:user])
+  if @user.save
+    session[:user_id] = @user.id
+    redirect_to user_steps_path
+  else
+    render :new
+  end
+end
+```
+
+<p>これはうまく行きました。登録が終わると新しいウィザードのpersonalのステップにリダイレクトされます。ここでそのページにフォームを追加します。そのフォームが送信されたらウィザードの2ページ目にリダイレクトさせます。各<code>render_wizard</code>ステップにユーザ情報を編集するためのフォームを作る場合は、<code>UserStepsController</code>のshowアクションで現在のユーザを取得します。今回のアプリケーションにはすでに<code>current_user</code>メソッドがあります。通常アプリケーションになんらか認証方法を持っているのであれば、current userを取得するメソッドがあるはずです。もしそれがない場合は、<code>UserStepsController</code>にリダイレクトするときにユーザの<code>id</code>を渡します。</p>
+
+``` /app/controllers/user_steps_controller.rb
+def show
+  @user = current_user
+  render_wizard
+end
+```
+
+<p>ここでpersonalテンプレートのダミーテキストを、必要なフィールドが入ったフォームに置き換えます。</p>
+
+``` /app/views/user_steps/personal.html.erb
+<%= form_for @user, url: wizard_path do |f| %>
+  <h2>Tell us a little about yourself</h2>
+  <div class="field">
+    <%= f.label :name %><br />
+    <%= f.text_field :name %>
+  </div>
+  <div class="field">
+    <%= f.label :date_of_birth %><br />
+    <%= f.date_select :date_of_birth, start_year: 1900, end_year: Date.today.year %>
+  </div>
+  <div class="field">
+    <%= f.label :bio %><br />
+    <%= f.text_area :bio, rows: 5 %>
+  </div>
+  <div class="actions">
+	<%= f.submit "Continue" %>
+  </div>
+<% end %>
+```
+
+<p>このフォームに<code>url</code>を渡します。通常これは<code>UsersController</code>に送信されますが、ここでは<code>UserStepsController</code>に送信されるようにします。ここで<code>wizard_path</code>ヘルパーメソッドを使用して、フォームを正しいアクションにPOSTします。フォームには、オリジナルのフォームから削除した最初の3つのフィールドと送信ボタンが含まれます。ページをリロードすると新しいフォームが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1149/original/E346I04.png" width="800" height="449" alt="入力が終わったPersonalステップ"/>
+</div>
+
+<p>“Continue”をクリックすると<code>update</code>アクションが起動されますが、まだ作成していません。これは<code>show</code>アクションに似ていますが、フォームの値に基づいて現在のユーザの属性を更新します。</p>
+
+``` /app/controllers/user_steps_controller.rb
+def update
+  @user = current_user
+  @user.attributes = params[:user]
+  render_wizard @user
+end
+```
+
+<p>ここで<code>render_wizard</code>に現在のユーザを渡していることに注意してください。このようにリソースを渡す場合、それに対して<code>save</code>を呼び出すことが試みられて、これが成功すると次のステップに進みます。リソースの保存に失敗すると、現在のステップが再度表示されます。</p>
+
+<p>ここで<code>social</code>テンプレートにフォームを追加します。</p>
+
+``` /app/views/user_steps/social.html.erb
+<%= form_for current_user, url: wizard_path do |f| %>
+  <h2>Where can we find you?</h2>
+  <div class="field">
+    <%= f.label :twitter_username %><br />
+    <%= f.text_field :twitter_username %>
+  </div>
+  <div class="field">
+    <%= f.label :github_username %><br />
+    <%= f.text_field :github_username %>
+  </div>
+  <div class="field">
+    <%= f.label :website %><br />
+    <%= f.text_field :website %>
+  </div>
+  <div class="actions">
+	  <%= f.submit "Continue" %>
+  </div>
+<% end %>
+```
+
+<p>このフォームを送信すると<code>update</code>アクションが再度起動されますが、これ以上ステップはないのでアプリケーションのルートページにリダイレクトされます。この動作を変更したい場合はコントローラで<code>redirect_to_finish_wizard</code>メソッドをオーバーライドします。ルートURLにリダイレクトするのはそのままですが、同時にユーザに登録してくれたお礼のメッセージを表示します。</p>
+
+``` /app/controllers/user_steps_controller.rb
+private
+def redirect_to_finish_wizard
+  redirect_to root_url, notice: "Thanks for signing up."
+end
+```
+
+<h3>ステップをスキップする</h3>
+
+<p>次に“Continue”ボタンの横に、ユーザがステップをキャンセルするためのリンクを追加します。READMEのQuick Reference section 2を見ると、Wickedが提供するメソッドのリストがありますが、その中のnext_wizard_pathが次のステップのURLを返すメソッドです。これを使って“skip”リンクを作成します。</p>
+
+``` /app/views/user_steps/personal.html.erb
+<div class="actions">
+  <%= f.submit "Continue" %>
+  or <%= link_to "skip this step", next_wizard_path %>
+</div>
+```
+
+<p>他のステップも同じように処理します。これでウィザードの各ページに“skip this step”のリンクができたので、ユーザはそのステップのフィールドは任意で入力すればよくスキップしてもいいということがわかります。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1150/original/E346I05.png" width="800" height="390" alt="スキップのリンクがついたSocialステップ"/>
+</div>
+
+<h3>入力チェック</h3>
+
+<p>次に入力チェックについて見ていきます。例えばウィザードの“Social”ステップでTwitterのユーザ名の形式をチェックしたいとします。現在は入力チェックエラーのメッセージを表示していないので、各ページにそのためのコードを挿入します。このアプリケーションを本番環境で稼働させる場合は、このコードは重複をなくすためにヘルパーメソッドに移動させるべきですが、ここではこのままでいきます。</p>
+
+``` /app/views/user_steps/social.html.erb
+<% if @user.errors.any? %>
+  <div class="error_messages">
+    <h2><%= pluralize(@user.errors.count, "error") %>  prohibited this user from being saved:</h2>
+    <ul>
+    <% @user.errors.full_messages.each do |msg| %>
+      <li><%= msg %></li>
+    <% end %>
+    </ul>
+  </div>
+<% end %>
+```
+
+<p><code>User</code>モデルに入力チェック機能を追加します。<code>validates_format_of</code>を使って、忘れずに<code>allow_blank</code>オプションをtrueに設定して、他のステップでユーザの他の情報が保存されたときに入力チェックが起動されないようにします。</p>
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  attr_accessible :bio, :date_of_birth, :email, :github_username, :name, :password, :password_confirmation, :twitter_username, :website
+  has_secure_password
+  
+  validates_format_of :twitter_username, :without =&gt; /\W/, :allow_blank =&gt; true
+end
+```
+
+<p>しかし、Twitterのユーザ名が入力されたことを確認するためにはどうすればいいでしょうか? 最初のステップが完了した時点でユーザ情報が保存されるので、これは少し複雑になります。第1ステップでusernameとpasswordフィールドに入力されたかどうかをチェックするのは簡単ですが、その後のステップでフィールドへの入力をチェックする場合、新規の<code>User</code>レコードが無効になり、第1ステップで保存できなくなります。この問題を回避するには、チェックに条件を追加し、Twitterのユーザ名のフィールドは“Social”ステップでのみチェックされるようにします。</p>
+
+``` /app/models/user.rb
+validates_presence_of :twitter_username, if: :on_social_step?
+```
+
+<p>ここで<code>on_social_step?</code>メソッドを作成します。これは自分が今どのステップにいるかをチェックしてその戻り値によって入力チェックを行なうかどうかを判断します。しかし、そのメソッドはここには書きません。このようなことを行なう場合には、Wicked wikiの<a href="https://github.com/schneems/wicked/wiki/Partial-Validation-of-Active-Record-Objects">Active Record Objects</a>ページのPartial Validationの部分を参照することをお勧めします。そこにはまさにこのような状況についての説明があります。別の方法として、<a href="https://github.com/schneems/wicked/wiki/Partial-Validation-of-Active-Record-Objects">エピソード217</a>で複数ステップのフォームをゼロから作る方法を紹介しています。</p>
+
+<h3>重複を排除する</h3>
+
+<p>フォームウィザードはほぼ完成しましたが、各ステップのコードには多くの重複部分があります。表題とフィールド名を除けば2つのステップはほとんど同じなので、部分テンプレートを利用する好都合な例です。表題をページの最上部のフォームの外に移動し、エラーメッセージと送信ボタンを新しい<code>form</code>部分テンプレートに移動します。ただし部分テンプレートをpartialとして出力するのではなく、レイアウトとして出力してform builderを渡します。</p>
+
+``` /app/views/user_steps/personal.html.erb
+<h2>Tell us a little about yourself</h2>
+
+<%= render :layout => 'form' do |f| %>  
+    
+  <div class="field">
+    <%= f.label :name %><br />
+    <%= f.text_field :name %>
+  </div>
+  <div class="field">
+    <%= f.label :date_of_birth %><br />
+    <%= f.date_select :date_of_birth, start_year: 1900, end_year: Date.today.year %>
+  </div>
+  <div class="field">
+    <%= f.label :bio %><br />
+    <%= f.text_area :bio, rows: 5 %>
+  </div>
+<% end %>
+```
+
+<p>新しい部分テンプレートは次のようになります。エラーメッセージとボタンの間で<code>yield</code>を呼び出して、そこにフォームのフィールドが出力されるようにしていることに注意してください。</p>
+
+``` /app/views/user_steps/_form.html.erb
+
+<%= form_for @user, url: wizard_path do |f| %>
+<% if @user.errors.any? %>
+  <div class="error_messages">
+    <h2><%= pluralize(@user.errors.count, "error") %>  prohibited this user from being saved:</h2>
+    <ul>
+      <% @user.errors.full_messages.each do |msg| %>
+      <li><%= msg %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+  
+<%= yield f %>
+  
+<div class="actions">
+  <%= f.submit "Continue" %>
+
+or  <%= link_to "skip this step", next_wizard_path %>
+</div>
+<% end %>
+```
+
+<p>同じことを“Social”テンプレートでも行って整理します。フォームの表示は前と変わらないままですが、ステップ間での重複がなくなりました。</p>

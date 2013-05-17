@@ -1,0 +1,151 @@
+<p>Below is a screenshot from an example application that shows a list of projects each of which has a number of tasks. Let&rsquo;s say that we&rsquo;re having performance issues on this page and that we want to add fragment caching to it to speed it up.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1405/original/E387I01.png" width="800" height="450" alt="Our projects application."/>
+</div>
+
+<p>The template for this page is shown below. This simply renders out the projects.</p>
+
+``` /app/views/projects/index.html.erb
+<h1>Projects</h1>
+
+<%= render @projects %>
+```
+
+<p>For each project the <code>_project</code> partial is rendered. This template is also fairly simple and renders the tasks for each project.</p>
+
+``` /app/views/projects/_project.html.erb
+<h2><%= link_to project.name, edit_project_path(project) %></h2>
+<ul><%= render project.tasks %></ul>
+```
+
+<p>This partial renders the <code>_task</code> partial for each task that the project has.</p>
+
+``` /app/views/tasks/_task.html.erb
+<li>
+  <%= task.name %>
+  <%= link_to "edit", edit_task_path(task) %>
+</li>
+```
+
+<p>We&rsquo;ll add fragment caching to the <code>_projects</code> partial. If you&rsquo;re not familiar with fragment caching take a look at <a href="http://railscasts.com/episodes/90-fragment-caching-revised">episode 90</a> which covers it in more detail.</p>
+
+``` /app/views/projects/_project.html.erb
+<% cache project do %>
+  <h2><%= link_to project.name, edit_project_path(project) %></h2>
+  <ul><%= render project.tasks %></ul>
+<% end %>
+```
+
+<p>As we&rsquo;re rendering out the tasks inside this partial it would be good if this cache expired when a task is changed. We can do this by modifying the Task model and adding <code>touch: true</code> to the <code>project</code> association.</p>
+
+``` /app/models/task.rb
+class Task < ActiveRecord::Base
+  attr_accessible :name, :completed_at
+  belongs_to :project, touch: true
+end
+```
+
+<p>Now the project that a task belongs to will be marked as updated when that task is updated. So that we can see the effects of this we&rsquo;ll modify the development configuration file and set <code>perform_caching</code> to <code>true</code> so that we can try this out.</p>
+
+``` /config/development.rb
+config.action_controller.perform_caching = true
+```
+
+<p>When we restart our Rails app now and then reload the home page each of the projects will be stored in a fragment cache. Each subsequent time we reload the page those parts will be read from the cache. If we edit a task the cache for that task&rsquo;s project will be expired and a new one will be created.</p>
+
+<p>Handling Changes to Cached Templates</p>
+
+<p>This works well but what happens if we make a change to the view template? Let&rsquo;s say that we want to render the tasks in an ordered list instead of an unordered list.</p>
+
+``` /app/views/projects/_project.html.erb
+<% cache project do %>
+  <h2><%= link_to project.name, edit_project_path(project) %></h2>
+  <ol><%= render project.tasks %></ol>
+<% end %>
+```
+
+<p>When we reload the page we won&rsquo;t see any change. Each task&rsquo;s HTML is already stored in the cache and as the cache hasn&rsquo;t expired the old content is still shown. A common workaround for this problem is to add a version number to the cache key.</p>
+
+``` /app/views/projects/_project.html.erb
+<% cache ['v1', project] do %>
+  <h2><%= link_to project.name, edit_project_path(project) %></h2>
+  <ol><%= render project.tasks %></ol>
+<% end %>
+```
+
+<p>Now because we&rsquo;ve changed the cache key the cache will be expired and reloaded and we&rsquo;ll see the tasks displayed in an ordered list.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1406/original/E387I02.png" width="800" height="450" alt="The changes we made are now picked up."/>
+</div>
+
+<h3>Dealing With Nested Caches</h3>
+
+<p>The problem with this approach is that every time we update the template we need to remember to change the version number so that the cache key changes and the changes are picked up. This isn&rsquo;t difficult but things can get quickly out of hand if we have nested fragment caches. For example let&rsquo;s say that we want to fragment-cache the tasks partial as well to give us a little extra performance.</p>
+
+``` /app/views/tasks/_task.html.erb
+<% cache ['v1', task] do %>
+<li>
+  <%= task.name %>
+  <%= link_to "edit", edit_task_path(task) %>
+</li>
+<% end %>
+```
+
+<p>When we do this we&rsquo;ll need to update the version number in the project partial&rsquo;s cache key too so that the whole cache is expired. If we update the task partial now, say to change the link&rsquo;s text from &ldquo;edit&rdquo; to &ldquo;rename&rdquo;, we&rsquo;ll have to update the version number as well. We won&rsquo;t see this change when we reload the page, however, unless we also change the version number in the projects partial as well. Once we&rsquo;ve changed both the change will be shown.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1407/original/E387I03.png" width="800" height="450" alt="The changes to the tasks partial are now shown."/>
+</div>
+
+<h3>Using The Cache Digest Gem</h3>
+
+<p>Even though this has worked it&rsquo;s annoying to have to remember to make this change every time we change a template and this is where the <a href="https://github.com/rails/cache_digests">Cache Digests gem</a> comes in useful. This functionality will be available by default in Rails 4 but has been extracted out into a gem so that we can use it in Rails 3 projects. This gem works by including a digest in the fragment cache keys that is based on the templates. This means that if the template changes a new cache key is generated and that cache will expire. We&rsquo;ll try this gem in our application. As ever we use it by adding it to our gemfile then running bundle to install it.</p>
+
+``` /Gemfile
+gem 'cache_digests'
+```
+
+<p>Now it&rsquo;s no longer necessary for us to keep track of a version number in our fragment caches and we can remove them from both the <code>project</code> and <code>task</code> partials. When we restart our application now then reload its home page a digest will be included in the cache key that represents the template. </p>
+
+<p>When we make a change to the projects template now and reload the page the change doesn&rsquo;t seem to be picked up. The reason for this is that the cache digest gem doesn&rsquo;t read the template file on every request as this would be inefficient. Instead it keeps its own local cache of the digest for each template path in memory and this is why our template change hasn&rsquo;t been picked up. To get this working in development we&rsquo;ll need to restart our Rails app again. This normally isn&rsquo;t a problem in production as when we deploy the new templates the application will be restarted anyway. When we reload the page now then changed template is picked up as the cache digest is now different.</p>
+
+<p>One good thing about this feature is that it&rsquo;s smart enough to detect dependencies. For example it knows that the projects template has a <code>render</code> call for the projects tasks and so if the tasks partial changes it needs to expire the projects cache.</p>
+
+<p>That said we have to watch out for those cases where the dependency isn&rsquo;t properly detected. For example we have an <code>incomplete_tasks</code> method on the <code>Project</code> model. If we use this in the project partial to render the incomplete tasks then change the tasks partial the change won&rsquo;t be picked up as the dependency isn&rsquo;t detected. It&rsquo;s therefore a good idea to run a Rake task that the gem provides called <code>cache_digests:nested_dependencies</code> and pass it the path to the template.</p>
+
+``` terminal
+$ rake cache_digests:nested_dependencies TEMPLATE=projects/index
+[
+  {
+    "projects/project": [
+      "incomplete_tasks/incomplete_task"
+    ]
+  }
+]
+```
+
+<p>This tells us that it detected the project partial&rsquo;s dependency, which is correct, but there is also an <code>incomplete_task</code> which isn&rsquo;t correct, it should be task. This is something we need to change in order for the dependency to be picked up. In these cases its recommended to explicitly pass the <code>partial</code> option to render like this:</p>
+
+``` /app/views/projects/_project.html.erb
+<% cache project do %>
+  <h2><%= link_to project.name, edit_project_path(project) %></h2>
+  <ul><%= render partial: 'tasks/task', collection: project.incomplete_tasks %></ul>
+<% end %>
+```
+
+<p>Now when we run the Rake task the tasks dependency will be properly detected and the cache digest will be updated properly.</p>
+
+``` terminal
+$ rake cache_digests:nested_dependencies TEMPLATE=projects/index
+[
+  {
+    "projects/project": [
+      "tasks/task"
+    ]
+  }
+]
+```
+
+<p>There are further details about this in the gem&rsquo;s README which is worth taking the time to read. It tells us what different render calls will be parsed correctly and which ones won&rsquo;t and shows us another way to specify a template dependency if we&rsquo;re rendering a partial in a helper method.</p>

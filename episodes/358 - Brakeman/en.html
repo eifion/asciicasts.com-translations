@@ -1,0 +1,211 @@
+<p>Below is a screenshot from an application that has a number of security vulnerabilities. Finding these can be a bit of a challenge so in this episode we&rsquo;ll use the <a href="http://brakemanscanner.org/">Brakeman gem</a> which can alert us to common security problems.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1214/original/E358I01.png" width="800" height="500" alt="Our products application."/>
+</div>
+
+<p>Brakeman will scan the Ruby code in a Rails app and look for common problems that might represent a security issue. It isn&rsquo;t foolproof but it definitely helps to track down some nasty vulnerabilities so we&rsquo;ll use it in our app to see what it can find.</p>
+
+<h3>Getting Started With Brakeman</h3>
+
+<p>To use Brakeman we&rsquo;ll first have to install it, which is done in the usual way.</p>
+
+``` terminal
+$ gem install brakeman
+```
+
+<p>If you&rsquo;re using rbenv you might need to run <code>rbenv rehash</code> to access the brakeman command after the gem installs. Once the gem has installed we can run the brakeman command from our Rails app&rsquo;s directory. This will analyse the source code and print out a report.</p>
+
+``` terminal
+$ brakeman
+[Notice] Detected Rails 3 application
+Loading scanner...
+[Notice] Using Ruby 1.9.3. Please make sure this matches the one used to run your Rails application.
+Processing application in /Users/eifion/store
+# Rest of output omitted.
+```
+
+<p>Brakeman has found several issues here but before we start looking at them we&rsquo;ll generate an HTML version of the report instead. We do by using the <code>-o</code> option and if the filename passed to it ends in <code>.html</code> an HTML report will be generated.</p>
+
+``` terminal
+$ brakeman -o brakeman.html
+```
+
+<p>At the top of this file is a list of the checks that Brakeman has performed. This is followed by a summary of the results.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1215/original/E358I02.png" width="800" height="500" alt="The report showing the checks that were made."/>
+</div>
+
+<p>The most interesting part of the report is at the bottom. Here&rsquo;s we&rsquo;ll find a list of the issues that were found.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1216/original/E358I03.png" width="800" height="510" alt="The issues found by the report."/>
+</div>
+
+<p>The first column here is a confidence rating which tells us how sure Brakeman is that its found a security issue. We can also see the location and type of the issue and a detailed message about it. As we&rsquo;re looking at the HTML version of the report we can click on any message to see the source code surrounding the problem.</p>
+
+<h3>Fixing The Issues</h3>
+
+<p>We&rsquo;ll go through the list of issues one at a time and fix them. We&rsquo;ll start with the second one in the list. It&rsquo;s message tells us:</p>
+
+``` 
+All versions of Rails before 3.0.14, 3.1.6, and 3.2.6 contain SQL Injection Vulnerabilities: CVE-2012-2694 and CVE-2012-2695; Upgrade to 3.2.6, 3.1.6, 3.0.14
+```
+
+<p>This is a problem specific to the version of Rails that the application uses. Our app is running on Rails 3.2.5 but an important security fix was introduced in 3.2.6. This is a fairly recent change so it&rsquo;s good to see that Brakeman is kept up to date with security fixes. To remove this warning we just need to update the version number in the gemfile.</p>
+
+``` /Gemfile
+gem 'rails', '3.2.6'
+```
+
+<p>Once we&rsquo;ve done this we&rsquo;ll run <code>bundle update rails</code> to install that new version of Rails. If we run brakeman again now to regenerate the report we&rsquo;ll see that the issue has disappeared. The next issue is in the <code>UsersController</code>&rsquo;s  <code>create</code> action.</p>
+
+```
+Unprotected mass assignment near line 7: User.new(params[:user])
+```
+
+<p>There&rsquo;s a related problem in the model warnings section.</p>
+
+``` 
+Mass assignment is not restricted using attr_accessible
+```
+
+<p>If we&rsquo;re ever unsure as to what a report is talking about we should take a look at the <a href="http://brakemanscanner.org/docs/">Brakeman documentation</a>. There are various articles here including a whole <a href="http://brakemanscanner.org/docs/warning_types/">section on Warning Types</a> which will give us detailed information about the several different types of security issues that Brakeman reports, including mass assignment. This explains this vulnerability and how to solve it. In Rails 3.1 and newer we can easily fix this by adding a line to the application config file.</p>
+
+``` /config/application.rb
+config.active_record.whitelist_attributes = true
+```
+
+<p>This is enabled by default in new Rails apps but if we&rsquo;re upgrading from an older version of Rails it can be easily forgotten and it&rsquo;s good to have a reminder from Brakeman. When we do this we need to remember to add <code>attr_accessible</code> to any models that don&rsquo;t have it, such as the <code>User</code> model Brakeman warned us about.</p> 
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  has_secure_password
+  attr_accessible :name, :password, :password_confirmation
+  validates_format_of :name, with: /^\w+$/
+end
+```
+
+<p>When we regenerate the report now these warnings have gone. The next problem we&rsquo;ll tackle is this one, in the <code>ProductsController</code>.</p>
+
+``` 
+Possible SQL injection near line 3: Product.order("name #{params[:direction]}")
+```
+
+<p>SQL injection issues should always be taken seriously. If we look in the <code>ProductsController</code>&rsquo;s <code>index</code> action we&rsquo;ll see the poorly-written code that&rsquo;s causing Brakeman to complain.</p>
+
+``` /app/controllers/products_controller.rb
+def index
+  @products = Product.order("name #{params[:direction]}")
+end
+```
+
+<p>We&rsquo;re inserting a parameter directly into a SQL <code>order</code> clause here, which is a bad idea. We can fix this by checking the value of the parameter to make sure that it&rsquo;s only set to either <code>asc</code> or <code>desc</code> and using that value in the SQL. Brakeman is clever enough to know that params values are dangerous but that the string value that we set isn&rsquo;t.</p> 
+
+``` /app/controllers/products_controller.rb
+def index
+  direction = params[:direction] == "desc" ? "desc" : "asc"
+  @products = Product.order("name #{direction}")
+end
+```
+
+<p>When we regenerate the report now that issue has gone. The last security warning listed is this:</p>
+
+```
+Possible unprotected redirect near line 12: redirect_to((session.delete(:return_to) or root_url))
+```
+
+<p>Brakeman has given this error has a weak confidence so it may not be a problem but it&rsquo;s a good idea to investigate it anyway so that we&rsquo;re sure. The <a href="http://brakemanscanner.org/docs/warning_types/redirect/">documentation on Redirect warnings</a> has more details about this time of vulnerability. If we redirect based on the value from a user-supplied parameter then we can be subject to phishing attacks. An evil site could be set up that looks identical to ours and the owners of this site could use this vulnerability to redirect from our site to theirs. If someone signs in through our application and is  redirected to the evil site they could be prompted to enter their password again. To protect our site from this vulnerability we can use the <code>:only_path</code> option in our redirect which will require that the redirect takes place only within our application. In our application&rsquo;s <code>SessionsController</code> we redirect based on the value of a session variable called <code>return_to</code> which is set from a parameter in the new action.</p>
+ 
+``` /app/controllers/sessions_controller.rb
+class SessionsController < ApplicationController
+  def new
+    session[:return_to] = params[:return_to] if params[:return_to]
+  end
+
+  def create
+    user = User.find_by_name(params[:name])
+    if user && user.authenticate(params[:password])
+      session[:user_id] = user.id
+      redirect_url = session.delete(:return_to) || root_url
+      redirect_to redirect_url
+    else
+      flash.now.alert = "Name or password is invalid"
+      render "new"
+    end
+  end
+
+  def destroy
+    session[:user_id] = nil
+    redirect_to root_url
+  end
+end
+```
+
+<p>To protect from this we&rsquo;ll use that <code>only_path</code> option in the direct.</p>
+
+``` /app/controllers/sessions_controller.rb
+def create
+  user = User.find_by_name(params[:name])
+  if user && user.authenticate(params[:password])
+    session[:user_id] = user.id
+    redirect_url = session.delete(:return_to) || root_url
+    redirect_to redirect_url, :only_path => true
+  else
+    flash.now.alert = "Name or password is invalid"
+    render "new"
+  end
+end
+```
+
+<p>When we regenerate the report now this warning has disappeared.</p>
+
+<p>Our final warning relates to the <code>User</code> model.</p>
+
+```
+Insufficient validation for 'name' using /^\w+$/. Use \A and \z as anchors near line 4
+```
+
+<p>This tells us that we&rsquo;re using insufficient validation in a regular expression. We&rsquo;re using caret and dollar signs as anchors where we should be using <code>\A</code> and <code>\z</code>. This is because we&rsquo;re using <code>validates_format_of</code> in the User model to checks the format of the user name. Users can fool this by inserting new lines into their username as the regular expression only checks the boundaries of a line and not the full text.</p> 
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  has_secure_password
+  attr_accessible :name, :password, :password_confirmation
+  validates_format_of :name, with: /^\w+$/
+end
+```
+
+<p>To fix this we just need to alter our regular expression.</p>
+
+``` /app/models/user.rb
+validates_format_of :name, with: /\A\w+\z/
+```
+
+<p>When we regenerate the report again now we have no warnings at all. Does this mean that our app is fully secure? Unfortunately not, there are several things that Brakeman cannot detect so it&rsquo;s a good idea to always be on the look out for new security issues. Brakeman is a great tool but it should be used as a way to find potential issues and not relied on to guarantee than an application is free from problems.</p>
+
+<p>There&rsquo;s a lot to Brakeman that we haven&rsquo;t shown here. If we look at the options in <a href="https://github.com/presidentbeef/brakeman#options">README</a> we&rsquo;ll see that there are a lot of ways to customize the way that the report is generated.</p>
+
+<p>If we want to run Brakeman as a Rake task we can use the <code>--rake</code> option. This will generate a Rake file in our application.</p>
+
+``` /lib/tasks/brakeman.rake
+namespace :brakeman do
+
+  desc "Run Brakeman"
+  task :run, :output_file do |t, args|
+    require 'brakeman'
+    
+    Brakeman.run :app_path => ".", :output_file => args[:output_file], :print_report => true
+  end
+end
+```
+
+<p>This generated task serves as a nice example of how we can run Brakeman from within Ruby. We can pass in various options to really customize the report and make it consistent for our application. If we want to run this command though we&rsquo;ll need to add the <code>brakeman</code> gem to our gemfile.</p> 
+
+``` /Gemfile
+gem 'brakeman', group: :development
+```
+
+<p>Another way to run Brakeman is to use Guard, which we covered in <a href="http://railscasts.com/episodes/264-guard">episode 264</a>. With the <a href="https://github.com/guard/guard-brakeman">Guard Brakeman gem</a> Brakeman will be run automatically whenever we make a change to a file.</p>

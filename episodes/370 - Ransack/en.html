@@ -1,0 +1,264 @@
+<p>In the example app below we have a list of products. We&rsquo;d like to give the user the ability to search these products based on any of its fields and while we could create this functionality from scratch instead we&rsquo;ll use a gem called <a href="https://github.com/ernie/ransack/">Ransack</a>. This is the successor to MetaSearch which was covered in <a href="http://railscasts.com/episodes/251-metawhere-metasearch">episode 251</a> and it allows us to create complex search forms with ease.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1291/original/E370I01.png" width="800" height="500" alt="The page that shows the list of products."/>
+</div>
+
+<p>Ransack is installed by adding it to the gemfile and running <code>bundle</code>.</p>
+
+``` /Gemfile
+gem 'ransack'
+```
+
+<p>Once Ransack has installed we can use it in the action we want to add searching to, in this case the <code>ProductsController</code>&rsquo;s <code>index</code> action. We make a search object here by calling <code>Product.search</code> and passing in the <code>q</code> parameter (this contains a hash of the search parameters that the user passes in). To get the found products we call <code>result</code> on this object.</p>
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    @search = Product.search(params[:q])
+    @products = @search.result
+  end
+end
+```
+
+<p>Next we need to make the form. Ransack provides a form builder for doing this called <code>search_form_for</code> and we&rsquo;ll use this to add the search form to the top of the page. This method takes a block that has a form builder passed to it. In the block we define the fields we want to search against and the names we pick for these fields are important. Naming the text field in the form <code>name_cont</code> means that Ransack will search for products whose name contains the value entered in this text field.</p>
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search do |f| %>
+  <div class="field">
+    <%= f.label :name_cont, "Name contains" %>
+    <%= f.text_field :name_cont %>
+  </div>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+<p>When we reload the page now it will have a search form on it and when we enter a value into that field and submit the form the products will be filtered.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1292/original/E370I02.png" width="800" height="419" alt="The page now has a working search form."/>
+</div>
+
+<p>This is pretty powerful and we can easily add more functionality to the search by adding more fields to the view, no other logic is needed elsewhere. For example to add the ability to filter by price we can add two more fields like this:</p>
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search do |f| %>
+  <div class="field">
+    <%= f.label :name_cont, "Name contains" %>
+    <%= f.text_field :name_cont %>
+  </div>
+  <div class="field">
+    <%= f.label :price_gteq, "Price between" %>
+    <%= f.text_field :price_gteq %>
+    <%= f.label :price_lteq, "and" %>
+    <%= f.text_field :price_lteq %>    
+  </div>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+<p>We can now search for products within a given price range.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1293/original/E370I03.png" width="800" height="432" alt="We can now search for products in a price range, too."/>
+</div>
+
+<p>If we look at the <a href="https://github.com/ernie/ransack/wiki/Basic-Searching">Basic Searching section</a> of the wiki we&rsquo;ll find a list of the predicates that we can pass in to customize how the search is performed and the SQL that is executed for each one. Ransack also makes it easy to add links for sorting so we&rsquo;ll make the table&rsquo;s headers into links that sort the search results. In the view we can use a helper method called <code>sort_link</code> so we&rsquo;ll replace the static text in the tables&rsquo; header cells with links to sort the products.</p>
+
+``` /app/views/products/index.html.erb
+<tr>
+  <th><%= sort_link(@search, :name, "Product Name") %></th>
+  <th><%= sort_link(@search, :released_on, "Release Date") %></th>
+  <th><%= sort_link(@search, :price, "Price") %></th>
+</tr>
+```
+
+<p>When we reload the page now we have links for sorting the results table by each of the displayed fields.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1294/original/E370I04.png" width="800" height="432" alt="The table&rsquo;s headers are now links that can be clicked to sort the list of products."/>
+</div>
+
+<h3>Creating a Dynamic Search Form</h3>
+
+<p>Next we&rsquo;ll show you some of the more advanced feature of Ransack. There&rsquo;s a lot more to the search form builder than meets the eye; we can create completely dynamic search forms with it so that the user has complete control over the columns and predicates that are used in the search. Instead of having concrete search fields on our page we&rsquo;ll create something more dynamic. We can call a <code>condition_fields</code> method on the form builder and this passes another form builder in for each of the search conditions. We then loop through each of the condition&rsquo;s attribute_fields and display an <code>attribute_select</code> for each one. We then display fields for the predicate and value.</p>
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search do |f| %>
+  <%= f.condition_fields do |c| %>
+  <div class="field">
+    <%= c.attribute_fields do |a| %>
+      <%= a.attribute_select %>
+    <% end %>
+    <%= c.predicate_select %>
+    <%= c.value_fields do |v| %>
+      <%= v.text_field :value %>
+    <% end %>
+    </div>
+  <% end %>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+<p>This code may seem rather verbose but it&rsquo;s worth it for what it does. We&rsquo;ll need to make a small change to the controller before this will work. Searches have no conditions by default so we&rsquo;ll add a new empty one.</p>
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    @search = Product.search(params[:q])
+    @products = @search.result
+    @search.build_condition
+  end  
+end
+```
+
+<p>When we reload the page now we have three fields where we can select the field we want to filter, the predicate and the condition. When we submit the form the products are filtered and we have another set of fields so that we can add another search.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1295/original/E370I05.png" width="800" height="459" alt="We can now filter by multiple fields."/>
+</div>
+
+<p>What&rsquo;s good about this is that we can even add associations here. The <code>attribute_select</code> can have an associations option and as a product belongs to a <code>Category</code> we&rsquo;ll add this in.</p>
+
+``` /app/views/products/index.html.erb
+<%= a.attribute_select associations: [:category] %>
+```
+
+<p>When we reload the page now we&rsquo;ll be able to search by the product&rsquo;s category fields too.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1296/original/E370I06.png" width="800" height="460" alt="The search fields now include the product&rsquo;s category fields."/>
+</div>
+
+<h3>Adding and Removing Conditions Dynamically</h3>
+
+<p>It would be nice if we could add and remove conditions dynamically with JavaScript. This is a little complicated to implement but the pattern works similarly to nested forms so we&rsquo;ll implement something similar to what we did in <a href="http://railscasts.com/episodes/196-nested-model-form-part-1">episode 196</a>. The first thing we&rsquo;ll do is move the condition fields into a partial.</p>
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search do |f| %>
+  <%= f.condition_fields do |c| %>
+    <%= render "condition_fields", f: c%>
+  <% end %>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+<p>We&rsquo;ll need to rename the form field variable in the new partial and add a link for removing the search.</p>
+
+``` /app/views/products/index.html.erb
+<div class="field">
+  <%= f.attribute_fields do |a| %>
+    <%= a.attribute_select associations: [:category] %>
+  <% end %>
+  <%= f.predicate_select %>
+  <%= f.value_fields do |v| %>
+    <%= v.text_field :value %>
+  <% end %>
+  <%= link_to "remove", '#', class: "remove_fields" %>
+</div>
+```
+
+<p>In the <code>ApplicationHelper</code> we&rsquo;ll write a <code>link_to_add_fields</code> method which works similarly to the one we wrote in episode 196.</p>
+
+``` /app/helpers/application_helper.rb
+module ApplicationHelper
+  def link_to_add_fields(name, f, type)
+    new_object = f.object.send "build_#{type}"
+    id = "new_#{type}"
+    fields = f.send("#{type}_fields", new_object, child_index: id) do |builder|
+      render(type.to_s + "_fields", f: builder)
+    end
+    link_to(name, '#', class: "add_fields", data: {id: id, fields: fields.gsub("\n", "")})
+  end
+end
+```
+
+<p>We&rsquo;ll call this method in the index template to generate a link for creating conditions.</p>
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search do |f| %>
+  <%= f.condition_fields do |c| %>
+    <%= render "condition_fields", f: c%>
+  <% end %>
+  <p><%= link_to_add_fields "Add Conditions", f, :condition %>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+<p>The last step is the JavaScript to get this working.</p>
+
+``` /app/assets/javascripts/products.js.coffee
+jQuery ->
+  $('form').on 'click', '.remove_fields', (event) ->
+    $(this).closest('.field').remove()
+    event.preventDefault()
+
+  $('form').on 'click', '.add_fields', (event) ->
+    time = new Date().getTime()
+    regexp = new RegExp($(this).data('id'), 'g')
+    $(this).before($(this).data('fields').replace(regexp, time))
+    event.preventDefault()
+```    
+    
+<p>This is all we need to add and remove the fields dynamically. When we reload the page now we&rsquo;ll see the links for adding and removing search conditions.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1297/original/E370I07.png" width="800" height="500" alt="The search fields can now be removed."/>
+</div>
+
+<p>This works well but if the user adds too many conditions they might run into the limit of the data that can be sent over a GET request. One way around this problem is to use POST instead so we&rsquo;ll implement this. First in the routes file we&rsquo;ll add a block to the products resource and add a <code>search</code> route that takes POST requests and which routes to the <code>index</code> action.</p>
+
+``` /config/routes.rb
+Store::Application.routes.draw do
+  resources :products do
+    collection { post :search, to: 'products#index' }
+  end
+  root to: 'products#index'
+end
+```
+
+<p>We&rsquo;ll need to change the search form so that it points to this action.</p>
+
+``` /app/views/products/index.html.erb
+<%= search_form_for @search, url: search_products_path, method: :post do |f| %>
+  <%= f.condition_fields do |c| %>
+    <%= render "condition_fields", f: c %>
+  <% end %>
+  <p><%= link_to_add_fields "Add Conditions", f, :condition %>
+  <div class="actions"><%= f.submit "Search" %></div>
+<% end %>
+```
+
+<p>Now when we perform a search on the products the data is sent through a POST request instead of through URL parameters. We still have a problem with the sort links, however, as these will send a GET request to the <code>search</code> route and this doesn&rsquo;t work. Instead of handling sorting through links we could move this functionality up into the form and Ransack can help with this as it has methods for generating the select methods for sorting by different fields.</p>
+
+``` /app/views/index.html.erb
+<div class="field">
+  Sort:
+  <%= f.sort_fields do |s| %>
+    <%= s.sort_select %>
+  <% end %>
+</div>
+```
+
+<p>Since there&rsquo;s no sorting specified by default in the controller we can build one like we did for the conditions if no current sort exists.</p>
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    @search = Product.search(params[:q])
+    @products = @search.result
+    @search.build_condition
+    @search.build_sort if @search.sorts.empty?
+  end  
+end
+```
+
+<p>Now our page will have sort fields where we can choose the sort field and direction.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1298/original/E370I08.png" width="800" height="526" alt="The page now has fields for sorting the list."/>
+</div>
+
+<p>There may be other cases where we have links that need to carry over the search conditions but which can&rsquo;t do this through the form, such as pagination links. There are a couple of solutions for this problem. One is to use some JavaScript to submit the link as a POST request, another is to persist the search parameters in the database like we show in <a href="http://railscasts.com/episodes/111-advanced-search-form">episode 111</a>.</p>
+
+<p>That&rsquo;s it for our episode on Ransack. For an example of a complex search form take a look at the <a href="http://ransack-demo.herokuapp.com/">Ransack demo app</a>. This includes a more-complete advanced search feature with multiple sort fields or even add condition groups.</p>

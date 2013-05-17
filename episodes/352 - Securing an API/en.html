@@ -1,0 +1,138 @@
+<p>Last week, in <a href="http://railscasts.com/episodes/350-rest-api-versioning">episode 350</a>, we showed you how to build a versioned API for a store application. We can interact with this application through JSON if we visit the path <code>/api/products</code>. This API is completely public so anyone can use it to edit or destroy the products but usually we want to restrict access to an API. There are a variety of ways that we can do this and the correct technique depends on our application&rsquo;s requirements. In this episode we&rsquo;ll show several solutions that we can use to lock down an API so that you can choose the one that best fits your style of application.</p>
+
+<h3>Using HTTP Basic Authentication</h3>
+
+<p>One of the simplest options is HTTP Basic Authentication. This is incredibly easy to do in Rails and most API clients should have no problem supporting it. To use it we just need to modify the controller that serves the API with a call to <code>http_basic_authentication_with</code>, passing it a name and a password.</p>
+
+``` /app/controllers/api/v1/products_controller.rb
+module Api
+  module V1
+    class ProductsController < ApplicationController
+      http_basic_authenticate_with name: "admin", password: "secret"
+      respond_to :json
+
+      # Actions omitten
+    end
+  end
+end
+```
+
+<p>In a real application we&rsquo;d move the name and password into some kind of external configuration so that they aren&rsquo;t stored in version control. If we need to do this in multiple controllers we could move it into a new controller and then subclass the other controllers from it.</p> 
+
+<p>We can use the <code>curl</code> command to test this out. If we make a request to our API&rsquo;s path we now get an error.</p>
+
+``` terminal
+$ curl http://localhost:3000/api/products
+HTTP Basic: Access denied.
+```
+
+<p>If we look at the response headers we&rsquo;ll see that we get a <code>401 Unauthorized</code> response.</p>
+
+``` terminal
+$ curl http://localhost:3000/api/products -I
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Basic realm="Application"
+Content-Type: text/html; charset=utf-8
+X-UA-Compatible: IE=Edge
+Cache-Control: no-cache
+X-Request-Id: c411eeceefc39ab3964d40301530843c
+X-Runtime: 0.002366
+Content-Length: 0
+Connection: keep-alive
+Server: thin 1.3.1 codename Triple Espresso
+```
+
+<p>If we pass in the correct username and password we&rsquo;ll get the full JSON response.</p>
+
+``` terminal
+$ curl http://localhost:3000/api/products -u "admin:secret"
+[{"category_id":2,"created_at":"2012-05-30T20:16:58Z","id":1,"name":"Settlers of Catan","price":"29.95","released_on":"2012-04-12","updated_at":"2012-05-30T20:16:58Z"}, ...etc]
+```
+
+<p>One thing to watch out for is that the credentials are sent as clear text so we should be sure to use a secure connection or maybe a digest connection.</p> 
+
+<h3>Authentication Via an Access Token</h3>
+
+<p>Another way we can lock down our API is to provide the client with an access token.  We&rsquo;ll need somewhere to store this token and we&rsquo;ll do this in a new <code>api_key</code> model.</p> 
+
+``` terminal
+$ rails g model api_key access_token
+```
+
+<p>There are other columns that we could add to this model. For example we could add a <code>role</code> column to specify the permissions that the token has, a <code>user_id</code> column to specify the user the token belongs to or an <code>expires_at</code> column to specify when the token expires. We&rsquo;ll keep our model simple for now, though, with just the one column. We&rsquo;ll need to run rake <code>db:migrate</code> to create the new <code>api_keys</code> table.</p>
+
+<p>In our new model we&rsquo;ll need to generate a random access token string each time a record is created. We&rsquo;ll do this in a <code>before_create</code> callback.</p>
+
+``` /app/models/api_key.rb
+class ApiKey < ActiveRecord::Base
+  before_create :generate_access_token
+  
+private
+  
+  def generate_access_token
+    begin
+      self.access_token = SecureRandom.hex
+    end while self.class.exists?(access_token: access_token)
+  end
+
+end
+```
+
+<p>This code uses <code>SecureRandom.hex</code>, which is provided in Ruby 1.9, to generate a random hexadecimal string. It then checks to see if another key exists with the same token and regenerates the token if this is the case. We could also add a unique constraint on this column on the database too, to ensure uniqueness. We can see this in action in the console. If we call <code>ApiKey.create!</code> we&rsquo;ll generate a new record with a random token.</p>
+
+``` console
+1.9.3-p125 :001 > ApiKey.create!
+   (0.1ms)  begin transaction
+  ApiKey Exists (0.2ms)  SELECT 1 FROM "api_keys" WHERE "api_keys"."access_token" = 'afbadb4ff8485c0adcba486b4ca90cc4' LIMIT 1
+Binary data inserted for `string` type on column `access_token`
+  SQL (5.9ms)  INSERT INTO "api_keys" ("access_token", "created_at", "updated_at") VALUES (?, ?, ?)  [["access_token", "afbadb4ff8485c0adcba486b4ca90cc4"], ["created_at", Wed, 30 May 2012 21:17:53 UTC +00:00], ["updated_at", Wed, 30 May 2012 21:17:53 UTC +00:00]]
+   (2.7ms)  commit transaction
+ => #<ApiKey id: 1, access_token: "afbadb4ff8485c0adcba486b4ca90cc4", created_at: "2012-05-30 21:17:53", updated_at: "2012-05-30 21:17:53">
+``` 
+ 
+<p>How we choose to generate this and display it to the client is up to us but it&rsquo;s usually done on some kind of profile page so that they can copy and paste it into their API tool. Now we need to restrict access to the API by requiring that the token is passed in. There are several ways that we could do this. One way is to add it as a URL parameter when we can then check for and check in the controller. We&rsquo;ll do this through a <code>before_filter</code>.</p>
+
+``` /app/controllers/api/v1/products_controller.rb
+module Api
+  module V1
+    class ProductsController < ApplicationController
+      before_filter :restrict_access
+      respond_to :json
+
+      # Actions omitted
+
+      private
+      def restrict_access
+        api_key = ApiKey.find_by_access_token(params[:access_token])
+        head :unauthorized unless api_key
+      end
+    end
+  end
+end
+```
+
+<p>In <code>restrict_access</code> we try to find an <code>ApiKey</code> by the <code>access_token</code> that&rsquo;s passed in from the URL. If we fail to find a matching key we return <code>401 Unauthorized</code>. Now unless a valid access token in is passed in we&rsquo;ll just see a blank response when we browse to this page, though it we look in the server logs we&rsquo;ll see that the server is returning a <code>401</code> response.</p>
+
+<p>Passing in the access token through a URL isn&rsquo;t the best solution, especially if the token never expires. People tend to copy and paste URLs and we don&rsquo;t want them sharing their credentials. Instead we&rsquo;ll pass the access token in via an HTTP header. Rails gives us some controller methods to make adding this functionality easy. We can use <code>authenticate_or_request_with_http_token</code> in a before filter. We have a before filter in our <code>ProductsController</code> so we&rsquo;ll modify the  <code>restrict_access</code> method it calls to use <code>authenticate_or_request_with_http_token</code>.</p>
+
+``` /app/controllers/api/v1/products_controller.rb
+def restrict_access
+  authenticate_or_request_with_http_token do |token, options|
+    ApiKey.exists?(access_token: token)
+  end
+end
+```
+
+<p>If the block that&rsquo;s passed to <code>authenticate_or_request_with_http_token</code> returns <code>true</code> the authentication passes and so in here we check that an <code>ApiKey</code> exists with the token that&rsquo;s passed in. Now when a request is made to the API access will be denied unless an <code>Authorization</code> header is set, like this:</p>
+
+``` terminal
+$ curl http://localhost:3000/api/products -H 'Authorization: Token token="afbadb4ff8485c0adcba486b4ca90cc4"'
+```
+
+<p>We could mix and match these different authentication token methods to best fit the needs of our application.</p>
+
+<p>The different solutions we&rsquo;ve covered here are fairly simple but what if the situation is a little more complicated? For example what if a user is able to log in to our application and we&rsquo;d like other applications that use our API to be able to simulate logging in as that user and access their credentials, but only if that user gives the other application permission. This is a common scenario in social networking applications such as Facebook or Twitter and a great way to do this is to use <a href="http://railscasts.com/episodes/350-rest-api-versioning">OAuth</a>. We won&rsquo;t be covering OAuth in any detail in this episode but there&rsquo;s plenty of information about it on its website. Essentially it allows us to secure an API and protect users&rsquo; data without requiring them to store their passwords on every site they log in to.</p>
+
+There are many projects available that help to make it easier to implement OAuth in  a Rails application. <a href="https://github.com/applicake/doorkeeper">Doorkeeper</a> is one of these and while it's still in early development it&rsquo;s worth taking a look at and so we&rsquo;ll be covering this in this week&rsquo;s Pro episode. The <a href="https://github.com/intridea/oauth2">oauth2</a> gem is also worth investigating. Many other projects build on this gem so it&rsquo;s a good idea to get an understanding of how it works. 
+
+<p>With any of the solutions we&rsquo;ve shown so far it&rsquo;s very important that the API interaction happens over a secure connection so we need to make sure that we use SSL.</p>

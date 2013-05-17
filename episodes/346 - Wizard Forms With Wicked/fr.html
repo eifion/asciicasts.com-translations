@@ -1,0 +1,314 @@
+<p>Ce qui suit est un formulaire d'inscription avec un grand nombre de champs. Des formulaires comme celui-ci peuvent être relativement intimidant pour un bon nombre d'utilisateurs et peuvent les effrayer.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1146/original/E346I01.png" width="800" height="700" alt="Our long signup form."/>
+</div>
+
+<p>Une option face à un formulaire aussi complexe est d'en faire un formulaire à plusieurs étapes, aussi connu sous le nom de wizard. La façon la plus simple est d'utiliser JavaScript; de cette manière, on peut tout garder côté client et nous n'avons pas besoin de faire de changements dans notre application Rails. Ceci n'est pas toujours la meilleure solution, cela dit. Nous pourrions vouloir que les données soient plus persistentes et être capable de les stocker en base de données à
+chaque étape, ou nous pourrions vouloir que le formulaire soit dynamique afin que les étapes changent en fonction de l'application Rails. Nous voudrons probablement ajouter des validations à certains champs à chaque étape également.</p>
+
+<h3>Introduction à Wicked</h3>
+
+<p>Si vous voulez gérer un wizard dans une application Rails, nous devrions considérer l'utilisation de la gemme <a href="https://github.com/schneems/wicked">Wicked</a> de Richard Schneeman. Elle ajoute des comportements aux contrôleurs Rails pour le transformer en un formulaire à plusieurs étapes et nous allons voir comment ça fonctionne dans cet épisode. La première étape est d'alléger notre formulaire d'autant de champs que possible - une des bonnes pratiques est de ne requérir
+uniquement des informations nécessaires à l'utilisateur pour accéder à l'enregistrement plus tard. Dans le cas d'une inscription, on peut réduire le formulaire aux champs relatifs à l'identification, soit le nom d'utilisateur et le mot de passe. Tout le reste peut être disposé dans des étapes séparées dans notre wizard donc nous allons réduire notre formulaire à ces champs.</p>
+
+``` /app/views/users/new.html.erb
+<h1>Sign Up</h1>
+
+<%= form_for @user do |f| %>
+  <% if @user.errors.any? %>
+    <div class="error_messages">
+      <h2><%= pluralize(@user.errors.count, "error") %> prohibited this user from being saved:</h2>
+      <ul>
+      <% @user.errors.full_messages.each do |msg| %>
+        <li><%= msg %></li>
+      <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="field">
+    <%= f.label :email %><br />
+    <%= f.text_field :email %>
+  </div>
+  <div class="field">
+    <%= f.label :password %><br />
+    <%= f.password_field :password %>
+  </div>
+  <div class="field">
+    <%= f.label :password_confirmation %><br />
+    <%= f.password_field :password_confirmation %>
+  </div>
+
+  <div class="actions">
+    <%= f.submit "Sign Up" %>
+  </div>
+<% end %>
+```
+
+<p>Quand on recharge le formulaire, nous ne verrons plus que ces champs. Ceci est la première étape de notre wizard.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1147/original/E346I02.png" width="800" height="400" alt="The first step of our new wizard."/>
+</div>
+
+<p>À ce stade, c'est une bonne idée de se demander si on a vraiment besoin d'un wizard. Nous pourrions simplement avoir une page pour modifier son profil et avoir ces champs dedans mais nous allons assumer que le wizard est la meilleure approche ici et poursuivre donc nous allons ajouter la gem Wicked au Gemfile et exécuter <code>bundle</code> pour l'installer.</p>
+
+``` /Gemfile
+gem 'wicked'
+```
+
+<p>Ensuite, nous allons générer un nouveau contrôleur appelé <code>user_steps</code>. Ça nous donnera un contrôleur dédié à la gestion des étapes du wizard. On peut appeler ce contrôleur comme il nous plait puisque Wicked s'en fiche.</p>
+
+``` terminal
+$ rails g controller user_steps
+```
+
+<p>Nous aurons besoin d'ajouter une nouvelle ressource <code>user_steps</code> à notre fichier de routes pour ce contrôleur.</p>
+
+``` /config/routes.rb
+Signup::Application.routes.draw do
+  resources :users
+  resources :user_steps
+  root to: 'users#index'
+end
+```
+
+<p>Maintenant, dans notre contrôleur, nous avons besoin d'inclure le module <code>Wicked::Wizard</code>. Ceci nous donne une méthode <code>steps</code> que nous pouvons utiliser pour définir les étapes dans notre wizard après que l'utilisateur ait été créé. Nous ajouterons deux étapes à notre formulaires, une pour les informations personnelles et une autre relatives aux réseaux sociaux dont l'utilisateur est membre. On s'attend à ce que ce contrôleur répondre à l'action <code>show</code>
+et cette action devrait rendre une étape donnée du wizard. Nous avons accès à la méthode <code>render_wizard</code> qui va chercher une vue pour chaque étape.</p>
+
+``` /app/controllers/user_steps_controller.rb
+class UserStepsController < ApplicationController
+  include Wicked::Wizard
+  steps :personal, :social
+
+  def show
+    render_wizard
+  end
+end
+```
+
+<p>Nous aurons besoin de créer ces vues dans <code>/app/views/user_steps</code>. Nous créerons des fichiers appelés <code>personal.html.erb</code> et <code>social.html.erb</code>. Pour le moment nous ajouterons simplement les mots "personal" et "social" à ces fichiers pour que nous puissions distinguer les étapes. Nous devrions maintenant avoir accès à toutes les étapes depuis <code>/user_steps/&lt;set_name&gt;</code>.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1148/original/E346I03.png" width="800" height="400" alt="The new Personal step of our wizard."/>
+</div>
+
+<p>Voilà comment <code>render_wizard</code> fonctionne. Elle rend une vue dont le nom est transmis via l'URL. Si on visite l'action <code>index</code> du contrôleur <code>UserStepsController</code>, nous serons rediriger vers la première étape du processus, dans notre cas l'étape <code>personal</code>. Nous avons besoin que l'action <code>/users/new</code> nous redirige vers la première étape quand nous soumettons ce formulaire. Soumettre le formulaire déclenche l'action
+<code>create</code> du contrôleur <code>UsersController</code>.</p>
+
+``` /app/controllers/users_controller.rb
+def create
+  @user = User.new(params[:user])
+  if @user.save
+    session[:user_id] = @user.id
+    redirect_to users_path, notice: "Thank you for signing up."
+  else
+    render :new
+  end
+end
+```
+
+<p>L'action sauvegarde le nouvel utilisateur puis le connecte en enregistrant son <code>id</code> en session. Quand ceci se produit, nous voulons rediriger l'utilisateur à la première étape du wizard plutôt que la page vers laquelle il est actuellement renvoyé.</p>
+
+``` /app/controllers/users_controller.rb
+def create
+  @user = User.new(params[:user])
+  if @user.save
+    session[:user_id] = @user.id
+    redirect_to user_steps_path
+  else
+    render :new
+  end
+end
+```
+
+<p>Quand l'utilisateur s'inscrit, il est redirigé vers l'étape "personal" de notre nouveau wizard. Maintenant, nous avons besoin d'ajouter un formulaire à cette page que nous redirigerons vers la seconde page de notre wizard quand il est soumis. Si nous voulons un formulaire pour modifier les détails de l'utilisateur sur chaque étape de <code>render_wizard</code>, nous aurons besoin de récupérer les informations de l'utilisateur courant dans l'action <code>show</code> de
+<code>UserStepsController</code>. Nous avons déjà une méthode <code>current_user</code> dans notre application et si vous avez une sorte de solution d'identification dans votre application, vous aurez généralement besoin d'une méthode pour récupérer l'utilisateur courant. Si vous n'en avez pas, vous pouvez transmettre l'<code>id</code> de l'utilisateur quand vous redirigez vers <code>UserStepsController</code>.</p>
+
+``` /app/controllers/user_steps_controller.rb
+def show
+  @user = current_user
+  render_wizard
+end
+```
+
+<p>Nous pouvons maintenant remplacer le texte dans la vue <code>personal</code> avec un formulaire contenant des champs pertinents.</code>
+
+``` /app/views/user_steps/personal.html.erb
+<%= form_for @user, url: wizard_path do |f| %>
+  <h2>Tell us a little about yourself</h2>
+  <div class="field">
+    <%= f.label :name %><br />
+    <%= f.text_field :name %>
+  </div>
+  <div class="field">
+    <%= f.label :date_of_birth %><br />
+    <%= f.date_select :date_of_birth, start_year: 1900, end_year: Date.today.year %>
+  </div>
+  <div class="field">
+    <%= f.label :bio %><br />
+    <%= f.text_area :bio, rows: 5 %>
+  </div>
+  <div class="actions">
+	<%= f.submit "Continue" %>
+  </div>
+<% end %>
+```
+
+<p>Nous avons eut besoin de passer une <code>url</code> à ce formulaire. Normalement, il sera soumis à <code>UsersController</code> mais nous voulons qu'il aille vers <code>UserStepsController</code>. Nous pouvons utiliser le helper <code>wizard_path</code> qui va <code>POST</code> le formulaire à la bonne action. Le formulaire contient les trois premiers champs que nous avons précédemment enlevé du formulaire d'origine et un bouton de soumission. Quand on recharge la page, on peut
+voir ce nouveau formulaire.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1149/original/E346I04.png" width="800" height="449" alt="The completed Personal step."/>
+</div>
+
+<p>Cliquer sur "Continue" déclenchera l'action <code>update</code> mais nous ne l'avons pas encore créée. Elle sera similaire à l'action <code>show</code> mais elle mettra à jour quelques attributs de l'utilisateur courant basés sur les valeurs du formulaire.</p>
+
+``` /app/controllers/user_steps_controller.rb
+def update
+  @user = current_user
+  @user.attributes = params[:user]
+  render_wizard @user
+end
+```
+
+<p>Notez que nous passons l'utilisateur courant à <code>render_wizard</code>. Quand on donne une ressource de cette manière, il essaiera d'appeler la méthode <code>save</code> sur celle-ci et si elle passe, il passera à la prochaine étape. Si l'enregistrement de la ressource échoue, nous verrons l'étape courante à nouveau.</p>
+
+<p>Nous pouvons ajouter le formulaire à la vue <code>social</code> maintenant.</p>
+
+``` /app/views/user_steps/social.html.erb
+<%= form_for current_user, url: wizard_path do |f| %>
+  <h2>Where can we find you?</h2>
+  <div class="field">
+    <%= f.label :twitter_username %><br />
+    <%= f.text_field :twitter_username %>
+  </div>
+  <div class="field">
+    <%= f.label :github_username %><br />
+    <%= f.text_field :github_username %>
+  </div>
+  <div class="field">
+    <%= f.label :website %><br />
+    <%= f.text_field :website %>
+  </div>
+  <div class="actions">
+	  <%= f.submit "Continue" %>
+  </div>
+<% end %>
+```
+
+<p>Soumettre ce formulaire déclenchera l'action <code>update</code> à nouveau mais comme il n'y a pas d'étapes supplémentaires, elle nous redirigera à la racine de l'application. Si nous voulons changer ce comportement, nous pouvons surcharger la méthode <code>redirect_to_finish_wizard</code> dans le contrôleur. Nous redirigerons toujours vers l'URL racine mais nous afficherons également un message pour remercier l'utilisateur de s'être inscrit.</p>
+
+``` /app/controllers/user_steps_controller.rb
+private
+def redirect_to_finish_wizard
+  redirect_to root_url, notice: "Thanks for signing up."
+end
+```
+
+<h3>Passer des étapes</h3>
+
+<p>La prochaine chose que nous allons faire est d'ajouter un lien au bouton "Continue" qui permet à l'utilisateur de passer une étape. Si on regarde la section 2 de "Quick Reference" du README, nous trouverons une liste de méthode que Wicked fournit et parmi celles-ci il y a <code>next_wizard_path</code> qui retourne une URL vers la prochaine étape. Nous pouvons l'utiliser pour faire notre lien "skip".</p>
+
+```/app/views/user_steps/personal.html.erb
+<div class="actions">
+  <%= f.submit "Continue" %>
+  or <%= link_to "skip this step", next_wizard_path %>
+</div>
+```
+
+<p>Nous allons faire la même chose avec l'autre étape. Maintenant, nous avons un lien "skip this step" pour chaque étape de notre wizard afin que l'utilisateur sache que les champs de ces étapes sont facultatifs et peuvent être zappés.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1150/original/E346I05.png" width="800" height="390" alt="The Social step showing the skip link."/>
+</div>
+
+<h3>Validations</h3>
+
+<p>Nous allons maintenant voir les validations. Disons que nous voulons valider le format du nom d'utilisateur Twitter dans l'étape "Social". Nous n'affichons actuellement aucune erreur de validations donc nous allons ajouter du code à chaque étape pour se faire. Si cette application était prévue pour de la production, nous aurions sûrement déplacé ce code dans un helper pour réduire la duplication de code mais ici nous allons laisser passer ça.</p>
+
+``` /app/views/user_steps/social.html.erb
+<% if @user.errors.any? %>
+  <div class="error_messages">
+    <h2><%= pluralize(@user.errors.count, "error") %> prohibited this user from being saved:</h2>
+    <ul>
+    <% @user.errors.full_messages.each do |msg| %>
+      <li><%= msg %></li>
+    <% end %>
+    </ul>
+  </div>
+<% end %>
+```
+
+<p> Maintenant, nous pouvons ajouter la validation à notre modèle <code>User</code>. Nous utiliserons <code>validates_format_of</code> et il est important de définir son option <code>allow_blank</code> à <code>true</code> pour la rendre optionnelle afin que la validation n'échoue pas quand l'utilisateur est enregistré à une différente étape.</p>
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  attr_accessible :bio, :date_of_birth, :email, :github_username, :name, :password, :password_confirmation, :twitter_username, :website
+  has_secure_password
+
+  validates_format_of :twitter_username, :without => /\W/, :allow_blank => true
+end
+```
+
+<p>Toutefois, qu'en est-il si nous voulons être sûr qu'un nom d'utilisateur Twitter a été renseigné ? C'est là où les choses peuvent devenir un peu compliquées puisque l'utilisateur est d'abord enregistré à la première étape. C'est très facile de valider la présence d'un nom d'utilisateur et d'un mot de passe à la première étape mais si nous essayons de valider les champs depuis une autre étape le nouvel enregistrement <code>User</code> sera invalide et ne sera pas sauvegardé. Pour
+contourner ça, nous pouvons faire une validation conditionnelle afin que le nom d'utilisateur Twitter soit validé uniquement à l'étape "Social".</p>
+
+``` /app/models/user.rb
+validates_presence_of :twitter_username, if: :on_social_step?
+```
+
+<p>Maintenant, il nous faut écrire la méthode <code>on_social_step?</code> qui va vérifier à quelle étape nous sommes et faire la validation conditionnelle en fonction de sa valeur de retour. Toutefois, nous n'allons pas écrire la méthode ici. Si vous avez besoin de faire quelque chose de ce genre, il vaut mieux jeter un oeil à la rubrique "Partial Validation" de la page <a href="https://github.com/schneems/wicked/wiki/Partial-Validation-of-Active-Record-Objects">Active Record Objects</a> du
+wiki de Wicked qui explique exactement cette situation. Pour une solution alternative, jetez un oeil à l'<a href="https://github.com/schneems/wicked/wiki/Partial-Validation-of-Active-Record-Objects">épisode 217</a> qui montre comment construire un formulaire à étapes multiples from scratch.</p>
+
+<h3>Supprimer les duplicats</h3>
+
+<p>Notre formulaire wizard est presque complet mais il y a beaucoup de duplication dans différentes étapes du code. En dehors de l'entête et des noms de champ, les deux étapes sont presque identiques ce qui en fait un cas parfait pour un layout partiel. Nous pouvons déplacer l'entête en haut de page, en dehors du formulaire et déplacer les messages d'erreurs et le bouton de validation dans un nouveau partial <code>form</code>. Plutôt que de rendre le partial en tant que partial, nous allons
+le rendre comme un layout et lui transmettre le form builder.</p>
+
+``` /app/views/user_steps/personal.html.erb
+<h2>Tell us a little about yourself</h2>
+
+<%= render :layout => 'form' do |f| %>
+  <div class="field">
+    <%= f.label :name %><br />
+    <%= f.text_field :name %>
+  </div>
+  <div class="field">
+    <%= f.label :date_of_birth %><br />
+    <%= f.date_select :date_of_birth, start_year: 1900, end_year: Date.today.year %>
+  </div>
+  <div class="field">
+    <%= f.label :bio %><br />
+    <%= f.text_area :bio, rows: 5 %>
+  </div>
+<% end %>
+```
+
+<p>Le nouveau partial de formulaire ressemble donc à ça. Notez que nous appelons <code>yield</code> entre les messages d'erreurs et le bouton afin que les champs de formulaire soit rendus à cet endroit.</p>
+
+``` /app/views/user_steps/_form.html.erb
+<%= form_for @user, url: wizard_path do |f| %>
+
+<% if @user.errors.any? %>
+  <div class="error_messages">
+    <h2><%= pluralize(@user.errors.count, "error") %> prohibited this user from being saved:</h2>
+    <ul>
+      <% @user.errors.full_messages.each do |msg| %>
+      <li><%= msg %></li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+
+<%= yield f %>
+
+<div class="actions">
+  <%= f.submit "Continue" %>
+or <%= link_to "skip this step", next_wizard_path %>
+</div>
+<% end %>
+```
+
+Nous pouvons maintenant faire la même chose à l'intérieur du template "Social" pour nettoyer ce template également. Notre formulaire fonctionnera comme il le faisait avant mais maintenant nous n'avons plus de duplicats de code à travers nos différentes étapes.</p>

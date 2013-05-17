@@ -1,0 +1,257 @@
+<p>Below is a screenshot from an application called &ldquo;You Haiku&rdquo; which lets users write Haikus and add them to the site.</p> 
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1252/original/E364I01.png" width="800" height="400" alt="The YouHaiku site."/>
+</div>
+
+<p>A number of Haikus have already been added to our application and we&rsquo;d like users to be able to vote for them by either voting them up or down. Our application has no voting system in place yet so how can we add this feature? We could write this from scratch but instead we&rsquo;ll use a gem called <a href="https://github.com/twitter/activerecord-reputation-system">Active Record Reputation System</a>. This allows us to easily calculate an average user rating, sum up the number of votes and more and here we&rsquo;ll show you how it get it working in our application.</p>
+
+<h3>Getting Started</h3>
+
+<p>We&rsquo;ll start by adding the gem to the gemfile and running bundle to install it. Note that we need to require the file separately as <code>reputation_system</code>.</p>
+
+``` /Gemfile
+gem 'activerecord-reputation-system', require: 'reputation_system'
+```
+
+<p>We&rsquo;ll need to run a generator to create migration files for the database tables that are needed. We&rsquo;ll take a closer look at these files later but for now we&rsquo;ll just migrate the database to add the necessary tables and fields.</p>
+
+``` terminal
+$ rails g reputation_system
+$ rake db:migrate
+```
+
+<p>Next we&rsquo;ll modify the model that we want users to be able to vote on and add a call to <code>has_reputation</code>. We pass this the name we want to give the reputation, in this case votes, and two more options: <code>source</code>, which is the name of the model that will be doing the voting, and <code>aggregated_by</code>, which can be set to <code>sum</code>, <code>average</code> or <code>product</code>, depending on how we want the calculation to happen. These options are documented in the <a href="https://github.com/twitter/activerecord-reputation-system#active-record-reputation-system---">README</a> along with the other options we can pass in.</p>
+
+``` /app/models/haiku.rb
+class Haiku < ActiveRecord::Base
+  attr_accessible :content
+
+  belongs_to :user
+  
+  has_reputation :votes, source: :user, aggregated_by: :sum
+end
+```
+
+<p>With this code in place we can begin to work on our voting system. We want two links next to each haiku so that a user can vote it up or down, but where should these links route to? We have a couple of options here: we could make a separate <code>haiku_votes</code> resource or we could make this a member action on the <code>Haiku</code> resource. We&rsquo;ll take the latter option and add a <code>votes</code> action that takes POST requests.</p>
+
+``` /config/routes.rb
+Youhaiku::Application.routes.draw do
+  get 'signup', to: 'users#new', as: 'signup'
+  get 'login', to: 'sessions#new', as: 'login'
+  get 'logout', to: 'sessions#destroy', as: 'logout'
+
+  resources :users
+  resources :sessions
+  resources :haikus do
+    member { post :vote }
+  end
+
+  root to: 'haikus#index'
+end
+```
+
+<p>Next we&rsquo;ll add the vote action to the <code>HaikusController</code>. The value of a vote should be <code>1</code> or <code>-1</code>, depending on whether it&rsquo;s a vote up or down. We&rsquo;ll use a type parameter and count the vote as an upvote if it has the value &ldquo;up&rdquo;. Next we&rsquo;ll fetch the haiku by its <code>id</code> and call a method called <code>add_evaluation</code>. This method takes three arguments: the name of the reputation, the value to add and the source object which in this case is the current user. Finally we redirect back to the referrer and display a flash notice.</p>
+
+``` /app/controllers/haikus_controller.rb
+def vote
+  value = params[:type] == "up" ? 1 : -1
+  @haiku = Haiku.find(params[:id])
+  @haiku.add_evaluation(:votes, value, current_user)
+  redirect_to :back, notice: "Thank you for voting!"
+end
+```
+
+<p>Next we&rsquo;ll add the voting links in the view template in the partial that displays a Haiku. These links point to the <code>vote_haiku_path</code> and take a type attribute reflecting the vote type.</p>
+
+``` /app/views/haikus/_haiku.html.erb
+<div class="haiku">
+  <%= simple_format haiku.content %>
+  <em>
+    -- <%= haiku.user.name %>
+    | <%= link_to "up", vote_haiku_path(haiku, type: "up"), method: "post" %>
+    | <%= link_to "down", vote_haiku_path(haiku, type: "down"), method: "post" %>
+  </em>
+</div>
+```
+
+<p>We may have to restart the server for all these changes to be picked up but once we have we should see the voting links when we reload the page.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1253/original/E364I02.png" width="800" height="400" alt="The voting links are now visible."/>
+</div>
+
+<h3>Updating Votes</h3>
+
+<p>If we vote a Haiku up and then change our mind and vote it down again we&rsquo;ll see an ActiveRecord error. This is because the same user has voted on the same Haiku twice and the reputation system automatically prevents duplicate votes. We could <code>rescue</code> from this exception in the <code>HaikusController</code> but instead we&rsquo;ll use a different method called <code>add_or_update_evaluation</code> to record the vote.</p>
+
+``` /app/controllers/haikus_controller.rb
+def vote
+  value = params[:type] == "up" ? 1 : -1
+  @haiku = Haiku.find(params[:id])
+  @haiku.add_or_update_evaluation(:votes, value, current_user)
+  redirect_to :back, notice: "Thank you for voting!"
+end
+```
+
+<p>This will update an existing vote if one is found. Now if a user votes more than once their current vote will be changed. It would be nice if we could see the number of votes a Haiku has received so we&rsquo;ll add this next. We can do this by calling <code>reputation_value_for</code> on the haiku and passing in the reputation that we want the value for. This returns a float value so we call <code>to_i</code> on it to round it down.</p>
+
+``` /app/views/haikus/_haiku.html.erb
+<div class="haiku">
+  <%= simple_format haiku.content %>
+  <em>
+    -- <%= haiku.user.name %>
+    | <%= pluralize haiku.reputation_value_for(:votes).to_i, "vote" %>
+    | <%= link_to "up", vote_haiku_path(haiku, type: "up"), method: "post" %>
+    | <%= link_to "down", vote_haiku_path(haiku, type: "down"), method: "post" %>
+  </em>
+</div>
+```
+
+<p>It would be good to sort the list of haikus based on the net number of upvotes. We&rsquo;ll do this inside the <code>HaikusController</code>&rsquo;s <code>index</code> action where we currently just fetch all the haikus. We can instead use <code>find_with_reputation</code> to fetch them in the correct order.</p>
+
+``` /app/controllers/haikus_controller.rb
+def index
+  @haikus = Haiku.find_with_reputation(:votes, :all, order: 'votes desc')
+end
+```
+
+<p>The second argument here is the scope we want to use. We haven&rsquo;t discussed reputation scopes yet. These aren&rsquo;t ActiveRecord named scopes but are specific to the Reputation System and we use the <code>:all</code> scope here to find everything. When we reload the page now the haikus are displayed in the correct order.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1254/original/E364I03.png" width="800" height="400" alt="The haikus are now displayed in order of the number of votes they have."/>
+</div>
+
+<p>Next we want to display the total number of votes that a user has received for their haikus and the Reputation System allows to to define reputations indirectly so we can go about it like this.</p> 
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  has_secure_password
+  attr_accessible :name, :password, :password_confirmation
+  validates_uniqueness_of :name
+
+  has_many :haikus
+  
+  has_reputation :votes, source: {reputation: :votes, of: :haikus}, aggregated_by: :sum
+end
+```
+
+<p>Here we use has_reputation with a hash for the source. This instructs the Reputation System to delegate this to the reputation called votes in the Haiku model. We aggregate the result of this to give an overall score for the user. We can now use this where we display the user&rsquo;s name in the application&rsquo;s layout file.</p>
+
+``` /app/views/layouts/application.html.erb
+Logged in as <strong><%= current_user.name %></strong>
+(<%= current_user.reputation_value_for(:votes).to_i %>).
+```
+
+<p>When we reload the page now we&rsquo;ll see the current user&rsquo;s score next to the user&rsquo;s name.</p>
+
+<h3>Showing The User The Haikus They Have Voted for</h3>
+
+<p>To make it easier for a user to see which haikus they have voted for we&rsquo;ll show something next to those haikus and hide the links. The gem doesn&rsquo;t seem to provide a way to do this but it&rsquo;s still possible. If we look at one of the migration files that was generated earlier we&rsquo;ll see that the gem creates a database table called <code>rs_evaluations</code> and a record is added here when a user votes.</p> 
+
+``` /db/migrations/20120718000000_create_reputation_system.rb
+def self.up
+  create_table :rs_evaluations do |t|
+    t.string      :reputation_name
+    t.references  :source, :polymorphic => true
+    t.references  :target, :polymorphic => true
+    t.float       :value, :default => 0
+    t.timestamps
+  end
+  # Rest of migration omitted
+end
+```
+
+<p>This table keeps track of the reputation name, which in our case is <code>votes</code>, the <code>source</code>, which is the <code>User</code> model, the target (the <code>Haiku</code> model) and the <code>value</code> which will be <code>1</code> or <code>-1</code> depending on whether the vote was up or down. Note that both <code>source</code> and <code>target</code> are polymorphic associations. There is an <code>RSEvaluation</code> model that goes along with this table and this means that we can associate a <code>User</code> record with that model like this:</p>
+
+``` /app/models/user.rb
+has_many :evaluations, class_name: "RSEvaluation", as: :source
+```
+
+<p>The <code>as:</code> option is necessary here as this is a polymorphic association. With this in place we can determine whether a given user has voted for a specific haiku.</p>
+
+``` /app/models/user.rb
+def voted_for?(haiku)
+  evaluations.where(target_type: haiku.class, target_id: haiku.id).present?
+end
+```
+
+<p>Here we fetch all the evaluations and determine whether one exists with correct <code>type</code> and <code>id</code>. There are more efficient ways to do this if we&rsquo;re doing this a lot on a single page but this approach will work for us here. We can use this method now to hide the links if a user has already voted.</p>
+
+``` /app/views/haikus/_haiku.html.erb
+<div class="haiku">
+  <%= simple_format haiku.content %>
+  <em>
+    -- <%= haiku.user.name %>
+    | <%= pluralize haiku.reputation_value_for(:votes).to_i, "vote" %>
+    <% if current_user && !current_user.voted_for?(haiku) %>
+      | <%= link_to "up", vote_haiku_path(haiku, type: "up"), method: "post" %>
+      | <%= link_to "down", vote_haiku_path(haiku, type: "down"), method: "post" %>
+    <% end %>
+  </em>
+</div>
+```
+
+<p>When we reload the page now the links have disappeared from the haikus that we&rsquo;ve voted for.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1255/original/E364I04.png" width="800" height="400" alt="Links are no longer shown for haikus that the user has already voted for."/>
+</div>
+
+<p>There&rsquo;s more that we could do with this application such as adding this restriction to the controller action and also preventing a user from voting for their own haikus but we won&rsquo;t do that here.</p>
+
+<h3>Adding Voting From Scratch</h3>
+
+<p>That&rsquo;s it for our quick tour of the ActiveRecord Reputation System. It&rsquo;s a handy gem but it seems that it would be fairly easy to reproduce the same functionality from scratch. This is indeed the case and you can see the source code for this <a href="https://github.com/railscasts/364-active-record-reputation-system/tree/master/youhaiku-from-scratch">on Github</a>. For the final part of this episode we&rsquo;ll walk quickly through this code.</p> 
+
+<p>Here we have a <code>HaikuVote</code> model that belongs to both a <code>Haiku</code> and a <code>User</code>. What&rsquo;s nice about this approach is that we can put custom validations here, including the vote values that we accept and whether or not the user that is voting is voting for one of their own haikus.</p>
+
+``` /app/models/haiku_vote.rb
+class HaikuVote < ActiveRecord::Base
+  attr_accessible :value, :haiku, :haiku_id
+
+  belongs_to :haiku
+  belongs_to :user
+
+  validates_uniqueness_of :haiku_id, scope: :user_id
+  validates_inclusion_of :value, in: [1, -1]
+  validate :ensure_not_author
+
+  def ensure_not_author
+    errors.add :user_id, "is the author of the haiku" if haiku.user_id == user_id
+  end
+end
+```
+
+<p>The most difficult thing to do from scratch is sorting the haikus based on the number of votes. This is implemented in the <code>Haiku</code> model in a class method called <code>by_votes</code>.</p> 
+
+``` /app/models/haiku.rb
+class Haiku < ActiveRecord::Base
+  attr_accessible :content
+
+  belongs_to :user
+  has_many :haiku_votes
+
+  def self.by_votes
+    select('haikus.*, coalesce(value, 0) as votes').
+    joins('left join haiku_votes on haiku_id=haikus.id').
+    order('votes desc')
+  end
+
+  def votes
+    read_attribute(:votes) || haiku_votes.sum(:value)
+  end
+end
+```
+
+<p>It takes some SQL code to get this functionality working, but it does work.</p>
+
+<p>Another tricky area is determining the number of votes that a user has received, although ActiveRecord&rsquo;s <code>joins</code> method means that we don&rsquo;t need to use SQL code here.</p>
+
+``` /app/models/user.rb
+def total_votes
+  HaikuVote.joins(:haiku).where(haikus: {user_id: self.id}).sum('value')
+end
+```
+
+<p>So, is it best to write this functionality from scratch or use the gem? The gem is useful if we have a more complicated setup, especially if we have multiple models that we&rsquo;re handling the reputation of. Its use of polymorphic associations can really help here. If we have a simpler setup, like the example application we&rsquo;ve shown here then starting from scratch is the better option.</p>

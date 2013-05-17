@@ -1,0 +1,320 @@
+<p>リッチクライアントの人気が高まる中で、よくあるのは「JSON APIがあればいいだけの場合にもRailsを使うべきか?」という疑問です。そのようなAPIを開発する場合には、RailsコアメンバのSantiago Pastorinoによる<a href="https://github.com/spastorino/rails-api">Rails::API gem</a>をお勧めします。このgemのREADMEには、APIを作成したいだけの場合にRailsを利用することの利点について詳しい説明があります。このgemは、Railsのモジュラー性の高さを活かして、APIを作成する場合に不要なものを全部外してスリム化されたRailsアプリケーションを作成するためのジェネレータを提供します。今回のエピソードでは、このgemを使ってとてもシンプルなアプリケーションを作りながらその仕組みを見ていきます。</p>
+
+<h3>Rails::APIを使う</h3>
+
+<p>最初にgemをインストールするために以下のコマンドを実行します。</p>
+
+``` terminal
+$ gem install rails-api
+```
+
+<p>rbenvを使用している場合は、<code>rbenv rehash</code>を実行して<code>rails-api</code>コマンドを利用できるようにします。<code>rails</code>コマンドと同じ要領で、このコマンドを用いて新規のアプリケーションを作成できます。今回はtodoという名前のアプリケーションを作成します。</p>
+
+``` terminal
+$ rails-api new todo
+```
+
+<p>このコマンドで、APIの提供に特化したスリム化されたアプリケーションが作成されます。通常のアプリケーションとの大きな違いは、<code>/app</code>ディレクトリの中がずっと単純であるという点です。その中には<code>assets</code>や<code>views</code>ディレクトリはなく、<code>controllers</code>、<code>mailers</code>、<code>models</code>だけがあります。生成された<code>ApplicationController</code>を見ると、<code>ActionController::Base</code>よりもずっと軽量な<code>ActionController::API</code>を継承していることがわかります。</p> 
+
+``` /app/controllers/application_controller.rb
+class ApplicationController < ActionController::API
+end
+```
+
+<p>これらの違いについては、後ほど詳しく見ていきます。</p>
+
+<p>もう一つ大きな違いはgemfileの中にあります。<code>rails-api</code> gemが含まれていますが、<code>assets</code>グループはありません。<code>jquery-rails</code> gemはまだ含まれていますが削除することができます。Rails::APIの今後のバージョンにも含まれません。</p>
+
+``` /Gemfile
+source 'https://rubygems.org'
+
+gem 'rails', '3.2.3'
+
+# Bundle edge Rails instead:
+# gem 'rails', :git => 'git://github.com/rails/rails.git'
+
+gem 'rails-api'
+
+gem 'sqlite3'
+```
+
+<p>ジェネレータの動きにも違いがあります。<code>Task</code>モデルに対してscaffoldを生成しようとすると、テンプレートやassetファイルがないので、生成されるファイル数はずっと少なくなります。</p>
+
+``` terminal
+$ rails g scaffold task name
+      invoke  active_record
+      create    db/migrate/20120517174851_create_tasks.rb
+      create    app/models/task.rb
+      invoke    test_unit
+      create      test/unit/task_test.rb
+      create      test/fixtures/tasks.yml
+       route  resources :tasks, except: :edit
+      invoke  scaffold_controller
+      create    app/controllers/tasks_controller.rb
+      invoke    test_unit
+      create      test/functional/tasks_controller_test.rb
+```	  
+
+<p>このscaffoldを作成したら、それを使えるようにするためにデータベースのマイグレーションを行ないます。</p>
+
+``` terminal
+$ rake db:migrate
+```
+
+<p>scaffoldで生成された<code>TasksController</code>を見ると、中身はJSONレスポンスを出力するだけなのがわかります。</p>
+
+``` /app/controllers/tasks_controller.rb
+class TasksController < ApplicationController
+  # GET /tasks
+  # GET /tasks.json
+  def index
+    @tasks = Task.all
+
+    render json: @tasks
+  end
+
+  # GET /tasks/1
+  # GET /tasks/1.json
+  def show
+    @task = Task.find(params[:id])
+
+    render json: @task
+  end
+
+  # Other actions omitted.
+end
+```
+
+<p>この種のアプリケーションはHTMLビューやユーザインターフェースを出力するように設定されていないので、コントローラアクションは単にJSONを返します。ブラウザで<code>/tasks</code>のパスにアクセスすると、JSONの出力が表示されますが、今はタスクが一つもないので空の配列になります。</p> 
+
+<h3>APIを利用するユーザインターフェースを作成する</h3>
+
+<p>タスクを作成したり管理するためのユーザインターフェースを提供したいのであれば、<code>/public</code>ディレクトリの中で行なうか、または完全にこのアプリケーションの外で行なうことになります。このアプリケーションの目的のために、デフォルトの<code>index.html</code>ファイルの内容を置き換えて、タスクのリスト表示と新規タスク作成の機能をJavaScriptとCSSも少し使いながら作成します。</p>
+
+``` /public/index.html
+
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+    <title>To Do List</title>
+    <style type="text/css" media="screen">
+      html, body {
+        background-color: #4B7399;
+        font-family: Verdana, Helvetica, Arial;
+        font-size: 14px;
+      }
+      a { color: #0000FF; }
+
+      #container {
+        width: 75%;
+        margin: 0 auto;
+        background-color: #FFF;
+        padding: 20px 40px;
+        border: solid 1px black;
+        margin-top: 20px;
+      }
+    </style>
+    <script src="//ajax.googleapis.com/ajax/libs/jquery/1.7.2/jquery.min.js" type="text/javascript"></script>
+    <script type="text/javascript" charset="utf-8">
+      $(function() {
+        function addTask(task) {
+          $('#tasks').append('<li>' + task.name + '</ul>');
+        }
+
+        $('#new_task').submit(function(e) {
+          $.post('/tasks', $(this).serialize(), addTask);
+          this.reset();
+          e.preventDefault();
+        });
+
+        $.getJSON('/tasks', function(tasks) {
+          $.each(tasks, function() { addTask(this); });
+        });
+      });
+    </script>
+  </head><body>
+    <div id="container">
+      <h1>To-Do List</h1>
+      <form id="new_task">
+        <input type="text" name="task[name]" id="task_name">
+        <input type="submit" value="Add">
+      </form>
+      <ul id="tasks"></ul>
+    </div>
+  </body>
+</html>
+```
+
+<p>今回はすべてを一つにまとめましたが、もちろん好きなように構造化させることができます。このアプリケーションのルートには、リストに項目を追加するページがあり、項目はAPIを介して保存されます。ページをリロードすると、項目リストがこれもAPIを介して表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1162/original/E348I01.png" width="800" height="300" alt="作成したAPIと通信するシンプルなページ"/>
+</div>
+
+<p>これはjQueryコードで実装されています。<code>$.getJSON</code>でタスクリストを取得し、<code>$.post</code>で新規タスクを作成します。</p>
+
+``` /public/index.html
+$('#new_task').submit(function(e) {
+  $.post('/tasks', $(this).serialize(), addTask);
+  this.reset();
+  e.preventDefault();
+});
+
+$.getJSON('/tasks', function(tasks) {
+  $.each(tasks, function() { addTask(this); });
+});
+```
+
+<p>このサンプルはあえてシンプルな構造にしましたが、<a href="http://backbonejs.org">Backbone.js</a>のようなフル機能のクライアントサイド用フレームワークを利用することもできます。</p>
+
+<h3>追加のフォーマットを処理する</h3>
+
+<p>次にRails::APIコントローラに足りない部分について紹介します。例えば、作成したAPIを別のフォーマットにも対応させて、JSONだけでなくXMLでもタスクリストを返せるようにしたいとしましょう。通常の場合は、以下のように<code>respond_to</code>ブロックを追加します。</p>
+
+``` /app/controllers/tasks_controller.rb
+def index
+  @tasks = Task.all
+    
+  respond_to do |format|
+    format.json { render json: @tasks }
+    format.xml { render xml: @tasks }
+  end
+end
+```
+
+<p><code>http://localhost:3000/tasks.xml</code>にアクセスするとXML形式のデータが表示されるはずですが、代わりに<code>undefined method `respond_to’</code>というエラーが表示されます。これはRails::APIコントローラをより軽量にするために省かれている機能があるからですが、必要な機能を簡単に追加しなおすこともできます。<code>TasksController</code>を修正して<code>ActionController::MimeResponds</code>というモジュールをincludeします。</p>
+
+``` /app/controllers/tasks_controller.rb
+class TasksController < ApplicationController
+  include ActionController::MimeResponds
+
+  # Actions omitted
+end
+```
+
+<p>他のコントローラもXMLを返せるようにするには、このモジュールを代わりに<code>ApplicationController</code>にincludeします。ページをリロードすると、タスクリストがXMLで出力されました。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1163/original/E348I02.png" width="800" height="300" alt="タスクがXMLで出力された"/>
+</div>
+
+<p>Rails::APIのREADMEには、includeできる<a href="https://github.com/spastorino/rails-api/blob/master/README.md#adding-other-modules">モジュールのリスト</a>があります。<code>ActionController::MimeResponds</code>の他にもtranslation、Basic HttpAuthenticationなどがあります。しかし、このリストはすべてのモジュールを網羅していません。ソースコードを見ると、<a href="https://github.com/spastorino/rails-api/blob/master/lib/rails-api/action_controller/api.rb#L124">Rails::API controller</a>と<a href="https://github.com/spastorino/rails-api/blob/master/lib/rails-api/action_controller/api.rb#L124">ActionController::Base5</a>に含まれているモジュールを比較できます。<a href="https://github.com/rails/rails/blob/master/actionpack/lib/action_controller/base.rb#L192">ActionController::Base</a>のすべてのモジュールをincludeすると機能が重複してしまいます。そこで必要なものだけを選択するようにします。</p>
+
+<p>しかし、コントローラにモジュールをincludeするだけでは足りない場合もあります。例えば、クッキーをサポートするにはモジュールをincludeするだけではなくRackミドルウェアを追加する必要があります。これによって重要なことがわかります。Rails APIはコントローラだけではなく、Rackミドルウェア層もスリム化しています。Railsアプリケーション内で<code>rake middleware</code>コマンドを実行すると、使用しているミドルウェアのリストが表示されます。表示されるリストは通常のRailsアプリケーションよりも少なくなっています。</p>
+
+``` terminal
+$ rake middleware
+use ActionDispatch::Static
+use Rack::Lock
+use #<ActiveSupport::Cache::Strategy::LocalCache::Middleware:0x007f9704a76118>
+use Rack::Runtime
+use ActionDispatch::RequestId
+use Rails::Rack::Logger
+use ActionDispatch::ShowExceptions
+use ActionDispatch::DebugExceptions
+use ActionDispatch::RemoteIp
+use ActionDispatch::Reloader
+use ActionDispatch::Callbacks
+use ActiveRecord::ConnectionAdapters::ConnectionManagement
+use ActiveRecord::QueryCache
+use ActionDispatch::ParamsParser
+use ActionDispatch::Head
+use Rack::ConditionalGet
+use Rack::ETag
+run Todo::Application.routes
+```
+
+<p>ここでは5つのミドルウェアがなくなっています。通常のrailsアプリケーションと今回のアプリケーションで<code>rake middleware</code>の実行結果の差分は次のとおりです。</p>
+
+``` terminal
+> use Rack::MethodOverride
+> use ActionDispatch::Cookies
+> use ActionDispatch::Session::CookieStore
+> use ActionDispatch::Flash
+> use ActionDispatch::BestStandardsSupport
+```
+
+<p>これらのミドルウェアのうち機能がわからないものがある場合は、<a href="http://railscasts.com/episodes/319-rails-middleware-walkthrough">エピソード319</a>を参照してください。 </p>
+
+<p>この機能のうちいずれか(例えばクッキーのサポート)を戻したい場合は、そのミドルウェアを追加してコントローラモジュールをincludeします。アプリケーションの設定ファイルに、次のようにミドルウェアを追加します。</p>
+
+``` /config/application.rb
+module Todo
+  class Application < Rails::Application
+    config.middleware.insert_after ActiveRecord::QueryCache, ActionDispatch::Cookies
+     # Rest of class omitted
+  end
+end
+```
+
+<p>ミドルウェアの順番はできる限り通常のアプリケーションと同じようにするのがいいので、<code>insert_after</code>を使ってフルスタックの場合と同じようにCookies middlewareを<code>QueryCache</code>の後に追加しました。これで<code>TasksController</code>で<code>Cookies</code>モジュールをincludeしてクッキー機能を追加できます。</p>
+
+``` /app/controllers/tasks_controller.rb
+class TasksController < ApplicationController
+  include ActionController::MimeResponds
+  include ActionController::Cookies
+
+  # Actions omitted
+end
+```
+
+<p>アプリケーションを再起動してミドルウェアへの変更を有効化させます。再起動後にページをリロードすると、<code>helper_method</code>が未定義だというエラーが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1164/original/E348I03.png" width="800" height="300" alt="Helpersモジュールをincludeしていないのでエラーが返される"/>
+</div>
+
+<p>これによって重要なことがわかります。モジュールの中には、別のモジュールに依存しているものがあります。今回の場合、<code>Cookies</code>モジュールは<code>Helpers</code>モジュールに依存するのでこれも追加する必要があります。</p>
+
+``` /app/controllers/tasks_controller.rb
+class TasksController < ApplicationController
+  include ActionController::MimeResponds
+  include ActionController::Helpers
+  include ActionController::Cookies
+
+  # Actions omitted
+end
+```
+
+<p>ページをリロードすると正しく動作するようになりました。これで通常のRailsアプリケーションと同じようにクッキーを利用できます。</p>
+
+<h3>JbuilderとRABLを用いてJSONを生成する</h3>
+
+<p>次にJSON APIを作るために利用できるその他のgemについて説明します。過去のエピソードで<a href="http://railscasts.com/episodes/320-jbuilder">Jbuilder</a>と<a href="http://railscasts.com/episodes/322-rabl">RABL</a>を紹介しました。これらのgemは、ビューテンプレートを用いてJSONを出力します。これはRails::APIのgrainに反するかも知れませんが、これらを使うことも可能です。RABLを使った例を示します。いつものようにgemをgemfileに追加してbundleコマンドを実行してインストールします。</p>
+
+``` /Gemfile
+gem 'rabl'
+```
+
+<p><code>/app</code>ディレクトリには現在viewsディレクトリがありませんが、RABLはビューテンプレートで動作するので新規にviewsディレクトリを作成します。viewsディレクトリの下に<code>tasks</code>ディレクトリを作成し、ここに<code>index.json.rabl</code>ファイルを作成します。このファイルでRABLに対して、全てのタスクを<code>id</code>と<code>name</code>属性付きの集合として出力させます。</p>
+
+``` /app/views/tasks/index.json.rabl
+collection @tasks
+attributes :id, :name
+```
+
+<p>コントローラでJSONを出力する振る舞いを修正してこのテンプレートを出力するように変更します。通常のRailsアプリケーションの場合、<code>render</code>の呼び出しを完全に削除すればフォールバックしてテンプレートを出力させることができます。Rails::APIアプリケーションの場合は出力の振る舞いは明示的に書く必要がありますが、ここで<code>render</code>を呼び出すだけで現在のアクションに一致するテンプレートが出力されます。</p>
+
+``` /app/controllers/tasks_controller.rb
+def index
+  @tasks = Task.all
+  
+  respond_to do |format|
+    format.json { render }
+    format.xml { render xml: @tasks }
+  end
+end
+```
+
+<p>アプリケーションを再起動して<code>/tasks.json</code>にアクセスすると、RABLが生成したJSONレスポンスが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1165/original/E348I04.png" width="800" height="300" alt="JSONがRABLテンプレートから出力される"/>
+</div>
+
+<p>出力を指定しなくてもいいようにするには、<code>ImplicitRender</code>モジュールをincludeすれば<code>render</code>の呼び出しも必要なくなります。XMLテンプレートを追加すれば、フォーマットが検知されて必要なテンプレートが自動的に出力されるようになるので、<code>respond_to</code>ブロックを完全に削除できます。</p>
+
+<p>ビューテンプレートの暗示的な出力を行なっているので、通常のRailsアプリケーションに近くなってきました。これらの機能をすべて追加しなおすとなると、そもそもRails::APIをあえて使う価値があるのかという疑問がでてきます。ここで行なったことを見ると、APIを出力しているだけだとしてもビューを出力しているのであれば、最初から通常のRailsアプリケーションを使った方がよかったかも知れません。結局はそれぞれのアプリケーションに要求されることと、Railsの機能のどの部分を使用するかによって選択は変わってきます。</p> 
+
+<p>JSON APIを作成するのであれば、READMEの<a href="https://github.com/spastorino/rails-api/blob/master/README.md#why-use-rails-for-json-apis">“Why use Rails for JSON APIs?”</a>(JSON APIにRailsを使う理由)のセクションを読むことをお勧めします。そこにはRailsがHTML出力以外に提供する機能についての詳細な解説があります。</p> 

@@ -1,0 +1,161 @@
+<p><a href="https://github.com/flyerhzm/bullet">Bullet</a>, by Richard Huang, is a gem that can alert us in a variety of ways when our application performs an inefficient database query like an N+1 query or a missing counter cache column. In this episode we&rsquo;ll use it to optimize a Rails application.</p>
+
+<h3>Optimizing Our Products Page</h3>
+
+<p>The page shown below lists products by the category they&rsquo;re in. There are two models involved on this page: one is <code>Category</code> and this can have many <code>Products</code>.</p> 
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1307/original/E372I01.png" width="800" height="500" alt="Our categories page showing the products."/>
+</div>
+
+<p>This page currently suffers from the N+1 query problem and we can see this by looking at the Rails log. This shows that we perform one query to get the categories then a separate query for each category to fetch its products.</p>
+
+``` log
+Category Load (0.2ms)  SELECT "categories".* FROM "categories" ORDER BY name
+Product Load (0.2ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" = 3
+Product Load (0.2ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" = 1
+Product Load (0.2ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" = 5
+Product Load (0.2ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" = 4
+Product Load (0.3ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" = 2
+```
+
+<p>This is what the N+1 query problem is: making a query to fetch the parent then any number of child queries to fetch the other records. This kind of problem can be easy to overlook and this is where Bullet comes in useful. We&rsquo;ll add it to our application&rsquo;s gemfile, but only in the development group, then run <code>bundle</code> to install it.</p>
+
+``` /Gemfile
+gem 'bullet', group: :development
+```
+
+<p>We&rsquo;ll enable Bullet in a new initializer file. Since it won&rsquo;t be loaded in every environment we first check to see that it&rsquo;s defined. If it is we enable it and tell it how we want to be notified about query issues. We&rsquo;ll set <code>alert</code> to <code>true</code> which will alert us through the browser.</p>
+
+``` /config/initializers/bullet.rb
+if defined? Bullet
+  Bullet.enable = true
+  Bullet.alert = true
+end
+```
+
+<p>When we restart the server and reload the page we get a JavaScript alert telling us that Bullet has detected an N+1 query and showing what we should do to fix it.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1308/original/E372I02.png" width="803" height="500" alt="Bullet warning us about our N+1 Query issue."/>
+</div>
+
+<p>We&rsquo;ll follow Bullet&rsquo;s recommendations and fetch the products at the same time we fetch the categories.</p>
+
+``` /app/controllers/categories_controller.rb
+class CategoriesController < ApplicationController
+  def index
+    @categories = Category.order(:name).includes(:products)
+  end
+end
+```
+
+<p>Now we fetch the products through eager loading since we need this data anyway. When we reload the page now we don&rsquo;t get an alert as we&rsquo;re fetching the data efficiently. If we look in the log file we&rsquo;ll see that the data is fetched by only two queries, one to get the categories and one to get the products in those categories.</p>
+
+``` log
+Category Load (0.2ms)  SELECT "categories".* FROM "categories" ORDER BY name
+Product Load (0.4ms)  SELECT "products".* FROM "products" WHERE "products"."category_id" IN (3, 1, 5, 4, 2)
+```
+
+<p>Bullet can also tell us when we&rsquo;re doing eager loading unnecessarily. Let&rsquo;s say that we decide to move the lists of products out of this index page and into the show page for each product. We&rsquo;ll remove the code that lists the products in the index template so that we&rsquo;re only displaying information about the categories.</p>
+
+``` /app/views/categories/index.html.erb
+<h1>Categories</h1>
+
+<% @categories.each do |category| %>
+  <div class="category">
+    <h2><%= link_to category.name, category %></h2>
+  </div>
+<% end %>
+```
+
+<p>When we reload the page now we&rsquo;ll get an alert again this time telling us that Bullet has detected unused eager loading.</p> 
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1309/original/E372I03.png" width="" height="" alt="Now we&rsquo;re warned about unnecessary eager loading."/>
+</div>
+
+<p>We can remove the call to <code>includes</code> in the <code>CategoriesController</code> to fix this.</p>
+
+``` /app/controllers/categories_controller.rb
+class CategoriesController < ApplicationController
+  def index
+    @categories = Category.order(:name).includes(:products)
+  end
+end
+```
+
+<p>Reloading the page now no longer give us an alert.</p>
+
+<h3>Counter Cache Columns</h3>
+
+<p>Bullet will also notify us when we should consider using a counter cache column. Let&rsquo;s say that under each of the category names we want to display the number of products in that category. We can do that like this:</p>
+
+``` /app/views/categories/index.html.erb
+<h1>Categories</h1>
+
+<% @categories.each do |category| %>
+  <div class="category">
+    <h2><%= link_to category.name, category %></h2>
+    <%= pluralize category.products.size, "product" %>
+  </div>
+<% end %>
+```
+
+<p>When we reload the page now we get an alert again.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1310/original/E372I04.png" width="800" height="500" alt="Our categories table now needs a counter cache column."/>
+</div>
+
+<p>This time it tells us that we should add a counter cache column. Our app needs to perform a database query for each category so that it can count its products. This is similar to the N+1 Query problem we had earlier. We can fix this easily by using the <code>counter_cache</code> option in the call to <code>belongs_to</code> in the <code>Product</code> model.</p>
+
+``` /app/models/product.rb
+class Product < ActiveRecord::Base
+  belongs_to :category, counter_cache: true
+  attr_accessible :name, :price, :category_id
+end
+```
+
+<p>We need to generate a migration to add the counter column to the products table.</p>
+
+``` terminal
+$ rails g migration add_products_count_to_categories products_count:integer
+```
+
+<p>Before we run the migration we&rsquo;ll change it so that the <code>counter_cache</code> column has a default value.</p>
+
+``` /db/migrations/20120820000000_add_products_count_to_categories.rb
+class AddProductsCountToCategories < ActiveRecord::Migration
+  def change
+    add_column :categories, :products_count, :integer, default: 0, null: false
+  end
+end
+```
+
+<p>If we want this to apply to the existing <code>Product</code> records we&rsquo;ll need to fill in that column and we&rsquo;ll create a separate migration to do this.</p>
+
+``` terminal
+$ rails g migration cache_product_count
+```
+
+<p>In this migration we could use ActiveRecord to fill this column but we won&rsquo;t do that here. Instead we&rsquo;ll write some SQL code.</p>
+
+``` /db/migrations/20120820000000_cache_product_count.rb
+class CacheProductsCount < ActiveRecord::Migration
+  def up
+    execute "update categories set products_count=(select count(*) from products where category_id=categories.id)"
+  end
+
+  def down
+  end
+end
+```
+
+<p>This will update the products count for the existing categories. We can now run these migrations with <code>rake db:migrate</code> and when we reload the page again the alert will be gone.</p>
+
+<h3>Other Notification Options</h3>
+
+<p>So far we&rsquo;ve only seen one way that Bullet can notify us, through an alert message, but there are a number of options that we can choose to be notified. This is done through the <a href="https://github.com/flyerhzm/uniform_notifier">Uniform Notifier gem</a> which is an interesting project in itself. After we&rsquo;ve tried Bullet out in our application we could switch the notification messages to something less intrusive, such as the <code>bullet_logger</code>. This way we can carry on developing our app and check this occasionally to see if there are any query issues.</p> 
+
+<p>One thing that&rsquo;s important with any tool like this is that we don&rsquo;t blindly follow its suggestions. If an alert message tells us to add eager loading we shouldn&rsquo;t just add it to make the message go away. There are many times when adding eager loading can actually make performance worse so we should consider other optimizations such as caching. When in doubt it&rsquo;s a good idea to use benchmarking to compare the performance of different solutions. We should also keep in mind that the environment that our production server is set up in can play a part as well, for example the latency of the database connections.</p>

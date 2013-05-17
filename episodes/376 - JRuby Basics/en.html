@@ -1,0 +1,190 @@
+<style type="text/css">.inlineThumbnail { border: solid 1px #333; float: left; margin: 0 8px 8px 0; }</style>
+
+<p><a href="http://www.jruby.org/">JRuby</a> is a polished and stable Ruby implementation built on top of the Java Virtual Machine. Even if you&rsquo;re not a Java programmer JRuby still has a lot to offer and in this episode we&rsquo;ll show you the basics of setting up JRuby and focus on some areas where it differs from Ruby MRI.</p>
+
+<h3>Installing JRuby</h3>
+
+<p>One way to install JRuby is to download it from the JRuby site but it can also be installed through a Ruby environment manager such as RVM or rbenv. We&rsquo;ll use rbenv to install the latest version which at the time of writing is 1.7.0.preview2.</p>
+
+``` terminal
+$ rbenv install jruby-1.7.0-preview2
+```
+
+<p>Note that if you&rsquo;re running OS X Mountain Lion this may prompt you to install a Java Virtual Machine. Once it has installed we can switch to it to see that it works. Note that depending on your setup you might need to prefix Ruby-related commands with a <code>j</code> to make sure that they use JRuby which means running <code>jruby</code> and <code>jirb</code> instead of <code>ruby</code> or <code>irb</code>.</p>
+
+``` terminal
+$ rbenv shell jruby-1.7.0-preview2
+$ ruby -v
+jruby 1.7.0.preview2 (1.9.3p203) 2012-08-07 4a6bb0a on Java HotSpot(TM) 64-Bit Server VM 1.6.0_35-b10-428-11M3811 [darwin-x86_64]
+```
+
+<p>We&rsquo;ll start our look at JRuby by experimenting in the console to see what sets JRuby apart. We can run Ruby commands just as if we were running Ruby MRI 1.9.3 and for the most part we won&rsquo;t notice any difference. One big change is that we now have access to the entire world of Java and its libraries. The key to unlocking this is the line <code>require &quot;java&quot;</code>. This allows us to access various Java classes such as a HashMap. We&rsquo;ll create a new HashMap, add a value to it then retrieve it.</p>
+
+``` console
+>> require "java"
+=> true
+>> h = java.util.HashMap.new
+=> {}
+>> h.put(:foo, "bar")
+=> nil
+>> h.get(:foo)
+=> "bar"
+```
+
+<p>For core classes like this JRuby provides some convenience methods beyond what is provided by the Java interface. With our <code>HashMap</code>, for example, we can access values similar to how we&rsquo;d do it in Ruby. We can even iterate over the keys with <code>.each</code> and much more, even though we&rsquo;re working with a Java hash map.</p>
+
+``` console
+>> h[:foo]
+=> "bar"
+```
+
+<p>Another more interesting use of JRuby is Swing which we can use to create a GUI. </p>
+
+``` console
+>> javax.swing.JOptionPane.showMessageDialog(nil, "Hello World!")
+=> nil￼
+```
+
+<p><img src="http://asciicasts.com/system/photos/1336/original/E376I01.png" width="262" height="167" alt="A Swing alert box." class="inlineThumbnail"/> Running this shows a dialog box and we can create full-featured UIs this way. This isn&rsquo;t useful for Rails applications but it&rsquo;s handy for creating administrative scripts. JRuby gives us an alternative way to  do this which more closely matches the Ruby style, like this:</p>
+
+
+``` console
+>> Java::JavaxSwing::JOptionPane.show_message_dialog(nil, "Hello")
+=> nil
+```
+
+<p>This will show a similar dialog box to the one we saw earlier. Next we&rsquo;ll show you a fuller example of what&rsquo;s possible with Swing.</p>
+
+``` swing.rb
+require "java"
+
+java_import javax.swing.JFrame
+java_import javax.swing.JButton
+java_import javax.swing.JOptionPane
+
+class HelloWorld < JFrame
+  def initialize
+    super "Example"
+    
+    setSize(150, 100)
+    setDefaultCloseOperation(JFrame::EXIT_ON_CLOSE)
+    setLocationRelativeTo(nil)
+    
+    button = JButton.new("Say Hello")
+    add(button)
+    
+    button.addActionListener do |e|
+      JOptionPane.showMessageDialog(nil, "Hello World")
+    end
+    
+    setVisible(true)
+  end
+end
+
+HelloWorld.new
+```
+
+<p>At the top of this file we call <code>require &quot;java&quot;</code> like we did in irb to give us access to Swing then use <code>java_import</code> to import some Java classes so that we don&rsquo;t need to go through their package when we use them and can access the classes directly in this script. We then create a Ruby class that inherits from the Java <code>JFrame</code> class. This will create a window and in our class we set its size and some other properties. We then create a button, add it to the window and add an event. The code inside the event&rsquo;s block is fired when the button is clicked. In Java we&rsquo;d use an anonymous function to define the event&rsquo;s code but here we can use a Ruby block. We then make the window visible. Finally outside the class we instantiate a new instance of our class. When we run this file through the <code>ruby</code> command it opens up a small window  filled with the button we created. When we click it the message dialog is shown.</p>
+
+<div class="imageWrapper" style="margin: 0 auto;">
+  <img src="http://asciicasts.com/system/photos/1337/original/E376I02.png" width="350" height="350" alt="Our simple Swing application."/>
+</div>
+
+<h3>Improved Concurrency In JRuby</h3>
+
+<p>Having a bridge between Ruby and Java is useful but as a Rails developer you might not consider it to be much use. What&rsquo;s more interesting about JRuby is that is has improved support for concurrency with threads. We can demonstrate this by creating a new Ruby script to calculate Fibonacci numbers.</p>
+
+``` fib.rb
+def fib(n)
+  n < 2 ? n : fib(n-1) + fib(n-2)
+end
+
+start = Time.now
+
+1.upto(5).map do |n|
+  Thread.new { puts "Thread #{n}: #{fib(32)}" }
+end.each(&:join)
+
+puts "Time: #{Time.now - start}"
+```
+
+<p>Here we have a simple method for calculating Fibonacci numbers that we trigger five times, each in a separate thread and when the program has finished we print out the total time it took to run. When we run this under JRuby it takes under a second to complete, but if we switch Ruby versions and run the same program under MRI it  takes over three seconds. The main reason for this slowdown is the Global Interpreter Lock. Matt Aimonetti wrote <a href="http://merbist.com/2011/10/03/about-concurrency-and-the-gil/">an article about this</a> in 2011 which explains this in detail. Basically this lock prevents the Fibonacci sequence from running concurrently in separate threads and if we have a multi-core machine this time difference will be more noticeable. If we aren&rsquo;t constantly processing Ruby code, but are instead waiting for a response from a database or a file system then the GIL is lifted and we can simulate this with a call to <code>sleep</code> in our Fibonacci code.</p>
+
+``` fib.rb
+def fib(n)
+  n < 2 ? n : fib(n-1) + fib(n-2)
+end
+
+start = Time.now
+
+1.upto(5).map do |n|
+  Thread.new { puts "Thread #{n}: #{sleep(0.5)}" }
+end.each(&:join)
+
+puts "Time: #{Time.now - start}"
+```
+
+<p>If we run this code under MRI Ruby now it only takes around half a second to finish as the lock isn&rsquo;t set when a thread sleeps.</p> 
+
+<p>If we&rsquo;re building a multi-threaded Rails application and wondering how much the performance might improve under JRuby due to this concurrency difference the answer is that this depends on how much time our application spends accessing the database versus executing Ruby code and also on the number of cores that the machine has. There are, of course, many other things we should consider when comparing performance but in general if we&rsquo;re setting up a multi-threaded Rails app in production under MRI we&rsquo;ll probably still want to set up separate processes running the Rails app to take full advantage of concurrency. Under JRuby, however,  it&rsquo;s more likely that we can handle everything in a single process.</p> 
+
+<h3>A JRuby on Rails Application</h3>
+
+<p>We&rsquo;ll finish this episode by showing how to make a Rails application compatible with JRuby. First we&rsquo;ll switch over the JRuby in the shell then install the Rails gem. Once all the gems have installed we can create a new Rails app that we&rsquo;ll call <code>blog</code>.</p>
+
+``` terminal
+$ rbenv shell jruby-1.7.0-preview2 
+$ gem install rails
+$ rails new blog
+```
+
+<p>The Rails generator is quite smart and will automatically make our new application compatible with JRuby if we make a new app while running JRuby. The key differences can be found in the gemfile and the first one is that the gem used to access SQLite is not the usual <code>sqlite3</code> but something else instead.</p>
+
+``` /Gemfile
+gem 'activerecord-jdbcsqlite3-adapter'
+```
+
+<p>JDBC is a standard way for Java applications to communicate with a database. This gem uses this to allow ActiveRecord to talk to our application&rsquo;s database. It&rsquo;s important to understand that some gems are incompatible with JRuby because they rely on C extensions and the <code>sqlite3</code> gem is one of them. If we try to install this gem under JRuby it will fail with an error message when trying to compile the native extensions. There are ways to get around this problem but it&rsquo;s generally best to look for an alternative gem that is compatible with JRuby. The JRuby wiki <a href="https://github.com/jruby/jruby/wiki/C-Extension-Alternatives">has a page</a> on C extension alternatives and this is a good place to look for an alternative to the gems your applications use that require C. Another useful resource is the <a href="https://github.com/jruby/jruby-lint">JRuby-Lint gem</a>. This provides a <code>jrlint</code> command that we can run in a project to see if it has any incompatibilities with JRuby. It doesn&rsquo;t check everything but it does look for C extensions and a few other potential problems. Back in our app&rsquo;s gemfile the next gem listed is <code>jruby-openssl</code> which emulates Ruby&rsquo;s native OpenSSL library. The only other JRuby-specific gem listed is <code>therubyrhino</code> which is used to execute JavaScript. If we&rsquo;re converting an existing Rails application to JRuby these are the main gems we&rsquo;ll need to add to make it compatible. We should then be able to continue working on our Rails app and to demonstrate this we&rsquo;ll create a scaffold for a simple <code>Article</code> model in our app.</p>
+
+``` terminal
+$ rails g scaffold article name
+$ rake db:migrate
+$ rails s
+```
+
+<p>This gives us the usual scaffolding pages and we can create, modify and list articles just like we would with an application that uses MRI Ruby.</p>
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1338/original/E376I03.png" width="800" height="309" alt="A Rails application running under JRuby."/>
+</div>
+
+<p>Loading in the entire Rails application under JRuby can take quite a while. In general JRuby is much slower at loading code initially but is quite fast at running it once it has loaded. If we&rsquo;re struggling with this we could consider making your application compatible with both MRI and JRuby so that we can use MRI in development when we&rsquo;re frequently reloading the application. We can accomplish this by using the <code>platform</code> command in the gemfile so that certain gems are only loaded under a specific Ruby implementation.</p>
+
+``` /Gemfile
+source 'https://rubygems.org'
+
+gem 'rails', '3.2.8'
+
+platform :jruby do
+ gem 'activerecord-jdbcsqlite3-adapter'
+ gem 'jruby-openssl'
+ gem 'therubyrhino'
+end
+
+plaform :ruby do
+  gem 'sqlite3'
+end
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~> 3.2.3'
+  gem 'coffee-rails', '~> 3.2.1'
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+```
+
+<p>If we switch our application over to MRI Ruby 1.9.3, run bundle to install the gems, then start up the server our Rails application will run under MRI. If you&rsquo;re doing this it&rsquo;s a good idea to have a comprehensive test suite so that we can ensure that our app works under both JRuby and MRI.</p>

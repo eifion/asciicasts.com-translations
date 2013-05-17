@@ -1,0 +1,179 @@
+<p>Let&rsquo;s say that we have a to-do list application where the user can add tasks and mark them as complete. A task list is private for a user which means that a new user must first sign up for the app before they can try it out.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1411/original/E393I01.png" width="800" height="400" alt="The home page of our to-do list application."/>
+</div>
+
+<p>This is the page that a new user sees when they first visit the app with a description to try to convince them to try it. When they click the &ldquo;Try it for free&rdquo; button they see a sign-up form and at this point a lot of potential customers will leave as they won&rsquo;t want to give their personal information just to try out an app. What can we do to improve this user experience? Instead of redirecting new users to a sign-up form we&rsquo;ll create a temporary guest account that they can use to try the application. Later on they can sign up for a permanent account if they like it.</p>
+
+<h3>Handling Guest Users</h3>
+
+<p>The first question that comes to mind is should we store the guest user account in the database if it&rsquo;s just temporary? Our application is currently structured so that a user has many tasks and we use this association in the <code>TasksController</code> to ensure that only the current user&rsquo;s tasks are shown. While we could keep track of a guest&rsquo;s tasks&rsquo; ids in a session this could get messy as our application grows and we have other associations with out User record. This would also mean that we had a lot of <code>user_id</code> foreign keys in our database that will be null and we&rsquo;d have no way then of knowing if two tasks are shared by the same guest user and so on. Given all this we&rsquo;ll keep track of all the guests in the database and to start we&rsquo;ll add a boolean guest column to the <code>users</code> table.</p>
+
+``` terminal
+$ rails g migration add_guest_to_users guest:boolean
+$ rake db:migrate
+```
+
+<p>Now we need to modify our application so that when a user clicks the &ldquo;Try it for free&rdquo; button a new guest user account is automatically created for them. The button currently redirects the user to the <code>new_users_path</code> so that the form is displayed, but instead we&rsquo;ll point it to the <code>users_path</code> with a POST action.</p> 
+
+``` /app/views/tasks/index.html.erb
+<p><%= button_to "Try it for free!", users_path, method: :post %></p>
+```
+
+<p>Clicking this button now triggers the <code>UsersController</code>&rsquo;s <code>create</code> action. This is currently set up to accept parameters from a form and we&rsquo;ll modify it so that if no parameters are passed in a new guest user is created, using a new <code>new_guest</code> class method on the <code>User</code> model.</p>
+
+``` /app/controllers/users_controller.rb
+def create
+  @user = params[:user] ? User.new(params[:user]) : User.new_guest
+  if @user.save
+    session[:user_id] = @user.id
+    redirect_to root_url
+  else
+    render "new"
+  end
+end
+```
+
+<p>In our User model we&rsquo;ve written the authentication from scratch as we showed in <a href="http://railscasts.com/episodes/250-authentication-from-scratch-revised">episode 250</a>. We use <code>has_secure_password</code> which Rails provides and which is a convenient way to add authentication to an application. If you&rsquo;re using Devise or another authentication gem you&rsquo;ll need to alter the technique we use here.</p>
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  has_many :tasks
+
+  attr_accessible :username, :email, :password, :password_confirmation
+
+  validates_presence_of :username, :email
+  validates_uniqueness_of :username
+
+  has_secure_password
+  
+  def self.new_guest
+    new { |u| u.guest = true }
+  end
+end
+```
+
+<p>In the <code>new_guest</code> method we create a new <code>User</code> and set its <code>guest</code> attribute to <code>true</code>. We do this inside a block because the guest attribute is protected from mass-assignment.</p>
+
+<p>A guest user will now be created whenever we click that button, but what if we want this to work a little differently? Maybe we don&rsquo;t want to override the <code>UsersController</code>&rsquo;s <code>create</code> method or we want a guest user to always be available if we try to access the current user when one isn&rsquo;t logged in. In these cases we can override the <code>current_user</code> method in the <code>ApplicationController</code> and have it fall back to creating a guest user if there is no current <code>user_id</code> session variable. We won&rsquo;t take that approach here but it&rsquo;s worth considering as a way to handle guest users.</p>
+
+<h3>Dealing With Validations</h3>
+
+<p>Let&rsquo;s try our changes out. When we visit the home page then click the &ldquo;Try it for free&rdquo; button the <code>UsersController</code> attempts to create a guest user but that user fails the validation and so we&rsquo;re redirected to the sign-up form.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1412/original/E393I02.png?1355685651" width="800" height="600" alt="Trying the app as a guest throws validation errors."/>
+</div>
+
+<p>What we need is for the <code>new_guest</code> method to return a valid user record and there are multiple ways that we can do this. One option is to add fake data for the required fields so that the validation passes. This is certainly an option but if we have different authentication techniques, such as signing in through Twitter it&rsquo;s harder to fake this data. This approach also means that we&rsquo;re filling up the database with data that will never be used. Instead, we&rsquo;ll modify the validations so that they&rsquo;re conditional and not required if the current user is a guest.</p>
+
+``` /app/models/user.rb
+validates_presence_of :username, :email, unless: :guest?
+validates_uniqueness_of :username, allow_blank: true
+```
+
+<p>When we click the button now the validations still fail as we haven&rsquo;t supplied a password. This validation is added automatically by <code>has_secure_password</code>. In Rails 4 we&rsquo;ll be able to pass in a <code>validations</code> option and set it to <code>false</code> so that these validations are skipped and then set them manually. Unfortunately this isn&rsquo;t available in Rails 3 but the implementation for <code>has_secure_password</code> is surprisingly simple. The method is only around a dozen lines long and most of the logic is contained in a module called <code>InstanceMethodsOnActivation</code> which we can easily include manually. We can mimic this functionality and alter it to suit our needs. Once we&rsquo;ve done that out model class looks like this:</p>
+
+``` /app/models/user.rb
+class User < ActiveRecord::Base
+  has_many :tasks
+
+  attr_accessible :username, :email, :password, :password_confirmation
+
+  validates_presence_of :username, :email, :password_digest, unless: :guest?
+  validates_uniqueness_of :username, allow_blank: true
+  validates_confirmation_of :password
+
+  # override has_secure_password to customize validation until Rails 4.
+  require 'bcrypt'
+  attr_reader :password
+  include ActiveModel::SecurePassword::InstanceMethodsOnActivation
+  
+  def self.new_guest
+    new { |u| u.guest = true }
+  end
+end
+```
+
+<p>Our class now mimics the functionality of <code>has_secure_password</code> but without the validations. This means that we can manually add the validations we want instead. If you&rsquo;re using Devise and want to do something similar to this you can remove the <code>Validatable</code> module and add the validations manually or alternatively we can remove the <code>email_changed?</code> and <code>password_required?</code> methods so that they&rsquo;re dependent on whether the current user is a guest.</p> 
+
+<p>We can try our application out now. If we click &ldquo;Try it for free&rdquo; now we&rsquo;re taken to the home page and we can add items and mark them as complete without having created a user account.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1413/original/E393I03.png" width="800" height="400" alt="Using the app as a guest."/>
+</div>
+
+<p>There are still some minor issues with our application. For example the login status text says &ldquo;Logged in as .&rdquo;. We should instead give an indication that they&rsquo;re logged in as a guest user and give them the chance to sign up for full membership. We can do this by editing the application&rsquo;s layout file. This currently displays the current user&rsquo;s username. We&rsquo;ll display the name instead, which is a new method on the User model that we&rsquo;ll write shortly.</p>
+
+``` /app/views/layouts/application.html.erb
+<% if current_user %>
+  Logged in as <strong><%= current_user.name %></strong>.
+  <%= link_to "Log Out", logout_path %>
+<% else %>
+  <%= link_to "Log In", login_path %>
+<% end %>
+```
+
+<p>The new name method will check if the current user is a guest and, if so, display &ldquo;Guest&rdquo; instead of their username.</p>
+
+``` /app/models/user.rb
+def name
+  guest ? "Guest" : username
+end
+```
+
+<p>Now we need a way for guests to sign up and we&rsquo;ll do this by adding a link to the layout that only shows if they&rsquo;re a guest.</p>
+
+``` /app/views/layouts/application.html.erb
+<% if current_user %>
+  Logged in as <strong><%= current_user.name %></strong>.
+  <% if current.user.guest? %>
+    <%= link_to "Become a member", signup_path %>
+  <% else %>
+    <%= link_to "Log Out", logout_path %>
+  <% end %>
+<% else %>
+  <%= link_to "Log In", login_path %>
+<% end %>
+```
+
+<p>We could make a logout link for guests too but we&rsquo;d need to be a little more careful about that as guests can&rsquo;t log back in.</p> 
+
+<h3>Storing Guest Users&rsquo; Tasks</h3>
+
+<p>The trickiest part of all this is that we need to persist a guest user&rsquo;s tasks when they become a member. There are several different ways that we can do this. One option is to change the <code>create</code> action so that it updates the current user record and removes the <code>guest</code> flag instead of creating a new record. Trying to juggle both new and existing user records in the same action can get a little messy, however, so we won&rsquo;t try this. Instead we&rsquo;ll move the associated data from the current user to the newly-created user if a current user exists and they are a guest.</p>
+
+``` /app/controllers/users_controller.rb
+def create
+  @user = params[:user] ? User.new(params[:user]) : User.new_guest
+  if @user.save
+    current_user.move_to(@user) if current_user && current.user.guest?
+    session[:user_id] = @user.id
+    redirect_to root_url
+  else
+    render "new"
+  end
+end
+```
+
+<p>We call a <code>move_to</code> method on the <code>User</code> model to move the data while we&rsquo;ll need to write. This will go through all the different associations and call <code>update_all</code> on them setting the <code>user_id</code> to the new user&rsquo;s id.</p>
+
+``` /app/models/user.rb
+def move_to(user)
+  tasks.update_all(user_id: user.id)
+end
+```
+
+<p>We could also destroy the guest user here but we need to be careful if we do this as it might still have the associations still tied to it. For example if a user has many tasks and <code>dependent</code> is set to <code>destroy</code> this will end up destroying the tasks it&rsquo;s associated with even though we&rsquo;ve updated them to the new user. A better solution is to create a Rake task to destroy old guest accounts. This could look like this:</p>
+
+``` /lib/tasks/guests.rake
+namespace :guests do
+  desc "Remove guest accounts more than a week old."
+  task :cleanup => :environment do
+    User.where(guest: :true).where("created_at < ?", 1.week.ago).destroy_all
+  end
+end
+```
+
+<p>The Rake task will go through all the <code>User</code> records and destroy all the guest accounts that were created over a week ago. If we do this it would be a good idea to notify the guest users that their accounts will be deleted after a week unless they upgrade to a full account. To have old guest accounts deleted automatically we could set up this Rake task as a cron job using the Whenever gem as demonstrated in <a href="http://railscasts.com/episodes/164-cron-in-ruby-revised">episode 164</a>. Now when a guest user clicks &ldquo;Become a member&rdquo; and fills in the signup form all their tasks are automatically moved over to their new account.</p>

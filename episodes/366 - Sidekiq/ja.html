@@ -1,0 +1,242 @@
+<p>Railsには、実行時間の長いジョブをバックグラウンドプロセスに移すためのツールがいくつもあります。それぞれが固有の長所を持っていますが、<a href="http://mperham.github.com/sidekiq/">Sidekiq</a>も例外ではありません。Sidekiqは、<a href="http://railscasts.com/episodes/271-resque">エピソード271</a>で取り上げたResqueに似ています。主な違いは、プロセスの代わりにスレッドを使用することによって複数のジョブを同時実行しメモリ使用量を節約できるという点です。</p>
+
+<h3>スニペットアプリケーション</h3>
+
+<p>Sidekiqのインターフェースは他のツールに似ているので、それについては最初に簡単に触れるだけにして、その後で他のツールとの違いに焦点をあてて説明します。今回のサンプルアプリケーションを以下に示します。シンプルな構成で、言語を選択するためのドロップダウンとコードスニペットを貼付けるためのテキストエリアを持ったフォームです。このフォームを送信すると、スニペットがシンタックスハイライトされて表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1262/original/E366I01.png" width="800" height="500" alt="スニペットアプリケーション"/>
+</div>
+
+<p><code>SnippetsController</code>の<code>create</code>アクションを見るとハイライト処理のしくみがわかります。</p> 
+
+``` /app/controllers/snippets_controller.rb
+def create
+  @snippet = Snippet.new(params[:snippet])
+  if @snippet.save
+    uri = URI.parse("http://pygments.appspot.com/")
+    request = Net::HTTP.post_form(uri, lang: @snippet.language, code: @snippet.plain_code)
+    @snippet.update_attribute(:highlighted_code, request.body)
+    redirect_to @snippet
+  else
+    render :new
+  end
+end
+```
+
+<p>スニペットが保存された後、Pygmentsを利用してコードをハイライトする外部Webサービスに対してリクエストが送られます。このサービスに対してPOSTリクエストで、言語の指定と元のコードを送信すると、ハイライトされたコードがレスポンスとして返されます。外部サービスの呼び出しは常にバックグラウンドプロセスに移行させたほうがいいでしょう。そうすることによって、サービスがダウンしていたりレスポンスが遅いという場合に、ユーザに直接影響を与えることがありません。この処理のためにSidekiqを使用することにします。</p>
+
+<h3>アプリケーションにSidekiqを追加する</h3>
+
+<p>Resqueと同じで、Sidekiqはジョブキューの管理にRedisを使用するので、まずこれをインストールします。OS Xを利用している場合は、一番簡単な方法として、Homebrewを使用して以下のコマンドを実行します。</p>
+
+``` terminal
+$ brew install redis
+```
+
+<p>インストールが完了したら、次のコマンドでRedisサーバを起動します。</p>
+
+``` terminal
+$ redis-server /usr/local/etc/redis.conf
+```
+
+<p>次にgemfileにSidekiq gemを追加して、<code>bundle</code>コマンドでインストールを行ないます。</p>
+
+``` /Gemfile
+gem 'sidekiq'
+```
+
+<p>Sidekiqはいくつかのインターフェースをサポートします。もっとも典型的な使い方は、独立したワーカークラスを生成する方法です。今回はこの方法でいくことにして、<code>app/workers</code>ディレクトリを新規に作成してそこにクラスを作成します。この場所に置くことによって、アプリケーションに自動的に読み込ませることができます。</p> 
+
+``` /app/workers/pygments_worker.rb
+class PygmentsWorker
+  include Sidekiq::Worker
+  
+  def perform
+    
+  end
+end
+```
+
+<p>このクラスは、後述する<code>Sidekiq::Worker</code>モジュールをincludeし、バックグラウンドで実行させたいコードを含んだ<code>perform</code>メソッドを持ちます。シンタックスハイライト処理のコードをコントローラからこのメソッドに移動させます。このために、<code>PygmentsWorker.perform_async</code>を呼び出してRedisにジョブを追加してから、非同期で<code>perform</code>を呼び出します。<code>perform</code>メソッドは現在のスニペットにアクセスできる必要があります。これを直接<code>perform_async</code>に引数として渡すことはできますが、オブジェクトをRedisに入れるためにシリアライズしなければいけないため、ベストな方法とは言えません。ActiveRecordモデルよりはもっとシンプルなオブジェクト、例えば文字列や数値をシリアライズする方がいいので、代わりにスニペットの<code>id</code>を渡して、バックグラウンドプロセスでデータベースからレコードを取得します。</p>
+
+``` /app/controllers/snippets_controller.rb
+def create
+  @snippet = Snippet.new(params[:snippet])
+  if @snippet.save
+    PygmentsWorker.perform_async(@snippet.id)
+    redirect_to @snippet
+  else
+    render :new
+  end
+end
+```
+
+<p>ワーカークラスに、コントローラから削除したコードを貼付けて、スニペットを<code>id</code>で取得できるように修正します。</p>
+
+``` /app/workers/pygments_worker.rb
+class PygmentsWorker
+  include Sidekiq::Worker
+  
+  def perform(snippet_id)
+    snippet = Snippet.find(snippet_id)
+    uri = URI.parse("http://pygments.appspot.com/")
+    request = Net::HTTP.post_form(uri, lang: snippet.language, code: snippet.plain_code)
+    snippet.update_attribute(:highlighted_code, request.body)
+  end
+end
+```
+
+<p>最後にアプリケーションディレクトリから<code>sidekiq</code>コマンドを実行してバックグラウンドプロセスを起動します。正しく動作させるためにコマンドの前に<code>bundle exec</code>を付けなくてはいけない場合があるので注意してください。</p>
+
+``` terminal
+$ bundle exec sidekiq
+```
+
+<p>これでSidekiqが新規ジョブの待機状態になったので、新規のワーカークラスを認識させるためにwebサーバを再起動してこれを試してみましょう。</p> 
+
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1263/original/E366I02.png" width="800" height="500" alt="バックグラウンドに処理を移したため、ハイライトはすぐには現れない"/>
+</div>
+
+<p>スニペットを投稿すると、バックグラウンドプロセスがまだ実行中のためシンタックスハイライトは表示されません。数秒待った後にページをリロードすると、ハイライトが適用されたのがわかります。</p> 
+
+<h3>考慮すること</h3>
+
+<p>Sidekiqを利用するときに注意しなくてはいけないことがいくつかあります。エラーによってジョブが失敗した場合、Sidekiqはそのジョブを再実行しようとします。つまりperformメソッドのいずれかの時点で例外が発生した場合に、コードが2度実行されることによって何らかの期待しない副作用が発生しないことを確認しておかなくてはいけません。これはeメールを扱う場合に特に重要です。ユーザに同じeメールを複数回送信することは避けなければいけません。この機能を無効化するために、次のように<code>sidekiq_options</code>メソッドを使用します。</p>
+
+``` /app/workers/pygments_worker.rb
+class PygmentsWorker
+  include Sidekiq::Worker
+  sidekiq_options retry: false
+  
+   # Rest of class omitted.
+end
+```
+
+<p>今回のジョブは失敗した場合に再試行しない理由がないので、今はこの機能を有効化しておきます。</p> 
+
+<p>もう一つ注意すべき点は、ワーカーで使用するコードはすべてthread-safe(マルチスレッド対応)にするということです。thread-safetyについては<a href="http://railscasts.com/episodes/365-thread-safety">エピソード365</a>で説明しましたが、一般的にインスタンス間で不定(mutable)なデータは共有しないようにするべきです。Rubyではこれがクラスレベルのデータを指す場合があり、これは避けるべきです。コードをthread-safeにするだけではなく、ワーカーが利用するライブラリもすべてthread-safeであるべきです。</p> 
+
+<p>データベースの設定ファイルのプールサイズの上限にも気をつけるべきです。これはデフォルトでは<code>5</code>になっているので、データベースに同時に接続できるスレッド数は5までです。この制限を上げておく方がいいでしょう。Sidekiqはデフォルトでは25個までのジョブを同時に実行できるので、<code>pool</code>オプションを同じ数に設定しておくのがいいでしょう。ただし、最適値は設定によって変わります。</p> 
+
+<h3>Sidekiqの特徴</h3>
+
+<p>これでSidekiqの設定方法がわかったので、次はその特徴を見ていきますが、その多くは<a href="https://github.com/mperham/sidekiq/wiki">Sidekiq wiki</a>に記述されています。Sidekiqを利用すると便利な点の一つは、未来のジョブの実行をスケジュールできることです。ワーカーに対して<code>perform_async</code>を呼び出す代わりに、<code>perform_in</code>を呼び出して待機時間を指定することができます。その時間が経過するまで、ジョブの処理は始まりません。</p>
+
+``` /app/controllers/snippets_controller.rb
+PygmentsWorker.perform_in(1.hour, @snippet.id)
+```
+
+<p>今回のアプリケーションでこれを行なう意味はあまりありませんが、例えばキャッシュのクリアなどには役に立ちます。もう一つの便利な点は、キューの優先付けです。例えばアプリケーションに複数のワーカーがあって、その中の一部のものを先に処理してほしいとしましょう。これをおこなうにはワーカーを特定のキューに割り当てますが、その場合は以下のように<code>queue</code>オプションを設定します。</p>
+
+``` /app/workers/pygments_worker.rb
+class PygmentsWorker
+  include Sidekiq::Worker
+  sidekiq_options queue: "high"
+  
+   # Rest of class omitted.
+end
+```
+
+<p>キューの名前を指定しなかった場合、ワーカーは<code>default</code>というキューに自動的に割り当てられます。<code>sidekiq</code>コマンドを実行するときに、<code>-q</code>オプションをつけてそれぞれに相対的な重みをつけることで処理をしてほしいキューを指定できます。</p>
+
+``` terminal
+$ bundle exec sidekiq -q height,5 default,1
+```
+
+<p>これで値の高いキューが優先的に処理されます。</p>
+
+<p>デプロイに関して言えば、Sidekiqには<a href="https://github.com/mperham/sidekiq/wiki/Deployment">Capistranoのレシピ</a>が含まれているのでそれを利用できます。上の例の<code>-q</code>オプションのようなカスタムのオプションを<code>sidekiq</code>コマンドに渡したい場合には、<code>config</code>ディレクトリの中の<code>sidekiq.yml</code>ファイルに入れます。ファイルの内容は例えば以下のようになります。</p>
+
+``` config.yml
+# Sample configuration file for Sidekiq.
+# Options here can still be overridden by cmd line args.
+#   sidekiq -C config.yml
+---
+:verbose: false
+:concurrency:  25
+:queues:
+  - [often, 7]
+  - [default, 5]
+  - [seldom, 3]
+```  
+
+<h3>Sidekiqを監視する</h3>
+
+<p>次にワーカーの監視について説明します。SidekiqはResqueによく似たwebインターフェースを持っています。Sinatraのアプリケーションで、routesファイルで指定することでRailsアプリケーション内にマウントすることができます。</p> 
+
+``` /config/routes.rb
+require 'sidekiq/web'
+
+Example::Application.routes.draw do
+  resources :snippets
+  root to: "snippets#new"
+  mount Sidekiq::Web, at: "/sidekiq"
+end
+```
+
+<p>ただしデフォルトでは含まれていないため、<code>sidekiq/web</code>をrequireする必要があります。webインターフェースを使用するのであれば、一緒にgemfileに追加しなくてはいけないgemがいくつかあります。<code>bundle</code>コマンドを再度実行し、変更を反映させるためにサーバを再起動します。</p>
+
+``` /Gemfile
+gem 'sinatra', require: false
+gem 'slim'
+```
+
+<p><code>/sidekiq</code>パスにアクセスするとwebインターフェースが表示され、処理されたジョブの数、失敗した処理の数、現在アクティブなワーカーの数、現在のキューの内容を見ることができます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1264/original/E366I03.png" width="800" height="626" alt="SidekiqのWebインターフェース"/>
+</div>
+
+<p>アプリケーションを本番環境で稼働させる場合はこれをパスワード保護するべきで、Sidekiq wikiにはその方法についての情報が掲載されています。</p> 
+
+<h3>Sidekiqのソースを見る</h3>
+
+<p>今回のエピソードの最後に、Sidekiqのソースコードを見てみます。ソースコードを見ることは常に多くの学びがあります。まず<code>PygmentsWorker</code>クラスにincludeした<code>Sidekiq::Worker</code>モジュールを見てみます。このモジュールはごく簡単で、すでに使用した<code>perform_async</code>と<code>perform_in</code>メソッドを含むいくつかのクラスメソッドを持っています。これらのメソッドはRedisに詳細データのハッシュを追加します。</p>
+
+``` /lib/sidekiq/worker.rb
+def perform_async(*args)
+  client_push('class' => self, 'args' => args)
+ end
+
+def perform_in(interval, *args)
+  int = interval.to_f
+  ts = (int < 1_000_000_000 ? Time.now.to_f + int : int)
+  client_push('class' => self, 'args' => args, 'at' => ts)
+end
+alias_method :perform_at, :perform_in
+
+def get_sidekiq_options # :nodoc:
+  self.sidekiq_options_hash ||= DEFAULT_OPTIONS
+end
+```
+
+<p>このモジュールには、先にワーカーで使用した<code>sidekiq_options</code>メソッドも含まれていて、指定できるオプションについての説明が含まれています。</p>
+
+``` /lib/sidekiq/worker.rb
+##
+# Allows customization for this type of Worker.
+# Legal options:
+#
+#   :queue - use a named queue for this Worker, default 'default'
+#   :retry - enable the RetryJobs middleware for this Worker, default *true*
+#   :timeout - timeout the perform method after N seconds, default *nil*
+#   :backtrace - whether to save any error backtrace in the retry payload to display in web UI,
+#      can be true, false or an integer number of lines to save, default *false*
+
+def sidekiq_options(opts={})
+  self.sidekiq_options_hash = get_sidekiq_options.merge(stringify_keys(opts || {}))
+end
+
+DEFAULT_OPTIONS = { 'retry' => true, 'queue' => 'default' }
+
+def get_sidekiq_options # :nodoc:
+  self.sidekiq_options_hash ||= DEFAULT_OPTIONS
+end
+```
+
+<p>もう一つ見ておくべきSidekiqの部品がミドルウェアです。Rackミドルウェアと混同しないようにしてください。これはジョブの処理の前後で発生する振る舞いのことを指します。SidekiqのクライアントサイドのミドルウェアはジョブがRedisに挿入される前に実行され、サーバサイドのミドルウェアはジョブが処理される前に実行されます。このミドルウェアが、ジョブのリトライ、ログの記録、例外処理を行ないます。<a href="https://github.com/mperham/sidekiq/blob/master/lib/sidekiq/middleware/server/exception_handler.rb">例外処理</a>について言えば、Airbrake、Exceptional、ExceptionNotifierなどいくつかのしくみが開発されています。これらを自分で設定することが可能で、wikiにその方法についての情報があります。これは、Sidekiqミドルウェアがいかにシンプルかということを示すいい例で、Sidekiqの振る舞いを拡張したい場合は自分でミドルウェアを書くことが可能です。</p> 
+
+<p>最後にもう一つ注目すべきなのが、Sidekiqの<a href="https://github.com/mperham/sidekiq/blob/master/lib/sidekiq/processor.rb">プロセッサクラス</a>です。これは、Redisからプルされた後のジョブの処理を受け持ちます。このクラスはデフォルトで追加されるミドルウェアのリストを取得します。ジョブが処理されるときに各ミドルウェアが起動されて、ワーカーに対してperformが呼び出されます。このクラスには、Sidekiqのマルチスレッド処理のキーとなる<a href="http://celluloid.io/">Celluloid</a>も含まれています。Celluloidは、Rubyでの同時実行性を扱う場合にとても役に立つ優れたプロジェクトです。ここでは詳細に触れることはしませんが、じっくりと見てみる価値があるでしょう。</p>

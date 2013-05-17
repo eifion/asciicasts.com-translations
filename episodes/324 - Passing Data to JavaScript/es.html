@@ -1,0 +1,209 @@
+<p>En las aplicaciones Rails donde JavaScript juega un papel importante suele ser necesario pasar datos desde la aplicaci&oacute;n en el servidor a JavaScript donde pueda ser usado por el c&oacute;digo en cliente.  En este episodio vamos a explorar algunas t&eacute;cnicas que sirven para hacer esto.  A continuaci&oacute;n se muestra una p&aacute;gina de una aplicaci&oacute;n sencilla en Rails y la idea es que queremos controlar mediante JavaScript la recuperaci&oacute;n y visualizaci&oacute;n de los productos.  Para hacerlo tenemos que pasar cierta informaci&oacute;n desde nuestra aplicaci&oacute;n hacia el cliente de JavaScript que se ejecuta en el navegador.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/992/original/E324I01.png" width="800" height="280" alt="La página de productos."/>
+</div>
+
+<p>La plantilla de esta p&aacute;gina es muy sencilla.</p>
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<div id="products">
+  Loading products...
+</div>
+```
+
+<p>Supongamos que el JavaScript de nuestra aplicaci&oacute;n tiene que saber la URL a llamar para recuperar el listado de productos.  Como no queremos  escribir a fuego esta direcci&oacute;n en el c&oacute;digo JavaScript vamos a generarla din&aacute;micamente desde nuestra aplicaci&oacute;n Rails.  Una forma de hacer esto es con la funci&oacute;n <code>javascript_tag</code> de la vista.</p>
+
+``` /app/views/products/index.html.erb
+<%= javascript_tag do %>
+  window.productsURL = '<%= j products_url %>';
+<% end %>
+```
+
+<p>N&oacute;tese que utilizamos el m&eacute;todo Rails <code>j</code> que nos asegura que la URL aparecer&aacute; codificada para poder ser usada en JavaScript.  Ahora podemos usar esta variable en cualquiera de los ficheros JavaScript o CoffeeScript que hagan referencia a esta p&aacute;gina.</p>
+
+``` /app/assets/javascripts/products.js.coffee
+jQuery ->
+  alert productsURL
+```  
+
+
+<p>Si queremos que en la p&aacute;gina aparezca precargado un conjunto inicial de productos en lugar de tener que obtenerlos mediante una petici&oacute;n separada podr&iacute;amos, por ejemplo, obtener los primeros diez productos en JSON y hacer que JavaScript muestre esta informaci&oacute;n directamente.  Podemos hacer esto as&iacute;:</p>
+
+``` /app/views/products/index.html.erb
+<%= javascript_tag do %>
+  window.productsURL = '<%= j products_url %>';
+  window.products = <%= raw Product.limit(10).to_json %>
+<% end %>
+```
+
+<p>Rails intentar escapar para HTML el listado de productos por lo que tendremos que invocar <code>raw</code> sobre el resultado en JSON.</p>
+
+<p>Este enfoque puede hacerse pesado muy deprisa, y por lo general es mejor utilizar atributos de datos de HTML.  Podemos pasar la URL de productos de la siguiente manera:</p>
+
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<div id="products" data-url="<%= products_url %>">
+  Loading products...
+</div>
+```
+
+<p>Podemos recuperar f&aacute;cilmente la informaci&oacute;n usando c&oacute;digo jQuery:</p>
+
+
+``` /app/assets/javascripts/products.js.coffee
+jQuery ->
+  alert $('#products').data('url')
+```  
+
+<p>Esta t&eacute;cnica surte el mismo efecto pero la sensaci&oacute;n es mucho m&aacute;s limpia.  Para evitar tener que anidar etiquetas ERb dentro de atributos HTML podemos utilizar <code>content_tag</code> que es una mejor manera de insertar datos din&aacute;micos dentro de una etiqueta HTML.</p>
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<%= content_tag "div", id: "products", data: {url: products_url} do %>
+  Loading products...
+<% end %>
+```
+
+<p>Desde la version 3.1 de Rails en adelante podemos usar un <em>hash</em> llamado <code>data</code> para definir atributos de datos, con lo que todo este enfoque resulta a&uacute;n m&aacute;s sencillo.  Si a este <em>hash</em> le pasamos objetos en Ruby, se invoca <code>to_json</code> para convertir autom&aacute;ticamente el objeto a su representaci&oacute;n en JSON.</p>
+
+``` /app/views/products/index.html.erb
+<h1>Products</h1>
+
+<%= content_tag "div", id: "products", data: {url: Product.limit(10) } do %>
+  Loading products...
+<% end %>
+
+```
+
+<p>Al recuperar estos datos, se convertir&aacute;n autom&aacute;ticamente a objetos JavaScript.</p>
+
+``` /app/assets/javascripts/products.js.coffee
+jQuery ->
+  console.log $('#products').data('url')
+```  
+
+<p>Si ahora recargamos la p&aacute;gina veremos el listado de productos en la consola.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/993/original/E324I02.png" width="801" height="400" alt="La representación en JSON de los productos ahora aparece en la consola."/>
+</div>
+
+<h3>Gon</h3>
+
+<p>Pero si tenemos que pasar muchos datos hacia JavaScript esta t&eacute;cnica tambi&eacute;n puede hacerse engorrosa.  Por suerte hay una soluci&oacute;n que podemos usar:  <a href="https://github.com/gazay/gon">la gema Gon</a>.  Nos permite establecer variables en nuestros controladores para luego acceder a ellos desde JavaScript.  Gon se instala de la manera habitual, a&ntilde;adi&eacute;ndolo al <code>Gemfile</code> y ejecutando <code>bundle</code>.</p>
+
+``` /Gemfile
+source 'https://rubygems.org'
+
+gem 'rails', '3.2.1'
+gem 'sqlite3'
+
+# Gems used only for assets and not required
+# in production environments by default.
+group :assets do
+  gem 'sass-rails',   '~> 3.2.3'
+  gem 'coffee-rails', '~> 3.2.1'
+
+  # See https://github.com/sstephenson/execjs#readme for more supported runtimes
+  # gem 'therubyracer'
+
+  gem 'uglifier', '>= 1.0.3'
+end
+
+gem 'jquery-rails'
+gem 'gon'
+```
+
+<p>A continuaci&oacute;n tenemos que actualizar el fichero de <em>layout</em> de nuestra aplicaci&oacute;n a&ntilde;adiendo <code>include_gon</code> dentro de la secci&oacute;n <code>head</code>.</p>
+
+``` /app/views/layouts/application.html.erb
+<head>
+  <title>Store</title>
+  <%= include_gon %>
+  <%= stylesheet_link_tag    "application", media: "all" %>
+  <%= javascript_include_tag "application" %>
+  <%= csrf_meta_tag %>
+</head>
+```
+
+<p>Si hacemos esto antes de cargar ning&uacute;n otro archivo JavaScript podremos acceder a las variables que hayamos establecido mediante Gon sin tener que esperar a que el DOM termine de cargar.</p>
+
+<p>Podemos establecer variables en el objeto <code>gon</code> dentro de una acci&oacute;n de nuestro controlador.</p>
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    gon.products = Product.limit(10)
+  end
+end
+```
+
+<p>Este listado de productos se pasar&aacute; autom&aacute;ticamente a JSON y estar&aacute; accesible para el JavaScript de nuestra aplicaci&oacute;n.  Podemos acceder al listado de productos de la siguiente manera:</p>
+
+``` /app/assets/javascripts/products.js.coffee
+console.log gon.products
+```
+
+<p>N&oacute;tese que no tenemos que esperar a que el documento termine de cargar para acceder a estos datos.  Si recargamos la p&aacute;gina volveremos a ver el listado de productos en la consola.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/994/original/E324I03.png" width="801" height="400" alt="La representación en JSON de los productos almacenados con Gon aparece en la consola."/>
+</div>
+
+<p>Si abrimos el c&oacute;digo fuente de la p&aacute;gina podremos comprobar c&oacute;mo funciona:</p>
+
+``` html
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Store</title>
+	<script>window.gon = {};gon.products=[{"created_at":"2012-02-18T20:24:45Z","id":1,"name":"Settlers of Catan","price":"29.95","updated_at":"2012-02-18T20:24:45Z"},{"created_at":"2012-02-18T20:24:45Z","id":2,"name":"DVD Player","price":"79.98999999999999","updated_at":"2012-02-18T20:24:45Z"},{"created_at":"2012-02-18T20:24:45Z","id":3,"name":"Red Shirt","price":"12.49","updated_at":"2012-02-18T20:24:45Z"}];</script>
+    // Other products omitted.
+    <link href="/assets/application.css?body=1" media="all" rel="stylesheet" type="text/css" />
+<link href="/assets/products.css?body=1" media="all" rel="stylesheet" type="text/css" />
+    <script src="/assets/jquery.js?body=1" type="text/javascript"></script>
+<script src="/assets/jquery_ujs.js?body=1" type="text/javascript"></script>
+<script src="/assets/products.js?body=1" type="text/javascript"></script>
+<script src="/assets/application.js?body=1" type="text/javascript"></script>
+    <meta content="authenticity_token" name="csrf-param" />
+<meta content="KktOQAWKvaRho+IdWOiaBud0W7Vuv31rdn0LF38hBag=" name="csrf-token" />
+  </head>
+  <body>
+    <!-- Body omitted -->
+  </body>
+</html>
+```
+
+<p>Gon simplemente crea una etiqueta <code>script</code> y a continuaci&oacute;n construye una variable llamada <code>gon</code> con los datos que hayamos establecido en el controlador.  Gon permite personalizar el JSON devuelto al cliente para plantillas escritas con RABL y Jbuilder, que ya hemos visto en cap&iacute;tulos recientes.  Para personalizar los datos devueltos por el listado de productos podemos crear un fichero <code>index.json.rabl</code> y definir los atributos que queramos devolver.</p>
+
+``` /app/views/products/index.json.rabl
+collection Product.limit(10)
+
+attributes :id, :name, :price
+```
+
+<p>Podemos utilizar <code>gon.rable</code> para decirle a Gon que utilice esta plantilla.</p>
+
+``` /app/controllers/products_controller.rb
+class ProductsController < ApplicationController
+  def index
+    gon.rabl "app/views/products/index.json.rabl", as: "products"
+  end
+end
+```
+
+<p>Esto almacenar&aacute; la respuesta de la plantilla en una variable llamada <code>products</code>.  Al recargar la p&aacute;gina veremos el mismo listado de productos pero los atributos ser&aacute;n aquellos que se hayan definido en la plantilla RABL.</p>
+
+<p>Hay un peque&ntilde;o problema potencial cuando se usa Gon.  Si no definimos variables de <code>gon</code> en la acci&oacute;n del controlador e intentamos llamar a <code>gon</code> en el JAvaScript recibiremos un error porque el objeto <code>gon</code> no habr&aacute; sido creado.  Lo mejor es asegurarse de que el objeto exista antes de hacer ninguna llamada.</p>
+
+``` /app/assets/javascripts/products.js.coffee
+console.log gon.products if gon
+```
+
+<p>Hay m&aacute;s informaci&oacute;n acerca de Gon en su <a href="https://github.com/gazay/gon/blob/master/README.md">documentaci&oacute;n</a> que merece la pena leer si pensamos usarlo en nuestras aplicaciones.</p>

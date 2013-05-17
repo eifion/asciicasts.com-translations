@@ -1,0 +1,141 @@
+商品リストを表示するページがあります。このページには商品名で検索を行なうための検索フィールドがついています。
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1204/original/E354I01.png" width="800" height="500" alt="商品ページ"/>
+</div>
+
+<p>この検索のためのコードは簡単に書けるように見えますが、<code>Product</code>モデルにあるクエリはかなり複雑です。すでに発売されていて、販売が終了しておらず、在庫があり、商品名が検索句に一致する商品を探さなくてはいけません。</p>
+
+``` /app/models/product.rb
+class Product < ActiveRecord::Base
+  belongs_to :category
+  attr_accessible :name, :price, :category_id, :released_at, :discontinued_at, :stock
+
+  def self.search(query)
+	where("released_at <= ? and (discontinued_at is null or discontinued_at > ?) and stock >= ? and name like ?", Time.zone.now, Time.zone.now, 2, "%#{query}%")
+  end
+end
+```
+
+<p>かなり長いSQLクエリが実行されていて、いくつかの変数がその後ろに付加され、それらはクエリ内のパラメータと順番が正しく並んでいる必要があります。このクエリをよりよくする方法はいくつかありますが、もっとも大きく改善する方法は、クエリを名前付きスコープに分解して、それを使って検索を行なうやり方です。しかしそれでもSQLを使っていることには変わりはないので、クエリの中の<code>LIKE</code>句の部分のようにデータベースの違いを心配しなくてはいけないという問題は残ります。ほとんどのデータベースでは、この場合は大文字・小文字を区別せずに検索を実行するので、たとえばアプリケーションのデータベースをPostgresに切り替える場合はこれを<code>ILIKE</code>に変更する必要があります。このデータベースの検索を抽象化させて一貫性を持たせることができれば便利でしょう。それにはArelを使う方法もありますが、直接Arelを操作するのはかなり複雑な作業になります。</p>
+
+<p><a href="https://github.com/ernie/squeel">Squeel gem</a>を使えばRubyコードの中にSQL文を混在させずにすみます。このgemを書いたErnie Millerは、<a href="http://railscasts.com/episodes/251-metawhere-metasearch">エピソード251</a>で取り上げたMetawhere gemの作者でもあります。SqueelはRubyでSQLを使わずにクエリを記述するためのDSLを提供します。これを今回のアプリケーションで試してみたいと思います。まずgemfileにgemを追加してbundleコマンドを実行してインストールします。 </p>
+
+``` /Gemfile
+gem 'squeel'
+```
+
+<p>最初にコンソールでSqueelの機能を実験してみます。Squeelを使うと<code>where</code>の呼び出しにブロックを渡すことができ、このブロックの中でSqueel DSLを使用できます。次のように、このブロックの中でカラムをメソッドとして呼び出すことができます。</p>
+
+``` console
+> Product.where{released_at <= 3.months.ago}
+  Product Load (0.3ms)  SELECT "products".* FROM "products" WHERE "products"."released_at" <= '2012-03-08 20:58:21.852780'
+ => [#<Product id: 1, name: "Settlers of Catan", category_id: 2, price: #><BigDecimal:7fdbf9b90aa0,'0.3495E2',18(45)>, released_at: "2012-03-01 00:00:00", discontinued_at: nil, stock: 5, created_at: "2012-06-08 20:09:13", updated_at: "2012-06-08 20:58:13">] 
+``` 
+
+<p>これが自動的にSQLクエリに翻訳されて、クエリに一致した商品が返されます。クエリ内の波カッコの両端にはスペースがありませんが、Squeel DSLではそれがルールのようなのでここではそれに従っています。この呼び出しに対して返されたオブジェクトは<code>ActiveRecord::Relation</code>オブジェクトで、Railsで使用するその他のスコープと合わせて使用することができます。しかしSqueelが利用するのは<code>ActiveRecord::Relation</code>だけではありません。Arelの機能を利用してクエリをSQLに変換します。<a href="https://github.com/ernie/squeel#squeel--">Squeel README</a>を見ると、Arelがサポートする演算子のリストが、対応するSQL演算子と一緒に一覧表で示されています。Squeelが提供する<code>&lt;</code>演算子を使う代わりに、Arelの<code>lt</code>メソッドを直接使っても同じ検索を行なうことができます。</p>
+
+``` console
+> Product.where{released_at.lt 3.months.ago}
+  Product Load (0.3ms)  SELECT "products".* FROM "products" WHERE "products"."released_at" < '2012-03-08 21:29:36.133638'
+ => [#<Product id: 1, name: "Settlers of Catan", category_id: 2, price: #><BigDecimal:7fdbf96d3940,'0.3495E2',18(45)>, released_at: "2012-03-01 00:00:00", discontinued_at: nil, stock: 5, created_at: "2012-06-08 20:09:13", updated_at: "2012-06-08 20:58:13">]
+``` 
+
+<p>Squeelのもう一つの便利な機能は、複数の条件を結合するためのANDとOR演算子です。検索条件を変えて、20ドルよりも高い商品のみを探したい場合は次のようにします。</p>
+
+``` console
+> Product.where{released_at.lt(3.months.ago) & price.gt(20)}
+  Product Load (0.6ms)  SELECT "products".* FROM "products" WHERE (("products"."released_at" < '2012-03-09 08:41:15.786451' AND "products"."price" > 20))
+ => [#<Product id: 1, name: "Settlers of Catan", category_id: 2, price: #><BigDecimal:7fe0aa2d5a40,'0.3495E2',18(45)>, released_at: "2012-03-01 00:00:00", discontinued_at: nil, stock: 5, created_at: "2012-06-08 20:09:13", updated_at: "2012-06-08 20:58:13">]
+``` 
+
+<p>このように複数の検索条件を使用する場合は、それぞれの条件をカッコで囲んでRubyが正しく優先度を理解できるようにすることが重要です。この機能によって、OR演算子の使い方がずっと簡単になります。これをActiveRecordで行なうのは複雑な作業でしたが、Squeelを使えば直接的な表現ができます。</p>
+
+``` console
+> Product.where{released_at.lt(3.months.ago) | price.gt(20)}
+  Product Load (0.4ms)  SELECT "products".* FROM "products" WHERE (("products"."released_at" < '2012-03-09 08:44:05.427791' OR "products"."price" > 20)
+# Large number of products omitted.
+```
+
+<h3>アプリケーションでSqueelを使う</h3>
+
+<p>今回のアプリケーションの検索クエリをSqueelに翻訳するために必要な情報は揃いました。現状のクエリは次のようになっています。</p>
+
+``` /app/models/product.rb
+def self.search(query)
+  where("released_at <= ? and (discontinued_at is null or discontinued_at > ?) and stock >= ? and name like ?", Time.zone.now, Time.zone.now, 2, "%#{query}%")
+end
+```
+
+<p>Squeelのコードに翻訳するとこのようになります。</p>
+
+```  /app/models/product.rb
+def self.search(query)
+  where do
+    (released_at <= Time.zone.now) & 
+	((discontinued_at == nil) | (discontinued_at > Time.zone.now)) & 
+	(stock >= 2) & (name =~ "%#{query}%")
+  end
+end
+```
+
+<p>LIKE句には正規表現の演算子に似た<code>=~</code>を使います。これはどのデータベースを使用するかに関わらず大文字・小文字を区別せずに検索を行ないます。またNULLとの比較には<code>is null</code>の代わりに<code>== nil</code>を使用します。</p>
+
+<p>このコードが以前のものよりもシンプルになったかどうかは意見が分かれるかも知れません。しかし一つ明らかに改善した点は、値が最後に固めて置かれているのではなく検索句の中に納められているという点です。またRubyコードを使っていることによって、複数行のブロックを利用してクエリが分解されて読みやすくなっています。ブラウザで検索フィールドを試してみると、SQLクエリと同じ検索結果が返されます。</p>
+
+<h3>コンテキストに納める</h3>
+
+<p>Squeelではブロックの呼び出しに<code>instance_eval</code>が使用されることを意識することが重要です。これは、ブロックの現在のコンテキストが<code>Product</code>クラスではなく、Squeel DSLのインスタンスであるということを意味します。ブロック内でクラスメソッドを呼び出したいとしても、Squeelがメソッド呼び出しをカラム名と解釈してしまうので、直接呼び出すことはできません。この問題を回避するためには、<code>my</code>を呼び出してブロックを渡します。こうすることによって、ブロック内のすべてのものが元のコンテキストで評価されます。これを試すために、クラスに<code>low_stock</code>メソッドを追加して検索で使用してみます。</p>
+
+``` /app/models/product.rb
+class Product < ActiveRecord::Base
+  belongs_to :category
+  attr_accessible :name, :price, :category_id, :released_at, :discontinued_at, :stock
+
+  def self.search(query)
+    where do
+      (released_at <= Time.zone.now) & 
+	  ((discontinued_at == nil) | (discontinued_at > Time.zone.now)) & 
+	  (stock >= my{low_stock}) & (name =~ "%#{query}%")
+    end
+  end
+  
+  def self.low_stock
+    2
+  end
+end
+```
+
+<p>これは前と同じ検索を実行します。</p>
+
+<h3>Squeelのカスタマイズ</h3>
+
+<p>Squeelのふるまいをカスタマイズしたい場合は、提供されるジェネレータを使ってそのための初期化ファイルを作成します。</p>
+
+``` terminal
+$ rails g squeel:initializer
+      create  config/initializers/squeel.rb
+```
+
+<p>これによって設定ファイルが生成され、その中には変更できる各種の設定についての説明がコメントとして含まれています。例えば以下の行を非コメント化すると、HashとSymbolの各クラスにメソッドが追加されてMetawhereと同等の機能が付加されるので、アプリケーションをMetawhereからSqueelに移行させる場合には便利です。</p>
+
+``` /config/initializers/squeel.rb
+# To load both hash and symbol extensions:
+#
+# config.load_core_extensions :hash, :symbol
+```
+
+<p>このファイルにエイリアスを追加すれば、例えば<code>lt</code>の代わりに<code>less_than</code>を呼び出すというようなことも可能です。</p>
+
+``` /config/initializers/squeel.rb
+# Alias an existing predicate to a new name. Use the non-grouped
+# name -- the any/all variants will also be created. For example,
+# to alias the standard "lt" predicate to "less_than", and gain
+# "less_than_any" and "less_than_all" as well:
+#
+# config.alias_predicate :less_than, :lt
+```
+
+<p>Squeelの紹介は以上です。今回紹介しきれなかったこともまだたくさんあるので、自身のアプリケーションで使ってみようと考えている場合はドキュメントを参照してください。</p>
+
+<p>Squeelはすばらしいプロジェクトです。もしSQLを書くのが苦でなければわざわざクエリ文の改善に時間をかける価値はないかも知れませんが、SQLを書くよりもRubyの方が楽という方は試してみる価値があるでしょう。</p>

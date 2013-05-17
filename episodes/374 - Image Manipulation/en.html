@@ -1,0 +1,177 @@
+<style type="text/css">.inlineThumbnail { border: solid 1px #333; float: left; margin: 0 8px 8px 0; }</style>
+
+
+<p>A few years ago Ryan Bates wrote an application called <a href="http://dailystamp.com">Daily Stamp</a>. With it we can enter something that we want to accomplish daily. We&rsquo;re then shown a calendar and a stamper that we can use to stamp the days that we accomplish that task.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1321/original/E374I01.png" width="824" height="539" alt="The Daily Stamp application."/>
+</div>
+
+<p>What we&rsquo;ll focus on in this episode is the ability to customize the stamp. The app has a page where we can select from a preset list of stamps or upload an image of our own to turn into a custom stamp. Whatever image we upload is resized and has effects applied to make it look like a rubber stamp. We can also choose from a number of colours for our stamp. In this episode we&rsquo;ll show you how to add this type of image manipulation. A key ingredient of this is <a href="http://www.imagemagick.org/script/index.php">ImageMagick</a>. A lot of people have a love-hate relationship with this as it can be difficult to set up and use, although it is a powerful piece of software once it&rsquo;s up and running. If we want to perform image manipulation this can take us quite far. A good place to start is with its <a href="http://www.imagemagick.org/script/command-line-tools.php">command-line tools</a>. These will give you a good idea of what ImageMagick is capable of and what steps are required to process an image with it. </p>
+
+<p>Installing ImageMagick can be tricky. If you&rsquo;re running Mac OS X it&rsquo;s a good idea to use Homebrew to install it as then all that&rsquo;s needed is to run the command <code>brew install imagemagick</code>. This should give us a convert command, along with several others, for processing images.</p> 
+
+<p>In addition to the source image we&rsquo;ll be working with, which is a PNG of Github&rsquo;s Octocat, we also have another image, which is an overlay texture made up of a white image with some transparency to give it the appearance of a rubber stamp. Our first objective is to resize and crop the source image so that it composites nicely with our overlay texture. If we look at the documentation for the <code><a href="http://www.imagemagick.org/script/convert.php">convert</a></code> command we&rsquo;ll see the list of options that can be passed in, including options to crop or resize an image. Both of these options accept a geometry parameter and the <a href="http://www.imagemagick.org/script/command-line-processing.php#geometry">documentation for this</a> tells us the different ways that we can format the argument to change its behaviour. This is handy if you&rsquo;re trying to make a square thumbnail from an oddly-shaped image like we are. We&rsquo;ll use the option with a caret symbol which will allow us to fill the stamp image while maintaining the aspect ratio. We&rsquo;ll start off in the terminal and resize the image to 70x70 pixels. We&rsquo;ll also crop it to the same dimensions and supply an offset value then save the file as <code>source.png</code>.</p>
+
+``` terminal
+$ convert octocat.png -resize '70x70^' -crop '70x70+0+0' source.png
+```
+
+<p><img src="http://asciicasts.com/system/photos/1322/original/E374I02.png" width="70" height="70" alt="Our first attempt at generating a thumbnail gives us an off-centre image." class="inlineThumbnail"/> The resulting image looks like this. It&rsquo;s dimensions are correct but it is off-centre. We want it to crop in the middle instead. This can be accomplished with the gravity option which we set before crop. Setting it to center will keep the image centered as it&rsquo;s cropped.</p>
+
+```terminal
+$ convert octocat.png -resize '70x70^' -gravity center -crop '70x70+0+0' source.png
+```
+
+<p><img src="http://asciicasts.com/system/photos/1323/original/E374I03.png" width="70" height="70" alt="The image in now centred correctly." class="inlineThumbnail"/> This crops the image correctly so we already have a command we can use to turn any image into a thumbnail. We want to turn this thumbnail into a greyscale image and also add some contrast so that it can easily be converted into a stamp. We can do this by adding some more options such as <code>quantize</code> to set the colour palette to greyscale, <code>colors</code> to do the conversion and <code>contrast</code> to make the image pop a little more. Note that the option passed to <code>quantize</code> is in uppercase.</p>
+
+``` terminal
+$ convert octocat.png -resize '70x70^' -gravity center -crop '70x70+0+0' -quantize GRAY -colors 256 -contrast source.png
+```
+
+<p><img src="http://asciicasts.com/system/photos/1324/original/E374I04.png" width="70" height="70" alt="We now have a greyscale image." class="inlineThumbnail"/> We now have a greyscale image that we can composite the overlay on top of to give it the texture of a stamp. We can do this by using the <code>composite</code> command which will overlay one image on top of another. We&rsquo;ll composite the overlay image on to our source image and overwrite the source image with the new image.</p>
+
+``` terminal
+$ composite stamp_overlay.png source.png source.png
+```
+
+<p><img src="http://asciicasts.com/system/photos/1329/original/E374I05.png" width="70" height="70" alt="The image now has the stamp overlay applied." class="inlineThumbnail"/> The image now has the stamp texture overlaid on top and the next thing we want to do is add some colour. Not only can the <code>convert</code> command be used to process existing images we can also use it to create images from scratch. We&rsquo;ll make a new 70x70 pixel image that we&rsquo;ll colour red. We do this by using the <code>canvas</code> option, although note that some versions of ImageMagick expect as <code>cx</code> option instead.</p>
+
+``` terminal
+$ convert -size 70x70 canvas:red colour.png
+```
+
+<p>This generates a square red image that we can composite with the source image. Instead of having to manage another file, however, we can handle to compositing in the same convert command. We&rsquo;ll load in the source image and configure how it should be composited with the other one. We&rsquo;ll use the <code>copy-opacity</code> opacity setting and tell it to composite the source image with the red canvas.</p>
+
+``` terminal
+$ convert -size 70x70 canvas:red source.png -compose copy-opacity -composite stamp.png
+```
+
+<p><img src="http://asciicasts.com/system/photos/1325/original/E374I06.png" width="70" height="70" alt="Our composite image needs to be inverted." class="inlineThumbnail"/> The generated image is close to what we want but it looks like we need to invert the source image to get the result we want. We can do this by passing in parentheses when we load in the image and by using the negate option to tell it to invert the colours on the source image when it&rsquo;s loaded in.</p>
+
+``` terminal
+convert -size 70x70 canvas:red \( source.png -negate \) -compose copy-opacity -composite stamp.png
+```
+
+<p><img src="http://asciicasts.com/system/photos/1326/original/E374I07.png" width="70" height="70" alt="We now have the stamp image we want." class="inlineThumbnail"/> The image that&rsquo;s generated now looks exactly like we want it to. It&rsquo;s easy to configure our command to change the colour for different stamps. Now that we have this figured out we can merge the entire thing into one command so that the image is resized and make into a stamp in one go. This is a long and rather complicated looking command but it does exactly what we want.</p>
+
+``` terminal
+convert -size 70x70 canvas:red \( octocat.png -resize '70x70^' -gravity center -crop '70x70+0+0' -quantize GRAY -colors 256 -contrast stamp_overlay.png -composite -negate \) -compose copy-opacity -composite stamp.png
+```
+
+<h3>Doing This in a Rails Application</h3>
+
+<p>The next step is to get this working in a Rails application. One option is just to execute this command from within Ruby and this isn&rsquo;t such a bad idea. There are a couple of gems available that will do just this. <a href="https://github.com/EricR/image_sorcery">Image Sorcery</a> is a thin wrapper around the command-line too and <a href="https://github.com/probablycorey/mini_magick">MiniMagick</a> is similar. The interface to both of these gems can be a little cumbersome when we have to deal with extensive image manipulation so keeping the whole command in a string and executing it is often the best way to go. There&rsquo;s also the classic <a href="http://rmagick.rubyforge.org/">RMagick gem</a>. This hasn&rsquo;t been updated recently and some people criticize it for leaking memory but it is a valid option if you&rsquo;re looking for an alternative to the command-line interface. It wraps the C library so its interface isn&rsquo;t always a one-to-one mapping with the command line but it does have a good <a href="http://studio.imagemagick.org/RMagick/doc/">user guide</a>. Let&rsquo;s see what&rsquo;s involved in using RMagick to generate the same stamp image. First we&rsquo;ll need to install its gem.</p>
+
+``` terminal
+$ gem install rmagick
+```
+
+<p>We&rsquo;ll get the image manipulation working in a simple Ruby script before we move it over to our Rails application. Here it is:</p>
+
+``` stamp.rb
+require "rmagick"
+
+source = Magick::Image.read("octocat.png").first
+source = source.resize_to_fill(70, 70).quantize(256, Magick::GRAYColorspace).contrast(true)
+overlay = Magick::Image.read("stamp_overlay.png").first
+source.composite!(overlay, 0, 0, Magick::OverCompositeOp)
+colored = Magick::Image.new(70, 70) { self.background_color = "red" }
+colored.composite!(source.negate, 0, 0, Magick::CopyOpacityCompositeOp)
+colored.write("stamp.png")
+```
+
+<p>First we require <code>rmagick</code> and then we load in the source image. Reading an image gives us an array of layer images and so we pick the first. We can then use the <code>resize_to_fill</code> method to crop and resize the image and call <code>quantize</code> on the thumbnail image that&rsquo;s returned to covert it to greyscale. Calling <code>contrast</code> and passing <code>true</code> will increase the image&rsquo;s contrast.</p>
+
+<p>Next we composite the overlay image. We load it in in the same way as the main image then call <code>composite!</code> on the source image to composite the overlay on the source. We then create a new image with a red background and composite it on to the negated source image. Note the <code>Magick::CopyCapacityCompositeOp</code> argument which is the same as the <code>-compose copy-opacity</code> option we used on the command line. Finally we write the image out.</p>
+
+<p><img src="http://asciicasts.com/system/photos/1327/original/E374I08.png" width="70" height="70" alt="The stamp image generated with RMagick." class="inlineThumbnail"/>
+We can try this out now. If we run our script the image that&rsquo;s returned looks like the one we generated on the command line so it seems that our script works. For comparison here&rsquo;s how the other approach to generating this script in Ruby looks:</p>
+
+``` stamp.rb
+# Or through the command line:
+system <<-COMMAND
+convert -size 70x70 canvas:red \\( octocat.png \
+  -resize '70x70^' -gravity center -crop '70x70+0+0' \
+  -quantize GRAY -colors 256 -contrast stamp_overlay.png \
+  -composite -negate \
+\\) -compose copy-opacity -composite stamp.png
+COMMAND
+```
+
+<p>If we use this we need to take care to watch for shell injection attacks if we&rsquo;re accepting parameters from the user. Using RMagick feels more verbose but it&rsquo;s also more dynamic and we need to watch out for potential memory leaks.</p> 
+
+<p>We&rsquo;ve already created a simple Rails application to demonstrate how an uploaded image can be converted. This has a page with a file upload dialogue that will covert any uploaded image to a stamp. We&rsquo;ve used RMagick for this example along with CarrierWave for handling file uploads. (CarrierWave was covered in <a href="http://railscasts.com/episodes/253-carrierwave-file-uploads">episode 253</a>.)</p>
+
+``` /Gemfile
+gem 'rmagick'
+gem 'carrierwave'
+```
+
+<p>We also have a <code>Stamp</code> model which mounts a CarrierWave uploader called <code>StampUploader</code>.</p>
+
+``` /app/models/stamp.rb
+class Stamp < ActiveRecord::Base
+  attr_accessible :image
+  mount_uploader :image, StampUploader
+end
+```
+
+<p>The <code>StampUploader</code> class is fairy standard apart from the processing code.</p>
+
+``` /app/uploaders/stamp_uploader.rb
+# encoding: utf-8
+
+class StampUploader < CarrierWave::Uploader::Base
+  include CarrierWave::RMagick
+
+  include Sprockets::Helpers::RailsHelper
+  include Sprockets::Helpers::IsolatedHelper
+
+  storage :file
+
+  def store_dir
+    "uploads/#{model.class.to_s.underscore}/#{mounted_as}/#{model.id}"
+  end
+
+  def extension_white_list
+    %w(jpg jpeg gif png)
+  end
+
+  %w[red green blue purple black].each do |color|
+    version(color) { process stamp: color }
+  end
+
+  def stamp(color)
+    manipulate! format: "png" do |source|
+      overlay_path = Rails.root.join("app/assets/images/stamp_overlay.png")
+      overlay = Magick::Image.read(overlay_path).first
+      source = source.resize_to_fill(70, 70).quantize(256, Magick::GRAYColorspace).contrast(true)
+      source.composite!(overlay, 0, 0, Magick::OverCompositeOp)
+      colored = Magick::Image.new(70, 70) { self.background_color = color }
+      colored.composite(source.negate, 0, 0, Magick::CopyOpacityCompositeOp)
+    end
+  end
+end
+```
+
+<p>The processing is done in the <code>stamp</code> method. This is all that&rsquo;s needed to handle the stamped versions. What we do is loop through a list of colours and make a version for each one. The stamp method calls <code>manipulate!</code> which is a custom CarrierWave method and tells it that we want to use RMagick to generate a PNG image. This method takes a block that we pass the source image into. The code in the block should return the modified image and is basically the same code we used earlier with a couple of variables thrown in. If we were using this code in a production app we should move it off into a background process, but that&rsquo;s out of the scope of this episode. Since each colour is a different version  we can easily change the colour of the stamp that&rsquo;s displayed in the view by passing in a different version.</p>
+
+``` /app/views/stamps/index.html.erb
+<h1>Stamps</h1>
+
+<% @stamps.each do |stamp| %>
+  <div class="stamp">
+    <%= image_tag stamp.image_url(:blue) %>
+  </div>
+<% end %>
+<div class="clear"></div>
+
+<p><%= link_to "New Stamp", new_stamp_path %></p>
+```
+
+<p>Now our stamps are a different colour.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1328/original/E374I09.png" width="800" height="360" alt="We can now choose from a range of different colours for our stamp."/>
+</div>

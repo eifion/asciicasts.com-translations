@@ -1,0 +1,250 @@
+<p>Feed aktivitas user merupakan hal yang biasa di minta untuk ada di sebuah web, seperti yang dimiliki juga oleh Github. Ini sangat baik untuk aplikasi dengan gaya social-network sehingga kita bisa melihat apa saja yang sudah dilakukan oleh user-user lain</p> 
+
+<p>Kita memiliki aplikasi buku masakan dimana user dapat membuat, mengedit dan membagikan resep-resep. User dapat menambahkan komentar pada resep dan menandai user lain sebagai teman. Kita akan menambahkan halaman aktivitas untuk aplikasi ini sehingga kita bisa melihat semua aktivitas teman kita dan mengetahui apa yang baru mereka lakukan, misalnya mengepost resep baru atau menambahkan komentar.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1467/original/E406I01.png" width="800" height="500" alt="Our cookbook application."/>
+</div>
+
+<p>Kita akan melakukan ini dengan gem yang bernama <a href="https://github.com/pokonski/public_activity">Public Activity</a>. Untuk menggunakannya pada aplikasi kita, kita akan menambahkannya ke dalam gemfile dan menjalankan <code>bundle</code> untuk menginstalnya</p>
+
+``` /Gemfile
+gem 'public_activity'
+```
+
+<p>Untuk membuat tabel database yang dibutuhkan oleh gem itu, kita perlu menjalankan generator <code>publish_activity:migration</code> kemudian melakukan migrasi pada database</p> 
+
+``` terminal
+$ rails g public_activity:migration
+$ rake db:migrate
+```
+
+<p>Tabel <code>activities</code> akan terbuat beserta dengan model ActiveRecord untuk manajemen aktivitas. Public Activity juga compatible dengan Mongoid dan langkah ini tidak perlu dilakukan bila anda menggunakannya. Lihatlah dokumentasinya bila anda melakukan setup ini. Langkah selanjutnya adalah menyertakan modul <code>PublicActivity::Model</code> pada setiap model yang ingin kita track aktivitasnya dan agar memanggil method bernamad <code>tracked</code>. Kita akan melakukan ini pada model <code>Recipe</code>.</p>
+
+``` /app/models/recipe.rb
+class Recipe < ActiveRecord::Base
+  include PublicActivity::Model
+  tracked
+  
+  attr_accessible :description, :image_url, :name
+
+  belongs_to :user
+  has_many :comments, dependent: :destroy
+end
+```
+
+<p>Method <code>tracked</code> mengeset beberapa callback untuk secara otomatis membuat catatan aktivitas saat sebuah model dibuat, di-update ataupun dihapus. Kita akan melakukan ini pada model <code>Comment</code> karena kita ingin melakukan tracking padanya. Jika sekarang kita menambahkan komentar baru pada sebuah resep akan langsung di tracking oleh Public Activity.</p> 
+
+<h3>Halaman Aktifitas</h3>
+
+<p>Selanjutnya kita perlu mebuat halaman yang menampilkan aktifitas. Kita akan membuat sebuah controller baru dengan action <code>index</code> untuk ini.</p>
+
+``` terminal
+$ rails g controller activities index
+```
+
+<p>Selanjutnya kita akan merubah file route dan mengganti route yang terbuat dengan resource activiteis.</p>
+
+``` /config/routes.rb
+resources :activities
+```
+
+<p>Pada action index controller ini kita ingin membuat list dari semua aktifitas. Dengan memanggil <code>PublicActivity::Activity</code> akan memberikan kita model ActiveRecord sehingga kita bisa melakukan query pada basis data seperti biasa. Kita akan mengurutkan hasilnya berdasarkan waktu pembuatannya sehingga aktifitas yang terbaru akan tampil diatas.</p>
+
+``` /app/config/activities_controller.rb
+class ActivitiesController &lt; ApplicationController
+  def index
+    @activities = PublicActivity::Activity.order(&quot;created_at desc&quot;)
+  end
+end
+```
+
+<p>Pada view kita dapat melakukan perulangan terhadap data ini dan menampilkannya. Untuk saat ini kita hanya akan melakukan inspect pada setiap aktifitas untuk melihat apa isinya.</p>
+
+``` /app/views/activities/index.html.erb
+<h1>Friends&rsquo; Activities</h1>
+<% @activities.each do |activity| %>
+  <%= activity.inspect %>
+<% end %>
+```
+
+<p>Saat kita memuat ulang halaman sekarang akan terlihat satu aktifitas yang sudah kita tambahkan.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1468/original/E406I02.png" width="800" height="400" alt="The activities page showing the single activity that we&rsquo;ve added."/>
+</div>
+
+<p>Kita dapat melihat atribut yang berbeda, dalam aktifitas ini terdapat kolom <code>trackable_id</code> dan <code>trackable_type</code>. Ini merupakan asosiasi polymorphic dan kita tahu bahwa aktifitas ini terasosiasi dengan model <code>Comment</code>. Disini juga terdapat beberapa asosiasi polymorphic lainnya: <code>recipient</code> dan <code>owner</code>. Owner adalah pengguna yang melakukan aktifitas dan kita ingin mengeset ini sehingga kita bisa menampilkan nama pengguna pada aktifitasnya. Kita akan melakukannya setelah ini.</p>
+
+<p>Seperti sudah disampaikan sebelumnya, gem ini menggunakan callback untuk melakukan pencatatan aktifitas. Hal ini menimbulkan masalah karena layer model tidak memiliki akses pada user saat ini, apakah ini berarti kita tidak bisa mengeset kepemilikan saat mencatat aktivitas? Public Activity memiliki pemecahan untuk masalah ini; untuk menggunakannya kita perlu menambahkan module pada <code>ApplicationController</code>.</p>
+
+``` /app/controllers/application_controller.rb
+class ApplicationController < ActionController::Base
+  include PublicActivity::StoreController
+
+  # Rest of class omitted
+end
+```
+
+<p>Ini akan mencatat ccntroller pada setiap request dan membuat kita bisa mengaksesnya dari model. Kita akan menambahkan ini pada model <code>Comment</code> dengan menyertakan opsi <code>owner</code> pada <code>tracked</code>.</p>
+
+``` /app/models/comment.rb
+tracked owner: ->(controller, model) { controller.current_user }
+```
+
+<p>Kita set opsi ini pada lambda dan akan dievalusi setiap tracking aktivitas dilakukan. Controller dan model diteruskan pada tracked sehingga kita bisa mengeset kepemilikan sesuai dengan user yang aktif saat itu. Tapi ini masih menyisakan masalah kecil, karena <code>current_user</code> merupakan private method pada <code>ApplicationController</code> kita. Kita akan membuatnya menjadi public danmenggunakan <code>hide_action</code> untuk membuatnya tidak dianggap sebagai sebuah action.</p>
+
+``` /app/controllers/application_controller.rb
+class ApplicationController < ActionController::Base
+  include PublicActivity::StoreController
+  protect_from_forgery
+
+  def current_user
+    @current_user ||= User.find(session[:user_id]) if session[:user_id]
+  end
+  helper_method :current_user
+  hide_action :current_user
+
+private
+
+  def require_login
+    redirect_to login_url, alert: "You must first log in or sign up." if current_user.nil?
+  end
+end
+```
+
+<p>Isu potensial lain adalah pada saat <code>Comment</code> memanggil <code>controller.current_user</code> akan menimbulkan exception jika kita mencoba membuat record diluar request saat itu karena tidak ada controllernya. Kita akan mengecek untuk melihat apakah ada controllernya sebelum mencoba untuk mendapatkan current user darinya.</p>
+
+``` /app/models/comment.rb
+tracked owner: ->(controller, model) { controller && controller.current_user }
+```
+
+<p>Pengerjaan ini tidak ideal dan rasanya agak kurang baik untuk mendapatkan akses terhadap controller dari model tetapi ini dapat bekerja. Kita akan menambahkannya ke model <code>Recipe</code> sehingga kita bisa mendapatkan user dari sini  juga. Kita kemudian mencoba juga menambahkan comment baru lalu mengunjungi halaman aktivitas lagi.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1469/original/E406I03.png" width="800" height="376" alt="The second activity shows its owner_id."/>
+</div>
+
+<p>Sekarang kita memiliki dua aktivitas dan yang pertama, yang baru saja ditambahkan sudah mempunyai <code>owner_id</code>. Kita akan memperbaiki bagian view sekarang, agar dapat dengan benar menampilkan aktivitas.</p>
+
+``` /app/views/activities/index.html.erb
+<h1>Friends&rsquo; Activities</h1>
+<% @activities.each do |activity| %>
+  <div class="activity">
+  <%= link_to activity.owner.name, activity.owner if activity.owner %>
+  added comment to <%= link_to activity.trackable.recipe.name, activity.trackable.recipe %>
+  </div>
+<% end %>
+```
+
+<p>Kita memiliki <code>div</code> dengan class <code>activity</code> untuk setiap aktivitas dan di dalamnya kita menampilkan nama pemilik aktivitas, tetapi hanya untuk aktivitas yang memiliki pemilik. Selanjutnya kita akan mendeskripsikan aktivitas tersebut dan ini akan sedikit sulit karena setiap aktivitas memiliki keunikan, sehingga untuk saat ini kita akan menulis saja bahwa aktivitas kita adalah komentar. Kita kemudian menampilkan nama resep dalam tautan untuk menuju ke resep itu. Untuk memperoleh resepnya kita menggunakan <code>activity.trackable</code> yang merupakan asosiasi polymorphic yang mereferensikan model untuk aktivitas tersebut, dalam kasus ini merupakan model <code>Comment</code>. Kita sekarang akan menambahkan styling juga terhadap tampilan aktivitas ini.</p>
+
+``` /app/assets/activities.css.scss
+.activity {
+  border-bottom: solid 1px #CCC;
+  padding: 16px 0;
+  em {
+    color: #777;
+    font-size: 12px;
+    padding-left: 5px;
+  }
+}
+```
+
+<p>Saat kita memuat ulang halaman ini sekarang kita seharusnya dapat melihat daftar aktivitas yang ada.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1470/original/E406I04.png" width="800" height="376" alt="The page now shows the list of activities."/>
+</div>
+
+<p>Ini sudah tampak bagus tetapi kita melakukan hard-coding untuk deskripsi. Bagaimana kita bisa mengubahnya agar dapat sesuai dengan masing-masing tipe aktivitas? Public Activity menyediakan helper bernama <code>render_activity</code> yang dapat kita gunakan.</p>
+
+``` /app/views/activities/index.html.erb
+<h1>Friends&rsquo; Activities</h1>
+<% @activities.each do |activity| %>
+  <div class="activity">
+    <%= link_to activity.owner.name, activity.owner if activity.owner %>
+    <%= render_activity activity %>
+  </div>
+<% end %>
+```
+
+<p>Ini akan me-render partial untuk aktivitas dengan mencarinya pada direktori <code>public_activity</code> dan disana kita akan membutuhkan folder untuk setiap tipe model yang berbeda yang kita tracking. Kita ingin partial ini akan tampil saat sebuah comment dibuat, maka kita menamakannya <code>_create.html.erb</code>. Di dalamnya kita akan mendeskripsikan activitas seperti yang kita lakukan sebelumnya.</p>
+
+``` /app/views/public_activity/comment/_create.html.erb
+added comment to <%= link_to activity.trackable.recipe.name, activity.trackable.recipe %>
+```
+
+<p>Sepertinya kita sudah pernah melakukan ini sebelumnya, tetapi untuk yang sekarang kita menggunakan partial untuk setiap tipe aktivitas termasuk <code>_destroy</code> dan <code>_update</code>. Setelah kita selesai menambahkan ini dan mengupdate beberapa komentar, kita dapat melihat bagaimana akan kelihatan di halaman aktivitas.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1471/original/E406I05.png" width="867" height="469" alt="Each activity is now described correctly."/>
+</div>
+
+<p>Semuanya sudah tampak bagus sekarang, tetapi saat kita menghapus suatu data, misalnya sebuah resep dan mengunjungi halaman aktivitas kita akan mendapatkan pesan kesalahan.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1472/original/E406I06.png" width="867" height="469" alt="Viewing the activities page after deleting a recipe throws an exception."/>
+</div>
+
+<p>Ini karena kita memanggil <code>activity.trackable.recipe</code> untuk resep yang sudah tidak lagi ada. Ini penting untuk setiap partial agar dapat mengetahui apakah suatu data masih ada atau tidak, sehingga kita akan mengubah setiap partial menjadi seperti ini.</p>
+
+``` /app/views/public_activity/comment/_create.html.erb
+added comment to 
+<% if activity.trackable %>
+  <%= link_to activity.trackable.recipe.name, activity.trackable.recipe %>
+<% else %>
+  which has since been removed 
+<% end %>
+```
+
+<p>Saat kita memuat ulang halaman, pesan kesalahan tadi akan menghilang.</p> 
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1473/original/E406I07.png" width="867" height="469" alt="The activities page now handles deleted records."/>
+</div>
+
+<h3>Excluding Actions</h3>
+
+<p>Selanjutnya kita akan memperlihatkan bagaimana untuk meng-exclude action yang tidak kita inginkan untuk di track. Misalnya pembaharuan komentar tidak begitu menarik, sehingga kita tidak ingin memperlihatkannya pada daftar aktivitas. Kita dapat melakukannya dengan memberikan pilihan pada saat memanggil <code>tracked</code> di model <code>Comment</code> model: apakah itu <code>only</code> untuk menuliskan aktivitas mana saja yang seharusnya di-tracked ataupun <code>except</code> untuk menuliskan aktivitas yang di-exclude.</p> 
+
+``` /app/models/comment.rb
+tracked except: :update, owner: ->(controller, model) { controller && controller.current_user }
+```
+
+<p>Method <code>tracked</code> mulai menjadi lebih kompleks dengan segala pilihan ini dan melakukan tracking aktivitas melalui model callback tidak selalu menjadi cara terbaik, sehingga kita akan mengubahnya agar melalui controller. Untuk melakukan ini kita akan menyertakan <code>PublicActivity::Common</code> pada model, bukannya <code>PublicActivity::Model</code>. Kita juga dapat menghilangkan pemanggilan <code>tracked</code> disini pula.</p>
+
+``` /app/models/comment.rb
+class Comment < ActiveRecord::Base
+ include PublicActivity::Common
+  attr_accessible :content
+
+  belongs_to :user
+  belongs_to :recipe
+end
+```
+
+<p>Sekarang pada <code>CommentsController</code> kita dapat mencatat aktivitas saat kita melakukan penyimpanan, pembaharuan ataupun penghapusan komentar.</p> 
+
+``` /app/controllers/comments_controller.rb
+if @comment.save
+  @comment.create_activity :create, owner: current_user
+  redirect_to @recipe, notice: "Comment was created."
+else
+  render :new
+end
+```
+
+<p>Ini memberikan kita kontrol yang lebih baik terhadap kapan dan bagaimana aktivitas dibuat dan ini dimaksudkan untuk menghindari kita men-setting current user. Cara ini juga membuat kita dapat membuat aktivitas yang custom dengan lebih mudah.</p>
+
+<p>Untuk menyelesaikan episode ini kita akan mengubah daftar aktivitas sehingga hanya menampilkan aktivitas dari teman kita, bukannya aktivitas semua orang. Kita dapat melakukannya dengan menambahkan scope kepada <code>ActivitiesController</code> kita.</p>
+
+``` /app/controllers/activities_controller.rb
+class ActivitiesController < ApplicationController
+  def index
+    @activities = PublicActivity::Activity.order("created_at desc").where(owner_id: current_user.friend_ids, owner_type: "User")
+  end
+end
+```
+
+<p>Dan sekarang hanya aktivitas yang termasuk dalam teman current user yang akan ditampilkan. Sebagai pemilik kita dapat menggunakan asosiasi polymorphic dan merupakan ide yang baik untuk memeriksa apakah <code>owner_type</code> adalah <code>User</code>. Saat kita memuat ulang halaman sekarang, kita tidak lagi melihat aktivitas dari user yang tidak kita tandai sebagai teman kita, tetapi saat kita menambahkan user lain yang sudah membuat komentar sebagai teman maka kita akan melihat aktivitas mereka dalam daftar.</p>

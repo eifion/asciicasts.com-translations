@@ -1,0 +1,230 @@
+<p>Last week at RailsConf the first release candidate of Rails 4.0 was announced. This makes it a great time to try upgrading your own projects to Rails 4 so that you can see if they work and report any bugs that you find. We covered many of Rails 4&rsquo;s new features in <a href="http://railscasts.com/episodes/400-what-s-new-in-rails-4">episode 400</a> so this episode will focus on the process of upgrading a Rails 3.2 app. This way you can follow along with one of your own applications. </p>
+
+<p>The first step is to ensure that we&rsquo;re running the latest version of Rails 3.2 and that all the application&rsquo;s gems are up to date as well. Also we&rsquo;ll need to be running Ruby 1.9.3 or later. It&rsquo;s also a good idea to check that our app&rsquo;s test suite is passing fully before starting to upgrade. The process will be more difficult if our app doesn&rsquo;t have automated tests as it means that much more manual testing will be required. At the very least you should add some integration tests to our app before beginning the upgrade. Our application has tests which all pass so we can start to upgrade it to Rails 4. It&rsquo;s a good idea to do this in a separate branch so we&rsquo;ll create one now.</p>
+
+``` terminal
+$ git checkout -b rails4
+```
+
+<p>Next we&rsquo;ll upgrade the version of Rails in the gemfile from <code>3.2.13</code> to <code>4.0.0.rc1</code> (or the current latest version). We&rsquo;ll need to change the version numbers for some of the other gems too, including those in the <code>assets</code> group. Rails 4 removes this group so we can remove it and include the gems that were in it for all groups.</p>
+
+``` /Gemfile
+gem 'rails', '4.0.0.rc1'
+gem 'sqlite3'
+
+gem 'sass-rails',   '~> 4.0.0.rc1'
+gem 'coffee-rails', '~> 4.0.0.rc1'
+gem 'uglifier', '>= 1.3.0'
+```
+
+<p>In Rails 4 the production environment will not try to dynamically generate any assets by default and use the static precompiled assets and to go along with this change the assets are now intended to be precompiled in the production environment. If you&rsquo;re running <code>rake assets:compile</code> to precompile the assets you&rsquo;ll need to set the environment to <code>production</code> first.</p>
+
+``` terminal
+$ RAILS_ENV=production bundle exec rake assets:precompile
+```
+
+<p>A nice side-effect of this is change is that it simplifies the application&rsquo;s config file. In Rails 3 we had to load the gems matching the assets group, but only in the <code>development</code> and <code>test</code> environments. This means that we can replace this code:</p>
+
+``` /config/application.rb
+if defined?(Bundler)
+  # If you precompile assets before deploying to production, use this line
+  Bundler.require(*Rails.groups(:assets => %w(development test)))
+  # If you want your assets lazily compiled in production, use this line
+  # Bundler.require(:default, :assets, Rails.env)
+end
+```
+
+<p>with this:</p>
+
+``` /config/application.rb
+Bundler.require(:default, Rails.env)
+```
+
+<p>If you miss the assets group in your production setup you can add something like that on your own and customize the group loading behaviour in this file.</p>
+
+<p>We can try this now by running <code>bundle update</code> to install the new version. This appears to work successfully but the command can sometimes have some unexpected behaviour. We can see some of this by running <code>bundle outdated</code> which is a little-known command but which is useful for finding out of date gems.</p> 
+
+``` terminal
+$ bundle outdated
+Fetching gem metadata from https://rubygems.org/.........
+Fetching gem metadata from https://rubygems.org/..
+Resolving dependencies...
+
+Outdated gems included in the bundle:
+  * builder (3.2.0 > 3.1.4)
+  * paper_trail (2.7.1 > 1.6.4)
+```
+
+<p>When we run this for our application it finds two outdated gems. The version of <code>builder</code> is fairly close but that for <code>paper_trail</code> is way off and this is because it couldn&rsquo;t find a newer version compatible with Rails 4. This is one reason why it&rsquo;s important to be strict in the gemfile about the versions we&rsquo;ll accept. We haven&rsquo;t specified a version for <code>paper_trail</code> in the gemfile so we&rsquo;ll do that now.</p>
+
+``` /Gemfile
+gem 'paper_trail', '~> 2.7.1'
+```
+
+<p>When we run <code>bundle update</code> now we get an error message about a version conflict. Papertrail expects a version of ActiveRecord around 3.0 so we&rsquo;ll have to find a different version that&rsquo;s compatible with Rails 4. Papertrail has a Git branch for Rails 4 and we can use that in the Gemfile, but this may not apply for other gems so we&rsquo;ll need take a look at each affected gem&rsquo;s issue tracker to see what its status is.</p> 
+
+``` /Gemfile
+gem 'paper_trail', github: 'airblade/paper_trail', branch: 'rails4'
+```
+
+<p>When we run bundle update now it will fetch a version of Papertrail from the Github project and it completes successfully.</p> 
+
+<p>Now that we have our gems up to date we can try running our specs. When we do so they fail miserably. The output shows an error saying that the <code>caches_page</code> method in the <code>EpisodesController</code> is undefined. We&rsquo;re using page caching in our application which has been removed in Rails 4, along with other things such as observers, protected model attributes and ActiveResource. The good news is that if we need any of these features, it&rsquo;s easy to add them back through gems. We&rsquo;ll add a list of items that it&rsquo;s a good idea to use during the upgrade process.</p>
+
+``` /Gemfile
+gem 'protected_attributes'
+gem 'rails-observers'
+gem 'actionpack-page_caching'
+gem 'actionpack-action_caching'
+gem 'activerecord-deprecated_finders'
+```
+
+<p>Doing this removes any errors related to the functionality that&rsquo;s been extracted from Rails 4. When we&rsquo;re doing a major version upgrade like this it&rsquo;s important to get the application into a working state as quickly as possible so it&rsquo;s best to avoid any large refactorings or other large changes to the app and adding these gems helps with that. When our tests pass we can then start to clean up the code and maybe change it to use techniques that don&rsquo;t rely on these gems. We&rsquo;ll run <code>bundle</code> to install these gems then try running our specs again to see if we can get them to pass. This time, along with a number of deprecation warnings, we see an error related to the routes.</p>
+
+``` terminal
+$ spec .
+...
+You should not use the `match` method in your router without specifying an HTTP method.
+If you want to expose your action to both GET and POST, add `via: [:get, :post]` option.
+If you want to expose your action to GET, use `get` in the router:
+  Instead of: match "controller#action"
+  Do: get "controller#action"
+...
+```
+
+<p>The <code>match</code> method is no longer accepted. Normally we should just replace this with get but if we want to support multiple methods we can add them or use match with the <code>via:</code> option.</p>
+
+``` /config/routes.rb
+# match 'new', to: 'episodes#new', via: [:get, :post]
+get 'new', to: 'episodes#new'
+```
+
+<p>When we try running our specs now they run but there are many failures, most of which are about mass-assigning protected attributes including ones for the <code>Version</code> model from Papertrail. This should run in Rails 4 with strong parameters but we&rsquo;re still using protected attributes. We can get around this by modifying our app&rsquo;s config file and setting <code>active_record.whitelist_attributes</code> setting to <code>false</code>. By default it&rsquo;s set to <code>true</code> which means that it expects <code>attr_accessible</code> to be defined in every model which probably won&rsquo;t be the case while we&rsquo;re migrating our application to use strong parameters.</p>
+
+``` /config/application.rb
+config.active_record.whitelist_attributes = false
+```
+
+<p>Now our specs all pass, although there are still a lot of deprecation warnings. Let&rsquo;s walk through these and try to sort them out. Many of them have to do with configuration options such as <code>whiny_nils</code>, which are no longer required. In the development config file we&rsquo;ll remove the line related to <code>whiny_nils</code>, and add an <code>eager_load</code> option, which we&rsquo;ll set to <code>false</code>. We can also remove the other options which are no longer required.</p>
+
+``` /config/development.rb
+Screencaster::Application.configure do
+  # Settings specified here will take precedence over those in config/application.rb
+
+  # In the development environment your application's code is reloaded on
+  # every request. This slows down response time but is perfect for development
+  # since you don't have to restart the web server when you make code changes.
+  config.cache_classes = false
+
+  config.eager_load = false
+
+  # Show full error reports and disable caching
+  config.consider_all_requests_local       = true
+  config.action_controller.perform_caching = false
+
+  # Don't care if the mailer can't send
+  config.action_mailer.raise_delivery_errors = false
+
+  # Print deprecation notices to the Rails logger
+  config.active_support.deprecation = :log
+
+  # Expands the lines which load the assets
+  config.assets.debug = true
+end
+```
+
+<p>Next we&rsquo;ll configure the production environment. Here we need to turn on eager loading and alter the <code>config.assets.compress</code> option.</p>
+
+``` /config/production.rb
+config.eager_load = true
+
+ # Compress JavaScripts and CSS
+ config.assets.js_compressor = :uglifier
+```
+
+<p>In the test environment we need to remove the <code>whiny_nils</code> option and set eager loading to <code>false</code>. We can also remove the <code>mass_assignment_sanitizer</code> as we&rsquo;ll be transitioning to strong parameters.</p>
+
+
+``` /config/test.rb
+# Log error messages when you accidentally call methods on nil
+# config.whiny_nils = true
+config.eager_load = false
+
+# Raise exception on mass assignment protection for Active Record models
+# config.active_record.mass_assignment_sanitizer = :strict
+```
+
+<p>A quick note now about the asset pipeline. If we look in our application&rsquo;s config file we&rsquo;ll see a leftover <code>config.assets.version</code> option that&rsquo;s set to <code>true</code>. This is no longer necessary as in Rails 4 the asset pipeline is enabled by default so we&rsquo;ll need to set it to <code>false</code> if we&rsquo;re not using the asset pipeline in our application. If we are we can just remove this option.</p>
+
+<p>There&rsquo;s one more configuration change we need to make, in the secret token initializer. In Rails 4 the configuration option in this file has been renamed from <code>secret_token</code> to <code>secret_key_base</code>. We&rsquo;ll need to specify both options while we&rsquo;re transitioning from Rails 3 but once we&rsquo;ve successfully migrated our application we can remove the <code>secret_token</code> option. It&rsquo;s best to use a different token for our <code>secret_key_base</code>.</p>
+
+``` /config/initializers/secret_token.rb
+Screencaster::Application.config.secret_token = '762a2f23950e306261908d4e5519ffe71ce626b119e9fc03a012ba86f46d82ef32d72f283633bacc2f59cf94ce5968552fe97d157e7f00560c1217d4592dda09'
+Screencaster::Application.config.secret_key_base = 'xx762a2f23950e306261908d4e5519ffe71ce626b119e9fc03a012ba86f46d82ef32d72f283633bacc2f59cf94ce5968552fe97d157e7f00560c1217d4592dda09'
+```
+
+<p>This is necessary because we&rsquo;re moving from a serialized cookie stored on the client to an encrypted cookie. This prevents users from easily being able to see the contents of  their session cookies.</p>
+
+<p>We&rsquo;ve made a lot of configuration changes here but we haven&rsquo;t covered everything. We&rsquo;ll create a new Rails 4 application so that we can look at the generated config files and then compare them with those of the application we&rsquo;re upgrading to see what else we need to copy over.</p> 
+
+<p>With all these changes in place we&rsquo;ll try running our specs again to make sure that we haven&rsquo;t broken anything and to see if we&rsquo;ve reduced the number of deprecation errors. All the tests still pass but there are still deprecation warnings so we&rsquo;ll see if we can reduce them. One of them is inside the <code>Episode</code> model. Whenever we defined a named scope we now need to pass a callable object as a second object, such as a lambda, like this:</p>
+
+``` /app/models/episode.rb
+scope :published, -> { where('published_on <= ?', Time.now.to_date) }
+```
+
+<p>This is necessary because it&rsquo;s east to set up a scope with something dynamic in it, such as the current time. Without the lambda this would always use the time at which the class is loaded, rather than the time at which the scope is called each time. The other deprecation we&rsquo;re still getting is in the <code>EpisodesController</code>&rsquo;s <code>index</code> action.</p> 
+
+``` /app/controllers/episodes_controller.rb
+def index
+  @episodes = Episode.published.find_all_by_pro(false)
+end
+```
+
+<p>Dynamic finder methods like this are no longer supported. Instead we should use the <code>find</code> method and pass the field in as an option.</p>
+
+``` /app/controllers/episodes_controller.rb
+def index
+  @episodes = Episode.published.where(pro: false)
+end
+```
+
+<p>When we run our specs now they all pass with no deprecation warnings.</p>
+
+<p>Now that we&rsquo;ve cleaned up the deprecations we can focus on other transitions such as strong parameters. These were covered in <a href="http://railscasts.com/episodes/371-strong-parameters">episode 371</a> and are basically a way to move mass assignment restrictions out of the model so that instead of using <code>attr_accessible</code> there we put the restrictions in the controller. We&rsquo;ll remove the attributes from the <code>Episode</code> model.</p>
+
+``` /app/models/episode.rb
+#attr_accessible :description, :name, :seconds, :published_on, :timecode
+```
+
+<p>In the controller we&rsquo;ll define a private method called <code>episode_params</code>. This is the conventional way to do this, although there are others we could use.</p>
+
+``` /app/controllers/episodes_controller.rb
+def episode_params
+  params.require(:episode).permit(:description, 
+  :name, :seconds, :published_on, :timecode)
+end
+```
+
+<p>In this method we call <code>permit</code> on the parameters that are passed in and pass it the permitted parameters. We use <code>params.require(:episode)</code> instead of <code>params[:episode]</code> to ensure that the parameters hash is available and to avoid a <code>nil</code> exception if they are not. We can then call this method whenever we get the parameters from the form.</p>
+
+``` /app/controllers/episodes_controller.rb
+def create
+  @episode = Episode.new(episode_params)
+  if @episode.save
+    redirect_to @episode, notice: 'Episode was successfully created.'
+  else
+    render action: "new"
+  end
+end
+```
+
+<p>Once we&rsquo;ve done this everywhere we can remove the <code>protected_attributes</code> gem from the gemfile. We can also remove any config options related to it from the app&rsquo;s config file such as <code>config.active_record.whitelist_attributes</code>.</p> 
+
+<p>We&rsquo;ve managed to remove one of the transition-related gems from our application now but it might be tricky to remove the others. We could use callbacks instead of <code>rails-observers</code> while <code>page_caching</code> still has some good use-cases so we could keep using this. HTTP caching, covered in <a href="http://railscasts.com/episodes/321-http-caching">episode 321</a>, is a better alternative to <code>action_caching</code> and we can remove <code>activerecord-deprecated_finders</code> as it is, in fact, a dependency in Rails 4.0, although it will be removed from Rails 4.1.</p>
+
+<p>Finally we&rsquo;ll mention a few minor changes that we can make. The first is in the controllers where <code>before_filter</code> is now <code>before_action</code>. There isn&rsquo;t yet a deprecation warning but the new name is a little clearer. In the routes file  if we use put here we can instead call <code>patch</code> as this better fits updating a record.</p>
+
+<p>If we have an app with a <code>/test</code> directory the structure has changed a little so it&rsquo;s worth taking a look at a new Rails 4 app to see what&rsquo;s different. Also the <code>/vendor/plugins</code> is no longer used so we can move the plugins out into a gem or into <code>/lib</code>.</p>
+
+<p>There are many more Rails 4 features that we haven&rsquo;t covered here, but which have been covered in past episodes. There are also a number of resources listed in the <a href="http://weblog.rubyonrails.org/2013/5/1/Rails-4-0-release-candidate-1/">blog post that announces the release candidate</a>.</p>

@@ -1,0 +1,80 @@
+<p>You&rsquo;re probably aware that the various Rails commands can be a little slow to run. If we run, say, a generator for a Rails application there is a delay of several seconds before we see any output. This is because the application is started up when these commands are run and this is most noticeable when running tests as these are run often when a application is in development. This wait time only grows as the application gets larger. In this episode we&rsquo;ll show you a few different tools that we can use to make these commands run much more quickly.</p>
+
+<h3>Zeus</h3>
+
+<p>The first one of these is called <a href="https://github.com/burke/zeus">Zeus</a> and it preloads Rails applications so that we can run commands against them almost instantly. It has some fairly strict requirements, however, and you&rsquo;ll need to be running a recent version of OS X or Linux and Ruby 1.9.3 with the garbage collection patch to use it. It does seem to work without that patch applied but it might be necessary to use it if you have limited RAM. To install it we just need to run <code>gem install zeus</code>. We shouldn&rsquo;t add it to an application&rsquo;s gemfile as it&rsquo;s designed to run outside Bundler with the <code>zeus</code> command. Once it&rsquo;s installed we can run <code>zeus start</code> to preload our application.</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1505/original/E412I01.png" width="585" height="413" alt="The output from the Zeus command."/>
+</div>
+
+<p>As the Rails app loads up this output will change. For our app most of it has turned green which means that we can use these commands against our application. If we open up another terminal tab we can run another generator by running <code>zeus generate</code> (or <code>zeus g</code> for short) instead of the usual Rails generator command.</p> 
+
+``` terminal
+$ zeus g model comment content
+```
+
+<p>Similarly, instead of running <code>rake db:migrate</code> we need to prefix this (and any other Rake commands) with <code>zeus</code>.</p>
+
+``` terminal
+$ zeus rake db:migrate
+```
+
+<p>This also runs more quickly now and if we run tests with <code>zeus rake test</code> they also run much faster than before. We can run a specific test file or directory with <code>zeus test</code> so to run just the functional tests we&rsquo;d use <code>zeus test test/functional</code>.</p> 
+
+<p>Now that we don&rsquo;t have to start up our Rails application every time we run one of these commands the output appears much sooner. Zeus works by preloading Rails in the different environments, development and test, and if we had Cucumber set up in this app it would work for that as well. This means that we can run commands against these preloaded environments. Zeus is also smart about reloading any changes. If we make a change to a model, for example, then this will be picked up automatically and we won&rsquo;t have to reload Zeus. Let&rsquo;s compare the time taken to run a command with and without Zeus. We&rsquo;ll try running the database migrations.</p>
+
+``` terminal
+$ time bundle exec rake db:migrate
+
+real  0m4.054s
+user  0m3.409s
+sys 0m0.569s
+
+$ time zeus rake db:migrate
+
+real  0m1.246s
+user  0m0.553s
+sys 0m0.162s
+```
+
+<p>This command took four seconds to run without Zeus but completed in less than a second with it. The difference will depend a lot on the size of the application so it&rsquo;s a good idea to try it with your applications to see how much difference it makes.</p>
+
+<p>One thing that&rsquo;s good about this setup is that is allows us to better integrate Rails commands into our text editor for really fast feedback. For example if we&rsquo;re using Textmate we can set it up so that putting the cursor within a test then using a keyboard shortcut would run a that test and show the results as a tooltip. This is done by creating a custom Textmate bundle that moves into the current project&rsquo;s directory and runs <code>zeus test</code> for the current file at the selected line.</p>
+
+``` tmbundle
+cd "$TM_PROJECT_DIRECTORY"
+zeus test "$TM_FILEPATH:$TM_LINE_NUMBER"
+```
+
+<p>One thing to be aware of when running Zeus is that it generates a <code>.zeus.sock</code> file at the root of our project and we&rsquo;ll generally not want to check this in to source control. It&rsquo;s a good idea to add it to the <code>.gitignore</code> file if you&rsquo;re using Git.</p> 
+
+<h3>Spring and Commands</h3>
+
+<p>Zeus is one way to speed up our Rails commands but it isn&rsquo;t the only one. Let&rsquo;s take a look at another couple of options. One similar tool is called <a href="https://github.com/jonleighton/spring">Spring</a> which also speeds up commands by preloading a Rails application although there are a few noticeable differences from Zeus. To install it we run <code>gem install spring</code> and after it has installed we&rsquo;ll have a <code>spring</code> command that we can use much like the <code>zeus</code> command. We can run Rails and Rake tasks through <code>spring</code> but one difference is that it automatically boots up our Rails application in the background on the first command. This means that the first command we run through it still takes a while to complete as it boots up our Rails app. Each subsequent command should run nearly instantly as it runs on the process that has already booted up.</p>
+
+<p>Using Spring means that we don&rsquo;t have to worry about starting our Rails application up through a special command to start it up and if we want to stop it at any time we can just run <code>spring stop</code> or close the terminal session. Another nice feature of Spring is that <a href="https://github.com/jonleighton/spring#configuration">it is very configurable</a>. We can easily change how the preloading works and which directories are watched. We do need to be aware, though, that it doesn&rsquo;t use fsevent by default to detect file changes but instead polls five times a second. The README has instructions on adding the necessary gems to the app&rsquo;s gemfile to get it to use fsevent instead if you&rsquo;re on OS X or inotify for Linux.</p>
+
+<p>The last tool we&rsquo;ll show here is called <a href="https://github.com/rails/commands">Commands</a>. This is a much simpler approach as it doesn&rsquo;t try to preload our Rails app. Instead it gives us a way to run Rails commands from the Rails console. Unlike the other two tools this one is designed to be added to our application&rsquo;s gemfile so we install it by adding it there then running <code>bundle</code> to install it.</p>
+
+``` /Gemfile
+gem 'commands', group: [:development, :test]
+```
+
+<p>Once it has installed we can open our application&rsquo;s console and run various generators and Rake tasks. </p>
+
+``` console
+>> generate "model author name"
+>> rake "db:migrate"
+```
+
+<p>As our application is already loaded in the console these commands will run very quickly. Unfortunately we can&rsquo;t run tests from here as the console loads the development environment by default. We&rsquo;ll need to open a console in the test environment to do so by running <code>rails console test</code>.</p>
+
+``` console
+>> rake "db:migrate"
+>> test "functional"
+```
+
+<p>Before we ran our tests we ran <code>rake &quot;db:migrate&quot;</code> so that the test database was migrated. We can then run tests with a <code>test</code> command, specifying the directory for the tests we want to run. The default output is quite noisy as it shows all the SQL commands that are being run. We can stop thing from happening by running <code>ActiveRecord::Base.logger = nil</code> in the console before running the tests. Commands doesn&rsquo;t yet support RSpec commands, but this is planned for the future.</p>
+
+<p>We&rsquo;ll end this episode by quickly mentioning <a href="https://github.com/sporkrb/spork">Spork</a> which was covered in <a href="http://railscasts.com/episodes/285-spork">episode 285</a>. This is designed to speed up the test environment by preloading Rails and works in a similar way to the other tools we&rsquo;ve demonstrated. This is a little dated now and doesn&rsquo;t support other Rails commands. If the other tools don&rsquo;t do what you want then it&rsquo;s worth considering, especially if you&rsquo;re using Windows or JRuby.</p>

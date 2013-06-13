@@ -149,7 +149,76 @@ config.eager_load = false
 # config.active_record.mass_assignment_sanitizer = :strict
 ```
 
+<p>Asset pipeline hakkında hızlı bir not düşelim. Eğer uygulamamızdaki config dosyasına bakarsak, true olarak düzenlenmiş <code>config.assets.version</code>'u görebiliriz. Eğer uygulamamız da asset pipeline kullanmıyorsak, Rails 4 ile varsayılan şekilde gelen bu duruma artık ihtiyacımız yok bu yüzden orayı <code>false</code> olarak düzenleyeceğiz. Oradan kaldırmamızda da yeterli olacaktır.</p>
 
+<p>Config dosyamızdaki secret token initializer'ı değiştirerek son bir değişim yapıyoruz. <code>secret_key_base</code>, Rails 4 config dosyasında <code>secret_token</code> olarak değiştirildi. Rails 3'den geçiş yaparken, bu iki opsiyonu da değiştirmeliyiz fakat uygulamamızı başarılı bir şekilde oluşturduk ve <code>secret_token</code> opsiyonunu kaldırabiliriz. Farklı bir token kullanmak için en iyi yol <code>secret_key_base</code> kullanmaktır.</p>
 
+``` /config/initializers/secret_token.rb
+Screencaster::Application.config.secret_token = '762a2f23950e306261908d4e5519ffe71ce626b119e9fc03a012ba86f46d82ef32d72f283633bacc2f59cf94ce5968552fe97d157e7f00560c1217d4592dda09'
+Screencaster::Application.config.secret_key_base = 'xx762a2f23950e306261908d4e5519ffe71ce626b119e9fc03a012ba86f46d82ef32d72f283633bacc2f59cf94ce5968552fe97d157e7f00560c1217d4592dda09'
+```
 
+<p>Bu durum gerekli çünkü kullanıcı taraflı şifrenlenmiş cookie'lerde bulunun bir dizi saklanmış cookie'leri kaldırıyoruz. Bu kullanıcıların oturum cookie'lerinin içeriklerini görmelerini sağlıyor.</p>
+
+<p>Bir çok değişiklik yaptık ancak henüz birşeyleri kapsamakdık. Yeni bir Rails 4 projesi yaratıp, orada oluşturulan config dosyası ile bizimkini karşılaştıracağız. Böylelikle neleri kopyalamamız gerektiği göreceğiz.</p>
+
+<p>Bütün bu değişimler ile spec'lerimizi çalıştırıyoruz ve eğer uyarı mesajlarının sayısı azaldıysa, hiç bir sorunun olmadığına emin olmak istiyoruz. Bütün testler hala geçiyor ancak bir kaç uyarı mesajımız var. Bu yüzden, onları azaltmalıyız. Bu uyarılarıdan biri <code>Episode</code> modelinden gelmekte. Bir named scope tanımladığımız zaman, ikinci bir obje olarak geri çağrılabilien bir obje tanımlamalıyız, öğrenğin bir lambda şu şekilde olabilir;</p>
+
+``` /app/models/episode.rb
+scope :published, -> { where('published_on <= ?', Time.now.to_date) }
+```
+
+<p>Bu gerekli çünkü scope dinamik bir şekilde ayarlanıyor örneğin yerel zaman gibi. Lambda olmadan kullanım, , zamanın sınıf her yüklendikten sonra cağrılmasından ziyade, ancak o sınıfın yüklenmesi ile olabilir. Diğer uyarımız ise <code>EpisodesController</code> içindeki <code>index</code> action'ından geliyor.</p>
+
+``` /app/controllers/episodes_controller.rb
+def index
+  @episodes = Episode.published.find_all_by_pro(false)
+end
+```
+
+<p>Artık dinamik bulucular desteklenmiyecek. <code>find</code> methodunun yerine alanı bir opsiyon olarak geçireceğiz.</p>
+
+``` /app/controllers/episodes_controller.rb
+def index
+  @episodes = Episode.published.where(pro: false)
+end
+```
+
+<p>Şimdilik bütün uyarı mesajlarından arındık. Artık strong parameters gibi diğer değişimlere odaklana biliriz. Bu konuyu <a href="http://railscasts.com/episodes/371-strong-parameters">Bölüm 371</a>'de ele almıştık ve model'in mass assignment koruma kullanımlarında  <code>attr_accessible</code> yerine bunları controller'a koyuyoruz. <code>Episode</code> modelinden attribute'ları kaldırıyoruz.</p>
+
+``` /app/models/episode.rb
+#attr_accessible :description, :name, :seconds, :published_on, :timecode
+```
+
+<p><code>episode_params</code> adlı bir private metodu controller içinde tanımlıyoruz. Diğer yöntemleri yapmak yerine bu geleneksel yolu seçtik.</p>
+
+``` /app/controllers/episodes_controller.rb
+def episode_params
+  params.require(:episode).permit(:description, 
+  :name, :seconds, :published_on, :timecode)
+end
+```
+
+<p>Bu metod içinde <code>permit</code> adlı üzerinden izin verilen parametleri geçirdiğimiz metodu kullanıyoruz. Parametrelerin bir hash içinde uygun durumda olduklarından ve nil durumundan kaçınmak için <code>params[:episode]</code> yerine <code>params.require(:episode)</code> kullanacağız. Bir formdan parametleri almak istediğimiz her zaman bu metodu kullanacağız.</p>
+
+``` /app/controllers/episodes_controller.rb
+def create
+  @episode = Episode.new(episode_params)
+  if @episode.save
+    redirect_to @episode, notice: 'Episode was successfully created.'
+  else
+    render action: "new"
+  end
+end
+```
+
+<p>Bu düzeltmeyi her tarafta yaptıktan sonra artık <code>protected_attributes</code> gem'ini GemFile'dan kaldırabiliriz. <code>config.active_record.whitelist_attributes</code> gibi config dosyasındaki alakalı opsiyonlarını da kaldırabiliriz.</p>
+
+<p>Uygulamamızdan geçiş ile akalaı gem'leri kaldırdık fakat diğerlerini kaldırmak biraz sıkıntılı olabilir. <code>page_caching</code> işlemi için <code>rails-observers</code> yerine geri bildirimleri kullanıyoruz. <a href="http://railscasts.com/episodes/321-http-caching">Bölüm 321</a>'de bu durumun nasıl kullanıcağından bahsettik. <code>action_caching</code> diğer bir iyi yöntem bu yüzden <code>activerecord-deprecated_finders</code>'ı kaldırıyoruz. Daha doğrusu şimdilik Rails 4 ile bir bağımlılığı olan bu durum yakında Rails 4.1'den kaldırılacak.</p>
+
+<p>Son olarak bir kaç küçük değişiklik daha yapacağız. Öncelikle controller'lar içindeki <code>before_filter</code>'ı <code>before_action</code> olarak değiştiriyoruz. Şimdilik bir uyarı durumu yok ancak küçük bir isim değişikliği yeterlidir. Route dosyalarında ise eğer "put" metodunu kullanıyorsak onu <code>patch</code> olarak bizlere daha iyi günceleme özelliği sunan metod ile değiştiriyoruz.</p>
+
+<p>Eğer <code>/test</code> hedef dizini olan bir uygulamamız varsa Rails 4 ile değişen küçük bir değişiklik gerekiyor. Dahası <code>/vendor/plugins</code> klasörü artık desteklenmiyor. Plugin'ler artık gem olacak ya da <code>/lib</code> altına konacak.</p>
+
+<p>Rails 4 ile gelen bir çok yeni özelliği burada anlatmadık fakat bir kaçına eski bölümlerimizde değindik. Buradaki listede özellikleri bulabilirsiniz. <a href="http://weblog.rubyonrails.org/2013/5/1/Rails-4-0-release-candidate-1/"></a></p>
 

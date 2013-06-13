@@ -1,0 +1,224 @@
+<p>Geçen haftaki RailsConf'da Rails 4.0'ın ilk candidate versiyonun çıktığı duyuruldu. Bu durum kendi projelerinizi Rails 4'e yükseltmeniz için mükemmel bir fırsat. Böylelikle bulduğunuz bugları rapor edebilirsiniz. <a href="http://railscasts.com/episodes/400-what-s-new-in-rails-4">Bölüm 400</a>'de Rails 4'ün bir çok yeni özelliğinden bahsetmiştik. Bu bölümde ise bir Rails 3.2 uygulamasını Rails 4.0'a yükseltmeye çalışacağız. Bu bölümü kendi uygulamalarınız üzerinde de uygulayabilirsiniz.</p>
+
+<p>İlk adım olarak Rails'ın son sürümü olan Rails 3.2 ile çalıştığımızdan ve gem'lerimizin hepsinin güncel olduğundan emin olmalıyız ve Ruby 1.9.3 ve sonrası ile çalışmamız gerektiğini unutmayalım. Versiyon yükseltmeye başlamadan önce testlerimizin hepsinin geçtiğine emin olmamız bizim açımızdan iyi olacaktır. Yoksa versiyon yükseltmek biraz zorlaşacaktır. Eğer otomatik testlerimiz yoksa, her yeni eklemeden sonra elle kendimiz manuel testler yapmak zorunda kalacağız. Versiyon yükseltmeye başlamadan önce biraz integration test ekliyoruz. Bütün testleri geçen bir uygulamamız var ve onu şimdi Rails 4'e yükseltmeye başlayabiliriz. Öncelikle bu çalışma için ayrı bir branch açmak iyi olcaktır.</p>
+
+``` terminal
+$ git checkout -b rails4
+```
+
+<p>Bir sonraki adımımız Rails <code>3.2.13</code> versiyonunu <code>4.0.0.rc1</code>'e taşımak olacaktır. İhtiyacımız olan versiyon değişikliğiden sonra ilgili gem'lerin özellikle <code>assets</code> grubunun yeni versiyona göre ayarlanmasıdır. Rails 4 ile bu grup meselesi ortadan kalkıyor ve bütün gem'lerin içine bu grubu dahil ediyoruz.</p>
+
+``` /Gemfile
+gem 'rails', '4.0.0.rc1'
+gem 'sqlite3'
+
+gem 'sass-rails',   '~> 4.0.0.rc1'
+gem 'coffee-rails', '~> 4.0.0.rc1'
+gem 'uglifier', '>= 1.3.0'
+```
+
+<p>Varsayılan şekilde Rails 4 production modu hiç bir asset tarafından dinamik olarak oluşturulmayacaktır ve gene production modunda önceden derlenmiş asset'ler kullanılacaktır. Eğer asset'leri ön derleme yapmak için <code>rake assets:compile</code> çalıştırırsak öncelikde ortamımızı <code>production</code> olarak ayarlamamız gerekiyor.</p>
+
+``` terminal
+$ RAILS_ENV=production bundle exec rake assets:precompile
+```
+
+<p>Bu durumun iyi yanı uygulamanın config dosyasını düzelticek olmaktır. Rails 3'de sadece <code>development</code> ve <code>test</code> modunda bir çok asset'i yüklüyorduk. Şimdi ise bu kodu </p>
+
+``` /config/application.rb
+if defined?(Bundler)
+  # If you precompile assets before deploying to production, use this line
+  Bundler.require(*Rails.groups(:assets => %w(development test)))
+  # If you want your assets lazily compiled in production, use this line
+  # Bundler.require(:default, :assets, Rails.env)
+end
+```
+
+<p>ile değiştiriyoruz.</p>
+
+``` /config/application.rb
+Bundler.require(:default, Rails.env)
+```
+<p>Eğer production modda assetlerinizi derlemek istersiniz, bu dosya içinde kendinize göre değişiklikler yapabilirisniz.</p>
+
+<p>Şimdi yeni versiyonu kurmak için <code>bundle update</code>'i deniyoruz. Sonucun başarılı olması lazım ancak bazen bu komut beklenmedik hatalar ortaya çıkartabilir. Bu yüzden hangi gem'lerin versiyon dışı olduklarını görmek için <code>bundle outdated</code> bu küçük kodu çalıştırıyoruz.</p>
+
+``` terminal
+$ bundle outdated
+Fetching gem metadata from https://rubygems.org/.........
+Fetching gem metadata from https://rubygems.org/..
+Resolving dependencies...
+
+Outdated gems included in the bundle:
+  * builder (3.2.0 > 3.1.4)
+  * paper_trail (2.7.1 > 1.6.4)
+```
+
+<p>Uygulamamız için bunu çalıştırdığımızda iki adet güncel olmayan gem bulduk. <code>builder</code>'ın versiyonu hemen hemen yakın ancak <code>paper_trail</code> için aynısını söyleyemiyoruz ve Rails 4 için yeni bir versiyon bulamıyoruz. Gem dosyası içinde versiyon belirtmenin önemli olduğunu gösteren bir durum olduğunu görebiliyoruz.  <code>paper_trail</code> için sabit bir versiyon belirlememiştik. Şimdi bunu yapacağız.</p>
+
+``` /Gemfile
+gem 'paper_trail', '~> 2.7.1'
+```
+
+<p><code>bundle update</code>'i çalıştırdığımız zaman versiyon çakışması hatası alıyoruz. Papertrail, ActiveRecord 3.0'ı veya ona yakın bir versiyonu istiyor ve bu yüzden Rails 4 ile uyumlu bir versiyon bulmaya çalışacağız. Papertrail, Rails 4 için bir Git branch'ine sahip Tek yapmamız gerekn gem dosyasında bu branch'i göstermek.</p>
+
+``` /Gemfile
+gem 'paper_trail', github: 'airblade/paper_trail', branch: 'rails4'
+```
+
+<p>Bundle update komutunu çalıştırdığımız zaman Papertrail'in Github'daki proje ile eşleştiğini görebiliriz.</p>
+
+<p>Şimdi biliyoruz ki gem'lerimiz güncel ve artık spec'lerimizi çalıştırabiliriz. Spec'lerimizi çalıştırdığımız zaman kötü bir şekilde hatalar alacağız. Çıktının bize gösterdiği <code>caches_page</code>'in <code>EpisodesController</code> içinde tanımlı olmadığıdır. Rails 4 ile kaldırılan page caching'i kullanıyoruz ve buna benzer diğer şeyler olan observers, protected model attributes ve ActiveResource kullanıyoruz. İyi haber, eğer bunları kullanmak istiyorsak, bir kaç gem eklemesi ile durumu kolayca kurtarabiliriz. Bütün bu versiyon yükseltme boyunca kullanmak için bu gem'leri eklemek iyi bir fikir olacaktır.</p>
+
+``` /Gemfile
+gem 'protected_attributes'
+gem 'rails-observers'
+gem 'actionpack-page_caching'
+gem 'actionpack-action_caching'
+gem 'activerecord-deprecated_finders'
+```
+
+<p>Bunu yapmamızın nedeni Rails 4 ile ortaya çıkacak hatalardan kaçınmak. Bu şekilde önemli versiyon yükseltmeleri yapılırken, hızlı çalışabilmek adına, yoğun ve büyük kod değiştirmelerden, düzeltmelerden kaçınmak ve bize uygulamamızda yardım edecek bir kaç gem'i eklemek en iyi yoldur. Bütüm testlerimiz geçtiği zaman belki kodu tekrar düzeltebiliriz ve böylelikle kullandığınımız teknikleri değiştirir, gem'lere artık ihtiyacımız kalmadığından onları kaldırabiliriz. Şimdi <code>bundle</code> kodunu çalıştırıyoruz ve gem'leri yüklüyoruz. Sonrasın da ise spec'leri çalıştırıp, onları geçirmeye çalışacağız. Bunları yaparken bir çok deprecation hatası alacağız ve bu hataların adreslerini göreceğiz.</p>
+
+``` terminal
+$ spec .
+...
+You should not use the `match` method in your router without specifying an HTTP method.
+If you want to expose your action to both GET and POST, add `via: [:get, :post]` option.
+If you want to expose your action to GET, use `get` in the router:
+  Instead of: match "controller#action"
+  Do: get "controller#action"
+...
+```
+
+<p><code>match</code> metodu artık desteklenmiyor. Normalde bunu get ile değiştirebiliriz fakat eğer bir çok metodu desteklenmesi istiyorsak, <code>via:</code> ile bu metodları ekleyebiliriz.</p>
+
+``` /config/routes.rb
+# match 'new', to: 'episodes#new', via: [:get, :post]
+get 'new', to: 'episodes#new'
+```
+<p>Spec'lerimizi çalıştırmayı denediğimiz zaman nedeni mass-assigning protected attributes olan bir çok hata ile karşılaşıyoruz. Bu hatalar Papertrail'ın <code>Version</code> modelinden geliyor. Bu durum Rails 4'de strong paramaters ile çalıştırılmalı fakat biz hala protected attributes kullanıyoruz. Uygulamamızın config dosyasını modifiye ederek başlayabiliriz. <code>active_record.whitelist_attributes</code> özelliğini <code>false</code> olarak ayarlıyoruz. Bu özellik başlangıçta <code>true</code> olarak geliyor ve bunu anlamı ise her model içinde <code>attr_accessible</code>'ın beklenmesidir. </p>
+
+``` /config/application.rb
+config.active_record.whitelist_attributes = false
+```
+
+<p>Bütün spec'lerimiz artık başarı ile geçiyor. Ancak buna rağmen hala uyarı mesajları alıyoruz. Bir kaçından kurtulmayı deneyelim. Bunların bir kısmı <code>whiny_nils</code> gibi artık desteklenmiyecek özelliklerin olduğu config dosyaları içinden geliyor. Development config dosyası içindeki <code>whiny_nils</code> alanı kaldırıp, yerine <code>eager_load</code> özelliğini ekliyoruz ve <code>false</code> olarak ayarlıyoruz. Daha fazla desteklenmeyecek diğer özellikleri de dosyadan kaldırabiliriz. </p>
+
+``` /config/development.rb
+Screencaster::Application.configure do
+  # Settings specified here will take precedence over those in config/application.rb
+
+  # In the development environment your application's code is reloaded on
+  # every request. This slows down response time but is perfect for development
+  # since you don't have to restart the web server when you make code changes.
+  config.cache_classes = false
+
+  config.eager_load = false
+
+  # Show full error reports and disable caching
+  config.consider_all_requests_local       = true
+  config.action_controller.perform_caching = false
+
+  # Don't care if the mailer can't send
+  config.action_mailer.raise_delivery_errors = false
+
+  # Print deprecation notices to the Rails logger
+  config.active_support.deprecation = :log
+
+  # Expands the lines which load the assets
+  config.assets.debug = true
+end
+```
+<p>Production modunu düzenleyeceğiz. Öncelikle bunu <code>config.assets.compress</code> ekliyoruz.</p>
+
+``` /config/production.rb
+config.eager_load = true
+
+ # Compress JavaScripts and CSS
+ config.assets.js_compressor = :uglifier
+```
+<p>Test ortamında ise <code>whiny_nils</code>'i kaldırmalı ve yerine eager'ı ekleyip <code>false</code> olarak ayarlamalıyız. <code>mass_assignment_sanitizer</code>'ı da strong paramters kullandığımız için kaldırmalıyız.</p>
+
+``` /config/test.rb
+# Log error messages when you accidentally call methods on nil
+# config.whiny_nils = true
+config.eager_load = false
+
+# Raise exception on mass assignment protection for Active Record models
+# config.active_record.mass_assignment_sanitizer = :strict
+```
+
+<p>Asset pipeline hakkında hızlı bir not düşelim. Eğer uygulamamızdaki config dosyasına bakarsak, true olarak düzenlenmiş <code>config.assets.version</code>'u görebiliriz. Eğer uygulamamız da asset pipeline kullanmıyorsak, Rails 4 ile varsayılan şekilde gelen bu duruma artık ihtiyacımız yok bu yüzden orayı <code>false</code> olarak düzenleyeceğiz. Oradan kaldırmamızda da yeterli olacaktır.</p>
+
+<p>Config dosyamızdaki secret token initializer'ı değiştirerek son bir değişim yapıyoruz. <code>secret_key_base</code>, Rails 4 config dosyasında <code>secret_token</code> olarak değiştirildi. Rails 3'den geçiş yaparken, bu iki opsiyonu da değiştirmeliyiz fakat uygulamamızı başarılı bir şekilde oluşturduk ve <code>secret_token</code> opsiyonunu kaldırabiliriz. Farklı bir token kullanmak için en iyi yol <code>secret_key_base</code> kullanmaktır.</p>
+
+``` /config/initializers/secret_token.rb
+Screencaster::Application.config.secret_token = '762a2f23950e306261908d4e5519ffe71ce626b119e9fc03a012ba86f46d82ef32d72f283633bacc2f59cf94ce5968552fe97d157e7f00560c1217d4592dda09'
+Screencaster::Application.config.secret_key_base = 'xx762a2f23950e306261908d4e5519ffe71ce626b119e9fc03a012ba86f46d82ef32d72f283633bacc2f59cf94ce5968552fe97d157e7f00560c1217d4592dda09'
+```
+
+<p>Bu durum gerekli çünkü kullanıcı taraflı şifrenlenmiş cookie'lerde bulunun bir dizi saklanmış cookie'leri kaldırıyoruz. Bu kullanıcıların oturum cookie'lerinin içeriklerini görmelerini sağlıyor.</p>
+
+<p>Bir çok değişiklik yaptık ancak henüz birşeyleri kapsamakdık. Yeni bir Rails 4 projesi yaratıp, orada oluşturulan config dosyası ile bizimkini karşılaştıracağız. Böylelikle neleri kopyalamamız gerektiği göreceğiz.</p>
+
+<p>Bütün bu değişimler ile spec'lerimizi çalıştırıyoruz ve eğer uyarı mesajlarının sayısı azaldıysa, hiç bir sorunun olmadığına emin olmak istiyoruz. Bütün testler hala geçiyor ancak bir kaç uyarı mesajımız var. Bu yüzden, onları azaltmalıyız. Bu uyarılarıdan biri <code>Episode</code> modelinden gelmekte. Bir named scope tanımladığımız zaman, ikinci bir obje olarak geri çağrılabilien bir obje tanımlamalıyız, öğrenğin bir lambda şu şekilde olabilir;</p>
+
+``` /app/models/episode.rb
+scope :published, -> { where('published_on <= ?', Time.now.to_date) }
+```
+
+<p>Bu gerekli çünkü scope dinamik bir şekilde ayarlanıyor örneğin yerel zaman gibi. Lambda olmadan kullanım, , zamanın sınıf her yüklendikten sonra cağrılmasından ziyade, ancak o sınıfın yüklenmesi ile olabilir. Diğer uyarımız ise <code>EpisodesController</code> içindeki <code>index</code> action'ından geliyor.</p>
+
+``` /app/controllers/episodes_controller.rb
+def index
+  @episodes = Episode.published.find_all_by_pro(false)
+end
+```
+
+<p>Artık dinamik bulucular desteklenmiyecek. <code>find</code> methodunun yerine alanı bir opsiyon olarak geçireceğiz.</p>
+
+``` /app/controllers/episodes_controller.rb
+def index
+  @episodes = Episode.published.where(pro: false)
+end
+```
+
+<p>Şimdilik bütün uyarı mesajlarından arındık. Artık strong parameters gibi diğer değişimlere odaklana biliriz. Bu konuyu <a href="http://railscasts.com/episodes/371-strong-parameters">Bölüm 371</a>'de ele almıştık ve model'in mass assignment koruma kullanımlarında  <code>attr_accessible</code> yerine bunları controller'a koyuyoruz. <code>Episode</code> modelinden attribute'ları kaldırıyoruz.</p>
+
+``` /app/models/episode.rb
+#attr_accessible :description, :name, :seconds, :published_on, :timecode
+```
+
+<p><code>episode_params</code> adlı bir private metodu controller içinde tanımlıyoruz. Diğer yöntemleri yapmak yerine bu geleneksel yolu seçtik.</p>
+
+``` /app/controllers/episodes_controller.rb
+def episode_params
+  params.require(:episode).permit(:description, 
+  :name, :seconds, :published_on, :timecode)
+end
+```
+
+<p>Bu metod içinde <code>permit</code> adlı üzerinden izin verilen parametleri geçirdiğimiz metodu kullanıyoruz. Parametrelerin bir hash içinde uygun durumda olduklarından ve nil durumundan kaçınmak için <code>params[:episode]</code> yerine <code>params.require(:episode)</code> kullanacağız. Bir formdan parametleri almak istediğimiz her zaman bu metodu kullanacağız.</p>
+
+``` /app/controllers/episodes_controller.rb
+def create
+  @episode = Episode.new(episode_params)
+  if @episode.save
+    redirect_to @episode, notice: 'Episode was successfully created.'
+  else
+    render action: "new"
+  end
+end
+```
+
+<p>Bu düzeltmeyi her tarafta yaptıktan sonra artık <code>protected_attributes</code> gem'ini GemFile'dan kaldırabiliriz. <code>config.active_record.whitelist_attributes</code> gibi config dosyasındaki alakalı opsiyonlarını da kaldırabiliriz.</p>
+
+<p>Uygulamamızdan geçiş ile akalaı gem'leri kaldırdık fakat diğerlerini kaldırmak biraz sıkıntılı olabilir. <code>page_caching</code> işlemi için <code>rails-observers</code> yerine geri bildirimleri kullanıyoruz. <a href="http://railscasts.com/episodes/321-http-caching">Bölüm 321</a>'de bu durumun nasıl kullanıcağından bahsettik. <code>action_caching</code> diğer bir iyi yöntem bu yüzden <code>activerecord-deprecated_finders</code>'ı kaldırıyoruz. Daha doğrusu şimdilik Rails 4 ile bir bağımlılığı olan bu durum yakında Rails 4.1'den kaldırılacak.</p>
+
+<p>Son olarak bir kaç küçük değişiklik daha yapacağız. Öncelikle controller'lar içindeki <code>before_filter</code>'ı <code>before_action</code> olarak değiştiriyoruz. Şimdilik bir uyarı durumu yok ancak küçük bir isim değişikliği yeterlidir. Route dosyalarında ise eğer "put" metodunu kullanıyorsak onu <code>patch</code> olarak bizlere daha iyi günceleme özelliği sunan metod ile değiştiriyoruz.</p>
+
+<p>Eğer <code>/test</code> hedef dizini olan bir uygulamamız varsa Rails 4 ile değişen küçük bir değişiklik gerekiyor. Dahası <code>/vendor/plugins</code> klasörü artık desteklenmiyor. Plugin'ler artık gem olacak ya da <code>/lib</code> altına konacak.</p>
+
+<p>Rails 4 ile gelen bir çok yeni özelliği burada anlatmadık fakat bir kaçına eski bölümlerimizde değindik. Buradaki listede özellikleri bulabilirsiniz. <a href="http://weblog.rubyonrails.org/2013/5/1/Rails-4-0-release-candidate-1/"></a></p>
+

@@ -1,0 +1,229 @@
+<p>先週のRailsConfでRails 4.0のRC1が発表されました。この機会に自分のアプリケーションをRails 4にアップグレードし、動作確認をして、見つけたバグを報告してみてはいかがでしょうか。Rails 4の新機能の多くについて<a href="http://railscasts.com/episodes/400-what-s-new-in-rails-4">エピソード400</a>で紹介したので、今回はRails 3.2のアプリケーションをアップグレードする方法に焦点をあてます。そうすることによって、自分のアプリケーションを使って順を追って理解することができるでしょう。 </p>
+
+<p>まず最初に、Rails 3.2の最新バージョンで動作していること、アプリケーションのgemがすべて最新版であることを確認します。またRuby 1.9.3以降が必要です。合わせてアップグレード作業の前に、アプリケーションのテストスイートがすべてパスすることを確認しておくのがいいでしょう。自動化されたテストがない場合、マニュアルでのテストが必要になるので作業はより難しくなるでしょう。少なくとも、作業を始める前に何らかの統合テストを追加しておくことをおすすめします。今回のアプリケーションにはテストがありすべてがパスしているので、Rails 4へのアップグレード作業を進めることにします。これは独立したブランチで行うほうがいいので、ここで作成します。</p>
+
+``` terminal
+$ git checkout -b rails4
+```
+
+<p>次にGemfileのRailsのバージョンを<code>3.2.13</code>から<code>4.0.0.rc1</code> (あるいは現在の最新バージョン)にアップグレードします。他のいくつかのgem(<code>assets</code>グループ内のものも含む)についてもバージョン番号を変更する必要があります。Rails 4はこのグループを削除するので、ここでもそれを削除してそこにあったgemをすべてのグループに含めます。</p>
+
+``` /Gemfile
+gem 'rails', '4.0.0.rc1'
+gem 'sqlite3'
+
+gem 'sass-rails',   '~> 4.0.0.rc1'
+gem 'coffee-rails', '~> 4.0.0.rc1'
+gem 'uglifier', '>= 1.3.0'
+```
+
+<p>Rails 4のデフォルト設定では、production環境は動的にアセットを生成しようとはせず、事前にコンパイルされた静的なアセットを使用するので、この変更に合わせるために、アセットはproduction環境では事前にプリコンパイルされます。アセットのプリコンパイルに<code>rake assets:compile</code>を実行する場合は、その前に環境を<code>production</code>に設定します。</p>
+
+``` terminal
+$ RAILS_ENV=production bundle exec rake assets:precompile
+```
+
+<p>この変更によるプラスの副作用として、アプリケーションの設定ファイルが単純化されます。Rails 3ではassets groupに一致したgemをロードする必要がありましたが、それは<code>development</code>と<code>test</code>の環境だけでした。つまり、以下のコード、</p>
+
+``` /config/application.rb
+if defined?(Bundler)
+  # If you precompile assets before deploying to production, use this line
+  Bundler.require(*Rails.groups(:assets => %w(development test)))
+  # If you want your assets lazily compiled in production, use this line
+  # Bundler.require(:default, :assets, Rails.env)
+end
+```
+
+<p>を次のように書き換えることができます。</p>
+
+``` /config/application.rb
+Bundler.require(:default, Rails.env)
+```
+
+<p>production環境の設定でassets groupの指定が必要な場合は、自分でその記述を追加してこのファイルでグループの読み込みの振る舞いをカスタマイズします。</p>
+
+<p>実際にこれを試すために、<code>bundle update</code>を実行して新バージョンをインストールしてみます。これはうまくいくように見えますが、このコマンドは時々予想しない振る舞いをする場合があります。その例を見るために、 <code>bundle outdated</code>を実行します。あまり知られていないコマンドですが、古くなったgemを探すときに便利です。</p> 
+
+``` terminal
+$ bundle outdated
+Fetching gem metadata from https://rubygems.org/.........
+Fetching gem metadata from https://rubygems.org/..
+Resolving dependencies...
+
+Outdated gems included in the bundle:
+  * builder (3.2.0 > 3.1.4)
+  * paper_trail (2.7.1 > 1.6.4)
+```
+
+<p>今回のアプリケーションに対してこれを実行すると、バージョンが古いgemが2つ見つかります。<code>builder</code>のバージョンは少し古く、<code>paper_trail</code>がかなり古い状態です。Rails 4と互換性のある新しいバージョンをみつけられないというメッセージの理由がこれです。これが、Gemfileが許容するバージョンについて厳密であるべき理由の一つです。Gemfileでは<code>paper_trail</code>のバージョンを指定していなかったので、ここでそれを指定します。</p>
+
+``` /Gemfile
+gem 'paper_trail', '~> 2.7.1'
+```
+
+<p><code>bundle update</code>を実行すると、バージョンの衝突に関するエラーが発生します。PapertrailはActiveRecordのバージョンが3.0以上であることを求めるため、Rails 4で動作する別のバージョンを探さなくてはいけません。PapertrailにはRails 4用のGit branchがあるのでそれをGemfileで使用できます。しかしこの方法は他のgemでは適用できないかも知れないので、影響を受けるそれぞれのgemのissue trackerで状態を確認する必要があります。</p> 
+
+``` /Gemfile
+gem 'paper_trail', github: 'airblade/paper_trail', branch: 'rails4'
+```
+
+<p>bundle updateを実行すると、PapertrailのGithubプロジェクトにあるバージョンが取得されてアップデートは成功します。</p> 
+
+<p>これでgemがすべて最新版になったのでspecを実行してみます。ですがその結果は悲惨なものです。出力にはエラーが表示され、 <code>EpisodesController</code>の<code>caches_page</code>メソッドが未定義とあります。これは我々のアプリケーションがRails 4で削除されたpage cachingを使用しているからです。Rails 4ではその他にもobservers、protected model attributes、ActiveResourceなどが削除されました。救いとしては、これらの機能が必要な場合は、gemを使って簡単に追加することができます。使ったほうがいいものについて、アップグレードの過程でいくつか追加します。</p>
+
+``` /Gemfile
+gem 'protected_attributes'
+gem 'rails-observers'
+gem 'actionpack-page_caching'
+gem 'actionpack-action_caching'
+gem 'activerecord-deprecated_finders'
+```
+
+<p>これによって、Rails 4から除かれた機能に関連するエラーが出なくなります。今回のようなメジャーバージョンのアップグレードを行う場合は、できるだけ早くアプリケーションを動作する状態にすることが大事なので、大規模なリファクタリングやその他の大きな変更は避けるべきで、そのためにはこれらのgemを追加するのが便利です。テストがパスしたら、そこから初めてコードを整理して、できるのならこれらのgemに依存しないように変更するのがいいでしょう。<code>bundle</code>コマンドでこれらのgemをインストールし、再度specを実行してパスするか確認します。今回は、いくつかのdeprecation warningと一緒に、routeに関連したエラーが表示されます。</p>
+
+``` terminal
+$ spec .
+...
+You should not use the `match` method in your router without specifying an HTTP method.
+If you want to expose your action to both GET and POST, add `via: [:get, :post]` option.
+If you want to expose your action to GET, use `get` in the router:
+  Instead of: match "controller#action"
+  Do: get "controller#action"
+...
+```
+
+<p><code>match</code>メソッドは受け付けられなくなりました。通常であれば単純にこれをgetに置き換えればいいのですが、複数のメソッドをサポートしたい場合はそれらを追加するか<code>via:</code>オプションを付けてmatchを使用します。</p>
+
+``` /config/routes.rb
+# match 'new', to: 'episodes#new', via: [:get, :post]
+get 'new', to: 'episodes#new'
+```
+
+<p>specを実行すると、多くのテストが落ちます。そのほとんどはprotected attributesに対するmass assignmentに関するもので、その中にはPapertrailの<code>Version</code>モデルのものも含まれています。Rails 4にはstrong parametersがあるのでこれは動作するはずですが、ここではまだprotected attributesを使用しています。この問題を回避するには、アプリケーションの設定ファイルを修正して、<code>active_record.whitelist_attributes</code>の設定を<code>false</code>にします。デフォルト設定はこれは<code>true</code>になっていて、すべてのモデルについて<code>attr_accessible</code>が定義されていることを想定していますが、今回はstrong parameterを使用しているアプリケーションの移行のためこれには当たりません。</p>
+
+``` /config/application.rb
+config.active_record.whitelist_attributes = false
+```
+
+<p>これでspecがパスしましたが、まだ多くのdeprecation warningがあります。これらを個別に確認して、分類してみましょう。多くは<code>whiny_nils</code>などの設定オプションに関連していますが、それらは必要ではなくなりました。developmentの設定ファイルで<code>whiny_nils</code>に関連する行を削除し、<code>eager_load</code>オプションを追加して<code>false</code>に設定します。その他の必要なくなったオプションも同じく削除します。</p>
+
+``` /config/development.rb
+Screencaster::Application.configure do
+  # Settings specified here will take precedence over those in config/application.rb
+
+  # In the development environment your application's code is reloaded on
+  # every request. This slows down response time but is perfect for development
+  # since you don't have to restart the web server when you make code changes.
+  config.cache_classes = false
+
+  config.eager_load = false
+
+  # Show full error reports and disable caching
+  config.consider_all_requests_local       = true
+  config.action_controller.perform_caching = false
+
+  # Don't care if the mailer can't send
+  config.action_mailer.raise_delivery_errors = false
+
+  # Print deprecation notices to the Rails logger
+  config.active_support.deprecation = :log
+
+  # Expands the lines which load the assets
+  config.assets.debug = true
+end
+```
+
+<p>次にproduction環境の設定を行ないます。ここでeager loadingを有効にし、<code>config.assets.compress</code>オプションを変更します。</p>
+
+``` /config/production.rb
+config.eager_load = true
+
+ # Compress JavaScripts and CSS
+ config.assets.js_compressor = :uglifier
+```
+
+<p>test環境では<code>whiny_nils</code>オプションを削除し、eager loadingを<code>false</code>に設定します。strong parameterに移行するので、<code>mass_assignment_sanitizer</code>は削除します。</p>
+
+``` /config/test.rb
+# Log error messages when you accidentally call methods on nil
+# config.whiny_nils = true
+config.eager_load = false
+
+# Raise exception on mass assignment protection for Active Record models
+# config.active_record.mass_assignment_sanitizer = :strict
+```
+
+<p>asset pipelineについて、一つ注意点があります。アプリケーションの設定ファイルを見ると、<code>config.assets.version</code>オプションが<code>true</code>に設定されて残っています。Rails 4ではasset pipelineがデフォルト設定で有効になるのでこれは必要ありません。このアプリケーションでasset pipelineを使わないのであればこれを<code>false</code>に設定します。使う場合はこのオプションを削除するだけです。</p>
+
+<p>もう一ヶ所設定を変更しなくてはいけないのが、secret token initializerです。Rails 4ではこのファイルの設定オプションが、<code>secret_token</code>から<code>secret_key_base</code>に名前が変わりました。Rails 3からの移行中には両方のオプションを指定する必要がありますが、アプリケーションの移行が成功したら<code>secret_token</code>オプションは削除できます。<code>secret_key_base</code>には違うトークンを使う方がいいでしょう。</p>
+
+``` /config/initializers/secret_token.rb
+Screencaster::Application.config.secret_token = '762a2f23950e306261908d4e5519ffe71ce626b119e9fc03a012ba86f46d82ef32d72f283633bacc2f59cf94ce5968552fe97d157e7f00560c1217d4592dda09'
+Screencaster::Application.config.secret_key_base = 'xx762a2f23950e306261908d4e5519ffe71ce626b119e9fc03a012ba86f46d82ef32d72f283633bacc2f59cf94ce5968552fe97d157e7f00560c1217d4592dda09'
+```
+
+<p>これが必要な理由は、クライアント側に保存されているシリアライズされたcookieを暗号化されたcookieに移行させるからです。これによってユーザがセッションクッキーの内容を簡単に見えるのを防ぎます。</p>
+
+<p>ここでは多くの設定の変更を行ないましたが、これで全てではありません。Rails 4アプリケーションを新規作成し、生成された設定ファイルを見て、現在アップグレード中のアプリケーションと比較して、さらにコピーしなくてはいけない部分がないかをチェックします。</p> 
+
+<p>これらの変更が済んだところで再度specを実行して、どこかを壊していないか、またdeprecationエラーの数が減ったかどうかを確認します。テストはすべてパスしますが、まだdeprecation warningが出るので、これらを減らすことができるのかどうか見てみます。警告の一つは、<code>Episode</code>モデルの中で発生しています。名前付きスコープを定義したときはいつも、次の例のlambdaのような、呼び出し可能なオブジェクトを2つ目のオブジェクトとして渡すようになりました。</p>
+
+``` /app/models/episode.rb
+scope :published, -> { where('published_on <= ?', Time.now.to_date) }
+```
+
+<p>これが必要な理由は、scopeに動的なもの(例えばcurrent time)を含んで設定することが簡単になるからです。もしlambdaを使わなければクラスがロードされたときの時間が使用されますが、今回の変更によって毎回scopeが呼び出されたときの時間が使用されることになります。まだ発生しているその他のdeprecationが、<code>EpisodesController</code>の<code>index</code>アクションの中にあります。</p> 
+
+``` /app/controllers/episodes_controller.rb
+def index
+  @episodes = Episode.published.find_all_by_pro(false)
+end
+```
+
+<p>このような動的なfinderメソッドはサポートされなくなりました。その代わりに、<code>find</code>メソッドを使ってオプションとしてフィールドを渡します。</p>
+
+``` /app/controllers/episodes_controller.rb
+def index
+  @episodes = Episode.published.where(pro: false)
+end
+```
+
+<p>ここでspecを実行すると、すべてパスしてdeprecation warningも出ません。</p>
+
+<p>deprecationをすべて片付けたので、strong parameterのようなその他の移行作業に集中することができます。strong parameterについては<a href="http://railscasts.com/episodes/371-strong-parameters">エピソード371</a>で取り上げましたが、基本的にはモデルからmass assignmentの制限を移動させて、<code>attr_accessible</code>を使う代わりにコントローラで制限をかけます。<code>Episode</code>モデルから属性を削除します。</p>
+
+``` /app/models/episode.rb
+#attr_accessible :description, :name, :seconds, :published_on, :timecode
+```
+
+<p>コントローラで<code>episode_params</code>というprivateメソッドを定義します。これは従来からのやり方ですが、その他の方法もあります。</p>
+
+``` /app/controllers/episodes_controller.rb
+def episode_params
+  params.require(:episode).permit(:description, 
+  :name, :seconds, :published_on, :timecode)
+end
+```
+
+<p>このメソッドでは、渡されたパラメータに対して<code>permit</code>を呼び出して、それに対してpermitされたパラメータを渡します。<code>params[:episode]</code>の代わりに<code>params.require(:episode)</code>を使って、パラメータのhashが存在することを保証することで、なかった場合に<code>nil</code>の例外が発生することを防ぎます。フォームからパラメータを取得するときにはいつでもこのメソッドを呼び出すことができます。</p>
+
+``` /app/controllers/episodes_controller.rb
+def create
+  @episode = Episode.new(episode_params)
+  if @episode.save
+    redirect_to @episode, notice: 'Episode was successfully created.'
+  else
+    render action: "new"
+  end
+end
+```
+
+<p>すべての置き換えが終わったら、Gemfileから<code>protected_attributes</code> gemを削除します。合わせてアプリケーションの設定ファイルから、<code>config.active_record.whitelist_attributes</code>などの関連する設定オプションを削除します。</p> 
+
+<p>アプリケーションから移行関連のgemの一つをなんとか削除することができましたが、その他のものを削除するのは簡単ではないかもしれません。<code>rails-observers</code>の代わりにcallbackを使うことができます。<code>page_caching</code>はまだ役に立つ場面があるので使い続けることにします。HTTP cachingについては<a href="http://railscasts.com/episodes/321-http-caching">エピソード321</a>で紹介しましたが、<code>action_caching</code>の置き換えに適しています。<code>activerecord-deprecated_finders</code>についてはRails 4.0では依存関係にあるので削除できます。Rails 4.1からは削除される予定です。</p>
+
+<p>最後にいくつかの修正すべき部分について触れておきます。まずコントローラでは、<code>before_filter</code>が<code>before_action</code>に変わりました。まだdeprecation warningは出ませんが、新しい名前の方が多少意味がわかりやすいでしょう。routesファイルでは、putを使っていた部分は代わりに<code>patch</code>を使います。このほうがレコードの更新という実態には合っています。</p>
+
+<p>アプリケーションに<code>/test</code>ディレクトリがある場合は構造が少し変わったので、新規のRails 4アプリケーションを見て変更点を確認することをお勧めします。また<code>/vendor/plugins</code>はなくなったので、プラグインはgemに置き換えるか<code>/lib</code>に移動します。</p>
+
+<p>ここで紹介できなかったRails 4の機能はまだ多くありますが、それらについては過去のエピソードで紹介しました。<a href="http://weblog.rubyonrails.org/2013/5/1/Rails-4-0-release-candidate-1/">RC公開に関するブログ記事</a>の中にもいくつかの情報源が挙げられているので参照してください。</p>

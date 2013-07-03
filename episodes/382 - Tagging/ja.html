@@ -1,0 +1,235 @@
+<p>下のスクリーンショットは記事の一覧を表示しているブログアプリケーションのページです。タグ機能を追加して、各記事に複数のタグをつけられるようにします。今回のエピソードでは、Railsアプリケーションにタグ機能を付加する2つの方法を紹介します。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1370/original/E382I01.png" width="800" height="500" alt="ブログアプリケーション"/>
+</div>
+
+<h3>Acts-as-Taggable-onを使ってタグ機能を付加する</h3>
+
+<p><a href="https://www.ruby-toolbox.com/categories/rails_tagging">タグ付け用のライブラリ</a>はいくつもありますが、飛び抜けて人気があるのが<a href="https://github.com/mbleigh/acts-as-taggable-on">acts-as-taggable-on</a>です。このgemは比較的古いですが、長い間メンテナンスされている数少ないgemの一つです。Railsアプリケーションで利用するには、gemfileに追加してbundleコマンドを実行してインストールします。</p>
+
+``` /Gemfile
+gem 'acts-as-taggable-on'
+```
+
+<p>次にこのgemが提供するジェネレータを実行してmigrationファイルを作成し、データベースのマイグレーションを行なって<code>acts-as-taggable-on</code>が使用するフィールドを追加します。</p>
+
+``` terminal
+$ rails g acts_as_taggable_on:migration
+$ rake db:migrate
+```
+
+<p>このマイグレーションによって<code>tags</code>と<code>taggings</code>の2つのテーブルが追加されます。これらのモデルはgemに含まれているので改めて作成する必要はありません。では早速アプリケーションにタグ機能を付加する作業に入りましょう。記事の編集ページに、その記事のタグを入力するためのフィールドを追加することにします。そのために<code>Article</code>モデルに、gemが提供する<code>acts_as_taggable</code>メソッドの呼び出しを追加し、さらに<code>attr_accessible</code>のリストに<code>tag_list</code>フィールドを追加します。</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  attr_accessible :content, :name, :tag_list
+  acts_as_taggable
+end
+```
+
+<p>次に記事の入力フォームに、タグのリストを編集するための新規のフィールドを追加します。</p>
+
+``` /app/views/articles/_form.html.erb
+<div class="field">
+  <%= f.label :tag_list, "Tags (separated by commas)" %><br />
+  <%= f.text_field :tag_list %>
+</div>
+```
+
+<p>ではこれを試してみましょう。記事を編集して新しいフィールドにいくつかのタグをカンマ区切りで入力すると、後で再度同じ記事を編集するときにはこれらのタグがリスト表示されているので、ここまでのところはうまく動いているようです。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1371/original/E382I02.png" width="800" height="412" alt="編集ページにタグのリストが表示される"/>
+</div>
+
+<p>タグ編集用に自動補完機能を付加したい場合は<a href="http://railscasts.com/episodes/102-auto-complete-association">エピソード102</a>を参照してください。その詳細はここでは省略します。次に各記事のタグをそれぞれの本文の下に追加します。これを行なうもっとも簡単な方法は、各記事ごとの<code>tag_list</code>を表示する方法です。</p>
+
+``` /app/views/articles/index.html.erb
+<h1>Articles</h1>
+
+<div id="articles">
+  <% @articles.each do |article| %>
+    <h2><%= link_to article.name, article %></h2>
+    <%= simple_format article.content %>
+    <p>Tags:  <%= article.tag_list %></p>
+    <p><%= link_to "Edit Article", edit_article_path(article) %></p>
+  <% end %>
+</div>
+
+<p><%= link_to "New Article", new_article_path %></p>
+```
+
+<p>各記事のタグが<code>index</code>ページに表示されました。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1372/original/E382I03.png" width="800" height="500" alt="各記事にタグのリストが表示された"/>
+</div>
+
+<p>タグがリンクになっていてクリックするとそのタグを持つ記事だけが表示されるようになっていたら便利でしょう。タグリストを設定したときにはタグをカンマで区切った単独の文字列として設定したのですが、実際には<code>tag_list</code>属性は文字列の配列を返します。このタグの配列を、次のようなリンクのセットに変換できます。</p>
+
+``` /app/views/articles/index.html.erb
+<p>Tags:  <%= article.tag_list.map { |t| link_to t, tag_path(t) }.join(', ') %></p>
+```
+
+<p>タグのためのルートがないので設定します。すべてのタグのresourceを設定することもできますが、シンプルに保つために単一のルートを設定します。これは<code>:tag</code>という引数をとって、記事のindexページにマッピングします。</p>
+
+``` /config/routes.rb
+Blog::Application.routes.draw do
+  get 'tags/:tag', to: 'articles#index', as: :tag
+  resources :articles
+  root to: 'articles#index'
+end
+```
+
+<p>ページをリロードすると、タグ部分のHTMLがエスケープされているので、うまく動作しません。これを修復するには、このコードをエスケープされないように<code>raw</code>メソッドを介して渡します。このメソッドを使用しているときは、ビュー層で少し複雑なことをしているというサインなので、ヘルパーメソッドへ移すことを検討したほうがいいでしょう。ここではそれは行ないませんが、頭の片隅には入れておいてください。</p>
+
+``` /app/views/articles/index.html.erb
+<p>Tags:  <%= raw article.tag_list.map { |t| link_to t, tag_path(t) }.join(', ') %></p>
+```
+
+<p>ページをリロードすると、各タグのリンクができていてそれぞれが正しいパスを指定しています。しかし、タグをクリックしてもまだ記事リストにフィルタがかかりません。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1373/original/E382I04.png" width="800" height="500" alt="各タグがリンクになった"/>
+</div>
+
+<p>これは<code>ArticlesController</code>のindexアクションで簡単に行なうことができます。<code>:tag</code>パラメータをチェックして、見つかったらそのタグでリストをフィルタリングします。gemには<code>tagged_with</code>というメソッドがあり、ある特定のタグが付いた記事を検索することができます。</p>
+
+``` /app/controllers/articles_controller.rb
+def index
+  if params[:tag]
+    @articles = Article.tagged_with(params[:tag])
+  else
+    @articles = Article.all
+  end
+end
+```
+
+<p>ページをリロードすると、記事は選択したタグでフィルタがかけられています。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1374/original/E382I05.png" width="800" height="500" alt="タグをクリックすると記事にフィルタがかけられる"/>
+</div>
+
+<h3>タグクラウドを追加する</h3>
+
+<p>タグリストが動作するようになりましたが、すべてのタグを見たい場合にはどうすればいいでしょうか? よく利用されるのがタグクラウドを使用する方法で、すべてのタグを人気度によってサイズを変えて表示させます。この機能をindexテンプレートの最上部の近くに追加します。gemが提供する<code>tag_cloud</code>メソッドがあるのでこの作業はとても簡単です。</p>
+
+``` /app/views/articles/index.html.erb
+<div id="tag_cloud">
+  <% tag_cloud Article.tag_counts, %w{s m l} do |tag, css_class| %>
+    <%= link_to tag.name, tag_path(tag.name), class: css_class %>
+  <% end %>
+</div>
+```
+
+<p>このメソッドは2つの引数をとります。1つ目は表示させたいタグのセットです。これを簡単に取得するには、<code>Article.tag_counts</code>を呼び出すと、タグのリストを表示し、それぞれが使用された回数を表示します。この情報は各タグの大きさを決めるのに必要です。二つ目に渡す引数は、複数種のサイズとして使用するためのCSSクラスの配列です。またこのメソッドはブロックをとり、そこに<code>tag</code>オブジェクトとそれと一致するCSSクラスが渡されます。このブロックの中でタグを描画して、tagオブジェクトの名前への<code>link_to</code>、 <code>tag_path</code> (URLでタグ名を使いたいので、これにもtag名を渡します)、CSSクラスを渡します。タグクラウド用のスタイルをまだ定義していなかったので、ここで追加します。</p>
+
+``` /app/assets/stylesheets/articles.css.scss
+#tag_cloud {
+  width: 400px;
+  line-height: 1.6em;
+  .s { font-size: 0.8em; }
+  .m { font-size: 1.2em; }
+  .l { font-size: 1.8em; }
+}
+```
+
+<p>記事のページをリロードすると、追加した2つのタグを含むタグクラウドが表示されます。記事にいくつかタグを追加してページをリロードすると、見た目がきれいになったタグクラウドが表示され、そこにはタグがついた記事の数によってサイズが異なるいくつかのタグが含まれています。タグをクリックすると、そのタグが付いた記事だけを表示するようフィルタがかかります。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1375/original/E382I06.png" width="800" height="500" alt="タグクラウドが、出現頻度によってタグの大きさを変える"/>
+</div>
+
+<p>その他にも、いろいろなことができます。現在のタグをハイライト表示したり、タグを名前順にソートしたりできますが、ここではそれは行ないません。</p> 
+
+<h3>ゼロからタグ機能を実装する</h3>
+
+<p><code>acts-as-taggable-on gem</code>を利用していろいろなことができましたが、同じようなものをゼロから作った場合はどれくらいの作業が必要になるでしょうか? これを行なう前に、追加した機能のいくつかを元に戻します。まずデータベースに対しておこなった変更を取り消し、マイグレーションを削除します。</p>
+
+``` terminal
+$ rake db:rollback
+$ rails d acts_as_taggable_on:migration
+```
+
+<p>次にGemfileからgemを削除して、bundleコマンドを再度実行します。ようやくこれで、タグ機能をゼロから作り直す準備ができました。まず最初に<code>Tag</code>モデルを作成し、<code>name</code>のカラムを付加します。</p>
+
+``` terminal
+$ rails g model tag name
+```
+
+<p>次に<code>Tagging</code>モデルを作成し、これを<code>Tag</code>と<code>Article</code>の両方に属する(belongs_to)ように設定します。</p>
+
+``` terminal
+$ rails g model tagging tag:belongs_to article:belongs_to
+```
+
+<p>gemが内部でおこなっているのと同じようにポリモーフィック関連を設定することもできますが、簡単に設定するために、ここでは<code>Article</code>モデルに直接リンクします。そして<code>rake db:migrate</code>を実行して新規テーブルを追加します。次にモデルに関連を設定していきます。まず最初は<code>Tag</code>です。</p>
+
+``` /app/models/tag.rb
+class Tag < ActiveRecord::Base
+  attr_accessible :name
+  has_many :taggings
+  has_many :articles, through: :taggings
+end
+```
+
+<p><code>acts_as_taggable</code>の機能を置き換えるためには、<code>Article</code>モデルをもう少し複雑にする必要があります。タグを管理するための関連といくつかのメソッドを追加します。</p>
+
+``` /app/models/article.rb
+class Article < ActiveRecord::Base
+  attr_accessible :content, :name, :tag_list
+  has_many :taggings
+  has_many :tags, through: :taggings
+
+  def self.tagged_with(name)
+    Tag.find_by_name!(name).articles
+  end
+
+  def self.tag_counts
+    Tag.select("tags.*, count(taggings.tag_id) as count").
+      joins(:taggings).group("taggings.tag_id")
+  end
+  
+  def tag_list
+    tags.map(&:name).join(", ")
+  end
+  
+  def tag_list=(names)
+    self.tags = names.split(",").map do |n|
+      Tag.where(name: n.strip).first_or_create!
+    end
+  end
+end
+```
+
+<p>まずtaggingsとの関連とtaggingsを介したtagsとの関連を設定し、<code>Article</code>モデルに対してアプリケーションの他の場所から呼び出すための4つのメソッドを実装します。<code>tagged_with</code>メソッドは名前が一致したタグを持つ記事を返し、<code>tag_counts</code>メソッドはタグとそのカウント数を返します。(このメソッドは<code>Tag</code>モデルに置いた方がいいかも知れません。) また<code>tag_list</code>のgetterとsetterのメソッドも作りますが、getterが配列ではなく文字列を返すという違いがあります。このため、現状<code>index</code>テンプレートが<code>tag_list</code>を配列として処理してしまうのでこれを修正します。<code>article.tags</code>を呼び出して<code>name</code>属性をマップさせることで、gemと似た振る舞いになるようにします。</p>
+
+``` /app/views/articles/index.html.erb
+<%= raw article.tags.map(&:name).map { |t| link_to t, tag_path(t) }.join(', ') %>
+```
+
+<p>最後に書くのが<code>tag_cloud</code>メソッドです。これを<code>ApplicationHelper</code>モジュールに書きます。</p>
+
+``` /app/helpers/application_helper.rb
+module ApplicationHelper
+  def tag_cloud(tags, classes)
+    max = tags.sort_by(&:count).last
+    tags.each do |tag|
+      index = tag.count.to_f / max.count * (classes.size - 1)
+      yield(tag, classes[index.round])
+    end
+  end
+end
+```
+
+<p>このメソッドはとてもシンプルで、gemのメソッドと同じ引数を取ります。ここでもっとも件数が多いタグを探して、他のタグの相対的な出現頻度を決めて、それぞれで使用するクラスを決定します。これでおおよそ同じ機能をゼロから作ることができました。記事にいくつかのタグを追加してから一覧に戻ると、記事の横にタグが表示され、クラウドにも追加されているのがわかります。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1376/original/E382I07.png" width="800" height="500" alt="自作のタグクラウド"/>
+</div>
+
+<p>今回の方法では、コードの大部分は<code>Article</code>モデルにあります。この機能を実装するのにそれほど多くのコードを書かずに済み、アプリケーションに依存しすぎていることもありません。gemの方には、スクラッチで開発したバージョンには加えることができなかった機能がいくつかあります。例えばモデルにタグを作成するときに違うコンテキストを与えることができる点などです。gem版では所有者を記録することができるので、例えばUserをタグを付けた人としてモデルの記録に残すこともできます。</p> 
+
+<p>シンプルなタグ付けのソリューションが欲しければスクラッチで開発するのも一つの案です。一方フル機能のソリューションを求めるのであれば、gemを利用する方がいいでしょう。</p>

@@ -1,0 +1,215 @@
+<p>今回のエピソードでは、RailsでJSON APIを作成するのに利用されるActive Model Serializerを紹介します。下のスクリーンショットは、標準的なブログアプリケーションで、複数の記事を持ち、それぞれの記事が複数のコメントを持ちます。HTMLビューに加えてJSON APIも提供し、URLに<code>.json</code>を追加することで記事のデータを取得できるようにします。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1489/original/E409I01.png" width="800" height="500" alt="ブログアプリケーション"/>
+</div>
+
+<p>今これを実行すると、アプリケーションはJSONリクエストに対して何を返すべきかわからないので、例外が表示されます。これを修正するのは簡単です。<code>ArticlesController</code>でshowアクションに<code>respond_to</code>ブロックを追加して、記事をJSON形式で表示できるようにします。</p>
+
+``` /app/controllers/articles_controller.rb
+def show
+  @article = Article.find(params[:id])
+  respond_to do |format|
+    format.html
+    format.json { render json: @article }
+  end
+end
+```
+
+<p>記事のページをロードすると、JSON形式でデータが表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1490/original/E409I02.png" width="800" height="300" alt="URLに.jsonを付加すると記事がJSON形式で表示される"/>
+</div>
+
+<h3>出力をカスタマイズする</h3>
+
+<p>これはRailsでJSON APIを作成する一般的な方法ですが、さらに出力をカスタマイズしなくてはいけない場合もあります。その場合はコントローラを介してオプションを渡すか、モデルで<code>as_json</code>メソッドをオーバーライドする方法がありますが、どちらの方法もすぐに複雑化して扱いにくくなってしまいます。このような場合にはActive Model Serializer gemのようなツールが便利なので、アプリケーションに追加してみましょう。通常の方法でGemfileに追加後に<code>bundle</code>コマンドを実行してインストールします。</p>
+
+``` /Gemfile
+gem 'active_model_serializers'
+```
+
+<p>このgemが提供するジェネレータを、APIを介して公開したいモデルごとに実行します。Railsのresource generatorを使用した場合は、これが自動で実行されます。これを用いて記事データのserializerを作成します。</p>
+
+``` terminal
+$ rails g serializer article
+```
+
+<p>このジェネレータが、新しい<code>app/serializers</code>ディレクトリにファイルを一つ作成します。これはJSON形式の出力を自由にカスタマイズするための専用のクラスができたということです。また便利なことにこのgemにはフックが含まれているので、モデルをJSON形式で出力しようとすると、自動的に同じ名前のserializerを探してもし見つかったらそれを用いてJSONデータを取得します。このクラスの中で出力に含む属性を指定します。</p>
+
+``` /app/serializers/article_serializer.rb
+class ArticleSerializer < ActiveModel::Serializer
+  attributes :id, :name, :content
+end
+```
+
+<p>ページをリロードすると、記事のJSONがserializerクラスを介して出力されています。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1491/original/E409I03.png" width="800" height="300" alt="JSONがserializerによって生成された"/>
+</div>
+
+<p>ここで大きな違いが一つあります。すべての属性は<code>article</code>というルートノードに含まれるようになりましたが、これはRailsがデフォルトで生成するJSONとは異なります。APIの利用側の都合によっては、この振る舞いが問題になる場合もあります。その場合は、コントローラアクションでrootオプションを渡して<code>false</code>に設定することによって、ルートノードを無効にすることもできます。</p>
+
+``` /app/controllers/articles_controller.rb
+format.json { render json: @article, root: false }
+```
+
+<p>すべてのシリアライズされたオブジェクトがこの振る舞いをしてほしい場合には、<code>default_serializer_options</code>メソッドを定義してデフォルトのオプションを設定します。</p>
+
+``` /app/controllers/articles_controller.rb
+def default_serializer_options
+  {root: false}
+end
+```
+
+<p>これをActive Model Serializerが自動的に検出するので、<code>ApplicationController</code>に移動したらすべてのコントローラに含まれることになります。今回の例ではルートノードをそのままにしたいので、アプリケーションにこのメソッドを追加することはしません。その代わりにserializerクラスに戻って、出力をどうカスタマイズできるかを見てみます。例えば、記事のURLのようにメソッドではない属性をモデルに追加したいとしましょう。serializerにメソッドを定義すれば、モデルに委譲する代わりにそれを利用できます。URLヘルパーメソッドを利用できるので、<code>article_url</code>を使って記事のURLを取得します。serializerが対象としているモデルを表すこのオブジェクトを渡します。</p>
+
+``` /app/serializers/article_serializer.rb
+class ArticleSerializer < ActiveModel::Serializer
+  attributes :id, :name, :content, :url
+
+  def url
+    article_url(object)
+  end
+end
+```
+
+<p>メソッドを介して属性をカスタマイズできるという点が、このserializerを使いやすくしています。もう一つの便利な機能が、associationのサポートです。記事のコメントからデータを取り込むために、has_manyを使ってassociationの名前を渡します。</p>
+
+``` /app/serializers/article_serializer.rb
+class ArticleSerializer < ActiveModel::Serializer
+  attributes :id, :name, :content, :url
+  has_many :comments
+
+  def url
+    article_url(object)
+  end
+end
+```
+
+<p>ページをリロードすると、JSONに関連のコメントのデータが含まれています。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1492/original/E409I04.png" width="800" height="300" alt="JSONに関連のコメントのデータが含まれている"/>
+</div>
+
+<p>察しがつくと思いますが、もう一つのserializerを作成することでコメントの属性をカスタマイズできます。</p>
+
+``` terminal
+$ rails g serializer comment
+```
+
+<p>複雑にしないように、ここでは属性の<code>id</code>と<code>content</code>だけを追加することにします。</p>
+
+``` /app/serializers/comment_serializer.rb
+class CommentSerializer < ActiveModel::Serializer
+  attributes :id, :content
+end
+```
+
+<p>serializerが見つからない場合にコントローラがデフォルトのRails serializationにフォールバックするというこの振る舞いのおかげで、カスタムの振る舞いが必要なときだけserializerを追加すればいいので、とても便利です。</p>
+
+<p>ここまでの作業で、ルートの<code>article</code>のノードにコメントのデータがネストされました。これをルートレベルに上げたい場合は、そのようにもできます。そのようなデータ構造にすることによってJavaScriptクライアントサイドフレームワークによってはパフォーマンスが向上する場合があります。そのために<code>ArticleSerializer</code>を修正してembedの呼び出しを追加し、<code>ids</code>を指定することで、いずれのassociationも記事のJSONデータに含まれる<coe>id</coe>だけを持つようにします。<code>include: true</code>も一緒に渡すと、コメントのデータがルートレベルに含まれます。</p>
+
+``` /app/serializers/article_serializer.rb
+embed :ids, include: true
+```
+
+<p>ページをリロードすると、コメントデータがトップに含まれて、<code>article</code>のルートノードの外側に移動ししています。記事のデータに<code>comment_ids</code>属性が追加され、そこには関連のコメントの<code>id</code>が含まれています。このようにしてコメントのデータを別にして、必要な場合だけ含むようにできますが、これはAPIをどのように使用するかに依存します。</p> 
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1493/original/E409I05.png" width="800" height="300" alt="コメントのidがJSONに含まれた"/>
+</div>
+
+<h3>条件付き属性</h3>
+
+<p>条件によって属性を含むようにしたい場合はそれも可能です。例えば、現在のユーザがadminだった場合のみ<code>edit_url</code>を含みたいとします。<code>attributes</code>を介してこれを行なうことはできませんが、<code>attributes</code>メソッドをオーバーライドすることによって、返されるすべてのハッシュを変換してJSON出力に付加することができます。</p>
+
+``` /app/serializers/article_serializer.rb
+def attributes
+  data = super
+  data[:edit_url] = edit_article_url(object)
+  data
+end
+```
+
+<p>現在の振る舞いをそのままにしたいので、まず<code>super</code>を呼び出してハッシュデータを取得し、これを修正して返します。<code>edit_url</code>属性を追加してこれを記事のURLに設定します。これをまだ条件分岐させていないので、動作するかどうか試してみます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1494/original/E409I06.png" width="800" height="300" alt="記事編集用のedit_urlを含む"/>
+</div>
+
+<p>うまくいきました。<code>edit_url</code>属性が出力の中に表示されました。次にこの属性を条件によって現れるようにして、現在のユーザがadminのときだけ表示されるようにします。serializerはコントローラとビュー層の外にあるので、ここで簡単に<code>current_user</code>を取得することはできません。この問題を解決するために、すべてのserializerに渡されるscopeというオブジェクトがあり、これがデフォルトではcurrent userオブジェクトになります。</p>
+
+``` /app/serializers/article_serializer.rb
+def attributes
+  data = super
+  data[:edit_url] = edit_article_url(object) if scope.admin?
+  data
+end
+```
+
+<p>しかし<code>edit_url</code>属性を条件付きで表示するためにこれを使用しようとすると、ページをリロードしたときに、<code>scope</code>オブジェクトに未定義のadmin?メソッドがあるといって例外が投げられます。これはscopeオブジェクトが現在のユーザに設定されていないということなので、問題は<code>ApplicationController</code>でどうやって<code>current_user</code>メソッドを定義するかです。</p> 
+
+``` /app/controllers/application_controller.rb
+private
+
+def current_user
+  OpenStruct.new(admin?: false)
+end
+helper_method :current_user
+```
+
+<p>とりあえずはこれが<code>OpenStruct</code>を使って<code>current_user</code>オブジェクトをstub化します。これはアプリケーションの開発中に手早く擬似的な認証機能を付加する便利な方法です。このメソッドは<code>private</code>と指定されているのでserializerには検出されません。これを代わりに<code>protected</code>にすると今度はうまく動作して、偽のユーザがadminではないので<code>edit_url</code>は表示されません。</p>
+
+<p>これでserializerはうまく機能しましたが、scopeの機能でまだ問題があります。一つの問題は、アプリケーション内でJSONリクエストを作成するたびに、たとえserializerでユーザレコードにアクセスされていなくても、現在のユーザのレコードがロードされます。これは不必要なデータベースクエリを発生させ、パフォーマンスの問題を引き起こす可能性があります。もう一つの問題は<code>scope</code>という名前が一般的すぎて、<code>scope</code>に対してそれを呼び出したときに<code>admin?</code>メソッドが現在のユーザに対して呼び出されるということが自明ではありません。serializerで直接<code>current_user</code>を呼び出せる方がずっといいでしょう。これを実現するためには、serializerに渡されたscopeオブジェクトをカスタマイズして、<code>ApplicationController</code>を変更し、<code>serialization_scope</code>を呼び出してcurrent user以外の何か、例えば<code>view_context</code>を使用します。</p>
+
+``` /app/controllers/application_controller.rb
+serialization_scope :view_context
+```
+
+<p>このビューコンテキストや、serializerで利用するその他のヘルパーメソッドで、現在のユーザを呼び出すことができます。serializerに戻って、 <code>current_user</code>メソッドを委譲するよう指示して、それに対して<code>admin?</code>を呼び出します。</p>
+
+``` /app/serializers/article_serializer.rb
+delegate :current_user, to: :scope
+
+def attributes
+  data = super
+  data[:edit_url] = edit_article_url(object) if current_user.admin?
+  data
+end
+```
+
+<p>ページに以前と同じ機能を持たせることができましたが、今度は現在のユーザは必要なときだけロードされます。このアプローチの一つの欠点は、serializerに対してビューコンテキスト全体へのアクセス権を与えなくてはいけないので、テストが少し難しくなります。この問題を回避するには、ヘルパーメソッドをテストするのと同じような方法で<code>ActionView::TestCase</code>を継承してテストを行うことができます。それによって自動的にビューコンテキストが設定され、serializerに渡すことができます。</p>
+
+<h3>JSONリクエスト以外でJSONを生成する</h3>
+
+<p>今回のエピソードの最後にチップスを一つ紹介します。このJSONデータをJSONリクエスト以外で作成したい場合にはどうすればいいでしょう? 例えば<code>index</code>ページの記事用にJSONデータを埋め込みたい場合などです。ページの要素の<code>data</code>属性でこれを行なうことができます。これは複雑になるので、属性の内容を生成するためのヘルパーメソッドを作成します。</p>
+
+``` /app/views/articles/index.html.erb
+<div id="articles" data-articles="<%= json_for @articles %>">
+```
+
+<p>データを生成するヘルパーメソッドは以下のようになります。</p>
+
+``` /app/helpers/application_helper.rb
+module ApplicationHelper
+  def json_for(target, options = {})
+    options[:scope] ||= self
+    options[:url_options] ||= url_options
+    target.active_model_serializer.new(target, options).to_json
+  end
+end
+```
+
+<p>このメソッドはターゲットのオブジェクトとして、ActiveRecordリレーションかモデルを受け入れます。まずserializerの<code>:scope</code>オプションを<code>self</code>(つまりview context)にし、<code>:url_options</code>を設定します。これはホストオプションが未定義のときにエラーを出さないようにするために重要です。最後に、渡されたオブジェクトに対して<code>active_model_serializer</code>を呼び出します。これはgemがrelationとモデルに追加したメソッドで、これによってserializerを自由に指定することができます。このserializerのインスタンスを生成してオプションを渡し、JSONに変換します。</p> 
+
+<p>ページをリロードしてソースを見ると、<code>data-articles</code>属性に記事のデータが入っています。</p> 
+
+``` html
+data-articles="[{"id":1,"name":"Superman"...
+```
+
+<p>ActiveModel Serializerに関する今回のエピソードは以上です。合わせてJbuilderとRABLについて解説したエピソード<a href="http://railscasts.com/episodes/320-jbuilder">320</a>と<a href="http://railscasts.com/episodes/322-rabl">322</a>も参照してください。これらのgemは今回とは別の方法で、serializerオブジェクトの代わりにビューテンプレートを利用することによってJSONを生成します。どちらのアプローチにもそれぞれ利点があります。Active Model Serializerのオブジェクト指向の特性がよりふさわしいシナリオがある一方で、ビュー層でserializationを行なう方がよりよいアプローチである場合もあるでしょう。</p></div>

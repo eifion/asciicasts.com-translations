@@ -1,0 +1,80 @@
+<p>Railsコマンドの多くが実行時間が遅いということにお気づきの方もいるでしょう。例えばRailsアプリケーションのジェネレータを実行した場合、画面への出力が始まるまでに数秒の遅れがあります。その理由はこれらのコマンドが実行されたときにアプリケーションが起動されるからで、開発時にテストを頻繁に実行する場合にこれが最も顕著になります。アプリケーションが大きくなるにつれ、この待ち時間は長くなります。今回のエピソードでは、これらのコマンドの実行時間を短くするいくつかのツールを紹介します。</p>
+
+<h3>Zeus</h3>
+
+<p>最初に紹介する<a href="https://github.com/burke/zeus">Zeus</a>は、Railsアプリケーションを事前にロードすることによって、コマンドをほとんど瞬時に実行することができます。ただし使用環境に対する要求は厳しく、最新のOSXあるいはLinuxと、ガーベッジコレクションのパッチが適用されたRuby 1.9.3が必要です。パッチがなくても動作するように見えますが、RAMの容量に制限がある場合は必要になるでしょう。インストールするには<code>gem install zeus</code>を実行します。<code>zeus</code>コマンドはBundlerの外で実行するため、アプリケーションのgemfileには追加しません。インストールできたら、<code>zeus start</code>コマンドを実行してアプリケーションをプリロードします。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1505/original/E412I01.png" width="585" height="413" alt="Zeusコマンドからの出力"/>
+</div>
+
+<p>Railsアプリケーションのロードが完了するとこの出力が変わります。今回のアプリケーションではほとんどがグリーンになりましたが、これはこれらのコマンドが使用可能であることを表しています。別のターミナルのタブを開いて、通常のRailsのジェネレータコマンドの代わりに<code>zeus generate</code> (あるいは省略して<code>zeus g</code>)コマンドで別のジェネレータを実行できます。</p> 
+
+``` terminal
+$ zeus g model comment content
+```
+
+<p>同じように、<code>rake db:migrate</code>(あるいはその他のRakeコマンド)を実行する場合もその前に<code>zeus</code>を付けます。</p>
+
+``` terminal
+$ zeus rake db:migrate
+```
+
+<p>これも同じようにより短い時間で実行でき、テストも<code>zeus rake test</code>を実行することで以前よりもずっと速く動作します。ファンクションテストのために<code>zeus test</code>で一部のテストファイルやディレクトリだけを実行する場合は<code>zeus test test/functional</code>を使用します。</p> 
+
+<p>これらのコマンドを実行するたびにRailsアプリケーションを起動しなくてもいいので、出力は今までよりもずっと速く表示されます。ZeusはRailsをdevelopmentとtestのそれぞれの環境ごとにプリロードすることで動作します。このアプリケーションにCucumberが設定されている場合はそこでも同じように動作します。つまり、コマンドはこれらのプリロードされた環境に対して実行されるということです。Zeusは変更部分のリロードにも対応します。例えばモデルを修正した場合も自動的に反映されるので、Zeusをリロードする必要はありません。Zeusを使った場合と使わない場合で、コマンドの実行時間を比較してみましょう。データベースのマイグレーションで試してみます。</p>
+
+``` terminal
+$ time bundle exec rake db:migrate
+
+real  0m4.054s
+user  0m3.409s
+sys 0m0.569s
+
+$ time zeus rake db:migrate
+
+real  0m1.246s
+user  0m0.553s
+sys 0m0.162s
+```
+
+<p>このコマンドはZeusを使わなかった場合は4秒かかりましたが、使用した場合は1秒未満で完了しました。違いはアプリケーションのサイズに大きく依存するので、どのくらい違いが出るのかを実際に自分のアプリケーションを用いて試して見るのがいいでしょう。</p>
+
+<p>この設定の便利な点の一つは、Railsコマンドを普段使っているテキストエディタに統合することによってすばやくフィードバックを得ることができることです。例えばTextmateでは、設定によってテストファイルにカーソルを置いた状態でキーボードショートカットでテストを実行し、その結果をツールチップとして表示することができます。これは、現在のプロジェクトに移動して現在のファイルの選択された行で <code>zeus test</code>を実行するというカスタムのTextmate bundleを作ることによって実現できます。</p>
+
+``` tmbundle
+cd "$TM_PROJECT_DIRECTORY"
+zeus test "$TM_FILEPATH:$TM_LINE_NUMBER"
+```
+
+<p>Zeusを実行する場合にひとつ注意することとして、プロジェクトのルートに<code>.zeus.sock</code>ファイルが作成されますが、これをソース管理の中にチェックインしない方がいいでしょう。Gitを使用しているのであれば、これを<code>.gitignore</code>ファイルに追加しておきましょう。</p> 
+
+<h3>SpringとCommands</h3>
+
+<p>ZeusはRailsコマンドを高速化させる一つの方法ですが、同じようなツールは他にもあります。他の選択肢もいくつか見てみましょう。その一つが<a href="https://github.com/jonleighton/spring">Spring</a>という名前のツールで、Railsアプリケーションをプリロードすることでコマンドを高速化するのですが、Zeusと違う点が2つあります。インストールを<code>gem install spring</code>コマンドで行うと、<code>spring</code>コマンドを利用できるようになり、<code>zeus</code>コマンドと同じような形で使用できます。RailsとRakeタスクを<code>spring</code>を介して実行できますが、一つの違いは1回目の実行時にバックグラウンドで自動的にRailsアプリケーションを起動するという点です。つまり最初に実行するコマンドでRailsアプリケーションが起動するので、1回目だけは完了までに時間がかかるということです。その後のコマンドは、すでに起動したプロセス上で動作するのでほとんど瞬時に実行されます。</p>
+
+<p>Springを使う場合は、Railsアプリケーションを特別なコマンドで起動するという手間がかからず、停止したい場合はただ<code>spring stop</code>を実行するかターミナルセッションを閉じるだけです。Springのもう一つの特徴は、<a href="https://github.com/jonleighton/spring#configuration">設定を変更しやすい</a>という点です。プリロードの動作や、どのディレクトリを監視するかを簡単に変更することができます。ただし注意しなくてはいけない点として、ファイルの変更を検知するのにfseventは使わずに、1秒間に5回pollします。OSXでfsevent、あるいはLinuxでinotifyを代わりに使用する場合に、アプリケーションのgemfileに必要なgemを追加する方法について、READMEに記述があります。</p>
+
+<p>最後に紹介するツールが<a href="https://github.com/rails/commands">Commands</a>です。これはRailsアプリケーションをプリロードしないとてもシンプルなアプローチで、RailsコンソールからRailsコマンドを実行する方法を提供します。他の2つのツールと違いアプリケーションのgemfileに追加する方式なので、gemfileを編集後に<code>bundle</code>コマンドを実行してインストールします。</p>
+
+``` /Gemfile
+gem 'commands', group: [:development, :test]
+```
+
+<p>インストールが終わったらアプリケーションのコンソールから各種のジェネレータやRakeタスクを実行できます。 </p>
+
+``` console
+>> generate "model author name"
+>> rake "db:migrate"
+```
+
+<p>アプリケーションはすでにコンソールにロードされているのでコマンドは高速に実行されます。デフォルトではコンソールはdevelopment環境をロードするため、ここからテストを実行することはできません。そのためには、<code>rails console test</code>を実行してtest環境でコンソールを開きます。</p>
+
+``` console
+>> rake "db:migrate"
+>> test "functional"
+```
+
+<p>テストを実行する前に、 <code>rake "db:migrate"</code>でテストデータベースのマイグレーションを行ないます。その後に<code>test</code>コマンドで実行したいテストのディレクトリを指定して、テストを実行できます。デフォルトの出力は、実行されたSQLコマンドがすべて表示されているので情報が多すぎて見にくいでしょう。これは、テストの実行前にコンソールで<code>ActiveRecord::Base.logger = nil</code>を実行することで止めることができます。CommandsはまだRSpecコマンドをサポートしていませんが、今後対応が予定されています。</p>
+
+<p>今回のエピソードの最後に<a href="http://railscasts.com/episodes/285-spork">エピソード285</a>で紹介した<a href="https://github.com/sporkrb/spork">Spork</a>にも触れておきます。このツールは、Railsをプリロードすることによってテスト環境を高速化するためのもので、今回紹介したツールと同じ仕組みで動作します。今は少し古くなってしまい、その他のRailsコマンドはサポートしていませんが、もしやりたいことが他のツールでできないという場合、特にWindowsかJRubyを使用しているのであれば、検討する価値があります。</p>

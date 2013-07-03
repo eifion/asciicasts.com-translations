@@ -1,0 +1,151 @@
+<p>下の図は、サンプルアプリケーションのスクリーンショットです。何件かのプロジェクトの一覧が表示され、それぞれに複数のタスクが登録されています。例えばこのページにパフォーマンスの問題があり、速度向上のためにfragment cachingの機能を付加したいとしましょう。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1405/original/E387I01.png" width="800" height="450" alt="プロジェクト管理アプリケーション"/>
+</div>
+
+<p>このページのテンプレートを以下に示します。このファイルが単純にプロジェクトのページを描画します。</p>
+
+``` /app/views/projects/index.html.erb
+<h1>Projects</h1>
+
+<%= render @projects %>
+```
+
+<p>各プロジェクトごとに、部分テンプレート<code>_project</code>が描画されます。このテンプレートもとてもシンプルで、プロジェクトごとのタスクを描画します。</p>
+
+``` /app/views/projects/_project.html.erb
+<h2><%= link_to project.name, edit_project_path(project) %></h2>
+<ul><%= render project.tasks %></ul>
+```
+
+<p>この部分テンプレートは、プロジェクトに含まれる各タスクのためのもうひとつの部分テーンプレートの<code>_task</code>を描画します。</p>
+
+``` /app/views/tasks/_task.html.erb
+<li>
+  <%= task.name %>
+  <%= link_to "edit", edit_task_path(task) %>
+</li>
+```
+
+<p>部分テンプレートの<code>_projects</code> にfragment cachingを付加します。fragment cachingについて知らないという場合は、<a href="http://railscasts.com/episodes/90-fragment-caching-revised">エピソード90</a>で詳しく説明しているので参照してください。</p>
+
+``` /app/views/projects/_project.html.erb
+<% cache project do %>
+  <h2><%= link_to project.name, edit_project_path(project) %></h2>
+  <ul><%= render project.tasks %></ul>
+<% end %>
+```
+
+<p>この部分テンプレートでタスクの情報を出力しているので、タスクが変更されたときにキャッシュが期限切れになるのが都合がいいでしょう。そのためにはTaskモデルを修正し、関連(association)の<code>project</code>に<code>touch: true</code>を追加します。</p>
+
+``` /app/models/task.rb
+class Task < ActiveRecord::Base
+  attr_accessible :name, :completed_at
+  belongs_to :project, touch: true
+end
+```
+
+<p>タスクが更新されたときに、そのタスクが属するプロジェクトに更新マークがつきます。効果を確認するために、設定ファイルのdevelopment.rbを修正し、<code>perform_caching</code>を<code>true</code>に設定します。</p>
+
+``` /config/development.rb
+config.action_controller.perform_caching = true
+```
+
+<p>Railsアプリケーションを再起動してトップページをリロードすると、プロジェクトの情報はfragment cacheに保存されます。ページをリロードする度ごとに、それらの部品がキャッシュから読み込まれます。タスクを編集すると、そのプロジェクトのキャッシュが期限切れになり、新規のものが作成されます。</p>
+
+<p>キャッシュされたテンプレートの変更を処理する</p>
+
+<p>これはうまくいきますが、ビューテンプレートを変更したらどうなるでしょうか? 例えばタスクを、unordered listではなく、ordered listで再描画したいとしましょう。</p>
+
+``` /app/views/projects/_project.html.erb
+<% cache project do %>
+  <h2><%= link_to project.name, edit_project_path(project) %></h2>
+  <ol><%= render project.tasks %></ol>
+<% end %>
+```
+
+<p>ページをリロードしても変化はありません。各タスクのHTMLはすでにキャッシュに保存されていて、キャッシュがまた期限切れになっていないので、古い内容がまだ表示されています。この問題を回避する一般的な方法として、キャッシュキーにバージョン番号を追加します。</p>
+
+``` /app/views/projects/_project.html.erb
+<% cache ['v1', project] do %>
+  <h2><%= link_to project.name, edit_project_path(project) %></h2>
+  <ol><%= render project.tasks %></ol>
+<% end %>
+```
+
+<p>cache keyを変更したので、キャッシュは期限切れになりリロードされ、タスクはordered listとして表示されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1406/original/E387I02.png" width="800" height="450" alt="今度は変更が反映されている"/>
+</div>
+
+<h3>ネストされたキャッシュの処理</h3>
+
+<p>この方法の問題は、テンプレートを更新するたびに忘れずにバージョン番号を変更しなければいけません。それによってcache keyが変わり変更が反映されることになります。難しくはないですが、fragment cacheがネストされた場合にとたんに管理しきれなくなってしまいます。例えば、パフォーマンスを少しでも向上させるためにタスクの部分テンプレートをfragment cacheしたいとしましょう。</p>
+
+``` /app/views/tasks/_task.html.erb
+<% cache ['v1', task] do %>
+<li>
+  <%= task.name %>
+  <%= link_to "edit", edit_task_path(task) %>
+</li>
+<% end %>
+```
+
+<p>そのためには、キャッシュの全体が期限切れになるようにプロジェクトの部分テンプレートのcache keyのバージョン番号も更新しなくてはいけません。ここでタスクの部分テンプレートを更新(例えばリンクの文字列をeditからrenameに変更)する場合、バージョン番号も更新する必要があります。ですが、プロジェクトの部分テンプレートのバージョン番号も更新しない限り、ページをリロードしてもこの変更は反映されません。両方を変更したときに初めて、変更が反映されます。</p>
+
+<div class="imageWrapper">
+  <img src="http://asciicasts.com/system/photos/1407/original/E387I03.png" width="800" height="450" alt="タスクの部分テンプレートへの変更が表示された"/>
+</div>
+
+<h3>Cache Digest Gemを使う</h3>
+
+<p>うまくはいきましたが、テンプレートに修正を加えるたびに忘れずにこの変更を行うのは面倒です。そのような場合に<a href="https://github.com/rails/cache_digests">Cache Digests gem</a>が役に立ちます。この機能はRails 4では標準で利用できますが、gemとして抽出されたので、Rails 3のアプリケーションでも利用可能です。このgemはテンプレートに基づくfragment cache keyにdigestを含むことによって機能します。つまりテンプレートが変更されると新しいcache keyが生成されてそのキャッシュは期限切れになります。このgemを実際のアプリケーションで試してみます。いつものようにgemfileに追加した後にbundleコマンドでインストールを行ないます。</p>
+
+``` /Gemfile
+gem 'cache_digests'
+```
+
+<p>もうfragment cacheのバージョン番号の履歴を管理する必要がないので、projectとtaskの両方の部分テンプレートからそれらを削除します。アプリケーションを再起動してトップページをリロードすると、テンプレートを意味するcache keyにダイジェストが含まれます。 </p>
+
+<p>projectsのテンプレートを変更してページをリロードしても変更は反映されていないようです。これはcache digest gemが、毎回のリクエストでテンプレートファイルを読み込むのが効率が悪いのでそれを行わないことが原因です。その代わりにテンプレートパス毎にダイジェストのローカルキャッシュをメモリに保持するので、それが原因でテンプレートの変更が反映されていません。開発環境でこれを動作させるために、Railsアプリケーションを再度起動し直します。新しいテンプレートがデプロイされたらいずれにしろアプリケーションはいずれにしろ再起動されるので、これが本番環境で問題になることはまずありません。ページをリロードすると、キャッシュダイジェストが変わっったので、変更されたテンプレートが表示されています。</p>
+
+<p>この機能の良い点の一つは、依存関係を自動的に検知してくれるという点です。例えばprojectsテンプレートにプロジェクトのタスクに対する<code>render</code>の呼び出しがあることを検知しているので、tasksの部分テンプレートが変更されたらprojectsのキャッシュを期限切れにします。</p>
+
+<p>そうは言っても、依存性が正しく検知されない場合があることも考慮する必要があります。例えば<code>Project</code>モデルに<code>incomplete_tasks</code>メソッドがあります。これを使ってプロジェクトの部分テンプレートで未完了のタスク一覧を作成し、その後でタスク一覧の部分テンプレートを変更すると、依存性が検出されないため変更は反映されません。そこでgemが提供する<code>cache_digests:nested_dependencies</code>というRakeタスクを実行してテンプレートへのパスを渡すのがいいでしょう。</p>
+
+``` terminal
+$ rake cache_digests:nested_dependencies TEMPLATE=projects/index
+[
+  {
+    "projects/project": [
+      "incomplete_tasks/incomplete_task"
+    ]
+  }
+]
+```
+
+<p>これによってわかるのは、projectの部分テンプレートの依存性が検出されて、これは正しいと判断され、それに加えて<code>incomplete_task</code>があるのは正しくなく、正しくはtaskであるべきだということです。これは、依存性を反映するために変更しなくてはいけない部分です。このような場合には、以下のように描画するために、明示的に<code>partial</code>オプションを渡す方法が推奨されています。</p>
+
+``` /app/views/projects/_project.html.erb
+<% cache project do %>
+  <h2><%= link_to project.name, edit_project_path(project) %></h2>
+  <ul><%= render partial: 'tasks/task', collection: project.incomplete_tasks %></ul>
+<% end %>
+```
+
+<p>Rakeタスクを実行するとtasksの依存性が正しく検知されて、cache digestが正しく更新されます。</p>
+
+``` terminal
+$ rake cache_digests:nested_dependencies TEMPLATE=projects/index
+[
+  {
+    "projects/project": [
+      "tasks/task"
+    ]
+  }
+]
+```
+
+<p>gemのREADMEにはこれについての詳細情報が記載されており、じっくり読む価値があります。それによるとどのようなrenderの呼び出しが正しく解析されるかあるいはされないかがわかり、またヘルパーメソッドを使用して部分テンプレートを描画している場合にテンプレートの依存性を見つけるもう一つの方法が示されています。</p>

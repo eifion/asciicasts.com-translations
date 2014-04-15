@@ -1,0 +1,99 @@
+<p>私達が作っているウェブサイトにはFAQのリストがあります。　サイト管理者はそのリストを使用者の任意で好きな様に並び替えれるようにして欲しいのです。さらに、ドラッグ・アンド・ドロップ・インターフェースで更新した並び替えをAJAXで表示します。</p>
+<div class="imageWrapper">
+  <img src="/system/photos/48/original/E147I01.png" height="331" width="811" alt="The page showing our list of FAQs."/>
+</div>
+<h3>FAQモデルの変換</h3>
+<p>アプリケーションのFAQモデルにはフィールドが２つあります：<code>question</code>と<code>answer</code>。 まず、各質問に並び替えれるポジションを与えるためにポジションアトリビュートを加えます。 これを実行するにはマイグレーションを生成します。</p>
+<pre class="terminal">script/generate migration add_position_to_faqs position:integer</pre>
+<p>このマイグレーション名とアーギュメントはマイグレーションコードをすべて出来るので、<code>rake db:migrate</code>を使います。（マイグレーションの詳細については、<a href="http://guides.rails.info/migrations.html#creatingastandalonemigration">このページ</a>をご覧ください。）</p>
+
+<h3>コード観のアップデート</h3>
+<p>次prototypeとsriptaculousのライブラリをアプリケーションに加えます。 これを行うにはこのラインをレイアウトファイルのhead部分に加えます。</p>
+<pre class="ruby">&lt;%= javascript_include_tag :defaults %&gt;</pre>
+<p>それが出来たら、<code>Index</code>のファイルにいくつかの変更を行います。 FAQは<code>&lt;ul&lt;</code>の中に表示されています。　各質問を見分けるためにユニークなIDをあげます。 リスト自体にもIDをあげます。　これを行うには<a href="http://api.rubyonrails.org/classes/ActionView/Helpers/RecordTagHelper.html#M001612"><code>content_tag_for</code>メソッド</a>を使います。 このメソッドはHTMLエレメントを作ります。　この場合はアプリケーションモデルのIDに基づくアトリビュート<code>&lt;li&lt;</code>が作られます。 新しいインデックスはこう見えます。</p>
+<pre class="ruby">
+&lt;h1&gt;FAQs&lt;/h1&lt;
+&lt;ul id=&quot;faqs&quot;&gt;
+  &lt;% @faqs.each do |faq| %&gt;
+    &lt;% content_tag_for :li, faq do %&gt;
+      &lt;%= link_to faq.question, faq_path(faq) %&gt;
+    &lt;% end %&gt;
+  &lt;% end %&gt;
+&lt;/ul&gt;
+&lt;%= link_to &quot;New FAQ&quot;, new_faq_path %&gt;
+</pre>
+<p class="title">各&lt;li&lt;エレメントにIDが付いてるインデックス。</p>
+<p>ページをリフレッシュしてコードを見たら各&lt;li&lt;エレメントに<code>faq_n</code>のIDが割り当てられてるのが見えます。　ｎはモデルのIDです。</p>
+
+<h3>リストを並び替え可能にする</h3>
+<p>リストを並び替え可能にするには<code>sortable_element</code>のヘルパーメソッドをインデックスに加えるだけです。 AJAXリクエストで更新したポジションをデータベースに貯えるURLを並び替え可能にしたいリストのIDエレメントに加えます。 まだデータベースにポジションを貯えるメソッドはないので、URLは今の間空にします。</p>
+<pre class="ruby">&lt;%= sortable_element(&#x27;faqs&#x27;, :url =&gt; &#x27;TODO&#x27;) %&gt;</pre>
+<p>このリストのアイテムはドラッグ・アンド・ドロップ可能になっていますが、　更新した並び替えはデータベースに保存されていません。 ページがリフレッシュしたらアイテムはデフォルトの並び替えに戻ります。 <code>FaqsController</code>に更新した並べ替えをデータベースに保存するメソッドを作りなければいけません。 現在コントローラーは七つの　RESTful アクションがある。　FAQの収載、表示、作成、と削除ができます。<code>Sort</code>というメソッドを加えます。</p>
+<pre class="ruby">
+def sort
+  params[:faqs].each_with_index do |id, index|
+    Faq.update_all([&rsquo;position=?&rsquo;, index+1], [&rsquo;id=?&rsquo;, id])
+  end
+  render :nothing =&gt; true
+end
+</pre>
+<p><code>sort</code>メソッドは各FAQパラメータをループし、ポジションを更新します。　FAQのIDは正しい更新した並べ替えなので、<code>update_all</code>を使い、各FAQのポジションアトリビュートをリストのインデックス足す１にします。　AJAXから何も要らないので、メソッドは何もリターンしません。</p>
+<p>ポジションが保存しているで、インデックスに小さな変更をします。　ポジションで並んでいるFAQのリストを取るアクションを加えます。</p>
+<pre class="ruby">
+def index
+  @faqs = Faq.all(:order =&gt; &rsquo;position&rsquo;)
+end
+</pre>
+<p>ルーツファイルの変更が必要です。　<code>sort</code>アクションは七つのアクションにないので、加えなければいけません。</p>
+<pre class="ruby">map.resources :faqs, :collection =&gt; { :sort =&gt; :post}</pre>
+<p>そのラインは新しいアクションを加え、POSTリクエストにます。　これはAJAXがXMLHTTPレクエスト出来るタイプです。　これで、<code>sortable_element</code>メソッドにURLを加えることができます。</p>
+<pre class="ruby">&lt;%= sortable_element(&rsquo;faqs&rsquo;), :url =&gt; sort_faqs_path %&gt;</pre>
+<p><code>sort_faqs_path</code>は<code>FaqsController</code>の<code>sort</code>メソッドをAJAXでコールします。　これで、アイテムをドラッグしてページをリフレッシュしたら新しいポジションはデータベースに保存されています。</p>
+
+<h3>UIの改善</h3>
+<p>FAQのリストは完全に機能していますが、UIが粗削りです。 例えば、リンクのアイテムをドラッグしたら、リンクが活性し、リンクのページに連れて行かれます。 UIを改善するにはアイテムにハンドルを付け、各エレメントをドラッグ可能にします。 コードには<code>&lt;span&gt;</code>を各アイテムに加えます。</p>
+<pre class="ruby">
+&lt;% content_tag_for :li, faq do %&gt;
+  &lt;span class=&quot;handle&quot;&gt;[drag]&lt;/span&gt;
+  &lt;%= link_to faq.question, faq_path(faq) %&gt;
+&lt;% end %&gt;
+</pre>
+<p>この<code>&lt;span&gt;</code>は<code>handle</code>クラスがあるので、<code>sortable_element</code>のメソッドでどのエレメントのアイテムをドラッグ可能
+にするか決めれます。　メソッドに　handle　オプションを加えたらこれができます。</p>
+<pre class="ruby">&lt;%= sortable_element(&rsquo;faqs&rsquo;), :url =&gt; sort_faqs_path, :handle =&gt; &rsquo;handle&rsquo; %&gt;</pre>
+<p>ドラッグ可能のエリアをもっと明らかにするため、handleにカーソルがホバーしたら&rsquo;move&rsquo;カーソルに変化するCSSを付けます。</p>
+<pre class="css">li .handle { color: #777; cursor: move; font-size: 12px; }&#xFFFC;</pre>
+
+<div class="imageWrapper">
+  <img src="/system/photos/49/original/E147I02.png" width="813" height="333" alt="Dragging using the handle."/>
+  <p class="title">Dragging Using The Handle</p>
+</div>
+
+<h3>acts_as_listの使用</h3>
+
+<p>アプリケーションには不必要ですけど、機能性を支給するてめに<code>acts_as_list</code>プラグインを使うます。 <a href=" http://github.com/rails/acts_as_list/tree/master">GITHUBからダウンロード</a>して普通にインストールします。</p>
+<pre class="terminal">script/plugin install git://github.com/rails/acts_as_list.git</pre>
+<p>使うにはFAQモデルに加えます。</p>
+<pre class="ruby">
+class Faq &lt; ActiveRecord::Base
+  acts_as_list
+end
+</pre>
+<p>これでFAQモデルはドラッグ可能のリストとして扱われます。 <code>acts_as_list</code>　を使うメリットは新しいFAQを作ると、自動的にポジションコロムに記入されます。 これで完全にドラッグ可能です。　これが本当のアプリケーションだったら、次はドラッグ機能をサイト管理者のみに制限しますが、このエピソードの範囲外なので、ここで終了します。</p>
+ 
+ 
+ 
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+
